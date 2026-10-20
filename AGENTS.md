@@ -15,7 +15,7 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 ## Layout
 
 - `qlm/` holds all the code, one directory per layer: `Wire/`, and later `Transport/`, `Engine/`, and `Setup/`. Each target compiles the layers through the `QLMShared` template in `project.yml`, which lists one entry per layer. A new layer is an edit there.
-- `qlm/Mac/App/` is the menu bar app, in AppKit and Objective-C.
+- `qlm/App/` is the menu bar app, in AppKit and Objective-C.
 - `qlm/CLI/` is `qlmctl`.
 - `Tests/` mirrors `qlm/`.
 

@@ -8,7 +8,7 @@ DerivedData/
 
 # XcodeGen: the Xcode project and the app's Info.plist are generated from project.yml.
 /qlm.xcodeproj/
-/qlm/Mac/App/Info.plist
+/qlm/App/Info.plist
 
 # clang's compilation database and clangd's index.
 /compile_commands.json

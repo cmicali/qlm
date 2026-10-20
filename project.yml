@@ -92,13 +92,13 @@ targets:
     platform: macOS
     templates: [QLMShared]
     sources:
-      - path: qlm/Mac/App
+      - path: qlm/App
         excludes:
           - "**/.DS_Store"
           - "**/*.md"
           - "Info.plist"                    # generated below; consumed via INFOPLIST_FILE
     info:
-      path: qlm/Mac/App/Info.plist
+      path: qlm/App/Info.plist
       properties:
         CFBundleName: "$(PRODUCT_NAME)"
         CFBundleDisplayName: qlm

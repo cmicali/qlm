@@ -93,7 +93,7 @@ qlm/
 ├── docs/plan.md
 ├── qlm/            all the code, one directory per layer
 │   ├── Wire/       C, no Apple dependency
-│   ├── Mac/App/    the menu bar app: AppKit, Objective-C
+│   ├── App/        the menu bar app: AppKit, Objective-C
 │   └── CLI/        qlmctl
 ├── Tests/          one XCTest bundle, hostless; mirrors qlm/
 ├── vibe-libs/      the shared toolbox, a git submodule
