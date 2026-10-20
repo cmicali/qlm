@@ -1,9 +1,10 @@
 name: qlm
 
-# cm_libs/ is the vibe-libs submodule. Its shared spec, cm_libs/cm_libs.yml,
-# arrives with its first piece. Then add `include: [cm_libs/cm_libs.yml]`
-# here, set `templateAttributes: {excludedPlatform: iOS}` on each target, and
-# list the pieces each target takes under `templates:`.
+# vibe-libs/ is the shared toolbox, a git submodule. When a target takes its
+# first piece, add `include: [vibe-libs/vibe-libs.yml]` here, set
+# `VIBE_LIBS_ROOT: "$(SRCROOT)/vibe-libs"` in the base settings, set
+# `templateAttributes: {excludedPlatform: iOS}` on that target, and list the
+# pieces it takes under `templates:`.
 
 options:
   bundleIdPrefix: com.commonwealthrecordings
@@ -78,7 +79,7 @@ settings:
 
 targetTemplates:
   # The layers the app, the CLI, and the tests share. Each target compiles
-  # them itself, as cm_libs's pieces compile into an app.
+  # them itself, as vibe-libs's pieces compile into an app.
   QLMShared:
     sources:
       - path: Sources
