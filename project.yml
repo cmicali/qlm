@@ -1,0 +1,171 @@
+name: qlm
+
+# cm_libs/ is the vibe-libs submodule. Its shared spec, cm_libs/cm_libs.yml,
+# arrives with its first piece. Then add `include: [cm_libs/cm_libs.yml]`
+# here, set `templateAttributes: {excludedPlatform: iOS}` on each target, and
+# list the pieces each target takes under `templates:`.
+
+options:
+  bundleIdPrefix: com.commonwealthrecordings
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+  developmentLanguage: en
+
+configs:
+  Debug: debug
+  Release: release
+
+settingGroups:
+  qlm-version:
+    MARKETING_VERSION: "0.1"
+    CURRENT_PROJECT_VERSION: 1
+
+settings:
+  base:
+    ALWAYS_SEARCH_USER_PATHS: NO
+    CLANG_ANALYZER_NONNULL: YES
+    CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION: YES_AGGRESSIVE
+    CLANG_ENABLE_MODULES: YES
+    CLANG_ENABLE_OBJC_ARC: YES
+    CLANG_ENABLE_OBJC_WEAK: YES
+    CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING: YES
+    CLANG_WARN_BOOL_CONVERSION: YES
+    CLANG_WARN_COMMA: YES
+    CLANG_WARN_CONSTANT_CONVERSION: YES
+    CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS: YES
+    CLANG_WARN_DIRECT_OBJC_ISA_USAGE: YES_ERROR
+    CLANG_WARN_DOCUMENTATION_COMMENTS: YES
+    CLANG_WARN_EMPTY_BODY: YES
+    CLANG_WARN_ENUM_CONVERSION: YES
+    CLANG_WARN_INFINITE_RECURSION: YES
+    CLANG_WARN_INT_CONVERSION: YES
+    CLANG_WARN_NON_LITERAL_NULL_CONVERSION: YES
+    CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF: YES
+    CLANG_WARN_OBJC_LITERAL_CONVERSION: YES
+    CLANG_WARN_OBJC_ROOT_CLASS: YES_ERROR
+    CLANG_WARN_RANGE_LOOP_ANALYSIS: YES
+    CLANG_WARN_STRICT_PROTOTYPES: YES
+    CLANG_WARN_SUSPICIOUS_MOVE: YES
+    CLANG_WARN_UNGUARDED_AVAILABILITY: YES_AGGRESSIVE
+    CLANG_WARN_UNREACHABLE_CODE: YES
+    CLANG_WARN__DUPLICATE_METHOD_MATCH: YES
+    CODE_SIGN_IDENTITY: "-"           # Sign to Run Locally: no certificate needed.
+    CODE_SIGN_STYLE: Automatic
+    DEAD_CODE_STRIPPING: YES
+    DEVELOPMENT_TEAM: 4UEV752JH4
+    ENABLE_STRICT_OBJC_MSGSEND: YES
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    GCC_C_LANGUAGE_STANDARD: c17
+    GCC_NO_COMMON_BLOCKS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_WARN_64_TO_32_BIT_CONVERSION: YES
+    GCC_WARN_ABOUT_RETURN_TYPE: YES_ERROR
+    GCC_WARN_UNDECLARED_SELECTOR: YES
+    GCC_WARN_UNINITIALIZED_AUTOS: YES_AGGRESSIVE
+    GCC_WARN_UNUSED_FUNCTION: YES
+    GCC_WARN_UNUSED_VARIABLE: YES
+    SDKROOT: macosx
+  configs:
+    Debug:
+      ENABLE_TESTABILITY: YES
+      GCC_OPTIMIZATION_LEVEL: 0
+      ONLY_ACTIVE_ARCH: YES
+    Release:
+      DEBUG_INFORMATION_FORMAT: "dwarf-with-dsym"
+      ENABLE_NS_ASSERTIONS: NO
+      GCC_OPTIMIZATION_LEVEL: s
+
+targetTemplates:
+  # The layers the app, the CLI, and the tests share. Each target compiles
+  # them itself, as cm_libs's pieces compile into an app.
+  QLMShared:
+    sources:
+      - path: Sources
+        excludes: ["**/.DS_Store", "**/*.md"]
+
+targets:
+  qlm:
+    type: application
+    platform: macOS
+    templates: [QLMShared]
+    sources:
+      - path: App
+        excludes:
+          - "**/.DS_Store"
+          - "**/*.md"
+          - "Info.plist"                    # generated below; consumed via INFOPLIST_FILE
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleName: "$(PRODUCT_NAME)"
+        CFBundleDisplayName: qlm
+        CFBundleExecutable: "$(EXECUTABLE_NAME)"
+        CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
+        CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        LSApplicationCategoryType: "public.app-category.music"
+        LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
+        LSUIElement: true                   # a menu bar item, no Dock icon
+        NSHumanReadableCopyright: "Copyright © 2026 Christopher Micali. All rights reserved."
+        NSPrincipalClass: NSApplication
+    settings:
+      groups: [qlm-version]
+      base:
+        PRODUCT_NAME: qlm
+        PRODUCT_BUNDLE_IDENTIFIER: com.commonwealthrecordings.qlm
+        # Not sandboxed: the plan's first build is a direct download.
+        ENABLE_HARDENED_RUNTIME: YES
+
+  qlmctl:
+    type: tool
+    platform: macOS
+    templates: [QLMShared]
+    sources:
+      - path: CLI
+        excludes: ["**/.DS_Store", "**/*.md"]
+    settings:
+      groups: [qlm-version]
+      base:
+        PRODUCT_NAME: qlmctl
+        PRODUCT_BUNDLE_IDENTIFIER: com.commonwealthrecordings.qlmctl
+        ENABLE_HARDENED_RUNTIME: YES
+
+  # Hostless: it compiles the shared layers itself and needs no app.
+  QLMTests:
+    type: bundle.unit-test
+    platform: macOS
+    templates: [QLMShared]
+    sources:
+      - path: Tests
+        excludes: ["**/.DS_Store", "**/*.md"]
+    settings:
+      base:
+        PRODUCT_NAME: "$(TARGET_NAME)"
+        PRODUCT_BUNDLE_IDENTIFIER: com.commonwealthrecordings.QLMTests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  qlm:
+    build:
+      parallelizeBuild: true
+      targets:
+        qlm: all
+        QLMTests: [test]
+    run:      { config: Debug }
+    test:
+      config: Debug
+      targets:
+        - QLMTests
+    profile:  { config: Release }
+    analyze:  { config: Debug }
+    archive:  { config: Release }
+  qlmctl:
+    build:
+      targets:
+        qlmctl: all
+    run:      { config: Debug }
+    profile:  { config: Release }
+    analyze:  { config: Debug }
+    archive:  { config: Release }

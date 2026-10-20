@@ -1,0 +1,42 @@
+name: CI
+
+# Every branch push, not pull requests: a branch in this repo already runs on
+# its push, and a second run per pull request would double the macOS minutes.
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    runs-on: macos-26
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Show toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+
+      - uses: ./.github/actions/setup-xcodegen
+
+      - name: Test
+        run: make test
+
+      - name: Build the app (Release)
+        if: ${{ !cancelled() }}
+        run: make build
+
+      - name: Build qlmctl (Release)
+        if: ${{ !cancelled() }}
+        run: make cli

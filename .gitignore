@@ -1,0 +1,18 @@
+# General
+.DS_Store
+
+# Xcode
+xcuserdata/
+build/
+DerivedData/
+
+# XcodeGen: the Xcode project and the app's Info.plist are generated from project.yml.
+/qlm.xcodeproj/
+/App/Info.plist
+
+# clang's compilation database and clangd's index.
+/compile_commands.json
+/.cache/
+
+# Claude Code worktrees are checkouts of this repo living inside it.
+/.claude/worktrees/
