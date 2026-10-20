@@ -59,7 +59,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Decided
 
-- **The name is qlm, and the prefix for classes and C symbols is `QLM`.** The CLI is `qlmctl`. qlm is one letter from GLM. That is fine for private use. If qlm is ever distributed, check the name against Genelec's marks first.
+- **The name is qlm, and the prefix for classes and C symbols is `QLM`.** The CLI is `qlmctl`.
 - **A Mac app first:** a menu bar item, with a window for detail. iOS cannot reach a USB HID device without DriverKit, so a phone remote would go through the Mac later.
 - **Objective-C and AppKit, as in Vibe**, so cm_libs pieces compile in through their templates with no bridging. The wire codec is plain C with no Apple dependency, so a CLI and the tests share it.
 - **A CLI, `qlmctl`, comes before the UI.** Every experiment and every acceptance test runs from it.
