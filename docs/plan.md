@@ -91,16 +91,16 @@ The app reads snapshots on the main queue. Nothing in the UI touches the transpo
 qlm/
 ├── AGENTS.md  README.md  Makefile  Brewfile  project.yml
 ├── docs/plan.md
-├── App/            the menu bar app: AppKit, Objective-C
-├── CLI/            qlmctl
-├── Sources/        shared by the app, the CLI, and the tests
-│   └── Wire/       C, no Apple dependency
-├── Tests/          one XCTest bundle, hostless
+├── qlm/            all the code, one directory per layer
+│   ├── Wire/       C, no Apple dependency
+│   ├── Mac/App/    the menu bar app: AppKit, Objective-C
+│   └── CLI/        qlmctl
+├── Tests/          one XCTest bundle, hostless; mirrors qlm/
 ├── vibe-libs/      the shared toolbox, a git submodule
 └── .github/        CI: tests and both builds on macOS
 ```
 
-Transport, Engine, and Setup join `Sources/` as directories of their own when their code arrives. `project.yml` compiles all of `Sources/` into each target through one template, as vibe-libs does with its pieces.
+Transport, Engine, and Setup join `qlm/` as directories of their own when their code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
 
 ### Behavior the engine must copy from GLM
 

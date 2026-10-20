@@ -14,16 +14,16 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 
 ## Layout
 
-- `App/` is the menu bar app, in AppKit and Objective-C.
-- `CLI/` is `qlmctl`.
-- `Sources/` holds the layers the app, the CLI, and the tests share. Each target compiles all of it through the `QLMShared` template.
-- `Tests/` mirrors `Sources/`.
+- `qlm/` holds all the code, one directory per layer: `Wire/`, and later `Transport/`, `Engine/`, and `Setup/`. Each target compiles the layers through the `QLMShared` template in `project.yml`, which lists one entry per layer. A new layer is an edit there.
+- `qlm/Mac/App/` is the menu bar app, in AppKit and Objective-C.
+- `qlm/CLI/` is `qlmctl`.
+- `Tests/` mirrors `qlm/`.
 
 ## Layers
 
 The plan's Architecture section has the detail.
 
-- **Wire** (`Sources/Wire/`): C, with no Apple framework. Pure functions over bytes. It depends on nothing.
+- **Wire** (`qlm/Wire/`): C, with no Apple framework. Pure functions over bytes. It depends on nothing.
 - **Transport**: the adapter over IOKit HID, a replay of a capture, or a fake bus. It uses Wire.
 - **Setup**: reads GLM's `.sam` files, designs the filters, and builds each monitor's DSP block as values. It uses Wire.
 - **Engine**: owns the bus on one serial queue and publishes immutable snapshots. It uses the other three.
