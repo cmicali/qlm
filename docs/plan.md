@@ -61,7 +61,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 - **The name is qlm, and the prefix for classes and C symbols is `QLM`.** The CLI is `qlmctl`.
 - **A Mac app first:** a menu bar item, with a window for detail. iOS cannot reach a USB HID device without DriverKit, so a phone remote would go through the Mac later.
-- **Objective-C and AppKit, as in Vibe**, so cm_libs pieces compile in through their templates with no bridging. The wire codec is plain C with no Apple dependency, so a CLI and the tests share it.
+- **Objective-C and AppKit, as in Vibe**, so vibe-libs pieces compile in through their templates with no bridging. The wire codec is plain C with no Apple dependency, so a CLI and the tests share it.
 - **A CLI, `qlmctl`, comes before the UI.** Every experiment and every acceptance test runs from it.
 - **The app never writes to a monitor's flash.** It never sends `15` (commit), `05` (test signals), or the standalone settings in `3A 01`, `3A 02`, and `3A 06`. The wire layer sends only opcodes on an allowlist.
 - **Volume is clamped in the wire layer, not the UI.** `7F FF FF` is 0 dB. A user ceiling caps every volume frame, and a test proves that no code path exceeds it.
@@ -91,16 +91,16 @@ The app reads snapshots on the main queue. Nothing in the UI touches the transpo
 qlm/
 ├── AGENTS.md  README.md  Makefile  Brewfile  project.yml
 ├── docs/plan.md
-├── App/            the menu bar app: AppKit, Objective-C
-├── CLI/            qlmctl
-├── Sources/        shared by the app, the CLI, and the tests
-│   └── Wire/       C, no Apple dependency
-├── Tests/          one XCTest bundle, hostless
-├── cm_libs/        the vibe-libs submodule
+├── qlm/            all the code, one directory per layer
+│   ├── Wire/       C, no Apple dependency
+│   ├── Mac/App/    the menu bar app: AppKit, Objective-C
+│   └── CLI/        qlmctl
+├── Tests/          one XCTest bundle, hostless; mirrors qlm/
+├── vibe-libs/      the shared toolbox, a git submodule
 └── .github/        CI: tests and both builds on macOS
 ```
 
-Transport, Engine, and Setup join `Sources/` as directories of their own when their code arrives. `project.yml` compiles all of `Sources/` into each target through one template, as cm_libs does with its pieces.
+Transport, Engine, and Setup join `qlm/` as directories of their own when their code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
 
 ### Behavior the engine must copy from GLM
 
@@ -117,7 +117,7 @@ Transport, Engine, and Setup join `Sources/` as directories of their own when th
 - **Settings:** the setup files, the volume range and ceiling, whether to wake the monitors at launch, and launch at login with `SMAppService`.
 - **The knob drives the app's volume**, if Phase 0 finds the path. Otherwise it works only while the app is closed.
 
-## Where cm_libs fits
+## Where vibe-libs fits
 
 | Piece | Use |
 | --- | --- |
@@ -129,19 +129,19 @@ Transport, Engine, and Setup join `Sources/` as directories of their own when th
 
 Nothing else applies: no decoding, playback, tags, or waveforms.
 
-**The submodule is in place at `cm_libs/`, but there is nothing to include yet.** cm_libs has no `cm_libs.yml` until its first piece moves. Then `project.yml` adds `include: [cm_libs/cm_libs.yml]`, and each target lists its pieces under `templates:`.
+**The submodule is in place at `vibe-libs/`, but this app includes nothing from it yet.** When a target takes its first piece, `project.yml` adds `include: [vibe-libs/vibe-libs.yml]`, sets `VIBE_LIBS_ROOT`, and lists the pieces under `templates:`. The comment at the top of `project.yml` has the steps.
 
-**Nothing in cm_libs has moved yet.** core/Common moves in cm_libs Phase 3. The mac controls, Updates, and DebugChannel wait for a second app in cm_libs Phase 5. This app is that second app, so it triggers those moves. It must not wait for them. It starts on Apple's frameworks and adopts each piece as it lands.
+**Two pieces have moved so far**: `core/Common`, with only the realtime brackets, and `audio/DSP`, with Vibe's varispeed. Neither helps this app yet. The log and signpost macros move with the first piece that logs, in vibe-libs Phase 3. The mac controls, Updates, and DebugChannel wait for a second app in vibe-libs Phase 5. This app is that second app, so it triggers those moves. It must not wait for them. It starts on Apple's frameworks and adopts each piece as it lands.
 
-**The protocol stays in this app.** No other app needs it, so by cm_libs's own rule it is not a candidate.
+**The protocol stays in this app.** No other app needs it, so by vibe-libs's own rule it is not a candidate.
 
-cm_libs's `AGENTS.md` says its users are Vibe and one other app. This would be a third, so that line needs an update when the app adds the submodule.
+vibe-libs's `AGENTS.md` says its users are Vibe and one other app. This would be a third, so that line needs an update when the app takes its first piece.
 
 ## Licensing
 
 genlc, hlm, and espgensam are GPL-3.0. The hlm spec is copyrighted text inside that distribution. The protocol's facts are not copyrightable. Their code and wording are.
 
-- **If the app is GPL-3.0**, port from them directly and send fixes back. This is the fastest path. cm_libs under Apache 2.0, as planned, is compatible with GPL-3.0.
+- **If the app is GPL-3.0**, port from them directly and send fixes back. This is the fastest path. vibe-libs is Apache 2.0, which is compatible with GPL-3.0.
 - **If it is not**, write every line from the facts and your own captures. Port no code, including espgensam's `.sam` mapping and biquad code.
 
 Two other risks. GLM's license may forbid reverse engineering the software. Capturing USB and bus traffic avoids touching GLM's binary, so prefer it to disassembly. Firmware updates may change the protocol, so the app warns on any firmware version it has not seen.

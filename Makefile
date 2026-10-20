@@ -27,7 +27,7 @@ help:
 	    END { for (i = 1; i <= n; i++) printf "  %-" width "s  %s\n", names[i], desc[names[i]] } \
 	' $(MAKEFILE_LIST)
 
-# Fetch cm_libs at its pinned commit, then generate qlm.xcodeproj from project.yml.
+# Fetch vibe-libs at its pinned commit, then generate qlm.xcodeproj from project.yml.
 project:
 	git submodule update --init --recursive
 	xcodegen generate

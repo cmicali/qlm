@@ -1,9 +1,10 @@
 name: qlm
 
-# cm_libs/ is the vibe-libs submodule. Its shared spec, cm_libs/cm_libs.yml,
-# arrives with its first piece. Then add `include: [cm_libs/cm_libs.yml]`
-# here, set `templateAttributes: {excludedPlatform: iOS}` on each target, and
-# list the pieces each target takes under `templates:`.
+# vibe-libs/ is the shared toolbox, a git submodule. When a target takes its
+# first piece, add `include: [vibe-libs/vibe-libs.yml]` here, set
+# `VIBE_LIBS_ROOT: "$(SRCROOT)/vibe-libs"` in the base settings, set
+# `templateAttributes: {excludedPlatform: iOS}` on that target, and list the
+# pieces it takes under `templates:`.
 
 options:
   bundleIdPrefix: com.commonwealthrecordings
@@ -78,10 +79,11 @@ settings:
 
 targetTemplates:
   # The layers the app, the CLI, and the tests share. Each target compiles
-  # them itself, as cm_libs's pieces compile into an app.
+  # them itself, as vibe-libs's pieces compile into an app. One entry per
+  # layer, so a new layer is a deliberate edit here.
   QLMShared:
     sources:
-      - path: Sources
+      - path: qlm/Wire
         excludes: ["**/.DS_Store", "**/*.md"]
 
 targets:
@@ -90,13 +92,13 @@ targets:
     platform: macOS
     templates: [QLMShared]
     sources:
-      - path: App
+      - path: qlm/Mac/App
         excludes:
           - "**/.DS_Store"
           - "**/*.md"
           - "Info.plist"                    # generated below; consumed via INFOPLIST_FILE
     info:
-      path: App/Info.plist
+      path: qlm/Mac/App/Info.plist
       properties:
         CFBundleName: "$(PRODUCT_NAME)"
         CFBundleDisplayName: qlm
@@ -123,7 +125,7 @@ targets:
     platform: macOS
     templates: [QLMShared]
     sources:
-      - path: CLI
+      - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md"]
     settings:
       groups: [qlm-version]

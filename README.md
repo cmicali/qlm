@@ -9,13 +9,13 @@ A native Mac controller for Genelec SAM monitors, through the GLM network adapte
 You need Xcode and XcodeGen. `make setup` installs XcodeGen from the Brewfile.
 
 ```
-make project   # fetch cm_libs and generate qlm.xcodeproj
+make project   # fetch vibe-libs and generate qlm.xcodeproj
 make build     # the menu bar app
 make cli       # qlmctl
 make test      # the unit tests
 ```
 
-`cm_libs/` is [vibe-libs](https://github.com/cmicali/vibe-libs), a git submodule. `make project` fetches it.
+`vibe-libs/` is [vibe-libs](https://github.com/cmicali/vibe-libs), a git submodule. `make project` fetches it.
 
 ## Disclaimer
 
