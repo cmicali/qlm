@@ -14,8 +14,8 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 
 ## Layout
 
-- `qlm/` holds all the code, one directory per layer: `Wire/`, and later `Transport/`, `Engine/`, and `Setup/`. Each target compiles the layers through the `QLMShared` template in `project.yml`, which lists one entry per layer. A new layer is an edit there.
-- `qlm/Mac/App/` is the menu bar app, in AppKit and Objective-C.
+- `qlm/` holds all the code, one directory per layer: `GLMProtocol/`, and later `GLMAdapter/`, `Setups/`, and `System/`. Each target compiles the layers through the `QLMShared` template in `project.yml`, which lists one entry per layer. A new layer is an edit there.
+- `qlm/App/` is the menu bar app, in AppKit and Objective-C.
 - `qlm/CLI/` is `qlmctl`.
 - `Tests/` mirrors `qlm/`.
 
@@ -23,19 +23,19 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 
 The plan's Architecture section has the detail.
 
-- **Wire** (`qlm/Wire/`): C, with no Apple framework. Pure functions over bytes. It depends on nothing.
-- **Transport**: the adapter over IOKit HID, a replay of a capture, or a fake bus. It uses Wire.
-- **Setup**: reads GLM's `.sam` files, designs the filters, and builds each monitor's DSP block as values. It uses Wire.
-- **Engine**: owns the bus on one serial queue and publishes immutable snapshots. It uses the other three.
+- **GLMProtocol** (`qlm/GLMProtocol/`): C, with no Apple framework. Pure functions over bytes. It depends on nothing.
+- **GLMAdapter**: the adapter over IOKit HID, a replay of a capture, or a fake bus. It uses GLMProtocol.
+- **Setups**: reads GLM's `.sam` files, designs the filters, and builds each monitor's DSP block as values. It uses GLMProtocol.
+- **System**: owns the bus on one serial queue and publishes immutable snapshots. It uses the other three.
 
-Layers meet through values and blocks. The app and `qlmctl` use the engine and Setup's values. They never touch the transport.
+Layers meet through values and blocks. The app and `qlmctl` use System and the values Setups builds. They never touch GLMAdapter.
 
 ## Safety
 
 These rules protect the monitors and the listener. They outrank any feature.
 
-- **Send only opcodes on the wire layer's allowlist.** Never send `15` (flash commit), `05` (test signals), or the standalone settings `3A 01`, `3A 02`, and `3A 06`.
-- **The wire layer clamps every volume frame to the user's ceiling.** `7F FF FF` is 0 dB. A test covers every builder.
+- **Send only opcodes on GLMProtocol's allowlist.** Never send `15` (flash commit), `05` (test signals), or the standalone settings `3A 01`, `3A 02`, and `3A 06`.
+- **GLMProtocol clamps every volume frame to the user's ceiling.** `7F FF FF` is 0 dB. A test covers every builder.
 - **Never drive the bus while GLM runs.**
 - **Refuse a group apply for any model whose filter design rate is unverified.**
 - **Test against real monitors at a low level, one monitor first.**
