@@ -61,10 +61,10 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 - **The name is qlm, and the prefix for classes and C symbols is `QLM`.** The CLI is `qlmctl`.
 - **A Mac app first:** a menu bar item, with a window for detail. iOS cannot reach a USB HID device without DriverKit, so a phone remote would go through the Mac later.
-- **Objective-C and AppKit, as in Vibe**, so vibe-libs pieces compile in through their templates with no bridging. The wire codec is plain C with no Apple dependency, so a CLI and the tests share it.
+- **Objective-C and AppKit, as in Vibe**, so vibe-libs pieces compile in through their templates with no bridging. GLMProtocol is plain C with no Apple dependency, so a CLI and the tests share it.
 - **A CLI, `qlmctl`, comes before the UI.** Every experiment and every acceptance test runs from it.
-- **The app never writes to a monitor's flash.** It never sends `15` (commit), `05` (test signals), or the standalone settings in `3A 01`, `3A 02`, and `3A 06`. The wire layer sends only opcodes on an allowlist.
-- **Volume is clamped in the wire layer, not the UI.** `7F FF FF` is 0 dB. A user ceiling caps every volume frame, and a test proves that no code path exceeds it.
+- **The app never writes to a monitor's flash.** It never sends `15` (commit), `05` (test signals), or the standalone settings in `3A 01`, `3A 02`, and `3A 06`. GLMProtocol sends only opcodes on an allowlist.
+- **Volume is clamped in GLMProtocol, not the UI.** `7F FF FF` is 0 dB. A user ceiling caps every volume frame, and a test proves that no code path exceeds it.
 - **GLM and the app never own the bus at once.** The app refuses the adapter while GLM runs, and it offers to quit GLM.
 - **Groups for unverified models are refused.** Status, volume, mute, and power still work on them.
 
@@ -78,12 +78,12 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 Four layers. Each meets the next through values and blocks.
 
-1. **Wire (C, pure).** Framing, escaping, CRC, report packing and reassembly, command builders, and reply parsers: ack, hardware ID, telemetry TLVs, and ASCII strings. No I/O. Golden tests: every captured frame decodes and re-encodes byte for byte.
-2. **Transport.** `IOHIDManager` matches the adapter. `IOHIDDeviceSetDispatchQueue` delivers input reports to the engine's queue. It keeps one request in flight, with a timeout, and handles hot plug. Two stand-ins share its interface: a replay transport that plays a capture, and a fake bus that simulates monitors, lease loss, and dropped replies.
-3. **Engine.** One serial queue owns the bus. It runs the lease registry (hardware ID to session ID) and the cycle GLM runs: volume, `04`, a `08` round, and `FE`, every 1.2 to 1.8 s. It coalesces volume to at most one frame per 50 ms. It tracks mute in software. It runs a group apply as one transaction. It publishes an immutable snapshot of the system after each change.
-4. **Setup.** It reads `.sam` files into groups. It designs the biquads at each device's rate and checks that each filter is stable. It builds each monitor's DSP block as values. It reports every field it cannot carry, never dropping one silently. It watches the file and offers a re-import when GLM saves.
+1. **GLMProtocol (C, pure).** Framing, escaping, CRC, report packing and reassembly, command builders, and reply parsers: ack, hardware ID, telemetry TLVs, and ASCII strings. No I/O. Golden tests: every captured frame decodes and re-encodes byte for byte.
+2. **GLMAdapter.** `IOHIDManager` matches the adapter. `IOHIDDeviceSetDispatchQueue` delivers input reports to System's queue. It keeps one request in flight, with a timeout, and handles hot plug. Two stand-ins share its interface: a replay adapter that plays a capture, and a fake bus that simulates monitors, lease loss, and dropped replies.
+3. **System.** One serial queue owns the bus. It runs the lease registry (hardware ID to session ID) and the cycle GLM runs: volume, `04`, a `08` round, and `FE`, every 1.2 to 1.8 s. It coalesces volume to at most one frame per 50 ms. It tracks mute in software. It runs a group apply as one transaction. It publishes an immutable snapshot of the monitors after each change.
+4. **Setups.** It reads `.sam` files into groups. It designs the biquads at each device's rate and checks that each filter is stable. It builds each monitor's DSP block as values. It reports every field it cannot carry, never dropping one silently. It watches the file and offers a re-import when GLM saves.
 
-The app reads snapshots on the main queue. Nothing in the UI touches the transport.
+The app reads snapshots on the main queue. Nothing in the UI touches GLMAdapter.
 
 ### The repository
 
@@ -92,17 +92,17 @@ qlm/
 ├── AGENTS.md  README.md  Makefile  Brewfile  project.yml
 ├── docs/plan.md
 ├── qlm/            all the code, one directory per layer
-│   ├── Wire/       C, no Apple dependency
-│   ├── App/        the menu bar app: AppKit, Objective-C
-│   └── CLI/        qlmctl
+│   ├── GLMProtocol/  C, no Apple dependency
+│   ├── App/          the menu bar app: AppKit, Objective-C
+│   └── CLI/          qlmctl
 ├── Tests/          one XCTest bundle, hostless; mirrors qlm/
 ├── vibe-libs/      the shared toolbox, a git submodule
 └── .github/        CI: tests and both builds on macOS
 ```
 
-Transport, Engine, and Setup join `qlm/` as directories of their own when their code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
+GLMAdapter, Setups, and System join `qlm/` as directories of their own when their code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
 
-### Behavior the engine must copy from GLM
+### Behavior System must copy from GLM
 
 - **On every connect and wake, apply the active group in full**, as GLM does. Monitors may have rebooted to their flash settings, and leases are reassigned.
 - **A group apply ducks first and restores after.** Expect a short silence, as with GLM.
@@ -186,10 +186,10 @@ Capture each scenario:
 
 One group switch must also decode to the sequence espgensam documents, for your models.
 
-### Phase 1: the wire codec, the transport, and a read-only CLI
+### Phase 1: GLMProtocol, GLMAdapter, and a read-only CLI
 
 - The codec, with golden tests from the Phase 0 captures.
-- The HID transport, the replay transport, and the fake bus.
+- The HID adapter, the replay adapter, and the fake bus.
 - CLI commands `info`, `discover`, and `poll`.
 
 **Done when** the CLI lists every monitor with model, serial, firmware, temperature, and power state, with GLM closed. Fake-bus tests must cover lease loss, rediscovery, and a lost reply.
@@ -199,7 +199,7 @@ One group switch must also decode to the sequence espgensam documents, for your 
 - Volume with the ceiling, dim, mute per monitor and for all, sleep and wake.
 - The knob, if Phase 0 found its path.
 
-**Done when** each action's frames match GLM's captured frames byte for byte, apart from session IDs. The knob must move the volume through the CLI's engine. Quitting the CLI must hand the bus back to the adapter without an unplanned level jump.
+**Done when** each action's frames match GLM's captured frames byte for byte, apart from session IDs. The knob must move the volume through System in the CLI. Quitting the CLI must hand the bus back to the adapter without an unplanned level jump.
 
 ### Phase 3: groups
 
@@ -214,7 +214,7 @@ One group switch must also decode to the sequence espgensam documents, for your 
 
 ### Phase 4: the Mac app
 
-- The menu bar item and the window over the engine's snapshots.
+- The menu bar item and the window over System's snapshots.
 - Settings, and detection of a running GLM.
 - Sleep, wake, and hot plug.
 - A notification when a monitor drops off or runs hot.
@@ -237,7 +237,7 @@ Each is optional:
 
 | Risk | Answer |
 | --- | --- |
-| A bug sends full volume | The clamp in the wire layer, the ceiling, and a test across every builder |
+| A bug sends full volume | The clamp in GLMProtocol, the ceiling, and a test across every builder |
 | Filters designed at the wrong rate | Rate from the model; groups refused for unverified models; a stability check on every biquad |
 | Subwoofer LFE fields unmapped | Warn on, or refuse, a group that sets them until a capture maps them |
 | The adapter's level when the app leaves | Found in Phase 0; the app matches it before it exits, if the protocol allows |

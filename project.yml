@@ -83,7 +83,7 @@ targetTemplates:
   # layer, so a new layer is a deliberate edit here.
   QLMShared:
     sources:
-      - path: qlm/Wire
+      - path: qlm/GLMProtocol
         excludes: ["**/.DS_Store", "**/*.md"]
 
 targets:
