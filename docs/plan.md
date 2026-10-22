@@ -92,6 +92,8 @@ qlm/
 ├── docs/plan.md
 ├── qlm/            all the code, one directory per layer
 │   ├── GLMProtocol/  C, no Apple dependency
+│   ├── GLMAdapter/   the adapter protocol and the fake bus; HID and replay to come
+│   ├── System/       the engine and its snapshots
 │   ├── App/          the menu bar app: AppKit, Objective-C
 │   └── CLI/          qlmctl
 ├── Tests/          one XCTest bundle, hostless; mirrors qlm/
@@ -101,7 +103,7 @@ qlm/
 └── .github/        CI: tests and both builds on macOS
 ```
 
-GLMAdapter, Setups, and System join `qlm/` as directories of their own when their code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
+Setups joins `qlm/` as a directory of its own when its code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
 
 ### Behavior System must copy from GLM
 
