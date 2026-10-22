@@ -70,9 +70,8 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Open, for you to decide
 
-1. **License.** See Licensing. This decides how Phase 1 starts.
-2. **Your hardware.** Which monitors, subwoofer, and knob model? 83x1 and three-way models have open questions. A subwoofer brings the unmapped LFE fields.
-3. **Capture machine.** Do you have a Windows PC, or a Mac that runs Windows in a VM with USB passthrough? See Phase 0.
+1. **Your hardware.** Which monitors, subwoofer, and knob model? 83x1 and three-way models have open questions. A subwoofer brings the unmapped LFE fields.
+2. **Capture machine.** Do you have a Windows PC, or a Mac that runs Windows in a VM with USB passthrough? See Phase 0.
 
 ## Architecture
 
@@ -141,10 +140,9 @@ vibe-libs's `AGENTS.md` says its users are Vibe and one other app. This would be
 
 ## Licensing
 
-genlc, hlm, and espgensam are GPL-3.0. The hlm spec is copyrighted text inside that distribution. The protocol's facts are not copyrightable. Their code and wording are.
+qlm is Apache 2.0, like vibe-libs. genlc, hlm, and espgensam are GPL-3.0, and the hlm spec is copyrighted text inside that distribution. The protocol's facts are not copyrightable. Their code and wording are.
 
-- **If the app is GPL-3.0**, port from them directly and send fixes back. This is the fastest path. vibe-libs is Apache 2.0, which is compatible with GPL-3.0.
-- **If it is not**, write every line from the facts and your own captures. Port no code, including espgensam's `.sam` mapping and biquad code.
+So every line is written from the facts and from qlm's own captures. Port no code, including espgensam's `.sam` mapping and biquad code. Every protocol fact in code names its source in a test: a capture in this repo, or a section of hlm's spec.
 
 Two other risks. GLM's license may forbid reverse engineering the software. Capturing USB and bus traffic avoids touching GLM's binary, so prefer it to disassembly. Firmware updates may change the protocol, so the app warns on any firmware version it has not seen.
 

@@ -43,7 +43,7 @@ These rules protect the monitors and the listener. They outrank any feature.
 
 ## The protocol and licensing
 
-- The protocol comes from genlc, hlm, and espgensam. All three are GPL-3.0. **Until qlm has a license, port no code from them.** Write from the protocol's facts and from captures.
+- qlm is Apache 2.0. The protocol comes from genlc, hlm, and espgensam, and all three are GPL-3.0, so **port no code from them.** Write from the protocol's facts and from captures.
 - **Every protocol fact in code names its source** in a test: a capture in this repo, or a section of hlm's spec.
 - **Genelec, GLM, and SAM are Genelec's marks.** Use them only to say what qlm works with.
 
