@@ -96,6 +96,8 @@ qlm/
 │   ├── App/          the menu bar app: AppKit, Objective-C
 │   └── CLI/          qlmctl
 ├── Tests/          one XCTest bundle, hostless; mirrors qlm/
+├── captures/       the Phase 0 captures, one directory per scenario
+├── tools/          the inventory script and the capture converter
 ├── vibe-libs/      the shared toolbox, a git submodule
 └── .github/        CI: tests and both builds on macOS
 ```

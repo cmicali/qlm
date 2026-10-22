@@ -18,6 +18,7 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 - `qlm/App/` is the menu bar app, in AppKit and Objective-C.
 - `qlm/CLI/` is `qlmctl`.
 - `Tests/` mirrors `qlm/`.
+- `captures/` holds the Phase 0 captures, and `tools/` the scripts that record and convert them. `captures/README.md` has the scenarios.
 
 ## Layers
 
