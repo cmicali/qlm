@@ -93,6 +93,7 @@ qlm/
 ├── qlm/            all the code, one directory per layer
 │   ├── GLMProtocol/  C, no Apple dependency
 │   ├── GLMAdapter/   the adapter protocol and the fake bus; HID and replay to come
+│   ├── Setups/       the setup file reader; filter design and the DSP block to come
 │   ├── System/       the engine and its snapshots
 │   ├── App/          the menu bar app: AppKit, Objective-C
 │   └── CLI/          qlmctl
@@ -103,7 +104,7 @@ qlm/
 └── .github/        CI: tests and both builds on macOS
 ```
 
-Setups joins `qlm/` as a directory of its own when its code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
+Every layer has its directory. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
 
 ### Behavior System must copy from GLM
 

@@ -14,11 +14,12 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 
 ## Layout
 
-- `qlm/` holds all the code, one directory per layer: `GLMProtocol/`, `GLMAdapter/`, `System/`, and later `Setups/`. Each target compiles the layers through the `QLMShared` template in `project.yml`, which lists one entry per layer. A new layer is an edit there.
+- `qlm/` holds all the code, one directory per layer: `GLMProtocol/`, `GLMAdapter/`, `Setups/`, and `System/`. Each target compiles the layers through the `QLMShared` template in `project.yml`, which lists one entry per layer. A new layer is an edit there.
 - `qlm/App/` is the menu bar app, in AppKit and Objective-C.
 - `qlm/CLI/` is `qlmctl`.
 - `Tests/` mirrors `qlm/`.
 - `captures/` holds the Phase 0 captures, and `tools/` the scripts that record and convert them. `captures/README.md` has the scenarios.
+- **A setup file in the repo is redacted.** `tools/redact-setup.py` makes the fixture in `Tests/Setups/Fixtures/`. Never commit a raw `.sam` file.
 
 ## Layers
 
