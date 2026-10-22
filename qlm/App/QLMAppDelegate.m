@@ -3,6 +3,7 @@
 #import "QLMFakeBus.h"
 #import "QLMPopoverController.h"
 #include "QLMReplies.h"
+#import "QLMSetupReader.h"
 #import "QLMSystem.h"
 
 @interface QLMAppDelegate ()
@@ -34,10 +35,24 @@
     return [[QLMFakeBus alloc] initWithMonitors:@[left, right, sub]];
 }
 
+// The first setup file GLM saved, by name. Nil when there is none or it
+// does not read.
+- (nullable QLMSetup *)loadSetup {
+    NSString *directory = [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/Genelec/GLM5/Setup Files"];
+    NSArray<NSString *> *names = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:directory error:NULL]
+        sortedArrayUsingSelector:@selector(compare:)];
+    for (NSString *name in names) {
+        if ([name.pathExtension caseInsensitiveCompare:@"sam"] == NSOrderedSame) {
+            return [QLMSetupReader readFileAtPath:[directory stringByAppendingPathComponent:name] error:NULL];
+        }
+    }
+    return nil;
+}
+
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     self.system = [[QLMSystem alloc] initWithAdapter:[self makeAdapter] settings:settings];
-    self.controller = [[QLMPopoverController alloc] initWithSystem:self.system];
+    self.controller = [[QLMPopoverController alloc] initWithSystem:self.system setup:[self loadSetup]];
 
     self.popover = [[NSPopover alloc] init];
     self.popover.contentViewController = self.controller;
