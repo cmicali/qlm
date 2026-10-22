@@ -11,7 +11,6 @@ static const double QLMDelayRate = 48000;  // delay is in 48 kHz samples on ever
 @interface QLMDSPBlock ()
 @property (nonatomic, readwrite) QLMSetupNode *node;
 @property (nonatomic, readwrite) double designRate;
-@property (nonatomic, readwrite) BOOL rateVerified;
 @property (nonatomic, readwrite) NSArray<NSData *> *payloads;
 @property (nonatomic, readwrite) NSArray<NSString *> *warnings;
 @end
@@ -22,6 +21,11 @@ static NSError *QLMDSPBlockFail(QLMDSPBlockError code, NSString *message) {
 
 static NSData *QLMPayload(QLMMessage message) {
     return [NSData dataWithBytes:message.payload length:message.length];
+}
+
+static BOOL QLMRateVerified(QLMSetupNodeClass nodeClass, double designRate) {
+    return (nodeClass == QLMSetupNodeClassTwoWay && designRate == 48000) ||
+           (nodeClass == QLMSetupNodeClassSubwoofer && designRate == 12000);
 }
 
 @implementation QLMDSPBlock
@@ -85,9 +89,7 @@ static QLMBiquad QLMDesign(QLMSetupBand *band) {
         }
     }
 
-    BOOL rateVerified = (node.nodeClass == QLMSetupNodeClassTwoWay && designRate == 48000) ||
-                        (node.nodeClass == QLMSetupNodeClassSubwoofer && designRate == 12000);
-    if (!rateVerified) {
+    if (!QLMRateVerified(node.nodeClass, designRate)) {
         [warnings addObject:[NSString stringWithFormat:@"%.0f Hz is unverified on the wire for %@", designRate, node.className]];
     }
 
@@ -139,10 +141,13 @@ static QLMBiquad QLMDesign(QLMSetupBand *band) {
     QLMDSPBlock *block = [[QLMDSPBlock alloc] init];
     block.node = node;
     block.designRate = designRate;
-    block.rateVerified = rateVerified;
     block.payloads = payloads;
     block.warnings = warnings;
     return block;
+}
+
+- (BOOL)rateVerified {
+    return QLMRateVerified(_node.nodeClass, _designRate);
 }
 
 + (NSArray<QLMDSPBlock *> *)blocksForGroup:(QLMSetupGroup *)group error:(NSError **)error {

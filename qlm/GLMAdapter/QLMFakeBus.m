@@ -32,8 +32,41 @@
     if (self) {
         _monitors = [monitors copy];
         _sent = [NSMutableArray array];
+        _recordsSentMessages = YES;
     }
     return self;
+}
+
++ (instancetype)demoBusWithSubwoofer:(BOOL)withSubwoofer {
+    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
+    const uint8_t rightID[3] = {0x44, 0x55, 0x66};
+    QLMFakeMonitor *left = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:leftID length:3]
+                                                        serialNumber:@"8330apm21001234"
+                                                          systemInfo:@"c-1;model-8330A;ver-1.14.7"
+                                                         deviceClass:QLMTelemetryClassTwoWay];
+    left.temperature = 38;
+    QLMFakeMonitor *right = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:rightID length:3]
+                                                         serialNumber:@"8330apm21005678"
+                                                           systemInfo:@"c-1;model-8330A;ver-1.14.7"
+                                                          deviceClass:QLMTelemetryClassTwoWay];
+    right.temperature = 41;
+    NSMutableArray<QLMFakeMonitor *> *monitors = [NSMutableArray arrayWithObjects:left, right, nil];
+    if (withSubwoofer) {
+        const uint8_t subID[3] = {0x77, 0x88, 0x99};
+        QLMFakeMonitor *sub = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:subID length:3]
+                                                           serialNumber:@"7350apm21009999"
+                                                             systemInfo:@"c-1;model-7350A;ver-1.14.7"
+                                                            deviceClass:QLMTelemetryClassSubwoofer];
+        sub.temperature = 33;
+        [monitors addObject:sub];
+    }
+    return [[self alloc] initWithMonitors:monitors];
+}
+
++ (NSData *)recordForSession:(uint8_t)session payload:(NSData *)payload {
+    NSMutableData *record = [NSMutableData dataWithBytes:&session length:1];
+    [record appendData:payload];
+    return record;
 }
 
 - (NSArray<NSData *> *)sentMessages {
@@ -82,9 +115,10 @@
     (void)decodeStatus;
 
     dispatch_async(queue, ^{
-        NSMutableData *record = [NSMutableData dataWithBytes:&decoded.address length:1];
-        [record appendBytes:decoded.payload length:decoded.length];
-        [self->_sent addObject:record];
+        if (self.recordsSentMessages) {
+            NSData *payload = [NSData dataWithBytes:decoded.payload length:decoded.length];
+            [self->_sent addObject:[QLMFakeBus recordForSession:decoded.address payload:payload]];
+        }
         if (self.disconnected) {
             handler(NULL, [NSError errorWithDomain:QLMAdapterErrorDomain code:QLMAdapterErrorDisconnected userInfo:nil]);
             return;
@@ -95,13 +129,6 @@
     });
 }
 
-static void QLMFakeReply(QLMMessage *reply, const uint8_t *payload, size_t length) {
-    memset(reply, 0, sizeof *reply);
-    reply->address = QLMAddressReply;
-    reply->length = length;
-    memcpy(reply->payload, payload, length);
-}
-
 static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated) {
     const char *utf8 = text.UTF8String;
     size_t length = strlen(utf8) + (terminated ? 1 : 0);
@@ -109,7 +136,7 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
     NSCAssert(length + 1 <= sizeof payload, @"text too long for a frame");
     payload[0] = 0x09;
     memcpy(payload + 1, utf8, length);
-    QLMFakeReply(reply, payload, 1 + length);
+    *reply = QLMMessageMake(QLMAddressReply, payload, 1 + length);
 }
 
 // The spec's section 9: a probe is answered by one monitor without a lease,
@@ -125,7 +152,7 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
                 if (monitor.present && monitor.session == 0) {
                     uint8_t bytes[4] = {0x09};
                     memcpy(bytes + 1, monitor.hardwareID.bytes, 3);
-                    QLMFakeReply(reply, bytes, sizeof bytes);
+                    *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
                     return YES;
                 }
             }
@@ -136,7 +163,7 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
                 if (monitor.present && memcmp(monitor.hardwareID.bytes, payload + 1, 3) == 0) {
                     monitor.session = payload[4];
                     uint8_t bytes[2] = {0x09, payload[4]};
-                    QLMFakeReply(reply, bytes, sizeof bytes);
+                    *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
                     return YES;
                 }
             }
@@ -146,9 +173,11 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
         if (payload[0] == 0x3A && message->length == 3 && payload[1] == 0x03) {
             BOOL off = payload[2] == QLMPowerStepPowerOff;
             BOOL wake = payload[2] == QLMPowerStepWakeFirst || payload[2] == QLMPowerStepWakeSecond;
-            for (QLMFakeMonitor *monitor in _monitors) {
-                if (monitor.present && (off || wake)) {
-                    monitor.on = wake;
+            if (off || wake) {
+                for (QLMFakeMonitor *monitor in _monitors) {
+                    if (monitor.present) {
+                        monitor.on = wake;
+                    }
                 }
             }
         }
@@ -176,15 +205,15 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
         if (!target.on) {
             // Section 8.1's standby frame.
             uint8_t bytes[] = {0x09, 0x41, temperature, 0x47, 0x02, 0x84, 0x03, 0x8E};
-            QLMFakeReply(reply, bytes, sizeof bytes);
+            *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
         } else if (target.deviceClass == QLMTelemetryClassSubwoofer) {
             uint8_t bytes[] = {0x09, 0x41, temperature, 0x83, 0x00, temperature, 0x42, 0x89, 0x46, 0x80,
                                0x43, 0x80, 0x45, 0x80, 0x47, 0x01, 0x84, 0x01, 0x66};
-            QLMFakeReply(reply, bytes, sizeof bytes);
+            *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
         } else {
             uint8_t bytes[] = {0x09, 0x41, temperature, 0x81, 0x00, temperature, 0x83, 0x00, temperature, 0x42, 0x89,
                                0x43, 0x80, 0x45, 0x80, 0x47, 0x01, 0x84, 0x02, 0xB0};
-            QLMFakeReply(reply, bytes, sizeof bytes);
+            *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
         }
         return YES;
     }
@@ -201,7 +230,7 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
         // fall through: a bare ack
     default: {
         uint8_t ack = 0x09;
-        QLMFakeReply(reply, &ack, 1);
+        *reply = QLMMessageMake(QLMAddressReply, &ack, 1);
         return YES;
     }
     }

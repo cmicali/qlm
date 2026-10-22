@@ -4,6 +4,17 @@
 
 #include "QLMCRC.h"
 
+QLMMessage QLMMessageMake(uint8_t address, const uint8_t *payload, size_t length) {
+    QLMMessage message;
+    memset(&message, 0, sizeof message);
+    message.address = address;
+    message.length = length < QLMPayloadMax ? length : QLMPayloadMax;
+    if (payload != NULL) {
+        memcpy(message.payload, payload, message.length);
+    }
+    return message;
+}
+
 bool QLMFrameAllows(const uint8_t *payload, size_t length) {
     if (payload == NULL || length == 0) {
         return false;

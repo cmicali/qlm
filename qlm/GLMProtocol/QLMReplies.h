@@ -23,6 +23,12 @@ bool QLMReplyHardwareID(const QLMMessage *message, uint8_t hardwareID[3]);
 // NUL-terminated). Copies the text, NUL-terminated, into `out`.
 bool QLMReplyText(const QLMMessage *message, char *out, size_t capacity);
 
+// Reads the model and the firmware version from system info text, in either
+// form: semicolon-separated fields (model-, ver-) or space-delimited with the
+// model first. The firmware is empty when the text has none. False when no
+// model is found or a field does not fit its buffer.
+bool QLMSystemInfoParse(const char *text, char *model, size_t modelCapacity, char *firmware, size_t firmwareCapacity);
+
 // Telemetry: 09, an optional busy marker, 41, the temperature in degrees C,
 // then tag-value fields with no length byte. A field not present is
 // QLMTelemetryAbsent. The 47 status is the only authority on power: 01 is on,

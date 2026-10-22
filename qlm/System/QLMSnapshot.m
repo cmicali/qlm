@@ -4,13 +4,10 @@ const NSInteger QLMMonitorValueAbsent = -1;
 
 @implementation QLMMonitorState
 
-- (instancetype)initWithHardwareID:(NSData *)hardwareID session:(uint8_t)session {
+- (instancetype)init {
     self = [super init];
     if (self) {
-        _hardwareID = [hardwareID copy];
-        _session = session;
-        _status = QLMMonitorStatusUnknown;
-        _deviceClass = QLMMonitorValueAbsent;
+        _hardwareID = [NSData data];
         _temperature = QLMMonitorValueAbsent;
         _inputMeter = QLMMonitorValueAbsent;
         _hfMeter = QLMMonitorValueAbsent;
@@ -24,13 +21,10 @@ const NSInteger QLMMonitorValueAbsent = -1;
 
 @implementation QLMSnapshot
 
-- (instancetype)initWithRunning:(BOOL)running monitors:(NSArray<QLMMonitorState *> *)monitors volumeDecibels:(NSNumber *)volumeDecibels {
+- (instancetype)init {
     self = [super init];
     if (self) {
-        _date = [NSDate date];
-        _running = running;
-        _monitors = [monitors copy];
-        _volumeDecibels = volumeDecibels;
+        _monitors = @[];
     }
     return self;
 }

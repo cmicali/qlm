@@ -1,6 +1,7 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMSetupReader.h"
+#import "QLMTestSupport.h"
 
 // Source: Fixtures/Main.sam, a GLM 5.2.1 setup file with six devices and
 // four groups, redacted by tools/redact-setup.py. Every value asserted here
@@ -11,24 +12,13 @@
 @implementation QLMSetupReaderTests
 
 - (NSData *)fixture {
-    NSString *path = [[NSBundle bundleForClass:[self class]] pathForResource:@"Main" ofType:@"sam"];
-    if (path == nil) {
-        path = [[@(__FILE__) stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Fixtures/Main.sam"];
-    }
-    NSData *data = [NSData dataWithContentsOfFile:path];
-    XCTAssertNotNil(data, @"fixture at %@", path);
+    NSData *data = [NSData dataWithContentsOfFile:QLMFixturePath(@"Main.sam")];
+    XCTAssertNotNil(data);
     return data;
 }
 
-- (QLMSetup *)readFixture {
-    NSError *error = nil;
-    QLMSetup *setup = [QLMSetupReader readData:[self fixture] error:&error];
-    XCTAssertNotNil(setup, @"%@", error);
-    return setup;
-}
-
 - (void)testHeader {
-    QLMSetup *setup = [self readFixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     XCTAssertEqualObjects(setup.magic, @"GLM5_v2");
     XCTAssertTrue([setup.glmVersion hasPrefix:@"5.2.1"]);
     XCTAssertEqualObjects(setup.layoutStyle, @"Stereo with sub");
@@ -49,7 +39,7 @@
 }
 
 - (void)testDevices {
-    QLMSetup *setup = [self readFixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     XCTAssertEqual(setup.devices.count, 6u);
     NSArray<NSString *> *models = @[@"8351B", @"8351B", @"8330A", @"8330A", @"7370A", @"7350A"];
     NSArray<NSNumber *> *types = @[@3, @3, @2, @2, @1, @1];
@@ -71,7 +61,7 @@
 }
 
 - (void)testGroups {
-    QLMSetup *setup = [self readFixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     XCTAssertEqual(setup.groups.count, 4u);
     NSArray<NSString *> *names = @[@"Main 4x2", @"Main 2x2", @"Main 2x1", @"Group_4"];
     for (NSUInteger i = 0; i < 4; i++) {
@@ -112,7 +102,7 @@
 }
 
 - (void)testTwoWayNode {
-    QLMSetupNode *node = [self readFixture].groups[0].nodes[0];
+    QLMSetupNode *node = QLMReadFixtureSetup().groups[0].nodes[0];
     XCTAssertEqualObjects(node.className, @"TwowayGen2");
     XCTAssertEqualObjects(node.serial, @"1000005");
     XCTAssertEqual(node.levelSensitivity, -0.2);
@@ -155,7 +145,7 @@
 // An 8351B. The file states 96 kHz for its bands, which the spec leaves
 // unresolved on the wire.
 - (void)testThreeWayNode {
-    QLMSetupNode *node = [self readFixture].groups[0].nodes[1];
+    QLMSetupNode *node = QLMReadFixtureSetup().groups[0].nodes[1];
     XCTAssertEqual(node.nodeClass, QLMSetupNodeClassThreeWay);
     XCTAssertEqualObjects(node.serial, @"1000002");
     XCTAssertEqual(node.levelSensitivity, -0.17);
@@ -168,7 +158,7 @@
 }
 
 - (void)testSubwooferNode {
-    QLMSetupNode *node = [self readFixture].groups[0].nodes[3];
+    QLMSetupNode *node = QLMReadFixtureSetup().groups[0].nodes[3];
     XCTAssertEqual(node.nodeClass, QLMSetupNodeClassSubwoofer);
     XCTAssertEqualObjects(node.serial, @"1000006");
     XCTAssertEqual(node.levelSensitivity, -1.3);
@@ -187,11 +177,11 @@
         XCTAssertEqual(band.type, QLMSetupBandPeak);
         XCTAssertEqual(band.sampleRate, 12000);
     }
-    XCTAssertEqual([[self readFixture].groups[0] nodeWithSerial:@"1000006"].nodeClass, QLMSetupNodeClassSubwoofer);
+    XCTAssertEqual([QLMReadFixtureSetup().groups[0] nodeWithSerial:@"1000006"].nodeClass, QLMSetupNodeClassSubwoofer);
 }
 
 - (void)testEveryKeyInTheFixtureIsKnown {
-    XCTAssertEqualObjects([self readFixture].unknownKeys, @[]);
+    XCTAssertEqualObjects(QLMReadFixtureSetup().unknownKeys, @[]);
 }
 
 - (void)testUnknownKeysAreReportedNotDropped {
@@ -241,6 +231,13 @@
     [text replaceCharactersInRange:band withString:@"Frequency:250.31"];
     XCTAssertNil([QLMSetupReader readData:[text dataUsingEncoding:NSUTF8StringEncoding] error:&error]);
     XCTAssertEqual(error.code, QLMSetupErrorStructure);
+
+    text = [[NSMutableString alloc] initWithData:[self fixture] encoding:NSUTF8StringEncoding];
+    NSRange nodes = [text rangeOfString:@"Group_Nodes:6"];
+    [text replaceCharactersInRange:nodes withString:@"Group_Nodes:-1"];
+    XCTAssertNil([QLMSetupReader readData:[text dataUsingEncoding:NSUTF8StringEncoding] error:&error]);
+    XCTAssertEqual(error.code, QLMSetupErrorStructure);
+    XCTAssertNotNil(error.userInfo[QLMSetupErrorLineKey]);
 }
 
 @end

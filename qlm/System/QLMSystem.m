@@ -48,6 +48,8 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
 @property (nonatomic) uint8_t session;
 @property (nonatomic) NSString *serialNumber;
 @property (nonatomic) NSString *systemInfo;
+@property (nonatomic) NSString *model;
+@property (nonatomic) NSString *firmwareVersion;
 @property (nonatomic) BOOL hasTelemetry;
 @property (nonatomic) QLMTelemetry telemetry;
 @property (nonatomic) NSUInteger missedPolls;
@@ -63,14 +65,19 @@ static uint8_t QLMMuteValueFor(QLMMonitorRecord *monitor) {
     return monitor.muted ? QLMMuteValueMuted : QLMMuteValueUnmuted;
 }
 
-// A block payload addressed to a monitor's session.
-static QLMMessage QLMMessageForPayload(NSData *payload, uint8_t session) {
-    QLMMessage message;
-    memset(&message, 0, sizeof message);
-    message.address = session;
-    message.length = MIN(payload.length, (NSUInteger)QLMPayloadMax);
-    memcpy(message.payload, payload.bytes, message.length);
-    return message;
+static QLMMonitorStatus QLMMonitorStatusFor(const QLMTelemetry *telemetry) {
+    if (telemetry->status == QLMTelemetryStatusOn) {
+        return QLMMonitorStatusOn;
+    }
+    return telemetry->status == QLMTelemetryAbsent ? QLMMonitorStatusUnknown : QLMMonitorStatusStandby;
+}
+
+static QLMMonitorClass QLMMonitorClassFor(const QLMTelemetry *telemetry) {
+    switch (telemetry->deviceClass) {
+    case QLMTelemetryClassSubwoofer: return QLMMonitorClassSubwoofer;
+    case QLMTelemetryClassTwoWay: return QLMMonitorClassTwoWay;
+    default: return QLMMonitorClassUnknown;
+    }
 }
 
 typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_Nullable error);
@@ -93,9 +100,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     BOOL _volumeSendPending;
     NSDate *_lastVolumeSend;
     BOOL _dimmed;
-    BOOL _applying;
     NSString *_activeGroupName;
-    void (^_applyFinish)(NSError *_Nullable error);
+    void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
     QLMSnapshotHandler _snapshotHandler;
     dispatch_queue_t _snapshotQueue;
 }
@@ -109,7 +115,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
-        _snapshot = [[QLMSnapshot alloc] initWithRunning:NO monitors:@[] volumeDecibels:nil];
+        _snapshot = [[QLMSnapshot alloc] init];
     }
     return self;
 }
@@ -120,17 +126,32 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
 }
 
-- (void)setSnapshotHandler:(QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue {
+// Every public method's work runs here, so the publishing rule holds after it.
+- (void)onQueue:(dispatch_block_t)block {
     dispatch_async(_queue, ^{
-        self->_snapshotHandler = [handler copy];
-        self->_snapshotQueue = queue;
+        block();
+        [self publishIfSettled];
     });
+}
+
+- (void)setSnapshotHandler:(QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue {
+    QLMSnapshotHandler copied = [handler copy];
+    [self onQueue:^{
+        self->_snapshotHandler = copied;
+        self->_snapshotQueue = queue;
+        if (copied != nil) {
+            QLMSnapshot *latest = self.snapshot;
+            dispatch_async(queue, ^{
+                copied(latest);
+            });
+        }
+    }];
 }
 
 #pragma mark - Lifecycle
 
 - (void)start {
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         if (self->_running) {
             return;
         }
@@ -148,11 +169,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         });
         dispatch_resume(timer);
         self->_cycleTimer = timer;
-    });
+    }];
 }
 
 - (void)stop {
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         if (!self->_running) {
             return;
         }
@@ -162,41 +183,57 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             self->_cycleTimer = NULL;
         }
         [self->_sends removeAllObjects];
+        // A reply that never comes must not stall the next start.
+        self->_inFlight = NO;
         [self->_adapter stop];
         [self->_monitors removeAllObjects];
         if (self->_applyFinish != nil) {
             [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System stopped during the apply.", nil)];
         }
         [self publish];
-    });
+    }];
 }
 
 #pragma mark - Sending
 
-// One message at a time: the bus is half-duplex and the adapter keeps one
+// One item at a time: the bus is half-duplex and the adapter keeps one
 // request in flight. A send waits in line until the previous reply lands.
+- (void)enqueue:(dispatch_block_t)item {
+    [_sends addObject:item];
+    [self pump];
+}
+
 - (void)send:(QLMMessage)message then:(nullable QLMSendCompletion)completion {
     __weak QLMSystem *weakSelf = self;
-    [_sends addObject:^{
+    [self enqueue:^{
         QLMSystem *strongSelf = weakSelf;
         if (strongSelf == nil) {
             return;
         }
         [strongSelf->_adapter sendMessage:message replyHandler:^(const QLMMessage *reply, NSError *error) {
-            QLMSystem *handlerSelf = weakSelf;
-            if (handlerSelf == nil) {
-                return;
-            }
-            handlerSelf->_inFlight = NO;
-            if (completion != nil && handlerSelf->_running) {
+            [weakSelf finishItem:completion == nil ? nil : ^{
                 completion(reply, error);
-            }
-            if (handlerSelf->_dirty) {
-                [handlerSelf publish];
-            }
-            [handlerSelf pump];
+            }];
         }];
     }];
+}
+
+// Not a send: the block runs when the line reaches it, after every item
+// queued before it.
+- (void)afterSends:(dispatch_block_t)block {
+    __weak QLMSystem *weakSelf = self;
+    [self enqueue:^{
+        [weakSelf finishItem:block];
+    }];
+}
+
+// Ends the item in flight. The work runs only while System runs.
+- (void)finishItem:(nullable dispatch_block_t)work {
+    _inFlight = NO;
+    if (work != nil && _running) {
+        work();
+    }
+    [self publishIfSettled];
     [self pump];
 }
 
@@ -210,13 +247,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     next();
 }
 
+- (BOOL)isIdle {
+    return !_inFlight && _sends.count == 0;
+}
+
 #pragma mark - The cycle
 
 // What GLM sends every 1.2 to 1.8 s: the volume, the keep-alive, a poll to
 // each monitor, then a probe for monitors without a lease. A cycle is
 // skipped while the previous one is still on the bus.
 - (void)runCycle {
-    if (!_running || _inFlight || _sends.count > 0) {
+    if (!_running || ![self isIdle]) {
         return;
     }
     if (_volumeDecibels != nil) {
@@ -249,6 +290,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return 0;
 }
 
+- (nullable QLMMonitorRecord *)monitorWithHardwareID:(NSData *)hardwareID {
+    for (QLMMonitorRecord *monitor in _monitors) {
+        if ([monitor.hardwareID isEqualToData:hardwareID]) {
+            return monitor;
+        }
+    }
+    return nil;
+}
+
 // A probe is answered by one monitor without a lease. It gets the next
 // session ID, then its identity is read, and the probe repeats for the next.
 - (void)probe {
@@ -264,11 +314,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSData *identity = [NSData dataWithBytes:hardwareID length:3];
     // A monitor answering the probe holds no lease. If we still track one
     // under this ID, that lease is gone.
-    for (QLMMonitorRecord *monitor in [_monitors copy]) {
-        if ([monitor.hardwareID isEqualToData:identity]) {
-            [_monitors removeObject:monitor];
-            _dirty = YES;
-        }
+    QLMMonitorRecord *stale = [self monitorWithHardwareID:identity];
+    if (stale != nil) {
+        [_monitors removeObject:stale];
+        _dirty = YES;
     }
     uint8_t session = [self takeSession];
     if (session == 0) {
@@ -292,17 +341,26 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)identify:(QLMMonitorRecord *)monitor {
-    [self send:QLMCommandSystemInfo(monitor.session) then:^(const QLMMessage *reply, NSError *error) {
-        char text[QLMPayloadMax];
-        if (reply != NULL && QLMReplyText(reply, text, sizeof text)) {
-            monitor.systemInfo = @(text);
-            self->_dirty = YES;
+    [self ask:QLMCommandSystemInfo(monitor.session) then:^(const char *text) {
+        monitor.systemInfo = @(text);
+        char model[QLMPayloadMax];
+        char firmware[QLMPayloadMax];
+        if (QLMSystemInfoParse(text, model, sizeof model, firmware, sizeof firmware)) {
+            monitor.model = @(model);
+            monitor.firmwareVersion = firmware[0] != '\0' ? @(firmware) : nil;
         }
     }];
-    [self send:QLMCommandSerialNumber(monitor.session) then:^(const QLMMessage *reply, NSError *error) {
+    [self ask:QLMCommandSerialNumber(monitor.session) then:^(const char *text) {
+        monitor.serialNumber = @(text);
+    }];
+}
+
+// Sends a query whose reply is text, and hands over the text if it reads.
+- (void)ask:(QLMMessage)query then:(void (^)(const char *text))store {
+    [self send:query then:^(const QLMMessage *reply, NSError *error) {
         char text[QLMPayloadMax];
         if (reply != NULL && QLMReplyText(reply, text, sizeof text)) {
-            monitor.serialNumber = @(text);
+            store(text);
             self->_dirty = YES;
         }
     }];
@@ -369,11 +427,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 #pragma mark - Volume
 
 - (void)setVolumeDecibels:(double)decibels {
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         self->_volumeDecibels = @(decibels);
         self->_dirty = YES;
         [self scheduleVolumeSend];
-    });
+    }];
 }
 
 - (void)scheduleVolumeSend {
@@ -414,39 +472,37 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 #pragma mark - Dim
 
 - (void)setDimmed:(BOOL)dimmed {
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         if (self->_dimmed == dimmed) {
             return;
         }
         self->_dimmed = dimmed;
+        self->_dirty = YES;
         if (self->_volumeDecibels != nil) {
             [self scheduleVolumeSend];
         }
-        [self publishWhenIdle];
-    });
+    }];
 }
 
 #pragma mark - Mute
 
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID {
     NSData *identity = [hardwareID copy];
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         if (!self->_running) {
             return;
         }
-        for (QLMMonitorRecord *monitor in self->_monitors) {
-            if ([monitor.hardwareID isEqualToData:identity]) {
-                monitor.muted = muted;
-                [self sendMuteRounds];
-                return;
-            }
+        QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
+        if (monitor != nil) {
+            monitor.muted = muted;
+            [self sendMuteRounds];
         }
-    });
+    }];
 }
 
 - (void)setAllMuted:(BOOL)muted {
-    dispatch_async(_queue, ^{
-        if (!self->_running || self->_monitors.count == 0) {
+    [self onQueue:^{
+        if (!self->_running) {
             return;
         }
         for (QLMMonitorRecord *monitor in self->_monitors) {
@@ -457,31 +513,28 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [self sendVolume];
         }
         [self sendMuteRounds];
-    });
+    }];
 }
 
-// Two rounds, each restating every monitor's mute state. The snapshot is
-// published after the last frame.
+// Two rounds, each restating every monitor's mute state. A 2B reply is a
+// bare ack, and a missed one is a lost send, not a missed poll.
 - (void)sendMuteRounds {
     NSArray<QLMMonitorRecord *> *monitors = [_monitors copy];
     for (NSUInteger round = 0; round < 2; round++) {
         for (QLMMonitorRecord *monitor in monitors) {
-            BOOL last = round == 1 && monitor == monitors.lastObject;
-            // A 2B reply is a bare ack. A missed one is a lost send, not a missed poll.
-            [self send:QLMCommandMute(monitor.session, QLMMuteValueFor(monitor)) then:^(const QLMMessage *reply, NSError *error) {
-                if (last) {
-                    self->_dirty = YES;
-                }
-            }];
+            [self send:QLMCommandMute(monitor.session, QLMMuteValueFor(monitor)) then:nil];
         }
     }
+    [self afterSends:^{
+        self->_dirty = YES;
+    }];
 }
 
 #pragma mark - Power
 
 // Sent back to back. GLM spaces them about 22 ms apart.
 - (void)sleep {
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         if (!self->_running) {
             return;
         }
@@ -489,12 +542,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         for (size_t i = 0; i < sizeof steps / sizeof steps[0]; i++) {
             [self send:QLMCommandPower(steps[i]) then:nil];
         }
-    });
+    }];
 }
 
 // The monitors come back under new sessions, and the probe finds them.
 - (void)wake {
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         if (!self->_running) {
             return;
         }
@@ -502,18 +555,18 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
         }
-    });
+    }];
 }
 
 #pragma mark - Group apply
 
-- (void)applyGroup:(QLMSetupGroup *)group inSetup:(QLMSetup *)setup completion:(void (^)(NSError *_Nullable error))completion {
+- (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
     void (^finish)(NSError *) = ^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(error);
         });
     };
-    dispatch_async(_queue, ^{
+    [self onQueue:^{
         NSArray<QLMMonitorRecord *> *targets = nil;
         NSError *refusal = nil;
         NSArray<QLMDSPBlock *> *blocks = [self checkGroup:group targets:&targets error:&refusal];
@@ -522,7 +575,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             return;
         }
         [self sendGroup:group blocks:blocks targets:targets finish:finish];
-    });
+    }];
 }
 
 // Every check runs before the first frame. On success, `targets` holds the
@@ -530,7 +583,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (nullable NSArray<QLMDSPBlock *> *)checkGroup:(QLMSetupGroup *)group
                                        targets:(NSArray<QLMMonitorRecord *> *_Nullable *_Nonnull)targets
                                          error:(NSError **)error {
-    if (_applying) {
+    if (_applyFinish != nil) {
         *error = QLMSystemErrorMake(QLMSystemErrorAlreadyApplying, @"A group apply is already running.", nil);
         return nil;
     }
@@ -548,15 +601,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!block.rateVerified) {
             NSString *description = [NSString stringWithFormat:@"The design rate of node %@ (%@) is unverified.", block.node.serial, block.node.className];
             *error = QLMSystemErrorMake(QLMSystemErrorUnverifiedRate, description, nil);
-            return nil;
-        }
-        NSData *routing = block.payloads.lastObject;
-        BOOL fits = YES;
-        for (NSData *payload in block.payloads) {
-            fits = fits && payload.length > 0 && payload.length <= QLMPayloadMax;
-        }
-        if (!fits || routing.length != 5 || ((const uint8_t *)routing.bytes)[0] != 0x40) {
-            *error = QLMSystemErrorMake(QLMSystemErrorBlocksFailed, @"A DSP block does not end in a routing frame.", nil);
             return nil;
         }
     }
@@ -598,14 +642,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // GLM's apply: duck, wake, unmute and route, the blocks, then restore. Every
-// frame is queued at once, so no cycle runs until the last one is sent.
+// frame is queued at once, so no cycle runs until the apply finishes.
 - (void)sendGroup:(QLMSetupGroup *)group
            blocks:(NSArray<QLMDSPBlock *> *)blocks
           targets:(NSArray<QLMMonitorRecord *> *)targets
            finish:(void (^)(NSError *_Nullable error))finish {
-    _applying = YES;
     _applyFinish = finish;
-    [self publish];
 
     __block NSError *failure = nil;
     QLMSendCompletion broadcast = ^(const QLMMessage *reply, NSError *error) {
@@ -630,16 +672,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // the never-send list, so qlm skips it.
     for (NSUInteger i = 0; i < blocks.count; i++) {
         uint8_t session = targets[i].session;
-        const uint8_t *routing = blocks[i].payloads.lastObject.bytes;
+        NSData *routing = blocks[i].payloads.lastObject;
         [self send:QLMCommandMute(session, QLMMuteValueUnmuted) then:acked];
-        [self send:QLMCommandRouting(session, routing[1], routing[2], routing[3], routing[4]) then:acked];
+        [self send:QLMMessageMake(session, routing.bytes, routing.length) then:acked];
     }
 
     for (NSUInteger i = 0; i < blocks.count; i++) {
         uint8_t session = targets[i].session;
         [self send:QLMCommandKeepAlive() then:broadcast];
         for (NSData *payload in blocks[i].payloads) {
-            [self send:QLMMessageForPayload(payload, session) then:acked];
+            [self send:QLMMessageMake(session, payload.bytes, payload.length) then:acked];
         }
     }
 
@@ -647,25 +689,22 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _lastVolumeSend = [NSDate date];
         [self send:[self volumeMessage] then:broadcast];
     }
-    NSString *name = [group.name copy];
-    for (NSUInteger i = 0; i < targets.count; i++) {
-        QLMMonitorRecord *monitor = targets[i];
+    for (QLMMonitorRecord *monitor in targets) {
         [self send:QLMCommandMute(monitor.session, QLMMuteValueFor(monitor)) then:acked];
-        if (i + 1 < targets.count) {
-            [self send:QLMCommandInputSync(monitor.session) then:acked];
-        } else {
-            [self send:QLMCommandInputSync(monitor.session) then:^(const QLMMessage *reply, NSError *error) {
-                acked(reply, error);
-                [self finishApplyOfGroup:name error:failure];
-            }];
-        }
+        [self send:QLMCommandInputSync(monitor.session) then:acked];
     }
+    NSString *name = [group.name copy];
+    [self afterSends:^{
+        [self finishApplyOfGroup:name error:failure];
+    }];
+
+    // The frames are queued, so this is the one snapshot published mid-send.
+    [self publish];
 }
 
 - (void)finishApplyOfGroup:(nullable NSString *)name error:(nullable NSError *)error {
     void (^finish)(NSError *) = _applyFinish;
     _applyFinish = nil;
-    _applying = NO;
     if (error == nil) {
         _activeGroupName = name;
     }
@@ -677,10 +716,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Snapshots
 
-// Publishes now if the bus is idle. Otherwise the next reply publishes.
-- (void)publishWhenIdle {
-    _dirty = YES;
-    if (!_inFlight && _sends.count == 0 && !_volumeSendPending) {
+- (void)publishIfSettled {
+    if (_dirty && [self isIdle]) {
         [self publish];
     }
 }
@@ -688,33 +725,47 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)publish {
     _dirty = NO;
     NSMutableArray<QLMMonitorState *> *states = [NSMutableArray arrayWithCapacity:_monitors.count];
+    BOOL allIdentified = _monitors.count > 0;
+    BOOL allMuted = _monitors.count > 0;
+    BOOL anyOn = NO;
     for (QLMMonitorRecord *monitor in _monitors) {
-        QLMMonitorState *state = [[QLMMonitorState alloc] initWithHardwareID:monitor.hardwareID session:monitor.session];
+        QLMMonitorState *state = [[QLMMonitorState alloc] init];
+        state.hardwareID = monitor.hardwareID;
+        state.session = monitor.session;
         state.serialNumber = monitor.serialNumber;
         state.systemInfo = monitor.systemInfo;
+        state.model = monitor.model;
+        state.firmwareVersion = monitor.firmwareVersion;
         state.missedPolls = monitor.missedPolls;
         state.lastReply = monitor.lastReply;
         state.muted = monitor.muted;
         if (monitor.hasTelemetry) {
             QLMTelemetry telemetry = monitor.telemetry;
             state.temperature = telemetry.temperature;
-            state.deviceClass = telemetry.deviceClass;
+            state.deviceClass = QLMMonitorClassFor(&telemetry);
             state.inputMeter = telemetry.inputMeter;
             state.hfMeter = telemetry.hfMeter;
             state.lfMeter = telemetry.lfMeter;
             state.subMeter = telemetry.subMeter;
-            if (telemetry.status == QLMTelemetryStatusOn) {
-                state.status = QLMMonitorStatusOn;
-            } else if (telemetry.status != QLMTelemetryAbsent) {
-                state.status = QLMMonitorStatusStandby;
-            }
+            state.status = QLMMonitorStatusFor(&telemetry);
         }
+        state.identified = state.serialNumber != nil && state.systemInfo != nil && state.status != QLMMonitorStatusUnknown;
+        allIdentified = allIdentified && state.identified;
+        allMuted = allMuted && state.muted;
+        anyOn = anyOn || state.status == QLMMonitorStatusOn;
         [states addObject:state];
     }
-    QLMSnapshot *snapshot = [[QLMSnapshot alloc] initWithRunning:_running monitors:states volumeDecibels:_volumeDecibels];
+    QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
+    snapshot.running = _running;
+    snapshot.monitors = states;
+    snapshot.volumeDecibels = _volumeDecibels;
     snapshot.dimmed = _dimmed;
-    snapshot.applying = _applying;
+    snapshot.applying = _applyFinish != nil;
     snapshot.activeGroupName = _activeGroupName;
+    snapshot.idle = [self isIdle];
+    snapshot.allIdentified = allIdentified;
+    snapshot.allMuted = allMuted;
+    snapshot.anyOn = anyOn;
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;
     if (handler != nil && _snapshotQueue != NULL) {

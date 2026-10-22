@@ -33,6 +33,9 @@ typedef struct {
     uint8_t payload[QLMPayloadMax];
 } QLMMessage;
 
+// A message to `address` with a copy of the payload, cut at QLMPayloadMax.
+QLMMessage QLMMessageMake(uint8_t address, const uint8_t *payload, size_t length);
+
 typedef enum {
     QLMFrameOK = 0,
     QLMFrameErrorLength,

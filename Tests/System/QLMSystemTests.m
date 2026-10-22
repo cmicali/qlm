@@ -3,8 +3,8 @@
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
 #import "QLMSetupInternal.h"
-#import "QLMSetupReader.h"
 #import "QLMSystem.h"
+#import "QLMTestSupport.h"
 #include "QLMCommands.h"
 #include "QLMReplies.h"
 
@@ -56,42 +56,36 @@
     [_system start];
 }
 
-// Waits until the latest snapshot satisfies the predicate, and returns it.
+// Waits until a snapshot satisfies the predicate, and returns it.
 - (QLMSnapshot *)waitForSnapshot:(BOOL (^)(QLMSnapshot *snapshot))predicate {
     return [self waitForSnapshot:predicate after:nil];
 }
 
-// The same, with the handler in place before `action` runs.
+// The same, with the handler in place before `action` runs. The handler gets
+// the latest snapshot first, so a state reached earlier is seen.
 - (QLMSnapshot *)waitForSnapshot:(BOOL (^)(QLMSnapshot *snapshot))predicate after:(nullable dispatch_block_t)action {
     XCTestExpectation *expectation = [self expectationWithDescription:@"snapshot"];
     __block QLMSnapshot *match = nil;
-    __block BOOL fulfilled = NO;
     NSMutableArray<QLMSnapshot *> *received = _received;
-    void (^check)(QLMSnapshot *) = ^(QLMSnapshot *snapshot) {
-        if (!fulfilled && predicate(snapshot)) {
-            fulfilled = YES;
+    [_system setSnapshotHandler:^(QLMSnapshot *snapshot) {
+        [received addObject:snapshot];
+        if (match == nil && predicate(snapshot)) {
             match = snapshot;
             [expectation fulfill];
         }
-    };
-    [_system setSnapshotHandler:^(QLMSnapshot *snapshot) {
-        [received addObject:snapshot];
-        check(snapshot);
     } queue:_snapshots];
     if (action != nil) {
         action();
     }
-    // TRAP: an earlier action may publish before the handler is in place.
-    // Once the System queue has run the handler's setup, the latest snapshot
-    // covers whatever the handler missed.
-    [_bus perform:^{
-    }];
-    QLMSnapshot *latest = _system.snapshot;
-    dispatch_async(_snapshots, ^{
-        check(latest);
-    });
     [self waitForExpectations:@[expectation] timeout:5];
     return match;
+}
+
+// Waits until nothing is queued for the bus or in flight.
+- (void)waitForIdle {
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle;
+    }];
 }
 
 static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID) {
@@ -103,28 +97,41 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     return nil;
 }
 
-static BOOL QLMIsIdentified(QLMMonitorState *monitor) {
-    return monitor != nil && monitor.serialNumber != nil && monitor.systemInfo != nil && monitor.status == QLMMonitorStatusOn;
-}
-
 - (QLMSnapshot *)waitForDiscovery {
     return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return QLMIsIdentified(QLMFindMonitor(snapshot, self->_left.hardwareID)) &&
-               QLMIsIdentified(QLMFindMonitor(snapshot, self->_right.hardwareID));
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.anyOn;
     }];
 }
 
-// The messages sent to one address with one opcode, from an index on.
-- (NSUInteger)countSentTo:(uint8_t)address opcode:(uint8_t)opcode from:(NSUInteger)start {
-    NSUInteger count = 0;
+// The messages sent from an index on that pass the test.
+- (NSArray<NSData *> *)sentFrom:(NSUInteger)start matching:(BOOL (^)(NSData *message))test {
     NSArray<NSData *> *sent = _bus.sentMessages;
+    NSMutableArray<NSData *> *found = [NSMutableArray array];
     for (NSUInteger i = start; i < sent.count; i++) {
-        const uint8_t *bytes = sent[i].bytes;
-        if (sent[i].length >= 2 && bytes[0] == address && bytes[1] == opcode) {
-            count++;
+        if (test(sent[i])) {
+            [found addObject:sent[i]];
         }
     }
-    return count;
+    return found;
+}
+
+- (NSArray<NSData *> *)sentWithOpcode:(uint8_t)opcode from:(NSUInteger)start {
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        return message.length >= 2 && ((const uint8_t *)message.bytes)[1] == opcode;
+    }];
+}
+
+- (NSUInteger)countSentTo:(uint8_t)address opcode:(uint8_t)opcode from:(NSUInteger)start {
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return message.length >= 2 && bytes[0] == address && bytes[1] == opcode;
+    }].count;
+}
+
+- (NSUInteger)countSent:(NSData *)expected from:(NSUInteger)start {
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        return [message isEqualToData:expected];
+    }].count;
 }
 
 // Waits until the condition holds, polling.
@@ -137,34 +144,6 @@ static BOOL QLMIsIdentified(QLMMonitorState *monitor) {
         }
         [NSThread sleepForTimeInterval:0.005];
     }
-}
-
-static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
-    return [NSData dataWithBytes:bytes length:length];
-}
-
-// The messages sent from an index on that equal `message`.
-- (NSUInteger)countSent:(NSData *)message from:(NSUInteger)start {
-    NSUInteger count = 0;
-    NSArray<NSData *> *sent = _bus.sentMessages;
-    for (NSUInteger i = start; i < sent.count; i++) {
-        if ([sent[i] isEqualToData:message]) {
-            count++;
-        }
-    }
-    return count;
-}
-
-// The messages sent from an index on whose opcode is `opcode`, any address.
-- (NSArray<NSData *> *)sentWithOpcode:(uint8_t)opcode from:(NSUInteger)start {
-    NSMutableArray<NSData *> *found = [NSMutableArray array];
-    NSArray<NSData *> *sent = _bus.sentMessages;
-    for (NSUInteger i = start; i < sent.count; i++) {
-        if (sent[i].length >= 2 && ((const uint8_t *)sent[i].bytes)[1] == opcode) {
-            [found addObject:sent[i]];
-        }
-    }
-    return found;
 }
 
 - (void)testDiscoversLeasesAndIdentifiesEveryMonitor {
@@ -181,8 +160,11 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     XCTAssertEqualObjects(left.serialNumber, @"8320apm21001234");
     XCTAssertEqualObjects(right.serialNumber, @"8320apm21005678");
     XCTAssertEqualObjects(left.systemInfo, @"c-1;model-8320A");
+    XCTAssertEqualObjects(left.model, @"8320A");
+    XCTAssertNil(left.firmwareVersion);
+    XCTAssertTrue(left.identified);
     XCTAssertEqual(left.status, QLMMonitorStatusOn);
-    XCTAssertEqual(left.deviceClass, QLMTelemetryClassTwoWay);
+    XCTAssertEqual(left.deviceClass, QLMMonitorClassTwoWay);
     XCTAssertEqual(left.temperature, 38);
     XCTAssertEqual(left.missedPolls, 0u);
     XCTAssertNotNil(left.lastReply);
@@ -227,7 +209,7 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     }];
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
         QLMMonitorState *right = QLMFindMonitor(received, self->_right.hardwareID);
-        return right.session == 0x04 && QLMIsIdentified(right);
+        return right.session == 0x04 && right.identified;
     }];
     XCTAssertEqual(snapshot.monitors.count, 2u);
     XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
@@ -328,7 +310,7 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     XCTAssertFalse(QLMFindMonitor(muted, _right.hardwareID).muted);
     const uint8_t leftMuted[] = {left, 0x2B, QLMMuteValueMuted};
     const uint8_t rightSync[] = {right, 0x2B, QLMMuteValueUnmuted};
-    NSArray<NSData *> *expected = @[QLMSentBytes(leftMuted, 3), QLMSentBytes(rightSync, 3), QLMSentBytes(leftMuted, 3), QLMSentBytes(rightSync, 3)];
+    NSArray<NSData *> *expected = @[QLMBytes(leftMuted, 3), QLMBytes(rightSync, 3), QLMBytes(leftMuted, 3), QLMBytes(rightSync, 3)];
     XCTAssertEqualObjects([self sentWithOpcode:0x2B from:before], expected);
     // Individual mutes are not preceded by a volume frame.
     XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
@@ -345,9 +327,9 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     }];
     XCTAssertFalse(QLMFindMonitor(unmuted, _right.hardwareID).muted);
     XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 4u);
-    XCTAssertEqual([self countSent:QLMSentBytes(leftMuted, 3) from:before], 0u);
+    XCTAssertEqual([self countSent:QLMBytes(leftMuted, 3) from:before], 0u);
     const uint8_t rightMuted[] = {right, 0x2B, QLMMuteValueMuted};
-    XCTAssertEqual([self countSent:QLMSentBytes(rightMuted, 3) from:before], 0u);
+    XCTAssertEqual([self countSent:QLMBytes(rightMuted, 3) from:before], 0u);
 }
 
 // Section 7, 2B: mute-all is preceded by a volume re-broadcast.
@@ -364,12 +346,7 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
 
     QLMSystem *system = _system;
     QLMSnapshot *muted = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        for (QLMMonitorState *monitor in snapshot.monitors) {
-            if (!monitor.muted) {
-                return NO;
-            }
-        }
-        return snapshot.monitors.count == 2;
+        return snapshot.allMuted;
     } after:^{
         [system setAllMuted:YES];
     }];
@@ -377,10 +354,10 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     NSArray<NSData *> *sent = _bus.sentMessages;
     const uint8_t volume[] = {QLMAddressBroadcast, 0x1F, 0x04, 0x0C, 0x37};
     XCTAssertTrue(sent.count > before);
-    XCTAssertEqualObjects(sent[before], QLMSentBytes(volume, sizeof volume));
+    XCTAssertEqualObjects(sent[before], QLMBytes(volume, sizeof volume));
     for (QLMMonitorState *monitor in discovered.monitors) {
         const uint8_t mute[] = {monitor.session, 0x2B, QLMMuteValueMuted};
-        XCTAssertEqual([self countSent:QLMSentBytes(mute, 3) from:before], 2u);
+        XCTAssertEqual([self countSent:QLMBytes(mute, 3) from:before], 2u);
     }
     XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 4u);
 }
@@ -399,9 +376,9 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     const uint8_t minus10Bytes[] = {QLMAddressBroadcast, 0x1F, 0x28, 0x7A, 0x26};
     const uint8_t minus30Bytes[] = {QLMAddressBroadcast, 0x1F, 0x04, 0x0C, 0x37};
     const uint8_t minus40Bytes[] = {QLMAddressBroadcast, 0x1F, 0x01, 0x47, 0xAE};
-    NSData *minus10 = QLMSentBytes(minus10Bytes, 5);
-    NSData *minus30 = QLMSentBytes(minus30Bytes, 5);
-    NSData *minus40 = QLMSentBytes(minus40Bytes, 5);
+    NSData *minus10 = QLMBytes(minus10Bytes, 5);
+    NSData *minus30 = QLMBytes(minus30Bytes, 5);
+    NSData *minus40 = QLMBytes(minus40Bytes, 5);
 
     [_system setVolumeDecibels:-10];
     [self waitUntil:^BOOL {
@@ -444,7 +421,7 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     [_system setDimmed:YES];
     [_system setVolumeDecibels:-10];
     const uint8_t minus30[] = {QLMAddressBroadcast, 0x1F, 0x04, 0x0C, 0x37};
-    NSData *dimmed = QLMSentBytes(minus30, 5);
+    NSData *dimmed = QLMBytes(minus30, 5);
     __block NSUInteger first = NSNotFound;
     [self waitUntil:^BOOL {
         NSArray<NSData *> *sent = self->_bus.sentMessages;
@@ -471,7 +448,7 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     }];
     const uint8_t prepare[] = {QLMAddressBroadcast, 0x3A, 0x03, 0x02};
     const uint8_t off[] = {QLMAddressBroadcast, 0x3A, 0x03, 0x00};
-    NSArray<NSData *> *sleep = @[QLMSentBytes(prepare, 4), QLMSentBytes(prepare, 4), QLMSentBytes(off, 4), QLMSentBytes(off, 4)];
+    NSArray<NSData *> *sleep = @[QLMBytes(prepare, 4), QLMBytes(prepare, 4), QLMBytes(off, 4), QLMBytes(off, 4)];
     XCTAssertEqualObjects([self sentWithOpcode:0x3A from:before], sleep);
 
     // Section 9, "System Power": wake is 03 7F then 03 01, three times.
@@ -485,32 +462,18 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     const uint8_t second[] = {QLMAddressBroadcast, 0x3A, 0x03, 0x01};
     NSMutableArray<NSData *> *wake = [NSMutableArray array];
     for (int pair = 0; pair < 3; pair++) {
-        [wake addObject:QLMSentBytes(first, 4)];
-        [wake addObject:QLMSentBytes(second, 4)];
+        [wake addObject:QLMBytes(first, 4)];
+        [wake addObject:QLMBytes(second, 4)];
     }
     XCTAssertEqualObjects([self sentWithOpcode:0x3A from:before], wake);
 }
 
 #pragma mark - Group apply
 
-- (QLMSetup *)fixture {
-    NSString *path = [[NSBundle bundleForClass:[self class]] pathForResource:@"Main" ofType:@"sam"];
-    if (path == nil) {
-        path = [[[@(__FILE__) stringByDeletingLastPathComponent] stringByDeletingLastPathComponent]
-            stringByAppendingPathComponent:@"Setups/Fixtures/Main.sam"];
-    }
-    NSError *error = nil;
-    QLMSetup *setup = [QLMSetupReader readFileAtPath:path error:&error];
-    XCTAssertNotNil(setup, @"%@", error);
-    return setup;
-}
-
-// "Main 4x2" with only its two 8330A, nodes 0 and 2: two-way at 48 kHz, so
-// their design rate is verified.
-- (QLMSetupGroup *)mainsGroup:(QLMSetup *)setup {
-    QLMSetupGroup *source = setup.groups[0];
+// A group named `name` with the settings of `source` and only `nodes`.
+- (QLMSetupGroup *)groupNamed:(NSString *)name from:(QLMSetupGroup *)source nodes:(NSArray<QLMSetupNode *> *)nodes {
     QLMSetupGroup *group = [[QLMSetupGroup alloc] init];
-    group.name = @"Mains";
+    group.name = name;
     group.groupSensitivity = source.groupSensitivity;
     group.crossover = source.crossover;
     group.crossoverGlobalMode = source.crossoverGlobalMode;
@@ -518,8 +481,15 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     group.subwooferBypass = source.subwooferBypass;
     group.lowShelf = source.lowShelf;
     group.highShelf = source.highShelf;
-    group.nodes = @[source.nodes[0], source.nodes[2]];
+    group.nodes = nodes;
     return group;
+}
+
+// "Main 4x2" with only its two 8330A, nodes 0 and 2: two-way at 48 kHz, so
+// their design rate is verified.
+- (QLMSetupGroup *)mainsGroup {
+    QLMSetupGroup *source = QLMReadFixtureSetup().groups[0];
+    return [self groupNamed:@"Mains" from:source nodes:@[source.nodes[0], source.nodes[2]]];
 }
 
 // Two 8330A whose bus serials end in the fixture's 1000005 and 1000004.
@@ -533,10 +503,10 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
 }
 
-- (NSError *)applyGroup:(QLMSetupGroup *)group inSetup:(QLMSetup *)setup {
+- (NSError *)applyGroup:(QLMSetupGroup *)group {
     XCTestExpectation *expectation = [self expectationWithDescription:@"apply"];
     __block NSError *result = nil;
-    [_system applyGroup:group inSetup:setup completion:^(NSError *error) {
+    [_system applyGroup:group completion:^(NSError *error) {
         XCTAssertTrue([NSThread isMainThread]);
         result = error;
         [expectation fulfill];
@@ -553,11 +523,10 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     [self startSystem];
     [self waitForDiscovery];
     NSUInteger before = _bus.sentMessages.count;
-    QLMSetup *setup = [self fixture];
-    NSError *error = [self applyGroup:setup.groups[0] inSetup:setup];
+    NSError *error = [self applyGroup:QLMReadFixtureSetup().groups[0]];
     XCTAssertEqualObjects(error.domain, QLMSystemErrorDomain);
     XCTAssertEqual(error.code, QLMSystemErrorUnverifiedRate);
-    [NSThread sleepForTimeInterval:0.05];
+    [self waitForIdle];
     XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
     XCTAssertEqual([self sentWithOpcode:0x3A from:before].count, 0u);
     XCTAssertEqual([self sentWithOpcode:0x10 from:before].count, 0u);
@@ -573,24 +542,20 @@ static NSData *QLMSentBytes(const uint8_t *bytes, size_t length) {
     [self waitForDiscovery];
     [_system setVolumeDecibels:-30];
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.volumeDecibels != nil;
+        return snapshot.volumeDecibels != nil && snapshot.idle;
     }];
-    [NSThread sleepForTimeInterval:0.05];
     NSUInteger before = _bus.sentMessages.count;
-    QLMSetup *setup = [self fixture];
-    NSError *error = [self applyGroup:[self mainsGroup:setup] inSetup:setup];
+    NSError *error = [self applyGroup:[self mainsGroup]];
     XCTAssertEqualObjects(error.domain, QLMSystemErrorDomain);
     XCTAssertEqual(error.code, QLMSystemErrorUnknownMonitor);
-    [NSThread sleepForTimeInterval:0.05];
+    [self waitForIdle];
     XCTAssertEqual(_bus.sentMessages.count, before);
 }
 
 static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
     NSMutableArray<NSData *> *frames = [NSMutableArray array];
     for (NSData *payload in block.payloads) {
-        NSMutableData *frame = [NSMutableData dataWithBytes:&session length:1];
-        [frame appendData:payload];
-        [frames addObject:frame];
+        [frames addObject:[QLMFakeBus recordForSession:session payload:payload]];
     }
     return frames;
 }
@@ -610,12 +575,10 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
     [_system setMuted:YES forMonitorWithHardwareID:_right.hardwareID];
     [_system setVolumeDecibels:-10];
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.volumeDecibels != nil;
+        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.volumeDecibels != nil && snapshot.idle;
     }];
-    [NSThread sleepForTimeInterval:0.1];
 
-    QLMSetup *setup = [self fixture];
-    QLMSetupGroup *group = [self mainsGroup:setup];
+    QLMSetupGroup *group = [self mainsGroup];
     NSArray<QLMDSPBlock *> *blocks = [QLMDSPBlock blocksForGroup:group error:NULL];
     XCTAssertEqual(blocks.count, 2u);
     NSUInteger before = _bus.sentMessages.count;
@@ -627,7 +590,7 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
         sawApplying = sawApplying || snapshot.applying;
         return snapshot.activeGroupName != nil;
     } after:^{
-        [system applyGroup:group inSetup:setup completion:^(NSError *error) {
+        [system applyGroup:group completion:^(NSError *error) {
             result = error;
             [done fulfill];
         }];
@@ -641,41 +604,41 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
     NSMutableArray<NSData *> *expected = [NSMutableArray array];
     const uint8_t duckMin[] = {QLMAddressBroadcast, 0x1F, 0x00, 0x00, 0x08};
     const uint8_t duck[] = {QLMAddressBroadcast, 0x1F, 0x00, 0x00, 0x02};
-    [expected addObject:QLMSentBytes(duckMin, 5)];
-    [expected addObject:QLMSentBytes(duck, 5)];
+    [expected addObject:QLMBytes(duckMin, 5)];
+    [expected addObject:QLMBytes(duck, 5)];
     const uint8_t wakeFirst[] = {QLMAddressBroadcast, 0x3A, 0x03, 0x7F};
     const uint8_t wakeSecond[] = {QLMAddressBroadcast, 0x3A, 0x03, 0x01};
-    [expected addObject:QLMSentBytes(wakeFirst, 4)];
-    [expected addObject:QLMSentBytes(wakeFirst, 4)];
-    [expected addObject:QLMSentBytes(wakeSecond, 4)];
+    [expected addObject:QLMBytes(wakeFirst, 4)];
+    [expected addObject:QLMBytes(wakeFirst, 4)];
+    [expected addObject:QLMBytes(wakeSecond, 4)];
     const uint8_t sessions[2] = {first, second};
     for (int i = 0; i < 2; i++) {
         const uint8_t unmute[] = {sessions[i], 0x2B, QLMMuteValueUnmuted};
-        [expected addObject:QLMSentBytes(unmute, 3)];
+        [expected addObject:QLMBytes(unmute, 3)];
         [expected addObject:QLMBlockFrames(blocks[(NSUInteger)i], sessions[i]).lastObject];
     }
     const uint8_t keepAlive[] = {QLMAddressBroadcast, 0x04};
     for (int i = 0; i < 2; i++) {
-        [expected addObject:QLMSentBytes(keepAlive, 2)];
+        [expected addObject:QLMBytes(keepAlive, 2)];
         NSArray<NSData *> *frames = QLMBlockFrames(blocks[(NSUInteger)i], sessions[i]);
         XCTAssertEqual(frames.count, 27u);
         const uint8_t prepare[] = {sessions[i], 0x17, 0x01};
-        XCTAssertEqualObjects(frames.firstObject, QLMSentBytes(prepare, 3));
+        XCTAssertEqualObjects(frames.firstObject, QLMBytes(prepare, 3));
         XCTAssertEqual(((const uint8_t *)frames.lastObject.bytes)[1], 0x40);
         [expected addObjectsFromArray:frames];
     }
     const uint8_t volume[] = {QLMAddressBroadcast, 0x1F, 0x28, 0x7A, 0x26};
     for (int i = 0; i < 5; i++) {
-        [expected addObject:QLMSentBytes(volume, 5)];
+        [expected addObject:QLMBytes(volume, 5)];
     }
     const uint8_t restoreFirst[] = {first, 0x2B, QLMMuteValueUnmuted};
     const uint8_t restoreSecond[] = {second, 0x2B, QLMMuteValueMuted};
     const uint8_t syncFirst[] = {first, 0x3D, 0x00, 0x00};
     const uint8_t syncSecond[] = {second, 0x3D, 0x00, 0x00};
-    [expected addObject:QLMSentBytes(restoreFirst, 3)];
-    [expected addObject:QLMSentBytes(syncFirst, 4)];
-    [expected addObject:QLMSentBytes(restoreSecond, 3)];
-    [expected addObject:QLMSentBytes(syncSecond, 4)];
+    [expected addObject:QLMBytes(restoreFirst, 3)];
+    [expected addObject:QLMBytes(syncFirst, 4)];
+    [expected addObject:QLMBytes(restoreSecond, 3)];
+    [expected addObject:QLMBytes(syncSecond, 4)];
 
     NSArray<NSData *> *sent = _bus.sentMessages;
     XCTAssertGreaterThanOrEqual(sent.count, before + expected.count);
@@ -694,23 +657,52 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
     [self startSystem];
     [self waitForDiscovery];
     [_system setVolumeDecibels:-30];
-    QLMSetup *setup = [self fixture];
-    QLMSetupGroup *group = [self mainsGroup:setup];
+    QLMSetupGroup *group = [self mainsGroup];
     XCTestExpectation *firstDone = [self expectationWithDescription:@"first"];
     XCTestExpectation *secondDone = [self expectationWithDescription:@"second"];
     __block NSError *firstError = nil;
     __block NSError *secondError = nil;
-    [_system applyGroup:group inSetup:setup completion:^(NSError *error) {
+    [_system applyGroup:group completion:^(NSError *error) {
         firstError = error;
         [firstDone fulfill];
     }];
-    [_system applyGroup:group inSetup:setup completion:^(NSError *error) {
+    [_system applyGroup:group completion:^(NSError *error) {
         secondError = error;
         [secondDone fulfill];
     }];
     [self waitForExpectations:@[firstDone, secondDone] timeout:5];
     XCTAssertNil(firstError);
     XCTAssertEqual(secondError.code, QLMSystemErrorAlreadyApplying);
+}
+
+// An apply for a group whose nodes are all off has no per-monitor frames.
+// The duck, the wake, and the volume restore still go out, and it finishes.
+- (void)testApplyOfAGroupWithEveryNodeOffFinishes {
+    _settings.cycleInterval = 10;
+    [self useMainsMonitors];
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    // In "Main 2x2" the two 8330A, nodes 0 and 2, are off.
+    QLMSetupGroup *source = QLMReadFixtureSetup().groups[1];
+    QLMSetupGroup *group = [self groupNamed:@"Off" from:source nodes:@[source.nodes[0], source.nodes[2]]];
+    XCTAssertEqual([QLMDSPBlock blocksForGroup:group error:NULL].count, 0u);
+
+    NSUInteger before = _bus.sentMessages.count;
+    XCTAssertNil([self applyGroup:group]);
+    XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 7u);  // two duck frames, five restores
+    XCTAssertEqual([self sentWithOpcode:0x3A from:before].count, 3u);
+    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 0u);
+    XCTAssertEqual([self sentWithOpcode:0x10 from:before].count, 0u);
+
+    XCTAssertNil([self applyGroup:group]);
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return !received.applying && [received.activeGroupName isEqualToString:@"Off"];
+    }];
+    XCTAssertTrue(snapshot.idle);
 }
 
 @end

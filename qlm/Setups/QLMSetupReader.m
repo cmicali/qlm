@@ -31,16 +31,9 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
 }
 
 + (QLMSetup *)readData:(NSData *)data error:(NSError **)error {
-    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-    if (text == nil) {
-        text = [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
-    }
-    if (text == nil) {
-        if (error != NULL) {
-            *error = [NSError errorWithDomain:QLMSetupErrorDomain code:QLMSetupErrorEncoding userInfo:nil];
-        }
-        return nil;
-    }
+    // ISO Latin-1 decodes any bytes, so the fallback cannot fail.
+    NSString *text = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+                         ?: [[NSString alloc] initWithData:data encoding:NSISOLatin1StringEncoding];
 
     // Lines are CRLF. A line without a colon is part of the banner before
     // the magic, or a separator of dashes. Blank lines hold one space.
@@ -87,6 +80,12 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
     NSError *_error;
     NSUInteger _deviceCount;
     NSUInteger _groupCount;
+    // Keys the file carries that qlm has no use for. Listed so they are not
+    // reported as unknown. Anything else new in a future GLM is.
+    NSSet<NSString *> *_headerIgnored;
+    NSSet<NSString *> *_deviceIgnored;
+    NSSet<NSString *> *_groupIgnored;
+    NSSet<NSString *> *_nodeIgnored;
 }
 
 - (instancetype)initWithEntries:(NSArray<QLMSetupEntry *> *)entries {
@@ -94,6 +93,26 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
     if (self) {
         _entries = entries;
         _unknown = [NSMutableArray array];
+        _headerIgnored = [NSSet setWithArray:@[
+            @"RoomWidth", @"RoomLenght", @"RoomHeight", @"Created", @"Modified", @"GridSize", @"GLMTheme",
+            @"MicReferenceLevel", @"LEDOFF", @"SubwooferBypass", @"PowerMateKnopEnabled", @"RFRemoteEnabled",
+            @"LevelPanelEnabled", @"ShutDownGroupOffDevices", @"SignalDetectionEnabled", @"SystemPowerStatus",
+            @"ShowInfoType", @"SoundDoseWarningOff", @"SystemSensitivity",
+        ]];
+        _deviceIgnored = [NSSet setWithArray:@[
+            @"Uniq_ID", @"Barcode", @"SineTone_Supported", @"XPos", @"YPos", @"ZPos", @"Orientation", @"Elevation",
+            @"Colour", @"SE_Output", @"MicrophoneSerial", @"MicrophoneSensitivity", @"MicrophoneSensitivityCorrection",
+        ]];
+        _groupIgnored = [NSSet setWithArray:@[
+            @"Calibration_Description", @"AutoCal_Cloud", @"Session_ID", @"ReferenceLevelActive", @"Loudness_Signal_Level",
+            @"Loudness_Target_Level", @"Loudness_Calibrated_Level", @"HP_Loudness_Calibrated_Level", @"Group_Microphone_Serial",
+            @"Group_BE_XOMin", @"Group_BE_XOMax", @"Group_BE_Mode", @"GroupDelayCompensation", @"Group_RoomProfile",
+            @"Group_RoomProfile_MidRange", @"Group_RoomProfile_Strength", @"Group_SymmetricalEQ", @"Group_Audio",
+        ]];
+        _nodeIgnored = [NSSet setWithArray:@[
+            @"CalibrationGroupID", @"CalibrationStatusFlag", @"PhaseCalibratedWith", @"MultiChannel_AES_EBU",
+            @"GroupDelayCompensation", @"WooferSystemWithSerial", @"BassExtensionXO(Hz)", @"RateFlatness", @"RateCorrelated",
+        ]];
     }
     return self;
 }
@@ -193,22 +212,6 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
     return setup;
 }
 
-// Keys the file carries that qlm has no use for. Listed so they are not
-// reported as unknown. Anything else new in a future GLM is.
-static NSSet<NSString *> *QLMHeaderIgnored(void) {
-    static NSSet<NSString *> *set;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        set = [NSSet setWithArray:@[
-            @"RoomWidth", @"RoomLenght", @"RoomHeight", @"Created", @"Modified", @"GridSize", @"GLMTheme",
-            @"MicReferenceLevel", @"LEDOFF", @"SubwooferBypass", @"PowerMateKnopEnabled", @"RFRemoteEnabled",
-            @"LevelPanelEnabled", @"ShutDownGroupOffDevices", @"SignalDetectionEnabled", @"SystemPowerStatus",
-            @"ShowInfoType", @"SoundDoseWarningOff", @"SystemSensitivity",
-        ]];
-    });
-    return set;
-}
-
 - (void)parseHeaderInto:(QLMSetup *)setup {
     NSInteger deviceCount = -1;
     NSInteger groupCount = -1;
@@ -259,7 +262,7 @@ static NSSet<NSString *> *QLMHeaderIgnored(void) {
             setup.ledDisable = [self flag:entry];
         } else if ([key isEqualToString:@"InputMode"]) {
             setup.inputMode = [self integer:entry];
-        } else if (![QLMHeaderIgnored() containsObject:key]) {
+        } else if (![_headerIgnored containsObject:key]) {
             [self unknown:entry in:@"header"];
         }
     }
@@ -272,18 +275,6 @@ static NSSet<NSString *> *QLMHeaderIgnored(void) {
     }
     _deviceCount = (NSUInteger)deviceCount;
     _groupCount = (NSUInteger)groupCount;
-}
-
-static NSSet<NSString *> *QLMDeviceIgnored(void) {
-    static NSSet<NSString *> *set;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        set = [NSSet setWithArray:@[
-            @"Uniq_ID", @"Barcode", @"SineTone_Supported", @"XPos", @"YPos", @"ZPos", @"Orientation", @"Elevation",
-            @"Colour", @"SE_Output", @"MicrophoneSerial", @"MicrophoneSensitivity", @"MicrophoneSensitivityCorrection",
-        ]];
-    });
-    return set;
 }
 
 // Model, then keys to Data_End. The adapter's block has the same shape.
@@ -318,7 +309,7 @@ static NSSet<NSString *> *QLMDeviceIgnored(void) {
             device.microVersion = [self text:entry];
         } else if ([key isEqualToString:@"DBM_Filter"]) {
             device.dbmFilter = [self flag:entry];
-        } else if (![QLMDeviceIgnored() containsObject:key]) {
+        } else if (![_deviceIgnored containsObject:key]) {
             [self unknown:entry in:where];
         }
     }
@@ -334,20 +325,6 @@ static NSSet<NSString *> *QLMDeviceIgnored(void) {
         }
     }
     setup.devices = devices;
-}
-
-static NSSet<NSString *> *QLMGroupIgnored(void) {
-    static NSSet<NSString *> *set;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        set = [NSSet setWithArray:@[
-            @"Calibration_Description", @"AutoCal_Cloud", @"Session_ID", @"ReferenceLevelActive", @"Loudness_Signal_Level",
-            @"Loudness_Target_Level", @"Loudness_Calibrated_Level", @"HP_Loudness_Calibrated_Level", @"Group_Microphone_Serial",
-            @"Group_BE_XOMin", @"Group_BE_XOMax", @"Group_BE_Mode", @"GroupDelayCompensation", @"Group_RoomProfile",
-            @"Group_RoomProfile_MidRange", @"Group_RoomProfile_Strength", @"Group_SymmetricalEQ", @"Group_Audio",
-        ]];
-    });
-    return set;
 }
 
 // A band is its own key, then Frequency, Gain, Q_Value for a peak, and SR.
@@ -399,18 +376,6 @@ static QLMSetupNodeClass QLMNodeClassNamed(NSString *name) {
     return QLMSetupNodeClassUnknown;
 }
 
-static NSSet<NSString *> *QLMNodeIgnored(void) {
-    static NSSet<NSString *> *set;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        set = [NSSet setWithArray:@[
-            @"CalibrationGroupID", @"CalibrationStatusFlag", @"PhaseCalibratedWith", @"MultiChannel_AES_EBU",
-            @"GroupDelayCompensation", @"WooferSystemWithSerial", @"BassExtensionXO(Hz)", @"RateFlatness", @"RateCorrelated",
-        ]];
-    });
-    return set;
-}
-
 // Class, then keys and bands to Data_End.
 - (nullable QLMSetupNode *)parseNodeInGroup:(NSString *)groupName {
     QLMSetupEntry *classEntry = [self expect:@"Class"];
@@ -421,7 +386,7 @@ static NSSet<NSString *> *QLMNodeIgnored(void) {
     node.className = classEntry.value;
     node.nodeClass = QLMNodeClassNamed(classEntry.value);
     NSMutableArray<QLMSetupBand *> *bands = [NSMutableArray array];
-    NSString *where = [NSString stringWithFormat:@"group %@ node %lu", groupName, (unsigned long)(bands.count)];
+    NSString *where = [NSString stringWithFormat:@"group %@ node ?", groupName];
     while (_error == nil) {
         QLMSetupEntry *entry = [self next];
         if (entry == nil) {
@@ -480,7 +445,7 @@ static NSSet<NSString *> *QLMNodeIgnored(void) {
                    [key isEqualToString:@"SR"]) {
             [self failAt:entry code:QLMSetupErrorStructure message:@"a band value outside a band"];
             return nil;
-        } else if (![QLMNodeIgnored() containsObject:key]) {
+        } else if (![_nodeIgnored containsObject:key]) {
             [self unknown:entry in:where];
         }
     }
@@ -508,6 +473,9 @@ static NSSet<NSString *> *QLMNodeIgnored(void) {
         NSString *key = entry.key;
         if ([key isEqualToString:@"Group_Nodes"]) {
             nodeCount = [self integer:entry];
+            if (nodeCount < 0) {
+                [self failAt:entry code:QLMSetupErrorStructure message:@"a negative Group_Nodes"];
+            }
             break;
         } else if (inPanel) {
             continue;
@@ -533,11 +501,11 @@ static NSSet<NSString *> *QLMNodeIgnored(void) {
             group.lowShelf = [self parseBandOfType:QLMSetupBandLowShelf from:entry];
         } else if ([key isEqualToString:@"Group_HP_Shelve"]) {
             group.highShelf = [self parseBandOfType:QLMSetupBandHighShelf from:entry];
-        } else if (![QLMGroupIgnored() containsObject:key]) {
+        } else if (![_groupIgnored containsObject:key]) {
             [self unknown:entry in:where];
         }
     }
-    if (_error != nil || nodeCount < 0) {
+    if (_error != nil) {
         return nil;
     }
     NSMutableArray<QLMSetupNode *> *nodes = [NSMutableArray array];

@@ -148,4 +148,27 @@
     XCTAssertFalse(QLMReplyText(&ack, text, sizeof text));
 }
 
+// Section 8 gives the system info two forms: semicolon-separated fields
+// with model- and ver-, and space-delimited with the model first.
+- (void)testSystemInfoParse {
+    char model[16];
+    char firmware[16];
+    XCTAssertTrue(QLMSystemInfoParse("c-1;model-7350A;ver-1.14.7;hw-2;build-3733", model, sizeof model, firmware, sizeof firmware));
+    XCTAssertEqual(strcmp(model, "7350A"), 0);
+    XCTAssertEqual(strcmp(firmware, "1.14.7"), 0);
+
+    XCTAssertTrue(QLMSystemInfoParse("c-1;model-8320A", model, sizeof model, firmware, sizeof firmware));
+    XCTAssertEqual(strcmp(model, "8320A"), 0);
+    XCTAssertEqual(strcmp(firmware, ""), 0);
+
+    XCTAssertTrue(QLMSystemInfoParse("7350A 1 0000 0106 3733", model, sizeof model, firmware, sizeof firmware));
+    XCTAssertEqual(strcmp(model, "7350A"), 0);
+    XCTAssertEqual(strcmp(firmware, ""), 0);
+
+    XCTAssertFalse(QLMSystemInfoParse("c-1;ver-1.14.7", model, sizeof model, firmware, sizeof firmware));
+    XCTAssertFalse(QLMSystemInfoParse("", model, sizeof model, firmware, sizeof firmware));
+    char tiny[4];
+    XCTAssertFalse(QLMSystemInfoParse("c-1;model-7350A", tiny, sizeof tiny, firmware, sizeof firmware));
+}
+
 @end

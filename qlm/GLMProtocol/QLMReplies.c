@@ -61,6 +61,44 @@ bool QLMReplyText(const QLMMessage *message, char *out, size_t capacity) {
     return count > 0;
 }
 
+static bool QLMCopyField(const char *start, size_t length, char *out, size_t capacity) {
+    if (length + 1 > capacity) {
+        return false;
+    }
+    memcpy(out, start, length);
+    out[length] = '\0';
+    return true;
+}
+
+bool QLMSystemInfoParse(const char *text, char *model, size_t modelCapacity, char *firmware, size_t firmwareCapacity) {
+    if (text == NULL || model == NULL || firmware == NULL || modelCapacity == 0 || firmwareCapacity == 0) {
+        return false;
+    }
+    model[0] = '\0';
+    firmware[0] = '\0';
+    if (strchr(text, ';') == NULL && strstr(text, "model-") == NULL) {
+        size_t length = strcspn(text, " ");
+        return length > 0 && QLMCopyField(text, length, model, modelCapacity);
+    }
+    for (const char *field = text; *field != '\0';) {
+        size_t length = strcspn(field, ";");
+        if (length > 6 && strncmp(field, "model-", 6) == 0) {
+            if (!QLMCopyField(field + 6, length - 6, model, modelCapacity)) {
+                return false;
+            }
+        } else if (length > 4 && strncmp(field, "ver-", 4) == 0) {
+            if (!QLMCopyField(field + 4, length - 4, firmware, firmwareCapacity)) {
+                return false;
+            }
+        }
+        field += length;
+        if (*field == ';') {
+            field++;
+        }
+    }
+    return model[0] != '\0';
+}
+
 // The value length of each tag. Zero for a tag the spec does not list.
 static size_t QLMTelemetryValueLength(uint8_t tag) {
     switch (tag) {

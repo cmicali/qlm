@@ -7,8 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 extern NSErrorDomain const QLMSetupErrorDomain;
 
 typedef NS_ERROR_ENUM(QLMSetupErrorDomain, QLMSetupError) {
-    QLMSetupErrorEncoding = 1,
-    QLMSetupErrorMagic,      // not a GLM5_v2 file
+    QLMSetupErrorMagic = 1,  // not a GLM5_v2 file
     QLMSetupErrorStructure,  // a line or section out of place; the line is in userInfo
     QLMSetupErrorValue,      // a number that does not parse
 };

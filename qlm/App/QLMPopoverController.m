@@ -163,7 +163,7 @@ static BOOL QLMAnyMonitorOn(QLMSnapshot *_Nullable snapshot);
     self.message = nil;
     [self refreshGroupControls];
     __weak QLMPopoverController *weakSelf = self;
-    [self.system applyGroup:group inSetup:self.setup completion:^(NSError *error) {
+    [self.system applyGroup:group completion:^(NSError *error) {
         QLMPopoverController *strongSelf = weakSelf;
         if (strongSelf == nil) {
             return;

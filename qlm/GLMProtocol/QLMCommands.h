@@ -7,13 +7,12 @@
 #include "QLMFrame.h"
 
 // A volume word is 24-bit linear gain, floor(10^(dB/20) * 2^23), clipped at
-// 0 dB. GLM's slider stops at -120.4 dB. The two words below it are not
-// volumes: 2 is the duck under a group apply, and 0 is a hard mute.
+// 0 dB. GLM's slider stops at -120.4 dB. The duck under a group apply, 2,
+// is below it and is not a volume.
 enum {
     QLMVolumeWordMax = 0x7FFFFF,
     QLMVolumeWordMin = 0x000008,
     QLMVolumeWordDuck = 0x000002,
-    QLMVolumeWordMute = 0x000000,
 };
 #define QLMVolumeDecibelsMin (-120.4)
 #define QLMVolumeDecibelsMax (0.0)
@@ -28,7 +27,6 @@ double QLMVolumeDecibelsForWord(uint32_t word);
 enum {
     QLMMuteValueMuted = 0x03,
     QLMMuteValueUnmuted = 0x04,
-    QLMMuteValueLEDOff = 0x08,
 };
 
 // The subcommands of 3A 03. Sleep is prepare twice, then off twice. Wake is

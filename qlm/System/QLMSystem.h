@@ -33,8 +33,9 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 
 // Owns the bus on one serial queue. It runs discovery, the session leases,
-// the keep-alive and poll cycle, and volume, and it publishes an immutable
-// snapshot after each change. Every method may be called from any thread.
+// the keep-alive and poll cycle, and volume. After a change it publishes an
+// immutable snapshot once nothing is queued for the bus or in flight. Every
+// method may be called from any thread.
 @interface QLMSystem : NSObject
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter settings:(QLMSystemSettings *)settings;
@@ -42,6 +43,7 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 @property (nonatomic, readonly) QLMSystemSettings *settings;
 @property (atomic, readonly) QLMSnapshot *snapshot;  // the latest
 
+// The handler gets the latest snapshot at once, then every one published.
 - (void)setSnapshotHandler:(nullable QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue;
 
 - (void)start;
@@ -66,8 +68,10 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 
 // Ducks, wakes, sends each monitor its DSP block, and restores the volume
 // and mute. Refused, with nothing sent, for a node with an unverified design
-// rate or with no leased monitor. The completion runs on the main queue.
-- (void)applyGroup:(QLMSetupGroup *)group inSetup:(QLMSetup *)setup completion:(void (^)(NSError *_Nullable error))completion;
+// rate or with no leased monitor. A group whose nodes are all off still
+// ducks, wakes, and restores the volume, with no per-monitor frames. The
+// completion runs on the main queue.
+- (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
 
 @end
 

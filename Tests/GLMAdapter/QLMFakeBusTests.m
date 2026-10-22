@@ -164,6 +164,21 @@
     XCTAssertEqualObjects(sent[1], [NSData dataWithBytes:keepAlive length:sizeof keepAlive]);
 }
 
+- (void)testRecordingCanBeTurnedOff {
+    _bus.recordsSentMessages = NO;
+    XCTAssertTrue([self send:QLMCommandProbe() reply:NULL error:NULL]);
+    XCTAssertEqual(_bus.sentMessages.count, 0u);
+}
+
+- (void)testDemoBus {
+    XCTAssertEqual([QLMFakeBus demoBusWithSubwoofer:NO].monitors.count, 2u);
+    NSArray<QLMFakeMonitor *> *monitors = [QLMFakeBus demoBusWithSubwoofer:YES].monitors;
+    XCTAssertEqual(monitors.count, 3u);
+    XCTAssertEqual(monitors[2].deviceClass, QLMTelemetryClassSubwoofer);
+    XCTAssertEqualObjects(monitors[2].serialNumber, @"7350apm21009999");
+    XCTAssertEqual(monitors[1].temperature, 41);
+}
+
 // Section 7, 3A 03, and section 9, "System Power": 03 02 prepares, 03 00
 // powers off, and 03 7F and 03 01 wake. Broadcasts get no reply. The fake
 // keeps each lease across the change.

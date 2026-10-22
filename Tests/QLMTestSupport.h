@@ -5,6 +5,11 @@
 
 #include <string.h>
 
+#include "QLMFrame.h"
+#import "QLMSetup.h"
+
+NS_ASSUME_NONNULL_BEGIN
+
 // Asserts that `actual` holds exactly the listed bytes.
 #define QLMAssertBytes(actual, actualLength, ...)                                           \
     do {                                                                                   \
@@ -19,12 +24,17 @@
 #define QLMMakeMessage(addr, ...)                                                          \
     ({                                                                                     \
         const uint8_t payload_[] = {__VA_ARGS__};                                          \
-        QLMMessage message_;                                                               \
-        memset(&message_, 0, sizeof message_);                                             \
-        message_.address = (addr);                                                         \
-        message_.length = sizeof payload_;                                                 \
-        memcpy(message_.payload, payload_, sizeof payload_);                               \
-        message_;                                                                          \
+        QLMMessageMake((addr), payload_, sizeof payload_);                                 \
     })
+
+NSData *QLMBytes(const uint8_t *bytes, size_t length);
+
+// A file in Tests/Setups/Fixtures/.
+NSString *QLMFixturePath(NSString *name);
+
+// Fixtures/Main.sam, parsed once and shared. Never change it.
+QLMSetup *QLMReadFixtureSetup(void);
+
+NS_ASSUME_NONNULL_END
 
 #endif

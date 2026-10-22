@@ -76,13 +76,13 @@ static const char *QLMStatusName(QLMMonitorStatus status) {
     return "?";
 }
 
-static const char *QLMClassName(NSInteger deviceClass) {
+static const char *QLMClassName(QLMMonitorClass deviceClass) {
     switch (deviceClass) {
-    case QLMTelemetryClassSubwoofer: return "subwoofer";
-    case QLMTelemetryClassTwoWay: return "two-way";
-    case QLMTelemetryClassStandby: return "standby";
-    default: return "?";
+    case QLMMonitorClassSubwoofer: return "subwoofer";
+    case QLMMonitorClassTwoWay: return "two-way";
+    case QLMMonitorClassUnknown: break;
     }
+    return "?";
 }
 
 static void QLMPrintMonitors(QLMSnapshot *snapshot) {
@@ -369,11 +369,11 @@ static const char *QLMSystemErrorName(NSError *error) {
 }
 
 // System completes an apply on the main queue, so spin the main run loop.
-static int QLMApplyGroupOnBus(int argc, const char *argv[], QLMSetup *setup, QLMSetupGroup *group) {
+static int QLMApplyGroupOnBus(int argc, const char *argv[], QLMSetupGroup *group) {
     return QLMRunControl(argc, argv, 0.3, ^int(QLMSystem *system) {
         __block BOOL done = NO;
         __block NSError *result = nil;
-        [system applyGroup:group inSetup:setup completion:^(NSError *error) {
+        [system applyGroup:group completion:^(NSError *error) {
             result = error;
             done = YES;
         }];
@@ -419,7 +419,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         return EX_DATAERR;
     }
     if (!dryRun) {
-        return QLMApplyGroupOnBus(argc, argv, setup, group);
+        return QLMApplyGroupOnBus(argc, argv, group);
     }
     NSArray<QLMDSPBlock *> *blocks = [QLMDSPBlock blocksForGroup:group error:&error];
     if (blocks == nil) {
@@ -437,11 +437,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         }
         allowed = allowed && block.rateVerified;
         for (NSData *payload in block.payloads) {
-            QLMMessage message;
-            memset(&message, 0, sizeof message);
-            message.address = session;
-            message.length = payload.length;
-            memcpy(message.payload, payload.bytes, payload.length);
+            QLMMessage message = QLMMessageMake(session, payload.bytes, payload.length);
             uint8_t frame[QLMFrameMax];
             size_t length = 0;
             if (QLMFrameEncode(&message, frame, sizeof frame, &length) != QLMFrameOK) {

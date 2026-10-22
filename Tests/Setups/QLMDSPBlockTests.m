@@ -4,7 +4,7 @@
 #import "QLMDSPBlock.h"
 #include "QLMFrame.h"
 #import "QLMSetupInternal.h"
-#import "QLMSetupReader.h"
+#import "QLMTestSupport.h"
 
 // Sources: the hlm protocol spec, revision 13, section 9 for the block's
 // order, section 5 for the slots, section 6 for the level and delay words,
@@ -15,23 +15,8 @@
 
 @implementation QLMDSPBlockTests
 
-- (QLMSetup *)fixture {
-    NSString *path = [[NSBundle bundleForClass:[self class]] pathForResource:@"Main" ofType:@"sam"];
-    if (path == nil) {
-        path = [[@(__FILE__) stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"Fixtures/Main.sam"];
-    }
-    NSError *error = nil;
-    QLMSetup *setup = [QLMSetupReader readFileAtPath:path error:&error];
-    XCTAssertNotNil(setup, @"%@", error);
-    return setup;
-}
-
-static NSData *QLMBytes(const uint8_t *bytes, size_t length) {
-    return [NSData dataWithBytes:bytes length:length];
-}
-
 - (void)testTwoWayBlockInGLMsOrder {
-    QLMSetup *setup = [self fixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     QLMSetupGroup *group = setup.groups[0];
     QLMSetupNode *node = group.nodes[0];
     NSError *error = nil;
@@ -93,7 +78,7 @@ static NSData *QLMBytes(const uint8_t *bytes, size_t length) {
 }
 
 - (void)testSubwooferBlock {
-    QLMSetup *setup = [self fixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     QLMSetupGroup *group = setup.groups[0];
     QLMSetupNode *node = group.nodes[3];
     XCTAssertEqual(node.nodeClass, QLMSetupNodeClassSubwoofer);
@@ -117,7 +102,7 @@ static NSData *QLMBytes(const uint8_t *bytes, size_t length) {
 
 // The Safety rule: an 8351B's rate is unverified, so its block says so.
 - (void)testThreeWayIsUnverified {
-    QLMSetup *setup = [self fixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     QLMSetupGroup *group = setup.groups[0];
     NSError *error = nil;
     QLMDSPBlock *block = [QLMDSPBlock blockForNode:group.nodes[1] inGroup:group error:&error];
@@ -128,7 +113,7 @@ static NSData *QLMBytes(const uint8_t *bytes, size_t length) {
 }
 
 - (void)testBlocksForGroupSkipNodesThatAreOff {
-    QLMSetup *setup = [self fixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     NSError *error = nil;
     NSArray<QLMDSPBlock *> *all = [QLMDSPBlock blocksForGroup:setup.groups[0] error:&error];
     XCTAssertEqual(all.count, 6u, @"%@", error);
@@ -140,7 +125,7 @@ static NSData *QLMBytes(const uint8_t *bytes, size_t length) {
 }
 
 - (void)testRefusals {
-    QLMSetup *setup = [self fixture];
+    QLMSetup *setup = QLMReadFixtureSetup();
     QLMSetupGroup *group = setup.groups[0];
     NSError *error = nil;
 
