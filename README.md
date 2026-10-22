@@ -23,4 +23,6 @@ qlm is unofficial. It is not affiliated with or endorsed by Genelec. Genelec, GL
 
 ## License
 
-Not chosen yet. Until one is, nothing here is licensed for reuse.
+Copyright 2026 Christopher Micali. qlm is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE).
+
+The protocol was mapped by three GPL-3.0 projects, genlc, hlm, and espgensam. qlm ports no code from them. It is written from the protocol's facts and from its own captures.

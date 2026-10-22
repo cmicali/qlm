@@ -85,6 +85,12 @@ targetTemplates:
     sources:
       - path: qlm/GLMProtocol
         excludes: ["**/.DS_Store", "**/*.md"]
+      - path: qlm/GLMAdapter
+        excludes: ["**/.DS_Store", "**/*.md"]
+      - path: qlm/System
+        excludes: ["**/.DS_Store", "**/*.md"]
+      - path: qlm/Setups
+        excludes: ["**/.DS_Store", "**/*.md"]
 
 targets:
   qlm:

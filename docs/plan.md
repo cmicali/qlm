@@ -70,9 +70,8 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Open, for you to decide
 
-1. **License.** See Licensing. This decides how Phase 1 starts.
-2. **Your hardware.** Which monitors, subwoofer, and knob model? 83x1 and three-way models have open questions. A subwoofer brings the unmapped LFE fields.
-3. **Capture machine.** Do you have a Windows PC, or a Mac that runs Windows in a VM with USB passthrough? See Phase 0.
+1. **Your hardware.** Which monitors, subwoofer, and knob model? 83x1 and three-way models have open questions. A subwoofer brings the unmapped LFE fields.
+2. **Capture machine.** Do you have a Windows PC, or a Mac that runs Windows in a VM with USB passthrough? See Phase 0.
 
 ## Architecture
 
@@ -93,14 +92,19 @@ qlm/
 ├── docs/plan.md
 ├── qlm/            all the code, one directory per layer
 │   ├── GLMProtocol/  C, no Apple dependency
+│   ├── GLMAdapter/   the adapter protocol and the fake bus; HID and replay to come
+│   ├── Setups/       the setup file reader; filter design and the DSP block to come
+│   ├── System/       the engine and its snapshots
 │   ├── App/          the menu bar app: AppKit, Objective-C
 │   └── CLI/          qlmctl
 ├── Tests/          one XCTest bundle, hostless; mirrors qlm/
+├── captures/       the Phase 0 captures, one directory per scenario
+├── tools/          the inventory script and the capture converter
 ├── vibe-libs/      the shared toolbox, a git submodule
 └── .github/        CI: tests and both builds on macOS
 ```
 
-GLMAdapter, Setups, and System join `qlm/` as directories of their own when their code arrives. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
+Every layer has its directory. `project.yml` compiles the layers into each target through one template, with one entry per layer, as Vibe lists its subsystems.
 
 ### Behavior System must copy from GLM
 
@@ -139,10 +143,9 @@ vibe-libs's `AGENTS.md` says its users are Vibe and one other app. This would be
 
 ## Licensing
 
-genlc, hlm, and espgensam are GPL-3.0. The hlm spec is copyrighted text inside that distribution. The protocol's facts are not copyrightable. Their code and wording are.
+qlm is Apache 2.0, like vibe-libs. genlc, hlm, and espgensam are GPL-3.0, and the hlm spec is copyrighted text inside that distribution. The protocol's facts are not copyrightable. Their code and wording are.
 
-- **If the app is GPL-3.0**, port from them directly and send fixes back. This is the fastest path. vibe-libs is Apache 2.0, which is compatible with GPL-3.0.
-- **If it is not**, write every line from the facts and your own captures. Port no code, including espgensam's `.sam` mapping and biquad code.
+So every line is written from the facts and from qlm's own captures. Port no code, including espgensam's `.sam` mapping and biquad code. Every protocol fact in code names its source in a test: a capture in this repo, or a section of hlm's spec.
 
 Two other risks. GLM's license may forbid reverse engineering the software. Capturing USB and bus traffic avoids touching GLM's binary, so prefer it to disassembly. Firmware updates may change the protocol, so the app warns on any firmware version it has not seen.
 
