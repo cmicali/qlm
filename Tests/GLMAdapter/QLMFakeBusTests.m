@@ -5,7 +5,8 @@
 #include "QLMReplies.h"
 
 // Sources: the hlm protocol spec, revision 13, section 9, for the discovery
-// sequence the fake bus plays back, and section 8 for each reply's shape.
+// sequence the fake bus plays back, section 8 for each reply's shape, and
+// section 7 for the power and DSP frames.
 @interface QLMFakeBusTests : XCTestCase
 @end
 
@@ -161,6 +162,48 @@
     XCTAssertEqualObjects(sent[0], [NSData dataWithBytes:probe length:sizeof probe]);
     const uint8_t keepAlive[] = {0xFF, 0x04};
     XCTAssertEqualObjects(sent[1], [NSData dataWithBytes:keepAlive length:sizeof keepAlive]);
+}
+
+// Section 7, 3A 03, and section 9, "System Power": 03 02 prepares, 03 00
+// powers off, and 03 7F and 03 01 wake. Broadcasts get no reply. The fake
+// keeps each lease across the change.
+- (void)testPowerBroadcastsChangeEveryMonitor {
+    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
+    XCTAssertTrue([self send:QLMCommandAssignSession(leftID, 0x02) reply:NULL error:NULL]);
+
+    XCTAssertFalse([self send:QLMCommandPower(QLMPowerStepStandbyPrepare) reply:NULL error:NULL]);
+    XCTAssertTrue(_left.on);
+    XCTAssertTrue(_sub.on);
+    XCTAssertFalse([self send:QLMCommandPower(QLMPowerStepPowerOff) reply:NULL error:NULL]);
+    XCTAssertFalse(_left.on);
+    XCTAssertFalse(_sub.on);
+    XCTAssertEqual(_left.session, 0x02);
+
+    QLMMessage reply;
+    QLMTelemetry telemetry;
+    XCTAssertTrue([self send:QLMCommandPoll(0x02) reply:&reply error:NULL]);
+    XCTAssertEqual(QLMReplyTelemetry(&reply, &telemetry), QLMTelemetryOK);
+    XCTAssertEqual(telemetry.status, QLMTelemetryStatusStandby);
+
+    XCTAssertFalse([self send:QLMCommandPower(QLMPowerStepWakeFirst) reply:NULL error:NULL]);
+    XCTAssertTrue(_left.on);
+    XCTAssertTrue(_sub.on);
+    XCTAssertFalse([self send:QLMCommandPower(QLMPowerStepPowerOff) reply:NULL error:NULL]);
+    XCTAssertFalse([self send:QLMCommandPower(QLMPowerStepWakeSecond) reply:NULL error:NULL]);
+    XCTAssertTrue(_left.on);
+}
+
+// Section 9's enumeration: each DSP frame is acked on its own.
+- (void)testDSPFramesAreAcked {
+    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
+    XCTAssertTrue([self send:QLMCommandAssignSession(leftID, 0x02) reply:NULL error:NULL]);
+    QLMMessage reply;
+    XCTAssertTrue([self send:QLMCommandPrepare(0x02) reply:&reply error:NULL]);
+    XCTAssertTrue(QLMReplyIsAck(&reply));
+    XCTAssertTrue([self send:QLMCommandRouting(0x02, 0x00, 0x01, 0x00, 0x00) reply:&reply error:NULL]);
+    XCTAssertTrue(QLMReplyIsAck(&reply));
+    XCTAssertTrue([self send:QLMCommandInputSync(0x02) reply:&reply error:NULL]);
+    XCTAssertTrue(QLMReplyIsAck(&reply));
 }
 
 @end

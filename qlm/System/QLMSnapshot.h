@@ -27,6 +27,7 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly) NSInteger subMeter;
 @property (nonatomic, readonly) NSUInteger missedPolls;
 @property (nonatomic, readonly, nullable) NSDate *lastReply;
+@property (nonatomic, readonly) BOOL muted;  // as System last set it; telemetry does not show mute
 
 @end
 
@@ -36,7 +37,10 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly) NSDate *date;
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
-@property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set
+@property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed
+@property (nonatomic, readonly) BOOL dimmed;
+@property (nonatomic, readonly) BOOL applying;
+@property (nonatomic, readonly, nullable) NSString *activeGroupName;  // the last group applied in full
 
 @end
 

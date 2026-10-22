@@ -19,12 +19,17 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) NSInteger subMeter;
 @property (nonatomic, readwrite) NSUInteger missedPolls;
 @property (nonatomic, readwrite, nullable) NSDate *lastReply;
+@property (nonatomic, readwrite) BOOL muted;
 
 @end
 
 @interface QLMSnapshot ()
 
 - (instancetype)initWithRunning:(BOOL)running monitors:(NSArray<QLMMonitorState *> *)monitors volumeDecibels:(nullable NSNumber *)volumeDecibels;
+
+@property (nonatomic, readwrite) BOOL dimmed;
+@property (nonatomic, readwrite) BOOL applying;
+@property (nonatomic, readwrite, nullable) NSString *activeGroupName;
 
 @end
 

@@ -1,5 +1,6 @@
 #import "QLMFakeBus.h"
 
+#include "QLMCommands.h"
 #include "QLMReplies.h"
 
 @implementation QLMFakeMonitor
@@ -114,7 +115,8 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
 // The spec's section 9: a probe is answered by one monitor without a lease,
 // an assignment by the monitor whose hardware ID it names, and a unicast by
 // the monitor holding that session. Broadcasts of volume, keep-alive, and
-// power get no reply.
+// power get no reply. Every other unicast, the DSP block's included, gets a
+// bare ack.
 - (BOOL)replyTo:(const QLMMessage *)message into:(QLMMessage *)reply {
     const uint8_t *payload = message->payload;
     if (message->address == QLMAddressBroadcast || message->address == QLMAddressMulticast) {
@@ -136,6 +138,17 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
                     uint8_t bytes[2] = {0x09, payload[4]};
                     QLMFakeReply(reply, bytes, sizeof bytes);
                     return YES;
+                }
+            }
+        }
+        // Section 7's 3A 03: 00 powers off, 7F and 01 wake. Sessions survive
+        // a power change here, a simplification: real monitors re-enumerate.
+        if (payload[0] == 0x3A && message->length == 3 && payload[1] == 0x03) {
+            BOOL off = payload[2] == QLMPowerStepPowerOff;
+            BOOL wake = payload[2] == QLMPowerStepWakeFirst || payload[2] == QLMPowerStepWakeSecond;
+            for (QLMFakeMonitor *monitor in _monitors) {
+                if (monitor.present && (off || wake)) {
+                    monitor.on = wake;
                 }
             }
         }
