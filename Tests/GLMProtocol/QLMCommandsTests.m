@@ -128,6 +128,54 @@
     QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x00, 0x00, 0x08);
 }
 
+// Section 6: a level word is linear gain at 2^23 - 1, rounded. The spec's
+// observed words invert to their stated decibels within a hundredth.
+- (void)testLevelWords {
+    XCTAssertEqual(QLMLevelWordForDecibels(0), 0x7FFFFFu);
+    XCTAssertEqual(QLMLevelWordForDecibels(3), 0x7FFFFFu);
+    for (NSNumber *observed in @[@0x7A3957, @0x748C42, @0x00679F]) {
+        double decibels = 20 * log10(observed.doubleValue / 8388607.0);
+        XCTAssertEqual(QLMLevelWordForDecibels(decibels), observed.unsignedIntValue);
+    }
+    XCTAssertEqualWithAccuracy(20 * log10(0x7A3957 / 8388607.0), -0.4, 0.01);
+}
+
+// Sections 6, 7, and 9: the DSP block's frames.
+- (void)testDSPBlockBuilders {
+    QLMMessage prepare = QLMCommandPrepare(0x02);
+    XCTAssertEqual(prepare.address, 0x02);
+    QLMAssertBytes(prepare.payload, prepare.length, 0x17, 0x01);
+    QLMMessage delay = QLMCommandDelay(0x02, 356);
+    QLMAssertBytes(delay.payload, delay.length, 0x10, 0x02, 0x00, 0x00, 0x01, 0x64);
+    QLMMessage level = QLMCommandLevel(0x02, 0x7FFFFF);
+    QLMAssertBytes(level.payload, level.length, 0x10, 0x01, 0x00, 0x7F, 0xFF, 0xFF);
+    QLMMessage levelOver = QLMCommandLevel(0x02, 0xFFFFFF);
+    QLMAssertBytes(levelOver.payload, levelOver.length, 0x10, 0x01, 0x00, 0x7F, 0xFF, 0xFF);
+    QLMMessage unknown = QLMCommandLevelUnknown(0x02);
+    QLMAssertBytes(unknown.payload, unknown.length, 0x10, 0x01, 0x09, 0x00, 0x00, 0x00);
+    uint8_t coefficients[20] = {0x00, 0x00, 0x80, 0x3F};
+    QLMMessage peq = QLMCommandPEQ(0x02, 0x13, coefficients);
+    XCTAssertEqual(peq.length, 24u);
+    XCTAssertEqual(peq.payload[0], 0x10);
+    XCTAssertEqual(peq.payload[1], 0x0E);
+    XCTAssertEqual(peq.payload[2], 0x13);
+    XCTAssertEqual(memcmp(peq.payload + 3, coefficients, 20), 0);
+    XCTAssertEqual(peq.payload[23], 0x00);
+    QLMMessage crossover = QLMCommandCrossover(0x02, 90);
+    QLMAssertBytes(crossover.payload, crossover.length, 0x3B, 0x00, 0x5A);
+    QLMMessage sync = QLMCommandInputSync(0x02);
+    QLMAssertBytes(sync.payload, sync.length, 0x3D, 0x00, 0x00);
+    QLMMessage routing = QLMCommandRouting(0x02, 0x00, 0x02, 0x00, 0x01);
+    QLMAssertBytes(routing.payload, routing.length, 0x40, 0x00, 0x02, 0x00, 0x01);
+
+    QLMMessage messages[] = {prepare, delay, level, unknown, peq, crossover, sync, routing};
+    for (size_t i = 0; i < sizeof messages / sizeof messages[0]; i++) {
+        uint8_t out[QLMFrameMax];
+        size_t length = 0;
+        XCTAssertEqual(QLMFrameEncode(&messages[i], out, sizeof out, &length), QLMFrameOK, @"builder %zu", i);
+    }
+}
+
 - (void)testEveryBuilderEncodes {
     const uint8_t hardwareID[3] = {1, 2, 3};
     QLMMessage messages[] = {

@@ -58,4 +58,18 @@ QLMMessage QLMCommandVolume(double decibels, double ceilingDecibels);
 QLMMessage QLMCommandDim(double decibels, double ceilingDecibels);
 QLMMessage QLMCommandDuck(void);
 
+// The DSP block, in the order GLM sends it: prepare, delay, level, the
+// unknown level subcommand, twenty PEQ slots, crossover, input sync, routing.
+// A level word is linear gain at 2^23 - 1, rounded; 7F FF FF is 0 dB.
+uint32_t QLMLevelWordForDecibels(double decibels);
+QLMMessage QLMCommandPrepare(uint8_t session);
+QLMMessage QLMCommandDelay(uint8_t session, uint32_t samples);
+QLMMessage QLMCommandLevel(uint8_t session, uint32_t word);
+QLMMessage QLMCommandLevelUnknown(uint8_t session);
+// `coefficients` are the twenty bytes QLMBiquadPack writes.
+QLMMessage QLMCommandPEQ(uint8_t session, uint8_t slot, const uint8_t coefficients[20]);
+QLMMessage QLMCommandCrossover(uint8_t session, uint16_t value);
+QLMMessage QLMCommandInputSync(uint8_t session);
+QLMMessage QLMCommandRouting(uint8_t session, uint8_t inputIndex, uint8_t source, uint8_t pair, uint8_t aesChannel);
+
 #endif

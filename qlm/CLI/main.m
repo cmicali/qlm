@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sysexits.h>
 
+#import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
 #include "QLMReplies.h"
 #import "QLMSetupReader.h"
@@ -14,7 +15,9 @@ static void QLMPrintUsage(FILE *stream) {
           "\n"
           "  discover [--fake] [--seconds N]  list every monitor on the bus after N seconds\n"
           "  poll [--fake] [--seconds N]    print each monitor's telemetry as it arrives, for N seconds\n"
-          "  setup <file.sam>               print a GLM 5 setup file\n"
+          "  setup <file.sam> [--bands]     print a GLM 5 setup file\n"
+          "  apply-group <file.sam> <group> --dry-run\n"
+          "                                 print the frames a group apply would send\n"
           "\n"
           "The adapter over HID is not written yet, so discover and poll need --fake,\n"
           "a simulated bus of two monitors.\n",
@@ -211,6 +214,73 @@ static int QLMPrintSetup(int argc, const char *argv[]) {
     return 0;
 }
 
+// The dry run prints every frame, encoded, with a stand-in session per
+// node. Applying for real waits for the adapter, and is refused for any
+// node whose design rate is unverified.
+static int QLMApplyGroup(int argc, const char *argv[]) {
+    if (argc < 4) {
+        QLMPrintUsage(stderr);
+        return EX_USAGE;
+    }
+    if (!QLMHasFlag(argc, argv, "--dry-run")) {
+        fputs("qlmctl: apply-group only runs with --dry-run until the adapter exists\n", stderr);
+        return EX_UNAVAILABLE;
+    }
+    NSError *error = nil;
+    QLMSetup *setup = [QLMSetupReader readFileAtPath:@(argv[2]) error:&error];
+    if (setup == nil) {
+        fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
+        return EX_DATAERR;
+    }
+    QLMSetupGroup *group = nil;
+    for (QLMSetupGroup *candidate in setup.groups) {
+        if ([candidate.name isEqualToString:@(argv[3])]) {
+            group = candidate;
+        }
+    }
+    if (group == nil) {
+        fprintf(stderr, "qlmctl: no group named '%s'\n", argv[3]);
+        return EX_DATAERR;
+    }
+    NSArray<QLMDSPBlock *> *blocks = [QLMDSPBlock blocksForGroup:group error:&error];
+    if (blocks == nil) {
+        fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
+        return EX_DATAERR;
+    }
+    BOOL allowed = YES;
+    uint8_t session = QLMAddressSessionFirst;
+    for (QLMDSPBlock *block in blocks) {
+        QLMSetupDevice *device = [setup deviceWithSerial:block.node.serial];
+        printf("%s %s as session %02X, %lu frames at %.0f Hz%s\n", device.model.UTF8String ?: "?", block.node.serial.UTF8String,
+               session, (unsigned long)block.payloads.count, block.designRate, block.rateVerified ? "" : ", rate unverified");
+        for (NSString *warning in block.warnings) {
+            printf("  ! %s\n", warning.UTF8String);
+        }
+        allowed = allowed && block.rateVerified;
+        for (NSData *payload in block.payloads) {
+            QLMMessage message;
+            memset(&message, 0, sizeof message);
+            message.address = session;
+            message.length = payload.length;
+            memcpy(message.payload, payload.bytes, payload.length);
+            uint8_t frame[QLMFrameMax];
+            size_t length = 0;
+            if (QLMFrameEncode(&message, frame, sizeof frame, &length) != QLMFrameOK) {
+                printf("  REFUSED by the allowlist:");
+            } else {
+                printf("  ");
+            }
+            for (size_t i = 0; i < length; i++) {
+                printf("%02X%s", frame[i], i + 1 < length ? " " : "\n");
+            }
+        }
+        session++;
+    }
+    printf("%s\n", allowed ? "every node's rate is verified: an apply would be allowed"
+                            : "REFUSED: a node's design rate is unverified, so an apply would not run");
+    return 0;
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         if (argc < 2 || strcmp(argv[1], "help") == 0 || strcmp(argv[1], "-h") == 0 || strcmp(argv[1], "--help") == 0) {
@@ -225,6 +295,9 @@ int main(int argc, const char *argv[]) {
         }
         if (strcmp(argv[1], "setup") == 0) {
             return QLMPrintSetup(argc, argv);
+        }
+        if (strcmp(argv[1], "apply-group") == 0) {
+            return QLMApplyGroup(argc, argv);
         }
         fprintf(stderr, "qlmctl: unknown command '%s'\n", argv[1]);
         QLMPrintUsage(stderr);

@@ -97,3 +97,57 @@ QLMMessage QLMCommandDim(double decibels, double ceilingDecibels) {
 QLMMessage QLMCommandDuck(void) {
     return QLMCommandVolumeWord(QLMVolumeWordDuck, QLMVolumeWordMax);
 }
+
+uint32_t QLMLevelWordForDecibels(double decibels) {
+    if (decibels >= 0) {
+        return QLMVolumeWordMax;
+    }
+    double word = round(pow(10.0, decibels / 20.0) * 8388607.0);
+    return word < 0 ? 0 : (uint32_t)word;
+}
+
+QLMMessage QLMCommandPrepare(uint8_t session) {
+    const uint8_t payload[] = {0x17, 0x01};
+    return QLMCommand(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandDelay(uint8_t session, uint32_t samples) {
+    const uint8_t payload[] = {0x10, 0x02, (uint8_t)(samples >> 24), (uint8_t)(samples >> 16), (uint8_t)(samples >> 8),
+                               (uint8_t)samples};
+    return QLMCommand(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandLevel(uint8_t session, uint32_t word) {
+    if (word > QLMVolumeWordMax) {
+        word = QLMVolumeWordMax;
+    }
+    const uint8_t payload[] = {0x10, 0x01, 0x00, (uint8_t)(word >> 16), (uint8_t)(word >> 8), (uint8_t)word};
+    return QLMCommand(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandLevelUnknown(uint8_t session) {
+    const uint8_t payload[] = {0x10, 0x01, 0x09, 0x00, 0x00, 0x00};
+    return QLMCommand(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandPEQ(uint8_t session, uint8_t slot, const uint8_t coefficients[20]) {
+    uint8_t payload[24] = {0x10, 0x0E, slot};
+    memcpy(payload + 3, coefficients, 20);
+    payload[23] = 0x00;
+    return QLMCommand(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandCrossover(uint8_t session, uint16_t value) {
+    const uint8_t payload[] = {0x3B, (uint8_t)(value >> 8), (uint8_t)value};
+    return QLMCommand(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandInputSync(uint8_t session) {
+    const uint8_t payload[] = {0x3D, 0x00, 0x00};
+    return QLMCommand(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandRouting(uint8_t session, uint8_t inputIndex, uint8_t source, uint8_t pair, uint8_t aesChannel) {
+    const uint8_t payload[] = {0x40, inputIndex, source, pair, aesChannel};
+    return QLMCommand(session, payload, sizeof payload);
+}

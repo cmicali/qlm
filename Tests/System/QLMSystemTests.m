@@ -197,7 +197,8 @@ static BOOL QLMIsIdentified(QLMMonitorState *monitor) {
 // The Safety rule: every volume frame is clamped to the ceiling. And the
 // plan: volume goes out at once, at most one frame per 50 ms.
 - (void)testVolumeIsClampedAndCoalesced {
-    _settings.cycleInterval = 1;
+    // No cycle may fire inside the test, or it re-sends the volume.
+    _settings.cycleInterval = 10;
     _settings.volumeInterval = 0.05;
     [self startSystem];
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
