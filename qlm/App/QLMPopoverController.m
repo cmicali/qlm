@@ -1,41 +1,107 @@
 #import "QLMPopoverController.h"
 
-#include "QLMReplies.h"
-
 static const double QLMSliderMinimumDecibels = -60;
 static const double QLMSliderStepDecibels = 0.5;
 
-static BOOL QLMAnyMonitorOn(QLMSnapshot *_Nullable snapshot);
+static NSColor *QLMDotColor(QLMMonitorState *monitor) {
+    if (monitor.missedPolls > 0) {
+        return NSColor.systemRedColor;
+    }
+    switch (monitor.status) {
+    case QLMMonitorStatusOn: return NSColor.systemGreenColor;
+    case QLMMonitorStatusStandby: return NSColor.systemYellowColor;
+    case QLMMonitorStatusUnknown: break;
+    }
+    return NSColor.systemGrayColor;
+}
+
+// One monitor's line: its status dot, its label, and its mute toggle.
+@interface QLMMonitorRow : NSObject
+@property (nonatomic, readonly) NSStackView *view;
+@property (nonatomic, readonly) NSImageView *dot;
+@property (nonatomic, readonly) NSTextField *label;
+@property (nonatomic, readonly) NSButton *muteButton;
+@property (nonatomic, readonly) QLMSystem *system;
+@property (nonatomic, nullable) QLMMonitorState *monitor;
+@end
+
+@implementation QLMMonitorRow
+
+- (instancetype)initWithSystem:(QLMSystem *)system {
+    self = [super init];
+    if (self) {
+        _system = system;
+        _dot = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:nil]];
+        [_dot.widthAnchor constraintEqualToConstant:10].active = YES;
+        _label = [NSTextField labelWithString:@""];
+        _label.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
+        _muteButton = [NSButton buttonWithImage:[[NSImage alloc] init] target:self action:@selector(muteClicked:)];
+        _muteButton.bordered = NO;
+        _muteButton.imagePosition = NSImageOnly;
+        NSView *spacer = [[NSView alloc] init];
+        [spacer setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+        _view = [NSStackView stackViewWithViews:@[_dot, _label, spacer, _muteButton]];
+        _view.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    }
+    return self;
+}
+
+- (void)setMonitor:(QLMMonitorState *)monitor {
+    BOOL mutedChanged = _monitor == nil || _monitor.muted != monitor.muted;
+    _monitor = monitor;
+    self.dot.contentTintColor = QLMDotColor(monitor);
+    NSString *temperature = monitor.temperature == QLMMonitorValueAbsent ? @"" : [NSString stringWithFormat:@"  %ld °C", (long)monitor.temperature];
+    self.label.stringValue = [NSString stringWithFormat:@"%@  %@%@", monitor.model ?: @"?", monitor.serialNumber ?: @"", temperature];
+    if (mutedChanged) {
+        self.muteButton.image = [NSImage imageWithSystemSymbolName:monitor.muted ? @"speaker.slash.fill" : @"speaker.fill"
+                                          accessibilityDescription:monitor.muted ? @"Unmute" : @"Mute"];
+    }
+}
+
+- (void)muteClicked:(NSButton *)button {
+    QLMMonitorState *monitor = self.monitor;
+    if (monitor != nil) {
+        [self.system setMuted:!monitor.muted forMonitorWithHardwareID:monitor.hardwareID];
+    }
+}
+
+@end
 
 @interface QLMPopoverController ()
 @property (nonatomic) QLMSystem *system;
-@property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic) NSTextField *stateLabel;
 @property (nonatomic) NSSlider *volumeSlider;
 @property (nonatomic) NSTextField *volumeLabel;
 @property (nonatomic) NSPopUpButton *groupPicker;
 @property (nonatomic) NSStackView *monitorsStack;
+@property (nonatomic) NSMutableDictionary<NSData *, QLMMonitorRow *> *rows;  // by hardware ID
 @property (nonatomic) NSButton *muteButton;
 @property (nonatomic) NSButton *dimButton;
 @property (nonatomic) NSButton *powerButton;
 @property (nonatomic, nullable) QLMSnapshot *shownSnapshot;
+// The snapshot says an apply is running, not which group.
 @property (nonatomic, copy, nullable) NSString *applyingGroupName;
-@property (nonatomic, copy, nullable) NSString *selectedGroupName;  // the last group applied
-@property (nonatomic, copy, nullable) NSString *message;            // shown in place of the monitor count
+@property (nonatomic, copy, nullable) NSString *message;  // shown in place of the monitor count
 @end
 
 @implementation QLMPopoverController
 
-- (instancetype)initWithSystem:(QLMSystem *)system setup:(QLMSetup *)setup {
+- (instancetype)initWithSystem:(QLMSystem *)system {
     self = [super initWithNibName:nil bundle:nil];
     if (self) {
         _system = system;
-        _setup = setup;
-        if (setup == nil) {
-            _message = @"no setup file";
-        }
+        _rows = [NSMutableDictionary dictionary];
     }
     return self;
+}
+
+- (void)setSetup:(QLMSetup *)setup {
+    _setup = setup;
+    self.message = setup == nil ? @"no setup file" : nil;
+    if (self.isViewLoaded) {
+        [self reloadGroups];
+        [self refresh];
+    }
 }
 
 - (void)loadView {
@@ -67,13 +133,8 @@ static BOOL QLMAnyMonitorOn(QLMSnapshot *_Nullable snapshot);
     volume.orientation = NSUserInterfaceLayoutOrientationHorizontal;
 
     self.groupPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
-    [self.groupPicker addItemWithTitle:@"Group"];
-    for (QLMSetupGroup *group in self.setup.groups) {
-        [self.groupPicker addItemWithTitle:group.name];
-    }
     self.groupPicker.target = self;
     self.groupPicker.action = @selector(groupChosen:);
-    self.groupPicker.enabled = self.setup != nil;
 
     self.muteButton = [NSButton buttonWithTitle:@"Mute" target:self action:@selector(muteClicked:)];
     self.muteButton.buttonType = NSButtonTypePushOnPushOff;
@@ -112,11 +173,12 @@ static BOOL QLMAnyMonitorOn(QLMSnapshot *_Nullable snapshot);
         [buttons.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-24],
     ]];
     self.view = view;
-    if (self.shownSnapshot != nil) {
-        [self showSnapshot:self.shownSnapshot];
-    } else {
-        [self refreshGroupControls];
-    }
+    [self reloadGroups];
+}
+
+- (void)viewWillAppear {
+    [super viewWillAppear];
+    [self render];
 }
 
 #pragma mark - Actions
@@ -136,26 +198,17 @@ static BOOL QLMAnyMonitorOn(QLMSnapshot *_Nullable snapshot);
 }
 
 - (void)powerClicked:(NSButton *)button {
-    if (QLMAnyMonitorOn(self.shownSnapshot)) {
+    if (self.shownSnapshot.anyOn) {
         [self.system sleep];
     } else {
         [self.system wake];
     }
 }
 
-- (void)monitorMuteClicked:(NSButton *)button {
-    NSArray<QLMMonitorState *> *monitors = self.shownSnapshot.monitors;
-    if (button.tag < 0 || (NSUInteger)button.tag >= monitors.count) {
-        return;
-    }
-    QLMMonitorState *monitor = monitors[(NSUInteger)button.tag];
-    [self.system setMuted:!monitor.muted forMonitorWithHardwareID:monitor.hardwareID];
-}
-
 - (void)groupChosen:(NSPopUpButton *)picker {
     NSInteger index = picker.indexOfSelectedItem - 1;
     if (self.setup == nil || index < 0 || (NSUInteger)index >= self.setup.groups.count) {
-        [self selectGroupNamed:self.selectedGroupName];
+        [self selectGroupNamed:self.shownSnapshot.activeGroupName];
         return;
     }
     QLMSetupGroup *group = self.setup.groups[(NSUInteger)index];
@@ -165,52 +218,21 @@ static BOOL QLMAnyMonitorOn(QLMSnapshot *_Nullable snapshot);
     __weak QLMPopoverController *weakSelf = self;
     [self.system applyGroup:group completion:^(NSError *error) {
         QLMPopoverController *strongSelf = weakSelf;
-        if (strongSelf == nil) {
-            return;
-        }
         strongSelf.applyingGroupName = nil;
-        if (error == nil) {
-            strongSelf.selectedGroupName = group.name;
-        } else {
-            strongSelf.message = error.localizedDescription;
-        }
-        [strongSelf selectGroupNamed:strongSelf.selectedGroupName];
-        [strongSelf refreshGroupControls];
+        strongSelf.message = error.localizedDescription;
+        [strongSelf refresh];
     }];
 }
 
 #pragma mark - Snapshots
 
-static BOOL QLMAnyMonitorOn(QLMSnapshot *_Nullable snapshot) {
-    for (QLMMonitorState *monitor in snapshot.monitors) {
-        if (monitor.status == QLMMonitorStatusOn) {
-            return YES;
-        }
+- (void)reloadGroups {
+    [self.groupPicker removeAllItems];
+    [self.groupPicker addItemWithTitle:@"Group"];
+    for (QLMSetupGroup *group in self.setup.groups) {
+        [self.groupPicker addItemWithTitle:group.name];
     }
-    return NO;
-}
-
-static NSColor *QLMDotColor(QLMMonitorState *monitor) {
-    if (monitor.missedPolls > 0) {
-        return NSColor.systemRedColor;
-    }
-    switch (monitor.status) {
-    case QLMMonitorStatusOn: return NSColor.systemGreenColor;
-    case QLMMonitorStatusStandby: return NSColor.systemYellowColor;
-    case QLMMonitorStatusUnknown: break;
-    }
-    return NSColor.systemGrayColor;
-}
-
-static NSString *QLMModelName(QLMMonitorState *monitor) {
-    // The info string reads c-1;model-8330A;ver-...; take the model.
-    NSRange model = [monitor.systemInfo rangeOfString:@"model-"];
-    if (model.location == NSNotFound) {
-        return monitor.systemInfo ?: @"?";
-    }
-    NSString *rest = [monitor.systemInfo substringFromIndex:NSMaxRange(model)];
-    NSRange end = [rest rangeOfString:@";"];
-    return end.location == NSNotFound ? rest : [rest substringToIndex:end.location];
+    [self refreshGroupControls];
 }
 
 - (void)selectGroupNamed:(nullable NSString *)name {
@@ -222,6 +244,9 @@ static NSString *QLMModelName(QLMMonitorState *monitor) {
     QLMSnapshot *snapshot = self.shownSnapshot;
     BOOL applying = self.applyingGroupName != nil || snapshot.applying;
     self.groupPicker.enabled = self.setup != nil && !applying;
+    if (!applying) {
+        [self selectGroupNamed:snapshot.activeGroupName];
+    }
     if (self.applyingGroupName != nil) {
         self.stateLabel.stringValue = [NSString stringWithFormat:@"applying %@", self.applyingGroupName];
     } else if (self.message != nil) {
@@ -237,10 +262,18 @@ static NSString *QLMModelName(QLMMonitorState *monitor) {
 
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
     self.shownSnapshot = snapshot;
-    if (!self.isViewLoaded) {
-        return;
-    }
+    [self refresh];
+}
 
+// Draws only while the popover is open. viewWillAppear draws the rest.
+- (void)refresh {
+    if (self.isViewLoaded && self.view.window != nil) {
+        [self render];
+    }
+}
+
+- (void)render {
+    QLMSnapshot *snapshot = self.shownSnapshot;
     if (snapshot.volumeDecibels != nil) {
         double decibels = snapshot.volumeDecibels.doubleValue;
         self.volumeLabel.stringValue = [NSString stringWithFormat:@"%.1f dB", decibels];
@@ -248,47 +281,43 @@ static NSString *QLMModelName(QLMMonitorState *monitor) {
             self.volumeSlider.doubleValue = decibels;
         }
     }
-
-    BOOL allMuted = snapshot.monitors.count > 0;
-    for (QLMMonitorState *monitor in snapshot.monitors) {
-        allMuted = allMuted && monitor.muted;
-    }
-    self.muteButton.state = allMuted ? NSControlStateValueOn : NSControlStateValueOff;
+    self.muteButton.state = snapshot.allMuted ? NSControlStateValueOn : NSControlStateValueOff;
     self.dimButton.state = snapshot.dimmed ? NSControlStateValueOn : NSControlStateValueOff;
-    self.powerButton.title = QLMAnyMonitorOn(snapshot) ? @"Sleep" : @"Wake";
+    self.powerButton.title = snapshot.anyOn ? @"Sleep" : @"Wake";
     self.powerButton.enabled = snapshot.monitors.count > 0;
-
-    if (self.applyingGroupName == nil && !snapshot.applying && snapshot.activeGroupName != nil
-        && [self.groupPicker indexOfItemWithTitle:snapshot.activeGroupName] > 0) {
-        self.selectedGroupName = snapshot.activeGroupName;
-        [self selectGroupNamed:self.selectedGroupName];
-    }
     [self refreshGroupControls];
+    [self renderMonitors:snapshot.monitors ?: @[]];
+}
 
-    for (NSView *row in [self.monitorsStack.arrangedSubviews copy]) {
-        [self.monitorsStack removeArrangedSubview:row];
-        [row removeFromSuperview];
+- (void)renderMonitors:(NSArray<QLMMonitorState *> *)monitors {
+    NSMutableArray<NSView *> *order = [NSMutableArray arrayWithCapacity:monitors.count];
+    NSMutableSet<NSData *> *present = [NSMutableSet setWithCapacity:monitors.count];
+    for (QLMMonitorState *monitor in monitors) {
+        QLMMonitorRow *row = self.rows[monitor.hardwareID];
+        if (row == nil) {
+            row = [[QLMMonitorRow alloc] initWithSystem:self.system];
+            self.rows[monitor.hardwareID] = row;
+        }
+        row.monitor = monitor;
+        [order addObject:row.view];
+        [present addObject:monitor.hardwareID];
     }
-    [snapshot.monitors enumerateObjectsUsingBlock:^(QLMMonitorState *monitor, NSUInteger index, BOOL *stop) {
-        NSImageView *dot = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:nil]];
-        dot.contentTintColor = QLMDotColor(monitor);
-        [dot.widthAnchor constraintEqualToConstant:10].active = YES;
-        NSString *temperature = monitor.temperature == QLMMonitorValueAbsent ? @"" : [NSString stringWithFormat:@"  %ld °C", (long)monitor.temperature];
-        NSTextField *label = [NSTextField labelWithString:[NSString stringWithFormat:@"%@  %@%@", QLMModelName(monitor), monitor.serialNumber ?: @"", temperature]];
-        label.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
-        NSImage *speaker = [NSImage imageWithSystemSymbolName:monitor.muted ? @"speaker.slash.fill" : @"speaker.fill"
-                                     accessibilityDescription:monitor.muted ? @"Unmute" : @"Mute"];
-        NSButton *mute = [NSButton buttonWithImage:speaker target:self action:@selector(monitorMuteClicked:)];
-        mute.bordered = NO;
-        mute.imagePosition = NSImageOnly;
-        mute.tag = (NSInteger)index;
-        NSView *spacer = [[NSView alloc] init];
-        [spacer setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
-        NSStackView *row = [NSStackView stackViewWithViews:@[dot, label, spacer, mute]];
-        row.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-        [self.monitorsStack addArrangedSubview:row];
-        [row.widthAnchor constraintEqualToAnchor:self.monitorsStack.widthAnchor].active = YES;
-    }];
+    for (NSData *hardwareID in self.rows.allKeys) {
+        if (![present containsObject:hardwareID]) {
+            [self.rows removeObjectForKey:hardwareID];
+        }
+    }
+    if ([self.monitorsStack.arrangedSubviews isEqualToArray:order]) {
+        return;
+    }
+    for (NSView *view in [self.monitorsStack.arrangedSubviews copy]) {
+        [self.monitorsStack removeArrangedSubview:view];
+        [view removeFromSuperview];
+    }
+    for (NSView *view in order) {
+        [self.monitorsStack addArrangedSubview:view];
+        [view.widthAnchor constraintEqualToAnchor:self.monitorsStack.widthAnchor].active = YES;
+    }
 }
 
 @end
