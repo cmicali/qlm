@@ -1,6 +1,25 @@
 # qlm: the plan
 
-**Status: draft, 2026-10-20. The scaffold is in place. Nothing works yet.**
+**Status: 2026-10-25. Everything that needs no adapter is built and tested against a fake bus. Nothing has touched real hardware. Phase 0 is next.**
+
+## Where things stand
+
+Built, with 79 tests, every protocol fact named by its section of hlm's spec:
+
+- **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, and the reply parsers.
+- **GLMAdapter:** the adapter protocol and a fake bus. **The adapter over HID is not written.** The spec does not cover the USB reports, so it waits for a capture.
+- **System:** discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots.
+- **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block.
+- **The app and `qlmctl`:** both run over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
+- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, and `tools/pcapng-to-reports.py`.
+
+Waiting on the captures:
+
+- The USB report layer: the host report prefix, and reassembly of a reply across reports. Then the HID adapter, the replay adapter, and golden tests over every captured frame.
+- Three readings marked unverified in code: a monitor's delay taken from `Time-of-flight_Compensation` as milliseconds, the analog routing frame, and matching a setup node to a monitor by the bus serial's suffix.
+- Whether the address byte is escaped. The code sends it bare.
+
+The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. The 8351B rate is unverified on the wire, so a group apply that includes one is refused.
 
 qlm is a native Mac controller for Genelec SAM monitors. It replaces GLM for daily use on the Mac. It shows the system's status. It sets volume, mute, dim, and power. It switches groups. GLM stays installed for calibration and setup. The app never measures, calibrates, or edits a setup.
 
@@ -70,7 +89,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Open, for you to decide
 
-1. **Your hardware.** Which monitors, subwoofer, and knob model? 83x1 and three-way models have open questions. A subwoofer brings the unmapped LFE fields.
+1. **The knob.** Is there a 9310 on the adapter? Its path to the host is unknown.
 2. **Capture machine.** Do you have a Windows PC, or a Mac that runs Windows in a VM with USB passthrough? See Phase 0.
 
 ## Architecture
