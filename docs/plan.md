@@ -11,7 +11,7 @@ Built, with 79 tests, every protocol fact named by its section of hlm's spec:
 - **System:** discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots.
 - **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block.
 - **The app and `qlmctl`:** both run over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
-- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, and `tools/pcapng-to-reports.py`.
+- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
 
 Waiting on the captures:
 
@@ -90,7 +90,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 ## Open, for you to decide
 
 1. **The knob.** Is there a 9310 on the adapter? Its path to the host is unknown.
-2. **Capture machine.** Do you have a Windows PC, or a Mac that runs Windows in a VM with USB passthrough? See Phase 0.
+2. **Capture machine.** Decided: a Raspberry Pi 5 inline between the Mac and the adapter. [captures/README.md](../captures/README.md) has the steps.
 
 ## Architecture
 
@@ -182,8 +182,8 @@ This is not legal advice.
 
 **Capture USB traffic of GLM 5.** USB capture on a current Mac needs SIP disabled, and reports say it fails on Apple silicon. I have not tested this. Use one of these:
 
-1. **Windows, with USBPcap and Wireshark** (recommended), on a PC or in a VM with the adapter passed through.
-2. **A Raspberry Pi exporting the adapter over usbip** to a Windows client, captured with `usbmon` on the Pi. A blogger already runs GLM this way.
+1. **Windows, with USBPcap and Wireshark**, on a PC or in a VM with the adapter passed through.
+2. **A Raspberry Pi 5 inline proxy** (the route chosen). GLM stays on the Mac. The Pi relays the adapter with usb-proxy over raw-gadget, and `usbmon` on the Pi records it.
 3. **Mac only:** Frida hooks on `IOHIDDeviceSetReport` and the input callback in a re-signed copy of GLM. It needs no extra hardware, but it does touch GLM's binary.
 
 Capture each scenario:

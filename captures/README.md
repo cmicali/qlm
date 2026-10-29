@@ -14,7 +14,7 @@ captures/
 │   ├── hidutil.txt             hidutil's list, for the adapter's usage page
 │   └── setups/*.sam            a copy of every GLM setup file
 └── <scenario>/
-    ├── capture.pcapng          what USBPcap recorded, untouched
+    ├── capture.pcapng          what usbmon or USBPcap recorded, untouched
     ├── reports.txt             tools/pcapng-to-reports.py's text form of it
     └── notes.md                what you did, when, and what you saw
 ```
@@ -23,14 +23,59 @@ captures/
 
 ## Recording
 
-USB capture on a current Mac needs SIP off and reportedly fails on Apple silicon, so record on Windows:
+USB capture on a current Mac needs SIP off and reportedly fails on Apple silicon. So record off the Mac, one of two ways.
+
+### A Raspberry Pi 5 inline
+
+The Pi sits between the Mac and the adapter. GLM 5 runs on the Mac unchanged. The Pi relays every transfer with [usb-proxy](https://github.com/AristoChen/usb-proxy) over [raw-gadget](https://github.com/xairy/raw-gadget), and usbmon records it.
+
+```
+Mac USB port ── USB-C cable ── Pi 5 USB-C port   (the Pi as a USB device)
+                               Pi 5 USB-A port ── GLM adapter
+```
+
+The Mac powers the Pi through that cable. Reach the Pi over SSH, on Wi-Fi or Ethernet.
+
+Set it up once:
+
+1. Enable SSH on the Pi, in Raspberry Pi Imager or with `sudo raspi-config`.
+2. From the repository on the Mac, copy the kit over: `scp -r tools/pi <user>@<host>:`
+3. On the Pi, run `sudo ./pi/setup.sh`. It installs the packages, builds usb-proxy, and enables the `qlm-proxy` service.
+4. Reboot the Pi if setup says so.
+
+Check that it works:
+
+- On the Pi, `systemctl status qlm-proxy` shows it running. `journalctl -u qlm-proxy -f` follows its log.
+- On the Mac, `ioreg -p IOUSB -w0 | grep -i genelec` lists the adapter. System Information's USB section shows it too.
+- GLM sees the adapter as if it were plugged in directly.
+
+Record each scenario:
+
+1. With `qlm-proxy` running, on the Pi run `sudo ./pi/capture.sh <scenario>`. It prints the start time.
+2. Run the scenario in GLM. Press Ctrl-C on the Pi when done.
+3. Write `notes.md`: the time of each action and what GLM showed. Note that the capture went through the proxy.
+4. On the Mac, copy it back with the `scp` command the script prints. Then convert it, as below.
+
+Pi route caveats:
+
+- The Mac powers the Pi. A Mac port gives at most 15 W, so the Pi warns about its supply and caps its USB-A ports at 600 mA. That suffices for the adapter. If the Pi browns out, power it from the GPIO 5 V pins instead.
+- The proxy does not forward USB suspend. So `sleep-wake` shows what GLM sends, but the adapter never sees the Mac suspend. Mark that capture as proxied in `notes.md`. Do not treat it as the answer to what the adapter does on host sleep.
+- For `unplug`, unplug the adapter from the Pi, not the Pi from the Mac. That would power the Pi off. The adapter loses power and its host either way, and the proxy drops the Mac's side too.
+- The Pi's own kernel may talk to the adapter before usb-proxy takes it over. Start each capture after `qlm-proxy` is running, and that traffic stays out.
+- Keep the adapter in the same USB-A port. Its bus number, which the capture records, belongs to the port.
+- The proxy only relays. It never sends a frame of its own, so AGENTS.md's bus rules hold.
+
+### Windows, with USBPcap
 
 1. Install GLM 5, Wireshark, and USBPcap on a Windows PC, or in a VM with the adapter passed through.
 2. Plug in the adapter and open GLM once, so the driver and the setup file are in place.
 3. In Wireshark, start a capture on the USBPcap interface that lists the adapter. The adapter is vendor `0x1781`, product `0x0E39`. Filter on `usb.idVendor == 0x1781` to check.
 4. Run one scenario. Save the capture as pcapng into a directory named for it.
 5. Write `notes.md` next to it: the time of each action and what GLM showed.
-6. Convert it:
+
+### Converting
+
+The converter reads both routes' captures:
 
 ```
 python3 -I tools/pcapng-to-reports.py captures/<scenario>/capture.pcapng > captures/<scenario>/reports.txt

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Turns a USBPcap capture into qlm's reports.txt form.
+"""Turns a USB capture into qlm's reports.txt form.
 
-Reads a pcap or pcapng file whose link type is USBPcap (249) and prints one
-line per interrupt or control data transfer: seconds from the first packet,
-`out` or `in`, then the bytes in hex. Everything else is skipped.
+Reads a pcap or pcapng file from USBPcap on Windows (link type 249) or from
+usbmon on Linux (189, or 220 for the memory-mapped form). Prints one line per
+interrupt or control data transfer: seconds from the first packet, `out` or
+`in`, then the bytes in hex. Everything else is skipped.
 
     python3 -I tools/pcapng-to-reports.py capture.pcapng > reports.txt
     python3 -I tools/pcapng-to-reports.py --self-test
@@ -12,12 +13,22 @@ import struct
 import sys
 
 LINKTYPE_USBPCAP = 249
+LINKTYPE_USB_LINUX = 189
+LINKTYPE_USB_LINUX_MMAPPED = 220
+LINKTYPES = (LINKTYPE_USBPCAP, LINKTYPE_USB_LINUX, LINKTYPE_USB_LINUX_MMAPPED)
 
 # USBPcap's packet header, packed. The direction is bit 0 of info: 1 is
 # device to host. The transfer is 0 iso, 1 interrupt, 2 control, 3 bulk. A
 # control transfer carries one more byte, its stage.
 HEADER = struct.Struct("<HQiHBHHBBI")
 HEADER_LENGTH_MIN = HEADER.size
+
+# usbmon's packet header, in the capturing host's order. The memory-mapped
+# form adds 16 bytes. The event is S (submit), C (complete), or E (error).
+# Bit 0x80 of the endpoint is IN. A control transfer's setup packet lives in
+# the header, so the data that follows is the data stage alone.
+USBMON = struct.Struct("<QBBBBHbbqiiII8s")
+USBMON_LENGTH = {LINKTYPE_USB_LINUX: 48, LINKTYPE_USB_LINUX_MMAPPED: 64}
 
 
 def packets_pcap(data):
@@ -30,13 +41,13 @@ def packets_pcap(data):
         raise ValueError("not a pcap file")
     nanos = magic in (0xA1B23C4D, 0x4D3CB2A1)
     linktype = struct.unpack(order + "I", data[20:24])[0]
-    if linktype != LINKTYPE_USBPCAP:
-        raise ValueError(f"link type {linktype} is not USBPcap")
+    if linktype not in LINKTYPES:
+        raise ValueError(f"link type {linktype} is not USBPcap or usbmon")
     offset = 24
     while offset + 16 <= len(data):
         seconds, fraction, captured, _ = struct.unpack(order + "IIII", data[offset:offset + 16])
         offset += 16
-        yield seconds + fraction / (1e9 if nanos else 1e6), data[offset:offset + captured]
+        yield seconds + fraction / (1e9 if nanos else 1e6), linktype, data[offset:offset + captured]
         offset += captured
 
 
@@ -69,8 +80,8 @@ def packets_pcapng(data):
         elif block_type == 6:
             interface, high, low, captured, _ = struct.unpack(order + "IIIII", body[:20])
             linktype, resolution = interfaces[interface]
-            if linktype == LINKTYPE_USBPCAP:
-                yield ((high << 32) | low) * resolution, body[20:20 + captured]
+            if linktype in LINKTYPES:
+                yield ((high << 32) | low) * resolution, linktype, body[20:20 + captured]
         offset += length
 
 
@@ -80,28 +91,54 @@ def packets(data):
     return packets_pcap(data)
 
 
+def transfer_usbpcap(packet):
+    """Returns (direction, bytes) for a USBPcap packet, or None."""
+    if len(packet) < HEADER_LENGTH_MIN:
+        return None
+    header_length, _, _, _, info, _, _, _, transfer, data_length = HEADER.unpack(packet[:HEADER_LENGTH_MIN])
+    if transfer not in (1, 2):
+        return None
+    payload = packet[header_length:header_length + data_length]
+    if transfer == 2:
+        stage = packet[HEADER_LENGTH_MIN] if header_length > HEADER_LENGTH_MIN else None
+        # Stage 0 is the setup packet, followed by the data on an OUT transfer.
+        if stage == 0:
+            payload = payload[8:]
+        elif stage != 1:
+            return None
+    return "in" if info & 1 else "out", payload
+
+
+def transfer_usbmon(packet, header_length):
+    """Returns (direction, bytes) for a usbmon packet, or None."""
+    if len(packet) < header_length:
+        return None
+    _, event, transfer, endpoint, device, _, _, _, _, _, _, _, captured, _ = USBMON.unpack(packet[:USBMON.size])
+    if transfer not in (1, 2):
+        return None
+    # The root hub is always device 1 on its bus. Its port status is noise.
+    if device == 1:
+        return None
+    incoming = bool(endpoint & 0x80)
+    # OUT data rides on the submit, IN data on the completion.
+    if event != (ord("C") if incoming else ord("S")):
+        return None
+    return "in" if incoming else "out", packet[header_length:header_length + captured]
+
+
 def reports(data):
     """Yields (seconds, direction, bytes) for each transfer that carries data."""
     first = None
-    for timestamp, packet in packets(data):
-        if len(packet) < HEADER_LENGTH_MIN:
-            continue
-        header_length, _, _, _, info, _, _, _, transfer, data_length = HEADER.unpack(packet[:HEADER_LENGTH_MIN])
-        if transfer not in (1, 2):
-            continue
-        payload = packet[header_length:header_length + data_length]
-        if transfer == 2:
-            stage = packet[HEADER_LENGTH_MIN] if header_length > HEADER_LENGTH_MIN else None
-            # Stage 0 is the setup packet, followed by the data on an OUT transfer.
-            if stage == 0:
-                payload = payload[8:]
-            elif stage != 1:
-                continue
-        if not payload:
+    for timestamp, linktype, packet in packets(data):
+        if linktype == LINKTYPE_USBPCAP:
+            transfer = transfer_usbpcap(packet)
+        else:
+            transfer = transfer_usbmon(packet, USBMON_LENGTH[linktype])
+        if transfer is None or not transfer[1]:
             continue
         if first is None:
             first = timestamp
-        yield timestamp - first, "in" if info & 1 else "out", payload
+        yield timestamp - first, transfer[0], transfer[1]
 
 
 def convert(data, source):
@@ -136,17 +173,59 @@ def synthetic_pcapng():
     return shb + idb + epb(1_000_000, out) + epb(1_000_500, reply) + epb(1_002_000, setup) + epb(1_002_100, status)
 
 
+def synthetic_usbmon_pcapng():
+    """A memory-mapped usbmon pcapng with each event the converter must sort."""
+    def block(block_type, body):
+        length = 12 + len(body)
+        return struct.pack("<II", block_type, length) + body + struct.pack("<I", length)
+
+    shb = block(0x0A0D0D0A, struct.pack("<IHHq", 0x1A2B3C4D, 1, 0, -1))
+    idb = block(1, struct.pack("<HHI", LINKTYPE_USB_LINUX_MMAPPED, 0, 0) + struct.pack("<HH", 0, 0))
+
+    def usb(event, endpoint, transfer, payload, device=5, setup=None):
+        header = USBMON.pack(
+            1, ord(event), transfer, endpoint, device, 3,
+            0 if setup else ord("-"), 0 if payload else ord("<"),
+            0, 0, -115 if event == "S" else 0, len(payload), len(payload), setup or bytes(8),
+        )
+        return header + bytes(16) + payload
+
+    def epb(micros, packet):
+        padded = packet + b"\0" * (-len(packet) % 4)
+        return block(6, struct.pack("<IIIII", 0, micros >> 32, micros & 0xFFFFFFFF, len(packet), len(packet)) + padded)
+
+    report = bytes([0x80, 0x05, 0xFF, 0x04, 0xBC, 0x84, 0x7E])
+    reply = bytes([0x63, 0x01, 0x09, 0x5D, 0xE7, 0x7E])
+    set_report = bytes([0x21, 0x09, 0x00, 0x02, 0x00, 0x00, 0x03, 0x00])
+    return shb + idb + b"".join([
+        epb(1_000_000, usb("S", 0x01, 1, report)),
+        epb(1_000_100, usb("C", 0x01, 1, b"")),
+        epb(1_000_200, usb("S", 0x81, 1, b"")),
+        epb(1_000_500, usb("C", 0x81, 1, reply)),
+        epb(1_001_000, usb("C", 0x81, 1, bytes([0x02]), device=1)),
+        epb(1_002_000, usb("S", 0x00, 2, bytes([0x80, 0x01, 0xFE]), setup=set_report)),
+        epb(1_002_100, usb("C", 0x00, 2, b"")),
+    ])
+
+
+def check(name, data, expected):
+    text = convert(data, name)
+    if text != expected:
+        sys.stderr.write(f"self-test {name} failed\n--- got\n" + text + "--- expected\n" + expected)
+        return False
+    return True
+
+
 def self_test():
-    text = convert(synthetic_pcapng(), "self-test")
-    expected = (
-        "# qlm USB capture, converted from self-test\n"
+    body = (
         "# seconds direction bytes\n"
         "0.000000 out 80 05 FF 04 BC 84 7E\n"
         "0.000500 in 63 01 09 5D E7 7E\n"
         "0.002000 out 80 01 FE\n"
     )
-    if text != expected:
-        sys.stderr.write("self-test failed\n--- got\n" + text + "--- expected\n" + expected)
+    passed = check("usbpcap", synthetic_pcapng(), "# qlm USB capture, converted from usbpcap\n" + body)
+    passed = check("usbmon", synthetic_usbmon_pcapng(), "# qlm USB capture, converted from usbmon\n" + body) and passed
+    if not passed:
         return 1
     print("self-test passed")
     return 0
