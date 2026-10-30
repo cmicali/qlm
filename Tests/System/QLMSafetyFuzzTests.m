@@ -1597,6 +1597,9 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 
 #pragma mark The bugs the runs found
 
+// Each of these seeds broke a rule until its bug was fixed. Now each holds
+// every rule.
+
 // The seed that found the bug, then the list it shrank to.
 - (void)runSeed:(uint64_t)seed shrunkTo:(NSArray<QLMFuzzAction *> *)actions {
     [self runSeed:seed actions:QLMFuzzActionCount];
@@ -1614,7 +1617,6 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 // System counts it as sent, so a volume or a mute may never go out.
 // QLMSystem.h lets a start come during a stop.
 - (void)testAStartRightAfterAStopKeepsTwoSendsInFlight {
-    [self expectBugs:@[QLMFuzzKnownLateCompletion]];
     [self runSeed:QLMFuzzLateCompletionSeed shrunkTo:@[QLMFuzzMake(QLMFuzzRestart, 0, 0, 0, NO)]];
 }
 
@@ -1624,7 +1626,6 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 // ceiling caps every volume frame after it. Each frame queued at a wake,
 // a dim, a mute all, or an apply can wait behind holds and replies.
 - (void)testAVolumeQueuedBeforeACeilingDropGoesOutAboveIt {
-    [self expectBugs:@[QLMFuzzKnownStaleVolume]];
     [self runSeed:QLMFuzzStaleVolumeSeed
          shrunkTo:@[
              QLMFuzzMake(QLMFuzzCeiling, -0.5, 0, 0, NO), QLMFuzzMake(QLMFuzzVolume, -0.0, 0, 0, NO),
@@ -1637,7 +1638,6 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 // than the rounds go out: the unmute's round reaches the monitor after the
 // first mute's, and unmutes it until the second's comes.
 - (void)testARoundQueuedBeforeAMuteUnmutesAMutedMonitor {
-    [self expectBugs:@[QLMFuzzKnownStaleRound]];
     [self runSeed:QLMFuzzStaleRoundSeed
          shrunkTo:@[
              QLMFuzzMake(QLMFuzzAdvance, 1.5, 0, 0, NO), QLMFuzzMake(QLMFuzzMute, 0, 0, 0, YES),
