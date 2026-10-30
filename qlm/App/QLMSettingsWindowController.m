@@ -2,13 +2,20 @@
 
 #import <ServiceManagement/ServiceManagement.h>
 
+#include <math.h>
+
 #include "QLMCommands.h"
+#import "QLMFormat.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMSettingsTextWidth = 360;
 
 @interface QLMSettingsWindowController () <NSWindowDelegate>
 @property (nonatomic) QLMPreferences *preferences;
+@property (nonatomic) QLMMonitorList *monitorList;
+@property (nonatomic) NSButton *adapterCheckbox;
+@property (nonatomic) NSTextField *handBackLevel;
+@property (nonatomic) NSGridRow *handBackRow;
 @property (nonatomic) NSPopUpButton *setupPicker;
 @property (nonatomic) NSTextField *setupNote;
 @property (nonatomic) NSTextField *lowestField;
@@ -27,7 +34,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 @implementation QLMSettingsWindowController
 
-- (instancetype)initWithPreferences:(QLMPreferences *)preferences {
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList {
     NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 520, 300)
                                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                                      backing:NSBackingStoreBuffered
@@ -37,6 +44,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self = [super initWithWindow:window];
     if (self) {
         _preferences = preferences;
+        _monitorList = monitorList;
         window.delegate = self;
         [self buildContent];
         [window center];
@@ -46,6 +54,19 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 - (void)buildContent {
     NSView *content = self.window.contentView;
+
+    self.adapterCheckbox = [NSButton checkboxWithTitle:@"Drive the real monitors through the GLM adapter" target:self
+                                                action:@selector(adapterClicked:)];
+    NSTextField *adapterNote = QLMNoteLabel(
+        @"On, qlm sends volume, mute, dim, power, and groups to the real monitors through the GLM adapter, "
+        @"every volume at or below the ceiling. Off, qlm runs on a fake bus and sends nothing. A change reconnects.",
+        QLMSettingsTextWidth);
+    // Until System can match the knob when it stops (qlm-control-first).
+    NSTextField *handBackNote = QLMNoteLabel(
+        @"When qlm quits, the Mac sleeps, or USB drops, the adapter takes over about 2.6 s later, at its knob's level. "
+        @"The ceiling does not apply to it. qlm does not yet match the knob when it stops, so the level can jump.",
+        QLMSettingsTextWidth);
+    self.handBackLevel = QLMNoteLabel(@"", QLMSettingsTextWidth);
 
     self.setupPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     self.setupPicker.target = self;
@@ -76,13 +97,20 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.loginItemsButton = [NSButton buttonWithTitle:@"Open Login Items" target:self action:@selector(openLoginItems:)];
     self.loginItemsButton.controlSize = NSControlSizeSmall;
 
+    NSTextField *rangeTitle = [NSTextField labelWithString:@"Volume range:"];
+    NSTextField *launchTitle = [NSTextField labelWithString:@"At launch:"];
+    NSTextField *setupTitle = [NSTextField labelWithString:@"Setup file:"];
     NSGridView *grid = [NSGridView gridViewWithViews:@[
-        @[[NSTextField labelWithString:@"Setup file:"], setupRow],
+        @[[NSTextField labelWithString:@"Monitors:"], self.adapterCheckbox],
+        @[[NSGridCell emptyContentView], adapterNote],
+        @[[NSGridCell emptyContentView], handBackNote],
+        @[[NSGridCell emptyContentView], self.handBackLevel],
+        @[setupTitle, setupRow],
         @[[NSGridCell emptyContentView], self.setupNote],
-        @[[NSTextField labelWithString:@"Volume range:"], lowestRow],
+        @[rangeTitle, lowestRow],
         @[[NSTextField labelWithString:@"Ceiling:"], ceilingRow],
         @[[NSGridCell emptyContentView], ceilingNote],
-        @[[NSTextField labelWithString:@"At launch:"], self.wakeCheckbox],
+        @[launchTitle, self.wakeCheckbox],
         @[[NSGridCell emptyContentView], self.loginCheckbox],
         @[[NSGridCell emptyContentView], self.loginNote],
         @[[NSGridCell emptyContentView], self.loginItemsButton],
@@ -91,13 +119,16 @@ static const CGFloat QLMSettingsTextWidth = 360;
     grid.columnSpacing = 8;
     grid.rowAlignment = NSGridRowAlignmentFirstBaseline;
     [grid columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
-    [grid rowAtIndex:1].topPadding = -4;
-    [grid rowAtIndex:2].topPadding = 10;
-    [grid rowAtIndex:4].topPadding = -4;
-    [grid rowAtIndex:5].topPadding = 10;
-    [grid rowAtIndex:7].topPadding = -4;
+    // A note sits close under its control, and a new section stands apart.
+    for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, ceilingNote, self.loginNote]) {
+        [grid cellForView:note].row.topPadding = -4;
+    }
+    for (NSView *title in @[setupTitle, rangeTitle, launchTitle]) {
+        [grid cellForView:title].row.topPadding = 10;
+    }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
     self.grid = grid;
+    self.handBackRow = [grid cellForView:self.handBackLevel].row;
     [content addSubview:grid];
     [NSLayoutConstraint activateConstraints:@[
         [grid.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:20],
@@ -140,18 +171,35 @@ static const CGFloat QLMSettingsTextWidth = 360;
 }
 
 - (void)showWindow:(id)sender {
+    self.adapterCheckbox.state = self.preferences.usesAdapter ? NSControlStateValueOn : NSControlStateValueOff;
     [self reloadSetupNames];
     [self renderSetup];
     [self renderRange];
     [self renderLaunch];
+    [self renderHandBack];
     [self fitWindow];
     [super showWindow:sender];
+}
+
+// The live line changes with every turn of the knob, so the window refits
+// only when the line's height does.
+- (void)refresh {
+    if (self.window.visible && [self renderHandBack]) {
+        [self fitWindow];
+    }
 }
 
 // Login Items may have changed in System Settings meanwhile.
 - (void)windowDidBecomeKey:(NSNotification *)notification {
     [self renderLaunch];
     [self fitWindow];
+}
+
+#pragma mark - The adapter
+
+- (void)adapterClicked:(NSButton *)checkbox {
+    self.preferences.usesAdapter = checkbox.state == NSControlStateValueOn;
+    [self.delegate settingsDidChangeAdapter:self];
 }
 
 #pragma mark - The setup file
@@ -231,6 +279,32 @@ static const CGFloat QLMSettingsTextWidth = 360;
 }
 
 #pragma mark - Drawing
+
+// Returns whether the line's height changed.
+- (BOOL)renderHandBack {
+    QLMSnapshot *snapshot = self.monitorList.snapshot;
+    NSNumber *knob = snapshot.adapter.knobTenths;
+    NSNumber *volume = snapshot.volumeDecibels;
+    NSString *text = nil;
+    if (snapshot.adapter.hasStatus && knob == nil) {
+        text = @"Now: no knob is in, so what the adapter would set is unknown.";
+    } else if (knob != nil && volume != nil) {
+        double sent = [self.preferences sentDecibels:volume.doubleValue dimmed:snapshot.dimmed];
+        double knobDecibels = knob.doubleValue / 10;
+        double jump = knobDecibels - sent;
+        NSString *change = fabs(jump) < QLMVolumeDecibelsStep ? @"barely move"
+            : [NSString stringWithFormat:@"%@ %@", jump > 0 ? @"rise" : @"fall", QLMDecibelsText(fabs(jump))];
+        text = [NSString stringWithFormat:@"Now: qlm sends %@, and the knob reads %@. If the adapter took over now, the level would %@.",
+                                          QLMDecibelsText(sent), QLMDecibelsText(knobDecibels), change];
+    }
+    if ([self.handBackLevel.stringValue isEqualToString:text ?: @""] && self.handBackRow.hidden == (text == nil)) {
+        return NO;
+    }
+    CGFloat height = self.handBackRow.hidden ? 0 : self.handBackLevel.fittingSize.height;
+    self.handBackLevel.stringValue = text ?: @"";
+    self.handBackRow.hidden = text == nil;
+    return height != (self.handBackRow.hidden ? 0 : self.handBackLevel.fittingSize.height);
+}
 
 - (void)renderSetup {
     if (self.setup != nil) {
