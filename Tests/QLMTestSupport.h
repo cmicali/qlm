@@ -60,9 +60,10 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 // The GLM adapter as a capture saw it, at the level of reports, behind a
 // QLMReportLink as the HID adapter is. Each output report the link writes
 // gets the input reports that answered it in the capture, split as the
-// adapter sent them, after replyDelay. Replies come in order, as the
-// adapter's do: none before the one ahead of it. A report the capture never
-// sent, or any report while silent, gets none.
+// adapter sent them, after replyDelay. Once the capture's replies to a report
+// run out, it gets the last again: a link's syncs add adapter queries. Replies
+// come in order, as the adapter's do: none before the one ahead of it. A
+// report the capture never sent, or any report while silent, gets none.
 @interface QLMCaptureDevice : NSObject <QLMAdapter>
 
 - (instancetype)initWithCapture:(QLMCapture *)capture;

@@ -117,7 +117,9 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
         _unmatchedReports += 1;
         return;
     }
-    [_unplayed[report] removeObjectAtIndex:0];
+    if (_unplayed[report].count > 1) {
+        [_unplayed[report] removeObjectAtIndex:0];
+    }
     if (exchange.replyFrame == nil || self.silent) {
         return;
     }

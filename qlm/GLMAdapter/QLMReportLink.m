@@ -47,6 +47,8 @@ static NSError *QLMStalledError(void) {
     // The shapes of replies that may still come. While any may, the link is
     // out of step, and the next request waits for a sync.
     QLMReplyShape _late;
+    // Since an open, a reply to another host may still come, of any shape.
+    BOOL _otherHostLate;
     // The sync is overdue. Every send fails until its reply comes.
     BOOL _stalled;
     QLMReportLinkRequest *_held;
@@ -59,6 +61,7 @@ static NSError *QLMStalledError(void) {
         _queue = queue;
         _writer = [writer copy];
         _replyTimeout = 0.1;
+        _otherHostLate = YES;
         QLMReportAssemblyReset(&_assembly);
     }
     return self;
@@ -106,7 +109,7 @@ static NSError *QLMStalledError(void) {
         return;
     }
     request.handler = handler;
-    if (_late != 0) {
+    if (_late != 0 || _otherHostLate) {
         _held = request;
         if (_waiting == nil) {
             [self sync];
@@ -184,10 +187,14 @@ static NSError *QLMStalledError(void) {
 
 // The adapter's status poll, or else its system info. GLM sends both.
 // closeWithError: leaves at least one that no late reply could be taken for.
+// Another host's late reply is likeliest a status, so after an open the
+// system info goes first.
 - (void)sync {
     BOOL statusLate = (_late & QLMReplyShapeAdapterStatus) != 0;
-    NSAssert(!statusLate || (_late & QLMReplyShapeSystemInfo) == 0, @"no sync is left");
-    QLMMessage query = statusLate ? QLMCommandSystemInfo(QLMAddressAdapter) : QLMCommandPoll(QLMAddressAdapter);
+    BOOL infoLate = (_late & QLMReplyShapeSystemInfo) != 0;
+    NSAssert(!statusLate || !infoLate, @"no sync is left");
+    BOOL info = statusLate || (_otherHostLate && !infoLate);
+    QLMMessage query = info ? QLMCommandSystemInfo(QLMAddressAdapter) : QLMCommandPoll(QLMAddressAdapter);
     QLMReportLinkRequest *sync = [self requestFor:&query error:NULL];
     if (sync == nil) {
         NSAssert(NO, @"the allowlist refused a sync");
@@ -218,11 +225,19 @@ static NSError *QLMStalledError(void) {
             _strayReplies += 1;
             return;
         }
-        // Replies come in order, so every late one has come or never will.
         _waiting = nil;
         _generation += 1;
-        _late = 0;
         _stalled = NO;
+        if (_otherHostLate) {
+            // This may have been the other host's reply, and then the sync's
+            // own is late. A sync of the other shape drops it.
+            _otherHostLate = NO;
+            _late = request.shape;
+            [self sync];
+            return;
+        }
+        // Replies come in order, so every late one has come or never will.
+        _late = 0;
         QLMReportLinkRequest *held = _held;
         _held = nil;
         if (held != nil) {
@@ -246,6 +261,10 @@ static NSError *QLMStalledError(void) {
     _stalled = NO;
     if (waiting != nil) {
         _late |= waiting.shape;
+        // The other host's reply comes first, and may have either shape.
+        if (_otherHostLate) {
+            _late |= QLMReplyShapeAdapterStatus | QLMReplyShapeSystemInfo;
+        }
         if (waiting.handler != nil) {
             [self finish:waiting.handler reply:NULL error:error];
         }
@@ -266,6 +285,7 @@ static NSError *QLMStalledError(void) {
         return;
     }
     _closed = nil;
+    _otherHostLate = YES;
     QLMReportAssemblyReset(&_assembly);
 }
 

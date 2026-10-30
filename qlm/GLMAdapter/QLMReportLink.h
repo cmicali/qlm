@@ -13,8 +13,16 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // drives a device through it, one link for each time the adapter arrives,
 // and the tests drive it with a capture.
 //
-// TRAP: a link knows only its own requests. A reply to another host's, or to
-// an earlier process's, could still answer its first request.
+// Each open puts the link out of step. A reply to another host, GLM or an
+// earlier process, may still come, of any shape. So the first request waits
+// for a sync in two steps: the adapter's system info, then its status poll.
+// The first step drops any late reply but a system info. A status is the
+// likeliest, since GLM's last request before it quits is a status poll
+// (captures/quit-glm, qlm-first-discover). A late system info fools the first
+// step, and the second then drops the first's own reply.
+// TRAP: two late replies, a system info and then a status, fool both steps.
+// GLM keeps one request in flight (captures/startup-idle). An earlier qlm
+// leaves two only when it quit during a sync after a system info timed out.
 //
 // Every method runs on the queue, and so does the writer. Each handler is
 // called once, asynchronously, on the queue.
@@ -45,11 +53,14 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 
 // The device closed. Fails the request in flight, and every send until a
 // reopen, with the error. The request's reply may come after the reopen, so
-// the next request then waits for a sync. When both syncs' shapes may be
-// late, no sync is left, and the link has lost track.
+// the open's sync starts with a shape that reply cannot have. When both
+// syncs' shapes may be late, no sync is left, and the link has lost track. A
+// close during an open's sync is one such: the other host's reply, ahead of
+// the sync's, may have either shape.
 - (void)closeWithError:(NSError *)error;
 
-// The device opened again. A link that lost track stays closed.
+// The device opened again, and the link is out of step, as at its first open.
+// A link that lost track stays closed.
 - (void)reopen;
 
 // Why the link lost track, or nil. It never reopens. Only a new arrival of
