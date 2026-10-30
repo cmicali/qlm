@@ -198,6 +198,22 @@
     XCTAssertNil([setup.groups[0] nodeWithSerial:@"16777216"].hardwareID);  // more than three bytes
 }
 
+// The same source: a device's Serial is its monitor's hardware ID too, so a
+// monitor on the bus finds its device, and its name, by hardware ID.
+- (void)testADevicesSerialIsItsMonitorsHardwareID {
+    const uint8_t rearRight[] = {0x0F, 0x42, 0x45};  // the fixture's 1000005
+    QLMSetup *setup = QLMReadFixtureSetup();
+    QLMSetupDevice *device = [setup deviceWithHardwareID:QLMBytes(rearRight, sizeof rearRight)];
+    XCTAssertEqualObjects(device.serial, @"1000005");
+    XCTAssertEqualObjects(device.hardwareID, QLMBytes(rearRight, sizeof rearRight));
+    XCTAssertEqual(device, [setup deviceWithSerial:@"1000005"]);
+    const uint8_t unknown[] = {0x11, 0x22, 0x33};
+    XCTAssertNil([setup deviceWithHardwareID:QLMBytes(unknown, sizeof unknown)]);
+    for (QLMSetupDevice *each in setup.devices) {
+        XCTAssertNotNil(each.hardwareID, @"%@", each.serial);
+    }
+}
+
 - (void)testEveryKeyInTheFixtureIsKnown {
     XCTAssertEqualObjects(QLMReadFixtureSetup().unknownKeys, @[]);
 }

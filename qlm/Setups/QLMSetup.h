@@ -81,6 +81,8 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly) NSString *model;
 @property (nonatomic, readonly) NSInteger type;  // 0 adapter, 1 subwoofer, 2 two-way, 3 three-way, as observed
 @property (nonatomic, readonly, nullable) NSString *serial;
+// The monitor's hardware ID, which serial gives in decimal, as a node's.
+@property (nonatomic, readonly, nullable) NSData *hardwareID;
 @property (nonatomic, readonly) NSString *name;
 @property (nonatomic, readonly, nullable) NSString *hardwareVersion;
 @property (nonatomic, readonly, nullable) NSString *dspVersion;
@@ -116,6 +118,8 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly) NSArray<NSString *> *unknownKeys;
 
 - (nullable QLMSetupDevice *)deviceWithSerial:(NSString *)serial;
+// The device a monitor on the bus is, matched by its three-byte hardware ID.
+- (nullable QLMSetupDevice *)deviceWithHardwareID:(NSData *)hardwareID;
 
 @end
 

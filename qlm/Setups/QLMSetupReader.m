@@ -277,6 +277,26 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
     _groupCount = (NSUInteger)groupCount;
 }
 
+// Big-endian, from at most 8 decimal digits.
+static NSData *_Nullable QLMHardwareIDForSerial(NSString *serial) {
+    if (serial.length == 0 || serial.length > 8) {
+        return nil;
+    }
+    uint32_t value = 0;
+    for (NSUInteger i = 0; i < serial.length; i++) {
+        unichar digit = [serial characterAtIndex:i];
+        if (digit < '0' || digit > '9') {
+            return nil;
+        }
+        value = value * 10 + (uint32_t)(digit - '0');
+    }
+    if (value > 0xFFFFFF) {
+        return nil;
+    }
+    const uint8_t bytes[3] = {(uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value};
+    return [NSData dataWithBytes:bytes length:3];
+}
+
 // Model, then keys to Data_End. The adapter's block has the same shape.
 - (nullable QLMSetupDevice *)parseDevice {
     QLMSetupEntry *model = [self expect:@"Model"];
@@ -299,6 +319,7 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
             device.type = [self integer:entry];
         } else if ([key isEqualToString:@"Serial"]) {
             device.serial = [self text:entry];
+            device.hardwareID = device.serial != nil ? QLMHardwareIDForSerial(device.serial) : nil;
         } else if ([key isEqualToString:@"Name"]) {
             device.name = entry.value;
         } else if ([key isEqualToString:@"Hardware_Version"]) {
@@ -374,26 +395,6 @@ static QLMSetupNodeClass QLMNodeClassNamed(NSString *name) {
         return QLMSetupNodeClassSubwoofer;
     }
     return QLMSetupNodeClassUnknown;
-}
-
-// Big-endian, from at most 8 decimal digits.
-static NSData *_Nullable QLMHardwareIDForSerial(NSString *serial) {
-    if (serial.length == 0 || serial.length > 8) {
-        return nil;
-    }
-    uint32_t value = 0;
-    for (NSUInteger i = 0; i < serial.length; i++) {
-        unichar digit = [serial characterAtIndex:i];
-        if (digit < '0' || digit > '9') {
-            return nil;
-        }
-        value = value * 10 + (uint32_t)(digit - '0');
-    }
-    if (value > 0xFFFFFF) {
-        return nil;
-    }
-    const uint8_t bytes[3] = {(uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value};
-    return [NSData dataWithBytes:bytes length:3];
 }
 
 // Class, then keys and bands to Data_End.
