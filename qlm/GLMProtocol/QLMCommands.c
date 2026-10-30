@@ -148,7 +148,7 @@ uint32_t QLMLevelWordForDecibels(double decibels) {
     if (decibels >= 0) {
         return QLMVolumeWordMax;
     }
-    double word = round(pow(10.0, decibels / 20.0) * (double)QLMVolumeWordMax);
+    double word = floor(pow(10.0, decibels / 20.0) * (double)QLMVolumeWordMax);
     return word < 0 ? 0 : (uint32_t)word;
 }
 

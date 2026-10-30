@@ -32,9 +32,9 @@
     // 6 ms of time of flight at 48 kHz is 288 samples.
     const uint8_t delay[] = {0x10, 0x02, 0x00, 0x00, 0x01, 0x20};
     XCTAssertEqualObjects(block.payloads[1], QLMBytes(delay, sizeof delay));
-    // -0.2 dB at 2^23 - 1, rounded.
-    uint32_t level = (uint32_t)round(pow(10, -0.2 / 20) * 8388607);
-    const uint8_t levelFrame[] = {0x10, 0x01, 0x00, (uint8_t)(level >> 16), (uint8_t)(level >> 8), (uint8_t)level};
+    // -0.2 dB is 7D 16 1A, floored, as GLM sent it in
+    // group-switch-main-2x1-main-4x2 at 36.137 s.
+    const uint8_t levelFrame[] = {0x10, 0x01, 0x00, 0x7D, 0x16, 0x1A};
     XCTAssertEqualObjects(block.payloads[2], QLMBytes(levelFrame, sizeof levelFrame));
     const uint8_t unknownLevel[] = {0x10, 0x01, 0x09, 0x00, 0x00, 0x00};
     XCTAssertEqualObjects(block.payloads[3], QLMBytes(unknownLevel, sizeof unknownLevel));

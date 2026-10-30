@@ -216,8 +216,9 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
     QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x00, 0x00, 0x08);
 }
 
-// Section 6: a level word is linear gain at 2^23 - 1, rounded. The spec's
-// observed words invert to their stated decibels within a hundredth.
+// Section 6: a level word is linear gain at 2^23 - 1. GLM floors it, as
+// QLMDSPBlockGoldenTests shows. The spec's observed words invert to their
+// stated decibels within a hundredth.
 - (void)testLevelWords {
     XCTAssertEqual(QLMLevelWordForDecibels(0), 0x7FFFFFu);
     XCTAssertEqual(QLMLevelWordForDecibels(3), 0x7FFFFFu);

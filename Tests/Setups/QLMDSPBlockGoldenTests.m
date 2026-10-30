@@ -98,12 +98,6 @@ static uint32_t QLMLevelWordOf(NSData *payload) {
     return (uint32_t)bytes[3] << 16 | (uint32_t)bytes[4] << 8 | bytes[5];
 }
 
-// GLM's level word: floor(10^(dB/20) * (2^23 - 1)), with 0 dB and up at
-// 7F FF FF. Rounding misses four of the eleven captured levels.
-static uint32_t QLMFlooredLevelWord(double decibels) {
-    return decibels >= 0 ? 0x7FFFFF : (uint32_t)floor(pow(10, decibels / 20) * 8388607.0);
-}
-
 static NSData *QLMHex(NSString *hex) {
     NSMutableData *data = [NSMutableData data];
     for (NSString *pair in [hex componentsSeparatedByString:@" "]) {
@@ -129,7 +123,6 @@ static NSSet<NSData *> *QLMExtrasForClass(QLMSetupNodeClass nodeClass) {
 
 // How `pass` differs from `block`. None when the pass holds every setting of
 // the block with the block's value, and exactly the class's extras besides.
-// The level may be one count above GLM's word.
 static NSArray<NSString *> *QLMDifferences(QLMDSPBlock *block, QLMCapturedPass *pass) {
     NSMutableDictionary<NSData *, NSData *> *expected = [NSMutableDictionary dictionary];
     for (NSData *payload in block.payloads) {
@@ -146,13 +139,7 @@ static NSArray<NSString *> *QLMDifferences(QLMDSPBlock *block, QLMCapturedPass *
             continue;
         }
         [seen addObject:key];
-        BOOL same = [mine isEqualToData:payload];
-        if (QLMIsLevel(payload)) {
-            uint32_t qlm = QLMLevelWordOf(mine);
-            uint32_t glm = QLMLevelWordOf(payload);
-            same = qlm >= glm && qlm - glm <= 1;
-        }
-        if (!same) {
+        if (![mine isEqualToData:payload]) {
             [differences addObject:[NSString stringWithFormat:@"%@ in place of %@", payload, mine]];
         }
     }
@@ -299,38 +286,37 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
         NSArray<NSData *> *mine = [QLMDSPBlock blockForNode:pass.node inGroup:pass.group error:NULL].payloads;
         XCTAssertEqual(glm.count, mine.count, @"%@", pass);
         for (NSUInteger j = 0; j < MIN(glm.count, mine.count); j++) {
-            if (QLMIsLevel(mine[j])) {
-                XCTAssertTrue(QLMIsLevel(glm[j]));
-            } else {
-                XCTAssertEqualObjects(glm[j], mine[j], @"%@, frame %lu", pass, (unsigned long)j);
-            }
+            XCTAssertEqualObjects(glm[j], mine[j], @"%@, frame %lu", pass, (unsigned long)j);
         }
         checked += 1;
     }
     XCTAssertEqual(checked, 47u);
 }
 
-// GLM floors the level word. qlm's builder rounds, so where the two differ
-// its word is one count high, about 1e-6 dB. Four captured levels show it:
-// the Left 8351B at -0.17 dB (group-switch-main-2x1-main-4x2, 35.618 s) and
-// -5.3 dB (group-switch-main-4x2-main-2x2, 13.690 s), the Rear Right 8330A
-// at -0.2 dB (group-switch-main-2x1-main-4x2, 36.137 s), and the Right
-// 8351B at -2.97 dB (group-switch-main-4x2-main-2x1, 13.106 s).
+// GLM floors the level word. Four captured levels tell floor from round,
+// where rounding is one count high: the Left 8351B at -0.17 dB
+// (group-switch-main-2x1-main-4x2, 35.618 s) and -5.3 dB
+// (group-switch-main-4x2-main-2x2, 13.690 s), the Rear Right 8330A at
+// -0.2 dB (group-switch-main-2x1-main-4x2, 36.137 s), and the Right 8351B
+// at -2.97 dB (group-switch-main-4x2-main-2x1, 13.106 s).
 - (void)testGLMFloorsTheLevelWord {
     NSMutableSet<NSNumber *> *levels = [NSMutableSet set];
+    NSMutableSet<NSNumber *> *belowRound = [NSMutableSet set];
     for (QLMCapturedPass *pass in [self passes]) {
         double decibels = pass.node.levelSensitivity + pass.node.groupSensitivity;
         for (NSData *payload in pass.payloads) {
             if (QLMIsLevel(payload)) {
-                XCTAssertEqual(QLMLevelWordOf(payload), QLMFlooredLevelWord(decibels), @"%@", pass);
+                uint32_t word = QLMLevelWordOf(payload);
+                XCTAssertEqual(word, QLMLevelWordForDecibels(decibels), @"%@", pass);
                 [levels addObject:@(decibels)];
+                if (decibels < 0 && word < round(pow(10, decibels / 20) * 8388607.0)) {
+                    [belowRound addObject:@(decibels)];
+                }
             }
         }
     }
     XCTAssertEqual(levels.count, 11u);
-    for (NSNumber *decibels in @[@-0.17, @-5.3, @-0.2, @-2.97]) {
-        XCTAssertLessThanOrEqual(QLMLevelWordForDecibels(decibels.doubleValue) - QLMFlooredLevelWord(decibels.doubleValue), 1u);
-    }
+    XCTAssertEqual(belowRound.count, 4u);
 }
 
 // A node of `node`'s class and input, with its bands at `sampleRate`.
