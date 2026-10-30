@@ -476,8 +476,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (QLMNamesSession(&message) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
             NSError *error = strongSelf->_adapterError
                                  ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, @"The frame was queued before System checked the leases again.", nil);
+            NSUInteger run = strongSelf->_run;
             [strongSelf->_clock async:strongSelf->_queue run:^{
                 QLMSystem *system = weakSelf;
+                if (system == nil || system->_run != run) {
+                    return;
+                }
                 if (QLMIsMonitorState(&message)) {
                     [system noteState:&message wentOut:NO];
                 }
@@ -494,8 +498,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             sent = QLMCommandVolumeWord(QLMVolumeFrameWord(&sent), QLMCeilingWord(strongSelf.settings.ceilingDecibels));
             sent.address = message.address;
         }
+        NSUInteger run = strongSelf->_run;
         [strongSelf->_adapter sendMessage:sent replyHandler:^(const QLMMessage *reply, NSError *error) {
             QLMSystem *system = weakSelf;
+            // TRAP: a stop ends the item in flight, and a start may follow at
+            // once. A reply from before the stop must not end an item of the
+            // next start, as hold: also guards.
+            if (system == nil || system->_run != run) {
+                return;
+            }
             [system noteSendError:error];
             if (QLMIsMonitorState(&sent)) {
                 [system noteState:&sent wentOut:QLMSendWentOut(error)];

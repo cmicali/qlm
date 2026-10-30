@@ -27,6 +27,9 @@
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
 // Hands the oldest reply held over, on the adapter's queue. NO when none is.
 - (BOOL)releaseReply;
+// The most requests sent since the last start, at once, whose replies
+// System had not been handed yet.
+@property (atomic, readonly) NSUInteger mostInFlight;
 @end
 
 @implementation QLMHeldAdapter {
@@ -34,6 +37,8 @@
     dispatch_queue_t _queue;
     id<QLMClock> _clock;
     NSMutableArray<dispatch_block_t> *_held;
+    NSUInteger _starts;
+    NSUInteger _inFlight;  // of this start's
 }
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
@@ -52,6 +57,10 @@
 - (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
     _queue = queue;
     _clock = clock;
+    @synchronized(self) {
+        _starts += 1;
+        _inFlight = 0;
+    }
     [_adapter startOnQueue:queue clock:clock];
 }
 
@@ -60,15 +69,31 @@
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    NSUInteger start;
+    @synchronized(self) {
+        start = _starts;
+        _inFlight += 1;
+        _mostInFlight = MAX(_mostInFlight, _inFlight);
+    }
+    __weak QLMHeldAdapter *weakSelf = self;
     [_adapter sendMessage:message replyHandler:^(const QLMMessage *reply, NSError *error) {
         BOOL answered = reply != NULL;
         QLMMessage copy = answered ? *reply : QLMMessageMake(0, NULL, 0);
         @synchronized(self) {
             [self->_held addObject:^{
+                [weakSelf replied:start];
                 handler(answered ? &copy : NULL, error);
             }];
         }
     }];
+}
+
+- (void)replied:(NSUInteger)start {
+    @synchronized(self) {
+        if (_starts == start) {
+            _inFlight -= 1;
+        }
+    }
 }
 
 - (BOOL)releaseReply {
@@ -894,6 +919,25 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(snapshot.monitors.count, 2u);
     XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
     XCTAssertEqual(QLMFindMonitor(snapshot, _right.hardwareID).session, 0x03);
+}
+
+// A stop with no hand-back lets go at once, with a request in flight, and
+// a start right after it sends its own first request. The stopped run's
+// reply must end nothing of the new run. If it did, System would send its
+// next request while the first is still in flight.
+- (void)testAReplyFromBeforeAStopEndsNothingAfterTheStart {
+    QLMHeldAdapter *held = [[QLMHeldAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:held];
+    [_time settle];
+    [_system stop];
+    [_system start];
+    [_time settle];
+    XCTAssertEqual(held.mostInFlight, 1u);
+    [self releaseRepliesOf:held until:^BOOL {
+        return NO;
+    }];
+    XCTAssertEqual(held.mostInFlight, 1u);
+    XCTAssertEqual(_system.snapshot.monitors.count, 2u);
 }
 
 // A gap the monitors ride out keeps every lease.
