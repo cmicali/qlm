@@ -19,6 +19,9 @@ NSInteger QLMMeterCounts(NSInteger raw);
 // On the main queue: it keeps one formatter.
 NSString *QLMReplyAgeText(NSDate *_Nullable date);
 
+// System's adapterError says another host has the adapter.
+BOOL QLMAdapterErrorIsBusy(NSError *_Nullable error);
+
 // The banner's lines for System's adapterError.
 NSString *QLMAdapterErrorTitle(NSError *error);
 NSString *QLMAdapterErrorDetail(NSError *error);

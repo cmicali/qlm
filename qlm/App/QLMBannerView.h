@@ -2,14 +2,25 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// A tinted strip that says why nothing reaches the bus: System's
-// adapterError. It hides itself when there is none.
+typedef NS_ENUM(NSInteger, QLMBannerStyle) {
+    QLMBannerStyleWarning,  // orange: nothing reaches the bus
+    QLMBannerStyleNotice,   // the accent color: something to act on
+};
+
+// A tinted strip with a title, a detail, and an optional button. It hides
+// itself when there is no title.
 @interface QLMBannerView : NSView
 
 // The width its text wraps at.
-- (instancetype)initWithTextWidth:(CGFloat)textWidth;
+- (instancetype)initWithTextWidth:(CGFloat)textWidth style:(QLMBannerStyle)style;
 
+- (void)showTitle:(nullable NSString *)title detail:(nullable NSString *)detail;
+
+// System's adapterError: why nothing reaches the bus.
 - (void)showError:(nullable NSError *)error;
+
+// Under the text, hidden until a caller sets it up and shows it.
+@property (nonatomic, readonly) NSButton *actionButton;
 
 @end
 
