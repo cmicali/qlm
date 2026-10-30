@@ -55,12 +55,19 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
 
 typedef BOOL (^QLMSnapshotTest)(QLMSnapshot *snapshot);
 
-// The first snapshot that passes, or nil after the timeout.
-QLMSnapshot *_Nullable QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSnapshotTest test);
+// Puts a snapshot handler in place, then runs the action, so the handler
+// sees every snapshot the action causes. Returns the first snapshot that
+// passes, or nil after the timeout. An action that returns NO sent nothing,
+// and the wait ends at once with nil.
+// TRAP: an action run before the handler is in place can finish first. The
+// handler then sees only the end state, as its replay, which a test made by
+// QLMAfterReplay skips, and the wait runs out.
+QLMSnapshot *_Nullable QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, BOOL (^_Nullable action)(void),
+                                          QLMSnapshotTest test);
 
-// TRAP: the snapshot replayed when a handler is installed may predate an
-// action just taken, and a no-op can leave it already passing. This test
-// skips it, so only a snapshot published after the action counts.
+// TRAP: the snapshot replayed when a handler is put in place predates the
+// action, and a no-op can leave it already passing. This test skips it, so
+// only a snapshot published after the action counts.
 QLMSnapshotTest QLMAfterReplay(QLMSnapshotTest test);
 
 // Runs a command on System, given what discovery found. Returns an exit

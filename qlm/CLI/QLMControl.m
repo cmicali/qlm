@@ -213,7 +213,7 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
 
 #pragma mark - Waiting
 
-QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSnapshotTest test) {
+QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, BOOL (^action)(void), QLMSnapshotTest test) {
     dispatch_semaphore_t passed = dispatch_semaphore_create(0);
     dispatch_queue_t queue = dispatch_queue_create("qlmctl.wait", DISPATCH_QUEUE_SERIAL);
     __block QLMSnapshot *result = nil;
@@ -223,7 +223,9 @@ QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSn
             dispatch_semaphore_signal(passed);
         }
     } queue:queue];
-    dispatch_semaphore_wait(passed, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * (double)NSEC_PER_SEC)));
+    if (action == nil || action()) {
+        [system.settings.clock wait:passed timeout:timeout];
+    }
     [system setSnapshotHandler:nil queue:queue];
     __block QLMSnapshot *found = nil;
     dispatch_sync(queue, ^{
@@ -365,9 +367,11 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     QLMSystemSettings *mirrorSettings = [settings copy];
     mirrorSettings.adapterPollInterval = 0;
     QLMSystem *mirror = [[QLMSystem alloc] initWithAdapter:bus settings:mirrorSettings];
-    [mirror start];
     NSUInteger count = discovered.monitors.count;
-    QLMSnapshot *found = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL(QLMSnapshot *snapshot) {
+    QLMSnapshot *found = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL {
+        [mirror start];
+        return YES;
+    }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.allIdentified && snapshot.monitors.count == count;
     });
     if (found == nil) {
@@ -388,12 +392,15 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     }
 
     NSUInteger start = bus.sentMessages.count;
-    *status = action(mirror, found);
+    QLMSnapshot *effected = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL {
+        *status = action(mirror, found);
+        return *status == 0;
+    }, effect);
     if (*status != 0) {
         [mirror stop];
         return nil;
     }
-    if (QLMWaitForSnapshot(mirror, QLMMirrorTimeout, effect) == nil) {
+    if (effected == nil) {
         *status = EX_TEMPFAIL;
     }
     // Read before the stop, which may land while a send is still on the queue.

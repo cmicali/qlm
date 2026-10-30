@@ -15,8 +15,76 @@
 // IDs, their start at 02, and re-discovery after four missed polls. Section 9
 // gives discovery, enumeration, and the poll loop. The plan's Phase 1 asks
 // for fake-bus tests of lease loss, re-discovery, and a lost reply. The
-// Phase 2 tests name their sections one by one.
+// Phase 2 tests name their sections one by one. System and the bus run on a
+// virtual clock, so each test's timing is its own, whatever the host's load.
 @interface QLMSystemTests : XCTestCase
+@end
+
+// Holds each reply until the test lets it through, so a test can fire a
+// timer between any two.
+@interface QLMHeldAdapter : NSObject <QLMAdapter>
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
+// Hands the oldest reply held over, on the adapter's queue. NO when none is.
+- (BOOL)releaseReply;
+@end
+
+@implementation QLMHeldAdapter {
+    id<QLMAdapter> _adapter;
+    dispatch_queue_t _queue;
+    id<QLMClock> _clock;
+    NSMutableArray<dispatch_block_t> *_held;
+}
+
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
+    self = [super init];
+    if (self) {
+        _adapter = adapter;
+        _held = [NSMutableArray array];
+    }
+    return self;
+}
+
+- (NSString *)deviceDescription {
+    return _adapter.deviceDescription;
+}
+
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
+    _queue = queue;
+    _clock = clock;
+    [_adapter startOnQueue:queue clock:clock];
+}
+
+- (void)stop {
+    [_adapter stop];
+}
+
+- (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    [_adapter sendMessage:message replyHandler:^(const QLMMessage *reply, NSError *error) {
+        BOOL answered = reply != NULL;
+        QLMMessage copy = answered ? *reply : QLMMessageMake(0, NULL, 0);
+        @synchronized(self) {
+            [self->_held addObject:^{
+                handler(answered ? &copy : NULL, error);
+            }];
+        }
+    }];
+}
+
+- (BOOL)releaseReply {
+    dispatch_block_t reply = nil;
+    @synchronized(self) {
+        reply = _held.firstObject;
+        if (reply != nil) {
+            [_held removeObjectAtIndex:0];
+        }
+    }
+    if (reply == nil) {
+        return NO;
+    }
+    [_clock async:_queue run:reply];
+    return YES;
+}
+
 @end
 
 @implementation QLMSystemTests {
@@ -25,6 +93,7 @@
     QLMFakeBus *_bus;
     QLMSystemSettings *_settings;
     QLMSystem *_system;
+    QLMVirtualClock *_time;
     dispatch_queue_t _snapshots;
     NSMutableArray<QLMSnapshot *> *_received;
 }
@@ -37,8 +106,10 @@
                                             systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay];
     _right = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:rightID length:3] serialNumber:@"8320apm21005678"
                                              systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay];
+    _time = [[QLMVirtualClock alloc] init];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
     _settings = [[QLMSystemSettings alloc] init];
+    _settings.clock = _time;
     _settings.cycleInterval = 0.02;
     _settings.ceilingDecibels = -20;
     // The adapter polls only at start, so the tests that count frames see
@@ -49,8 +120,28 @@
 }
 
 - (void)tearDown {
-    [_system stop];
+    [self stopSystem];
     [super tearDown];
+}
+
+// Stops System and waits until the stop is done.
+- (void)stopSystem {
+    if (_system == nil) {
+        return;
+    }
+    __block BOOL stopped = NO;
+    [_system stopWithCompletion:^{
+        stopped = YES;
+    }];
+    [self waitUntil:^BOOL {
+        return stopped;
+    }];
+}
+
+// Moves the clock one timer at a time until the condition holds. A minute
+// on the clock is a hang.
+- (void)waitUntil:(BOOL (^)(void))condition {
+    XCTAssertTrue([_time runUntil:condition within:60], @"the condition never held");
 }
 
 - (void)startSystem {
@@ -74,20 +165,20 @@
 // The same, with the handler in place before `action` runs. The handler gets
 // the latest snapshot first, so a state reached earlier is seen.
 - (QLMSnapshot *)waitForSnapshot:(BOOL (^)(QLMSnapshot *snapshot))predicate after:(nullable dispatch_block_t)action {
-    XCTestExpectation *expectation = [self expectationWithDescription:@"snapshot"];
     __block QLMSnapshot *match = nil;
     NSMutableArray<QLMSnapshot *> *received = _received;
     [_system setSnapshotHandler:^(QLMSnapshot *snapshot) {
         [received addObject:snapshot];
         if (match == nil && predicate(snapshot)) {
             match = snapshot;
-            [expectation fulfill];
         }
     } queue:_snapshots];
     if (action != nil) {
         action();
     }
-    [self waitForExpectations:@[expectation] timeout:5];
+    [self waitUntil:^BOOL {
+        return match != nil;
+    }];
     return match;
 }
 
@@ -151,18 +242,6 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
             monitor.session = 0;
         }
     }];
-}
-
-// Waits until the condition holds, polling.
-- (void)waitUntil:(BOOL (^)(void))condition {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
-    while (!condition()) {
-        if ([deadline timeIntervalSinceNow] < 0) {
-            XCTFail(@"timed out");
-            return;
-        }
-        [NSThread sleepForTimeInterval:0.005];
-    }
 }
 
 // Waits for `count` more of the adapter's polls, each a reading of the knob.
@@ -250,7 +329,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _settings.adapterPollInterval = 0.01;
     [self startSystem];
     [self waitForDiscovery];
-    [NSThread sleepForTimeInterval:0.3];
+    [_time advanceBy:0.3];
     NSArray<NSData *> *sent = _bus.sentMessages;
     XCTAssertGreaterThan(sent.count, 40u);
     for (NSData *record in sent) {
@@ -267,7 +346,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
         return received.adapter.identified;
     }];
-    [NSThread sleepForTimeInterval:0.1];
+    [_time advanceBy:0.1];
     XCTAssertEqual(snapshot.monitors.count, 0u);
     for (NSData *record in _bus.sentMessages) {
         XCTAssertEqual(((const uint8_t *)record.bytes)[0], QLMAddressAdapter, @"%@", record);
@@ -284,11 +363,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForDiscovery];
     const uint8_t pollBytes[] = {QLMAddressAdapter, 0x08};
     NSData *poll = QLMBytes(pollBytes, 2);
-    // TRAP: a fixed sleep, read while System ran, failed under load.
     [self waitUntil:^BOOL {
         return [self countSent:poll from:0] >= 10;
     }];
-    [_system stop];
+    [self stopSystem];
     NSArray<NSData *> *sent = _bus.sentMessages;
     NSUInteger polls = 0;
     for (NSUInteger i = 0; i < sent.count; i++) {
@@ -420,7 +498,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(busy.adapterError.domain, QLMAdapterErrorDomain);
     XCTAssertEqual(busy.adapterError.code, QLMAdapterErrorBusy);
     XCTAssertEqualObjects(busy.adapterError.localizedDescription, @"GLM is running (pid 1). Quit GLM first.");
-    [NSThread sleepForTimeInterval:0.1];
+    [_time advanceBy:0.1];
     XCTAssertEqual(_bus.sentMessages.count, 0u);
     XCTAssertEqual(_system.snapshot.monitors.count, 0u);
 
@@ -526,11 +604,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified;
     }];
-    // Wait for the count, not a fixed time: under load a cycle takes longer.
     [self waitUntil:^BOOL {
         return replay.playedCount > 100;
     }];
-    [_system stop];
+    [self stopSystem];
     XCTAssertEqualObjects(replay.unmatchedMessages, @[]);
     XCTAssertGreaterThan(replay.playedCount, 100u);
 }
@@ -553,7 +630,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(snapshot.adapter.model, @"GLM Adapter");
     XCTAssertEqualObjects(snapshot.adapter.serialNumber, @"H99999F000");
     XCTAssertEqualObjects(snapshot.adapter.knobTenths, @(-1004));
-    [_system stop];
+    [self stopSystem];
     XCTAssertEqual(device.unmatchedReports, 0u);
 }
 
@@ -599,12 +676,11 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self startSystem];
     [self waitForDiscovery];
     NSUInteger before = _bus.sentMessages.count;
-    // perform: runs on System's queue, so nothing goes out while it sleeps.
     [_bus perform:^{
-        [NSThread sleepForTimeInterval:0.05];
         self->_left.session = 0;
         self->_right.session = 0;
     }];
+    [_time stallFor:0.05];
     QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         QLMMonitorState *left = QLMFindMonitor(snapshot, self->_left.hardwareID);
         QLMMonitorState *right = QLMFindMonitor(snapshot, self->_right.hardwareID);
@@ -732,14 +808,48 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// Lets the held replies through, one at a time, until the condition holds
+// or none is left.
+- (BOOL)releaseRepliesOf:(QLMHeldAdapter *)held until:(BOOL (^)(void))condition {
+    [_time settle];
+    while (!condition()) {
+        if (![held releaseReply]) {
+            return NO;
+        }
+        [_time settle];
+    }
+    return YES;
+}
+
+// The cycle fires at the worst moment: the lease chain's next probe is out,
+// and the monitor that answers it holds no lease yet. The cycle must not
+// probe too, or that monitor answers both probes and gets two leases.
+- (void)testACycleInsideTheLeaseChainLeasesNoMonitorTwice {
+    QLMHeldAdapter *held = [[QLMHeldAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:held];
+    XCTAssertTrue([self releaseRepliesOf:held until:^BOOL {
+        const uint8_t *last = self->_bus.sentMessages.lastObject.bytes;
+        BOOL probeOut = last != NULL && last[0] == QLMAddressBroadcast && last[1] == 0xFE;
+        return probeOut && [self countSentTo:QLMAddressMulticast opcode:0x02 from:0] == 1;
+    }]);
+    [_time advanceBy:_settings.cycleInterval];
+    [self releaseRepliesOf:held until:^BOOL {
+        return NO;
+    }];
+
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:0], 2u);
+    QLMSnapshot *snapshot = _system.snapshot;
+    XCTAssertEqual(snapshot.monitors.count, 2u);
+    XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
+    XCTAssertEqual(QLMFindMonitor(snapshot, _right.hardwareID).session, 0x03);
+}
+
 // A gap the monitors ride out keeps every lease.
 - (void)testAShortGapKeepsTheLeases {
     [self startSystem];
     [self waitForDiscovery];
     NSUInteger before = _bus.sentMessages.count;
-    [_bus perform:^{
-        [NSThread sleepForTimeInterval:0.05];
-    }];
+    [_time stallFor:0.05];
     [self waitUntil:^BOOL {
         return [self countSentTo:0x02 opcode:0x08 from:before] >= 3;
     }];
@@ -783,7 +893,8 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMCapture *capture = QLMReadCapture(@"startup-idle", &error);
     XCTAssertNotNil(capture, @"%@", error);
     _settings.cycleInterval = 0.05;
-    [self startSystemWithAdapter:[[QLMReplayAdapter alloc] initWithCapture:capture]];
+    QLMReplayAdapter *replay = [[QLMReplayAdapter alloc] initWithCapture:capture];
+    [self startSystemWithAdapter:replay];
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
         BOOL known = received.monitors.count == 6 && received.allIdentified;
         for (QLMMonitorState *monitor in received.monitors) {
@@ -847,7 +958,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return [snapshot.volumeDecibels isEqual:@(-10)];
     }];
-    [NSThread sleepForTimeInterval:0.1];
+    [_time advanceBy:0.1];
     NSArray<NSData *> *sent = _bus.sentMessages;
     const uint8_t clamped[] = {QLMAddressBroadcast, 0x1F, 0x0C, 0xCC, 0xCC};
     XCTAssertTrue([sent containsObject:[NSData dataWithBytes:clamped length:sizeof clamped]]);
@@ -859,7 +970,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return [snapshot.volumeDecibels isEqual:@(-40)];
     }];
-    [NSThread sleepForTimeInterval:0.15];
+    [_time advanceBy:0.15];
     NSMutableArray<NSData *> *volumes = [NSMutableArray array];
     sent = _bus.sentMessages;
     for (NSUInteger i = before; i < sent.count; i++) {
@@ -1025,7 +1136,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     } after:^{
         [system setDimmed:YES];
     }];
-    [NSThread sleepForTimeInterval:0.05];
+    [_time advanceBy:0.05];
     XCTAssertEqual(_bus.sentMessages.count, before);
 }
 
@@ -1130,14 +1241,16 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 }
 
 - (NSError *)applyGroup:(QLMSetupGroup *)group {
-    XCTestExpectation *expectation = [self expectationWithDescription:@"apply"];
+    __block BOOL done = NO;
     __block NSError *result = nil;
     [_system applyGroup:group completion:^(NSError *error) {
         XCTAssertTrue([NSThread isMainThread]);
         result = error;
-        [expectation fulfill];
+        done = YES;
     }];
-    [self waitForExpectations:@[expectation] timeout:5];
+    [self waitUntil:^BOOL {
+        return done;
+    }];
     return result;
 }
 
@@ -1231,11 +1344,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 // Waits until the frames System sent from `start` on, less its cycle, are
 // at least `count`, then a little longer for one too many to show.
 - (NSArray<NSData *> *)waitForApplyFrames:(NSUInteger)count from:(NSUInteger)start {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
-    while ([self applyFramesFrom:start].count < count && [deadline timeIntervalSinceNow] > 0) {
-        [NSThread sleepForTimeInterval:0.01];
-    }
-    [NSThread sleepForTimeInterval:0.1];
+    [self waitUntil:^BOOL {
+        return [self applyFramesFrom:start].count >= count;
+    }];
+    [_time advanceBy:0.1];
     return [self applyFramesFrom:start];
 }
 
@@ -1435,7 +1547,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         NSArray<NSData *> *expected = [@[QLMAdapterRecord(&level)] arrayByAddingObjectsFromArray:pair];
         XCTAssertEqualObjects([self wakeEndFrom:before], expected, @"knob %@", knob);
         XCTAssertNil(_system.snapshot.volumeDecibels);
-        [_system stop];
+        [self stopSystem];
     }
 }
 
@@ -1448,7 +1560,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return [snapshot.mutedHardwareIDs containsObject:self->_left.hardwareID] && snapshot.idle;
     }];
-    [_system stop];
+    [self stopSystem];
     // The leases lapse, and the monitor forgets its mute, as one switched
     // off and on would.
     [_bus perform:^{
@@ -1603,15 +1715,14 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     __block NSUInteger fewest = 2;
     __block BOOL anyMissed = NO;
     QLMSystem *system = _system;
-    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.5];
-    while ([until timeIntervalSinceNow] > 0) {
+    [_time runUntil:^BOOL {
         QLMSnapshot *snapshot = system.snapshot;
         fewest = MIN(fewest, snapshot.monitors.count);
         for (QLMMonitorState *monitor in snapshot.monitors) {
             anyMissed = anyMissed || monitor.missedPolls > 0 || monitor.offline;
         }
-        [NSThread sleepForTimeInterval:0.01];
-    }
+        return NO;
+    } within:0.5];
     XCTAssertNotNil(system.snapshot.adapterError);
     [_bus perform:^{
         self->_bus.busyReason = nil;
@@ -1652,7 +1763,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 // while not running completes at once.
 - (void)testAStopCompletesOnceTheAdapterIsClosed {
     [self startWithKnob:@(-600) volume:@(-40)];
-    XCTestExpectation *stopped = [self expectationWithDescription:@"stopped"];
+    __block BOOL stopped = NO;
     QLMSystem *system = _system;
     QLMFakeBus *bus = _bus;
     QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
@@ -1661,15 +1772,12 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         XCTAssertTrue(NSThread.isMainThread);
         XCTAssertFalse(system.snapshot.running);
         XCTAssertEqualObjects(bus.sentMessages.lastObject, knobRecord);
-        [stopped fulfill];
+        stopped = YES;
     }];
-    [self waitForExpectations:@[stopped] timeout:5];
-
-    XCTestExpectation *again = [self expectationWithDescription:@"again"];
-    [_system stopWithCompletion:^{
-        [again fulfill];
+    [self waitUntil:^BOOL {
+        return stopped;
     }];
-    [self waitForExpectations:@[again] timeout:5];
+    [self stopSystem];
 }
 
 // After a restart, a monitor that still holds its lease never answers the
@@ -1836,12 +1944,14 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     NSArray<NSData *> *expected = [[self sequenceFor:group snapshot:ready] switchWithBlocks:[self blocksOf:group]
                                                                                     volume:QLMCommandVolume(-10, 0)];
     NSUInteger before = _bus.sentMessages.count;
-    XCTestExpectation *done = [self expectationWithDescription:@"switch"];
+    __block BOOL done = NO;
     [_system switchToGroup:group completion:^(NSError *error) {
         XCTAssertNil(error);
-        [done fulfill];
+        done = YES;
     }];
-    [self waitForExpectations:@[done] timeout:5];
+    [self waitUntil:^BOOL {
+        return done;
+    }];
     XCTAssertEqualObjects([self waitForApplyFrames:expected.count from:before], expected);
 }
 
@@ -1853,19 +1963,20 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForDiscovery];
     [_system setVolumeDecibels:-30];
     QLMSetupGroup *group = [self mainsGroup];
-    XCTestExpectation *firstDone = [self expectationWithDescription:@"first"];
-    XCTestExpectation *secondDone = [self expectationWithDescription:@"second"];
+    __block NSUInteger done = 0;
     __block NSError *firstError = nil;
     __block NSError *secondError = nil;
     [_system applyGroup:group completion:^(NSError *error) {
         firstError = error;
-        [firstDone fulfill];
+        done += 1;
     }];
     [_system applyGroup:group completion:^(NSError *error) {
         secondError = error;
-        [secondDone fulfill];
+        done += 1;
     }];
-    [self waitForExpectations:@[firstDone, secondDone] timeout:5];
+    [self waitUntil:^BOOL {
+        return done == 2;
+    }];
     XCTAssertNil(firstError);
     XCTAssertEqual(secondError.code, QLMSystemErrorAlreadyApplying);
 }

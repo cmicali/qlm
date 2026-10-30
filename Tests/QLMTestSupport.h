@@ -7,6 +7,7 @@
 
 #import "QLMAdapter.h"
 #import "QLMCapture.h"
+#import "QLMClock.h"
 #include "QLMFrame.h"
 #import "QLMSetup.h"
 
@@ -68,7 +69,7 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
 - (instancetype)initWithCapture:(QLMCapture *)capture;
 
-@property (nonatomic, readonly, nullable) QLMReportLink *link;  // made by startOnQueue:
+@property (nonatomic, readonly, nullable) QLMReportLink *link;  // made by startOnQueue:clock:
 @property (atomic) NSTimeInterval replyDelay;                   // 1 ms
 @property (atomic) NSTimeInterval nextReplyDelay;               // above 0: the next reply's delay, once
 @property (atomic) BOOL silent;
@@ -83,11 +84,45 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
 @end
 
+// A clock that moves only when a test advances it, or while a caller waits
+// on it: a wait runs each timer due, one at a time, until its semaphore is
+// signalled or its time runs out. A hop waits until the clock settles,
+// advances, or waits, so the caller's own steps take no time, and a reply
+// never beats the caller's next step. Every hop and timer it runs joins one
+// dispatch group, so it can wait until the work a timer starts is done.
+// Time and order then depend on the test alone, never on the host.
+@interface QLMVirtualClock : NSObject <QLMClock>
+
+// Runs the hops waiting, and the work they start, with time still. A hop to
+// the main queue runs in place when the main thread settles. Raises if the
+// work is not done within a generous deadline, which only a hang would reach.
+- (void)settle;
+// Settles, then runs each timer due within `seconds`, one at a time, until
+// the condition holds. Timers run in order of time, the earlier first when
+// two are due together, with now at each one's time, and each one's work
+// settles before the condition is checked again. When the condition never
+// holds, now ends `seconds` on, and this returns NO.
+- (BOOL)runUntil:(BOOL (^)(void))condition within:(NSTimeInterval)seconds;
+// Runs every timer due within `seconds`, as runUntil:within: does. Now ends
+// `seconds` on.
+- (void)advanceBy:(NSTimeInterval)seconds;
+// Moves now on by `seconds` with no timer run, as when the queues stall.
+// Then each timer that came due runs once, in order, as GCD runs a missed
+// timer once when its queue frees up. A repeating one keeps its beat.
+- (void)stallFor:(NSTimeInterval)seconds;
+
+@end
+
 @interface XCTestCase (QLMAdapter)
 
-// Sends on the adapter's queue and waits for the handler, failing the test
-// if it never comes. Returns whether a monitor answered.
-- (BOOL)qlm_send:(QLMMessage)message to:(id<QLMAdapter>)adapter queue:(dispatch_queue_t)queue reply:(nullable QLMMessage *)reply
+// Sends on the adapter's queue, then moves the clock one timer at a time
+// until the handler comes, so the test's next step comes at that moment.
+// Fails the test if it never comes. Returns whether a monitor answered.
+- (BOOL)qlm_send:(QLMMessage)message
+              to:(id<QLMAdapter>)adapter
+           queue:(dispatch_queue_t)queue
+           clock:(QLMVirtualClock *)clock
+           reply:(nullable QLMMessage *)reply
            error:(NSError **)error;
 
 @end

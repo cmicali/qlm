@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 
+#import "QLMClock.h"
 #include "QLMFrame.h"
 #include "QLMReport.h"
 
@@ -17,9 +18,9 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
     QLMAdapterErrorBadReply,      // the reply did not read
 };
 
-// One handler call per send, on the queue given to startOnQueue:. `reply` is
-// NULL when no monitor answered, which is not an error. The pointer is valid
-// only during the call.
+// One handler call per send, on the queue given to startOnQueue:clock:.
+// `reply` is NULL when no monitor answered, which is not an error. The
+// pointer is valid only during the call.
 typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSError *_Nullable error);
 
 // What System drives: the GLM network adapter over HID, a replay of a capture,
@@ -27,7 +28,8 @@ typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSErro
 // waits for its handler before sending the next.
 @protocol QLMAdapter <NSObject>
 
-- (void)startOnQueue:(dispatch_queue_t)queue;
+// Every timer and hop the adapter makes goes through the clock, System's.
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock;
 - (void)stop;
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
 

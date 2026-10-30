@@ -7,6 +7,7 @@
 #import "QLMControl.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMSystem.h"
+#import "QLMTestSupport.h"
 
 // qlmctl's gates before a control goes over USB, and its dry run. AGENTS.md's
 // Safety rules set the gates. The dry run's frames are System's own, so these
@@ -15,7 +16,20 @@
 @interface QLMControlTests : XCTestCase
 @end
 
-@implementation QLMControlTests
+@implementation QLMControlTests {
+    QLMVirtualClock *_time;
+}
+
+- (void)setUp {
+    [super setUp];
+    _time = [[QLMVirtualClock alloc] init];
+}
+
+// Runs what the dry runs left on the clock, their stops among it.
+- (void)tearDown {
+    [_time settle];
+    [super tearDown];
+}
 
 - (QLMControlOptions *)read:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments {
     NSString *problem = nil;
@@ -152,11 +166,33 @@ static NSData *QLMRecord(QLMMessage message) {
     return QLMAdapterRecord(&message);
 }
 
+// The dry run's waits move the test's clock, so its time is the test's own.
+- (QLMSystemSettings *)dryRunSettings {
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.clock = _time;
+    return settings;
+}
+
+// An action that is done before it returns, as when qlmctl's thread is slow
+// to come back from it. The wait's handler is in place first, so it sees the
+// mute land, and the dry run does not run out.
+- (void)testAnActionDoneBeforeItReturnsStillShows {
+    NSData *target = QLMDiscovered().monitors[0].hardwareID;  // at 09
+    NSArray<NSData *> *records = [self recordsOf:^int(QLMSystem *system, QLMSnapshot *found) {
+        [system setMuted:YES forMonitorWithHardwareID:target];
+        [self->_time settle];
+        return 0;
+    } effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && [snapshot.mutedHardwareIDs containsObject:target];
+    })];
+    XCTAssertTrue([records containsObject:QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))], @"%@", records);
+}
+
 - (void)testADryRunAddressesEachMonitorAsDiscoveryFoundIt {
     QLMSnapshot *discovered = QLMDiscovered();
     NSData *target = discovered.monitors[0].hardwareID;
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {
+    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [self dryRunSettings], ^int(QLMSystem *system, QLMSnapshot *found) {
         [system setMuted:YES forMonitorWithHardwareID:target];
         return 0;
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
@@ -178,7 +214,7 @@ static NSData *QLMRecord(QLMMessage message) {
 }
 
 - (void)testADryRunLeavesOutDiscoveryAndKeepsTheCeiling {
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    QLMSystemSettings *settings = [self dryRunSettings];
     settings.ceilingDecibels = -40;
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, ^int(QLMSystem *system, QLMSnapshot *found) {
@@ -217,7 +253,7 @@ static NSData *QLMRecord(QLMMessage message) {
 // What `action` sends on the dry run's mirror of QLMDiscovered, its monitors
 // at 09 and 05, with no cycle inside it.
 - (NSArray<NSData *> *)recordsOf:(QLMControlAction)action effect:(QLMSnapshotTest)effect {
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    QLMSystemSettings *settings = [self dryRunSettings];
     settings.ceilingDecibels = -35;
     settings.cycleInterval = 10;
     int status = -1;
@@ -324,7 +360,7 @@ static NSArray<NSData *> *QLMPair(void) {
     XCTAssertEqualObjects(records, [round arrayByAddingObjectsFromArray:round]);
 
     int status = -1;
-    XCTAssertNil(QLMDryRunRecords(discovered, [[QLMSystemSettings alloc] init], QLMWithMuted(@[@"9999"], mute), ^BOOL(QLMSnapshot *snapshot) {
+    XCTAssertNil(QLMDryRunRecords(discovered, [self dryRunSettings], QLMWithMuted(@[@"9999"], mute), ^BOOL(QLMSnapshot *snapshot) {
         return YES;
     }, &status));
     XCTAssertEqual(status, EX_DATAERR);
@@ -376,7 +412,7 @@ static QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable kn
 
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [self dryRunSettings], ^int(QLMSystem *system, QLMSnapshot *found) {
         return EX_DATAERR;
     }, ^BOOL(QLMSnapshot *snapshot) {
         return YES;

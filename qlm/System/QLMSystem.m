@@ -31,6 +31,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
         _adapterPollInterval = 0.107;
         _discoversMonitors = YES;
         _mutedHardwareIDs = [NSSet set];
+        _clock = QLMRealClock.shared;
     }
     return self;
 }
@@ -47,6 +48,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.mutedHardwareIDs = self.mutedHardwareIDs;
     copy.mutingAll = self.mutingAll;
     copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
+    copy.clock = self.clock;
     return copy;
 }
 
@@ -179,16 +181,18 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
-    dispatch_source_t _cycleTimer;
+    id<QLMClock> _clock;  // the settings', which every replacement keeps
+    id<QLMTimer> _cycleTimer;
     BOOL _cycleQueued;
+    BOOL _probing;  // a lease chain runs
     QLMTrackedAdapter *_adapterRecord;
     NSError *_adapterError;
-    dispatch_source_t _adapterTimer;
+    id<QLMTimer> _adapterTimer;
     NSUInteger _adapterPollsQueued;
     QLMKnob *_knob;
     NSNumber *_volumeDecibels;
     BOOL _volumeSendPending;
-    NSDate *_lastVolumeSend;
+    NSTimeInterval _lastVolumeSend;  // on the clock; -INFINITY before the first
     BOOL _dimmed;
     // The hardware IDs the user muted. Kept by ID, so a mute outlives a
     // lease that lapses and the monitor's next lease.
@@ -212,6 +216,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _queue = dispatch_queue_create("com.commonwealthrecordings.qlm.system", DISPATCH_QUEUE_SERIAL);
         _adapter = adapter;
         _settings = [settings copy];
+        _clock = _settings.clock;
+        _lastVolumeSend = -INFINITY;
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
@@ -227,20 +233,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)dealloc {
-    if (_cycleTimer != NULL) {
-        dispatch_source_cancel(_cycleTimer);
-    }
-    if (_adapterTimer != NULL) {
-        dispatch_source_cancel(_adapterTimer);
-    }
+    [_cycleTimer cancel];
+    [_adapterTimer cancel];
 }
 
 // Every public method's work runs here, so the publishing rule holds after it.
 - (void)onQueue:(dispatch_block_t)block {
-    dispatch_async(_queue, ^{
+    [_clock async:_queue run:^{
         block();
         [self publishIfSettled];
-    });
+    }];
 }
 
 - (void)setSnapshotHandler:(QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue {
@@ -250,9 +252,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_snapshotQueue = queue;
         if (copied != nil) {
             QLMSnapshot *latest = self.snapshot;
-            dispatch_async(queue, ^{
+            [self->_clock async:queue run:^{
                 copied(latest);
-            });
+            }];
         }
     }];
 }
@@ -274,7 +276,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)beginRunning {
     _running = YES;
     _stoppedHandBack = nil;
-    [_adapter startOnQueue:_queue];
+    [_adapter startOnQueue:_queue clock:_clock];
     _dirty = YES;
     // GLM's opening, less what qlm never sends: the adapter's status, its
     // system info, its serial, then the cycle (captures/startup-idle,
@@ -285,23 +287,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self runCycle];
 
     __weak QLMSystem *weakSelf = self;
-    _cycleTimer = [self timerEvery:self.settings.cycleInterval run:^{
+    _cycleTimer = [_clock every:self.settings.cycleInterval queue:_queue run:^{
         [weakSelf runCycle];
     }];
     if (self.settings.adapterPollInterval > 0) {
-        _adapterTimer = [self timerEvery:self.settings.adapterPollInterval run:^{
+        _adapterTimer = [_clock every:self.settings.adapterPollInterval queue:_queue run:^{
             [weakSelf pollAdapter];
         }];
     }
-}
-
-- (dispatch_source_t)timerEvery:(NSTimeInterval)seconds run:(dispatch_block_t)block {
-    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, _queue);
-    uint64_t interval = (uint64_t)(seconds * (double)NSEC_PER_SEC);
-    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), interval, interval / 10);
-    dispatch_source_set_event_handler(timer, block);
-    dispatch_resume(timer);
-    return timer;
 }
 
 - (void)stop {
@@ -343,14 +336,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)cancelTimers {
-    if (_cycleTimer != NULL) {
-        dispatch_source_cancel(_cycleTimer);
-        _cycleTimer = NULL;
-    }
-    if (_adapterTimer != NULL) {
-        dispatch_source_cancel(_adapterTimer);
-        _adapterTimer = NULL;
-    }
+    [_cycleTimer cancel];
+    _cycleTimer = nil;
+    [_adapterTimer cancel];
+    _adapterTimer = nil;
 }
 
 // Timers are cancelled already. Drops what was queued during a hand-back.
@@ -362,6 +351,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // A reply that never comes must not stall the next start.
     _inFlight = NO;
     _cycleQueued = NO;
+    _probing = NO;
     _adapterPollsQueued = 0;
     [_adapter stop];
     [_monitors removeAllObjects];
@@ -383,7 +373,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSArray<dispatch_block_t> *completions = [_stopCompletions copy];
     [_stopCompletions removeAllObjects];
     for (dispatch_block_t completion in completions) {
-        dispatch_async(dispatch_get_main_queue(), completion);
+        [_clock async:dispatch_get_main_queue() run:completion];
     }
 }
 
@@ -480,16 +470,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)hold:(NSTimeInterval)seconds {
     NSUInteger run = _run;
     dispatch_queue_t queue = _queue;
+    id<QLMClock> clock = _clock;
     __weak QLMSystem *weakSelf = self;
     [self enqueue:^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), queue, ^{
+        [clock after:seconds queue:queue run:^{
             QLMSystem *strongSelf = weakSelf;
             // TRAP: a stop empties the line. A hold from before it must not
             // end an item of the next start.
             if (strongSelf != nil && strongSelf->_run == run) {
                 [strongSelf finishItem:nil];
             }
-        });
+        }];
     }];
 }
 
@@ -584,12 +575,24 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // A probe is answered by one monitor without a lease. It gets the next
 // session ID, then its identity is read, and the probe repeats for the next.
 // Once no monitor answers, the new ones get the active group's blocks.
+// TRAP: only one lease chain runs. A second probe, from a cycle inside the
+// chain, would reach the monitor the chain's probe found before its lease
+// goes out, and that monitor would answer both and get two leases.
 - (void)probe {
+    if (_probing) {
+        return;
+    }
+    _probing = YES;
+    [self probeNext];
+}
+
+- (void)probeNext {
     [self send:QLMCommandProbe() then:^(const QLMMessage *reply, NSError *error) {
         uint8_t hardwareID[3];
         if (reply != NULL && QLMReplyHardwareID(reply, hardwareID)) {
             [self assignSessionTo:hardwareID];
         } else {
+            self->_probing = NO;
             [self applyToNewMonitors];
         }
     }];
@@ -606,21 +609,24 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     uint8_t session = [self takeSession];
     if (session == 0) {
+        _probing = NO;
         return;
     }
     [self send:QLMCommandAssignSession(hardwareID, session) then:^(const QLMMessage *reply, NSError *error) {
         uint8_t acked = 0;
         if (reply != NULL && (!QLMReplySessionAck(reply, &acked) || acked != session)) {
+            self->_probing = NO;
             return;
         }
         // A lost ack may hide a lease the monitor took, and then it never
         // answers a probe again. So it is tracked anyway. If it holds the
         // lease its polls answer; if not, the next probe finds it.
         if (reply == NULL && !QLMSendWentOut(error)) {
+            self->_probing = NO;
             return;
         }
         [self track:identity session:session serial:nil];
-        [self probe];
+        [self probeNext];
     }];
 }
 
@@ -652,8 +658,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return nil;
 }
 
-// A monitor that holds `session`, from a lease or one taken back.
+// A monitor that holds `session`, from a lease or one taken back. It
+// replaces any record of the same monitor, whose lease is gone.
 - (void)track:(NSData *)identity session:(uint8_t)session serial:(nullable NSString *)serial {
+    QLMMonitorRecord *stale = [self monitorWithHardwareID:identity];
+    if (stale != nil) {
+        [_monitors removeObject:stale];
+    }
     // TRAP: a monitor just switched on plays at its own stored level until a
     // host sends one, and that can be loud
     // (captures/qlm-control-first/notes.md, after the capture).
@@ -804,7 +815,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_knob reset];
         return;
     }
-    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:NSProcessInfo.processInfo.systemUptime volume:_volumeDecibels];
+    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:_clock.now volume:_volumeDecibels];
     if (volume == nil) {
         return;
     }
@@ -914,14 +925,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return;
     }
     NSTimeInterval interval = self.settings.volumeInterval;
-    NSTimeInterval since = _lastVolumeSend == nil ? interval : -[_lastVolumeSend timeIntervalSinceNow];
+    NSTimeInterval since = _clock.now - _lastVolumeSend;
     if (since >= interval) {
         [self sendVolume];
         return;
     }
     _volumeSendPending = YES;
     __weak QLMSystem *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((interval - since) * (double)NSEC_PER_SEC)), _queue, ^{
+    [_clock after:interval - since queue:_queue run:^{
         QLMSystem *strongSelf = weakSelf;
         if (strongSelf == nil) {
             return;
@@ -930,7 +941,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (strongSelf->_running) {
             [strongSelf sendVolume];
         }
-    });
+    }];
 }
 
 - (QLMMessage)volumeMessage {
@@ -940,7 +951,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (dispatch_block_t)volumeItem {
-    _lastVolumeSend = [NSDate date];
+    _lastVolumeSend = _clock.now;
     return [self itemSending:[self volumeMessage] then:nil];
 }
 
@@ -1174,10 +1185,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // `switching`: GLM's switch even when no group is active yet.
 - (void)applyGroup:(QLMSetupGroup *)group switching:(BOOL)switching completion:(void (^)(NSError *_Nullable error))completion {
+    id<QLMClock> clock = _clock;
     void (^finish)(NSError *) = ^(NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        [clock async:dispatch_get_main_queue() run:^{
             completion(error);
-        });
+        }];
     };
     [self onQueue:^{
         NSError *refusal = nil;
@@ -1272,7 +1284,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     };
 
     if (switching) {
-        _lastVolumeSend = [NSDate date];
+        _lastVolumeSend = _clock.now;
         for (QLMMonitorRecord *monitor in _monitors) {
             monitor.configured = YES;
         }
@@ -1385,9 +1397,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;
     if (handler != nil && _snapshotQueue != NULL) {
-        dispatch_async(_snapshotQueue, ^{
+        [_clock async:_snapshotQueue run:^{
             handler(snapshot);
-        });
+        }];
     }
 }
 

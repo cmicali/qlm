@@ -24,6 +24,7 @@
 
 @implementation QLMFakeBus {
     dispatch_queue_t _queue;
+    id<QLMClock> _clock;
     NSMutableArray<NSData *> *_sent;
 }
 
@@ -88,8 +89,9 @@
     }
 }
 
-- (void)startOnQueue:(dispatch_queue_t)queue {
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
     _queue = queue;
+    _clock = clock;
 }
 
 - (void)stop {
@@ -103,13 +105,13 @@
     uint8_t report[QLMReportLength];
     NSError *refusal = nil;
     if (!QLMAdapterPackReport(&message, report, &refusal)) {
-        dispatch_async(queue, ^{
+        [_clock async:queue run:^{
             handler(NULL, refusal);
-        });
+        }];
         return;
     }
 
-    dispatch_async(queue, ^{
+    [_clock async:queue run:^{
         NSString *busy = self.busyReason;
         if (busy != nil) {
             handler(NULL, QLMAdapterErrorMake(QLMAdapterErrorBusy, busy));
@@ -125,7 +127,7 @@
         QLMMessage reply;
         BOOL answered = [self replyTo:&message into:&reply];
         handler(answered ? &reply : NULL, nil);
-    });
+    }];
 }
 
 static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated) {

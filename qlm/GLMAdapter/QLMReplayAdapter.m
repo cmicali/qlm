@@ -2,6 +2,7 @@
 
 @implementation QLMReplayAdapter {
     dispatch_queue_t _queue;
+    id<QLMClock> _clock;
     // For each distinct output report, its unplayed exchanges, in order.
     NSMutableDictionary<NSData *, NSMutableArray<QLMCaptureExchange *> *> *_unplayed;
     NSMutableArray<NSData *> *_unmatched;
@@ -41,8 +42,9 @@
     }
 }
 
-- (void)startOnQueue:(dispatch_queue_t)queue {
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
     _queue = queue;
+    _clock = clock;
 }
 
 - (void)stop {
@@ -56,9 +58,9 @@
     uint8_t report[QLMReportLength];
     NSError *refusal = nil;
     if (!QLMAdapterPackReport(&message, report, &refusal)) {
-        dispatch_async(queue, ^{
+        [_clock async:queue run:^{
             handler(NULL, refusal);
-        });
+        }];
         return;
     }
     QLMCaptureExchange *exchange = nil;
@@ -75,9 +77,9 @@
 
     BOOL answered = exchange.answered;
     QLMMessage reply = answered ? exchange.reply : QLMMessageMake(0, NULL, 0);
-    dispatch_async(queue, ^{
+    [_clock async:queue run:^{
         handler(answered ? &reply : NULL, nil);
-    });
+    }];
 }
 
 @end

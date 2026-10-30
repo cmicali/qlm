@@ -191,8 +191,10 @@ static int QLMInfo(int argc, const char *argv[]) {
     if (system == nil) {
         return EX_UNAVAILABLE;
     }
-    [system start];
-    QLMSnapshot *result = QLMWaitForSnapshot(system, QLMInfoTimeout, ^BOOL(QLMSnapshot *snapshot) {
+    QLMSnapshot *result = QLMWaitForSnapshot(system, QLMInfoTimeout, ^BOOL {
+        [system start];
+        return YES;
+    }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.adapterError != nil || snapshot.adapter.identified;
     }) ?: system.snapshot;
     [system stop];
@@ -248,14 +250,17 @@ static int QLMDiscover(int argc, const char *argv[]) {
         return EX_UNAVAILABLE;
     }
     double seconds = QLMSecondsOption(argc, argv, 0);
-    [system start];
+    BOOL (^start)(void) = ^BOOL {
+        [system start];
+        return YES;
+    };
     QLMSnapshot *result = nil;
     if (seconds > 0) {
-        result = QLMWaitForSnapshot(system, seconds, ^BOOL(QLMSnapshot *snapshot) {
+        result = QLMWaitForSnapshot(system, seconds, start, ^BOOL(QLMSnapshot *snapshot) {
             return snapshot.adapterError != nil;
         }) ?: system.snapshot;
     } else {
-        result = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^BOOL(QLMSnapshot *snapshot) {
+        result = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, start, ^BOOL(QLMSnapshot *snapshot) {
             return snapshot.adapterError != nil || snapshot.allIdentified;
         }) ?: system.snapshot;
     }
@@ -316,10 +321,10 @@ static int QLMPoll(int argc, const char *argv[]) {
         fflush(stdout);
     } queue:printing];
     [system start];
-    long early = dispatch_semaphore_wait(failed, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)));
+    BOOL early = [system.settings.clock wait:failed timeout:seconds];
     [system stop];
     dispatch_sync(printing, ^{});
-    return early == 0 ? EX_UNAVAILABLE : 0;
+    return early ? EX_UNAVAILABLE : 0;
 }
 
 #pragma mark - The controls
@@ -430,8 +435,10 @@ static int QLMDryRunControl(QLMControlOptions *options, QLMSnapshot *discovered,
 // Runs the action once every monitor is identified, and stops as poll does.
 // A dry run stops the bus after discovery.
 static int QLMRunControl(QLMSystem *system, QLMControlOptions *options, QLMControlAction action, QLMSnapshotTest effect) {
-    [system start];
-    QLMSnapshot *discovered = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^BOOL(QLMSnapshot *snapshot) {
+    QLMSnapshot *discovered = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^BOOL {
+        [system start];
+        return YES;
+    }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.adapterError != nil || snapshot.allIdentified;
     });
     if (discovered == nil || discovered.adapterError != nil) {
@@ -454,17 +461,20 @@ static int QLMRunControl(QLMSystem *system, QLMControlOptions *options, QLMContr
         return QLMDryRunControl(options, discovered, action, effect);
     }
 
-    int status = action(system, discovered);
+    __block int status = 0;
+    QLMSnapshot *result = QLMWaitForSnapshot(system, QLMEffectTimeout, ^BOOL {
+        status = action(system, discovered);
+        return status == 0;
+    }, effect);
     BOOL sent = status == 0;
     if (sent) {
-        QLMSnapshot *result = QLMWaitForSnapshot(system, QLMEffectTimeout, effect);
         if (result == nil) {
             fputs("qlmctl: timed out waiting for the change to show\n", stderr);
             status = EX_TEMPFAIL;
         }
         QLMPrintControl(result ?: system.snapshot);
         if (options.seconds > 0) {
-            QLMWaitForSnapshot(system, options.seconds, ^BOOL(QLMSnapshot *snapshot) {
+            QLMWaitForSnapshot(system, options.seconds, nil, ^BOOL(QLMSnapshot *snapshot) {
                 return snapshot.adapterError != nil;
             });
         }
@@ -475,8 +485,10 @@ static int QLMRunControl(QLMSystem *system, QLMControlOptions *options, QLMContr
         }
     }
     // The stop may send the knob's level first, so wait for it.
-    [system stop];
-    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^BOOL(QLMSnapshot *snapshot) {
+    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^BOOL {
+        [system stop];
+        return YES;
+    }, ^BOOL(QLMSnapshot *snapshot) {
         return !snapshot.running;
     });
     if (sent && options.overUSB) {

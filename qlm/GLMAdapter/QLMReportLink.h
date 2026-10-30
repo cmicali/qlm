@@ -28,7 +28,10 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // called once, asynchronously, on the queue.
 @interface QLMReportLink : NSObject
 
-- (instancetype)initWithQueue:(dispatch_queue_t)queue writer:(QLMReportWriter)writer NS_DESIGNATED_INITIALIZER;
+// The clock runs the timeouts, and the hop that hands a reply over.
+- (instancetype)initWithQueue:(dispatch_queue_t)queue
+                        clock:(id<QLMClock>)clock
+                       writer:(QLMReportWriter)writer NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 // 0.1 s. The slowest reply in the captures took 11 ms: the adapter's own
