@@ -226,6 +226,32 @@ static NSData *QLMRecord(QLMMessage message) {
     return records;
 }
 
+// The round of 2B to both monitors, in the mirror's lease order, then
+// broadcast 2D 00 and 3D 00 00.
+static NSArray<NSData *> *QLMRoundAndPair(void) {
+    return @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueUnmuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueUnmuted)),
+             QLMRecord(QLMCommandInputPreamble()), QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
+}
+
+// qlmctl dim sends GLM's whole dim (captures/mute-dim, 51.24 s on and
+// 54.77 s off): the level it changes from, then the new level twice, a
+// round of 2B, and 2D 00 and 3D 00 00. qlm's first run set dim before the
+// volume, and sent the dimmed level alone (captures/qlm-control-first,
+// 538.3 s).
+- (void)testDimSendsGLMsWholeSequence {
+    NSData *level = QLMRecord(QLMCommandVolume(-43.5, -35));
+    NSData *dimmed = QLMRecord(QLMCommandDim(-43.5, -35));
+    for (NSNumber *on in @[@YES, @NO]) {
+        NSArray<NSData *> *records = [self recordsOf:QLMDimAction(on.boolValue, @(-43.5)) effect:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.idle && snapshot.dimmed == on.boolValue && [snapshot.volumeDecibels isEqual:@(-43.5)];
+        }];
+        NSData *from = on.boolValue ? level : dimmed;
+        NSData *to = on.boolValue ? dimmed : level;
+        NSArray<NSData *> *expected = [@[from, to, to] arrayByAddingObjectsFromArray:QLMRoundAndPair()];
+        XCTAssertEqualObjects(records, expected, @"dim %@", on.boolValue ? @"on" : @"off");
+    }
+}
+
 // qlmctl wake --volume sets the level, then wakes, so the wake ends with the
 // level and the pair, as GLM's does (captures/standby-wake, 47.24 s).
 - (void)testWakeWithAVolumeEndsWithIt {

@@ -60,7 +60,8 @@ static void QLMPrintUsage(FILE *stream) {
             "  - dim needs --volume, the level to dim from. qlm cannot read the level.\n"
             "  - wake without --volume sends no level, so each monitor comes back at the level it kept.\n"
             "  - One monitor first. mute --serial changes one monitor. As GLM does, it also restates every other\n"
-            "    monitor as unmuted. volume, dim, sleep, and wake are broadcasts, and every monitor obeys them.\n"
+            "    monitor as unmuted, and so do dim and a turn of the knob. A monitor muted in GLM plays again.\n"
+            "    volume, dim, sleep, and wake are broadcasts, and every monitor obeys them.\n"
             "    To try one on a single monitor, put the others in standby in GLM, then quit GLM. wake wakes\n"
             "    them all, so try it last.\n"
             "  - About 2.6 s after qlmctl exits, the adapter takes over with its own level, likely the knob's\n"
@@ -559,14 +560,7 @@ static int QLMDim(int argc, const char *argv[]) {
     }
     NSNumber *volume = options.volumeDecibels;
     // Without a volume, dim sends nothing, and the replay may pass.
-    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
-        // TRAP: dim first. A volume set first goes out undimmed.
-        [system setDimmed:options.on];
-        if (volume != nil) {
-            [system setVolumeDecibels:volume.doubleValue];
-        }
-        return 0;
-    }, ^BOOL(QLMSnapshot *snapshot) {
+    return QLMRunControlCommand(options, QLMDimAction(options.on, volume), ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && snapshot.dimmed == options.on && (volume == nil || [snapshot.volumeDecibels isEqualToNumber:volume]);
     });
 }

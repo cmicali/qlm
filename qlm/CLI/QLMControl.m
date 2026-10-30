@@ -258,6 +258,17 @@ static BOOL QLMIsDiscovery(NSData *record) {
     return record.length == 6 && QLMRecordIs(record, QLMCommandAssignSession(bytes + 2, bytes[5]));
 }
 
+QLMControlAction QLMDimAction(BOOL on, NSNumber *volumeDecibels) {
+    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        [system setDimmed:!on];
+        if (volumeDecibels != nil) {
+            [system setVolumeDecibels:volumeDecibels.doubleValue];
+        }
+        [system setDimmed:on];
+        return 0;
+    };
+}
+
 QLMControlAction QLMWakeAction(NSNumber *volumeDecibels) {
     return ^int(QLMSystem *system, QLMSnapshot *discovered) {
         if (volumeDecibels != nil) {
