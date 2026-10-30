@@ -30,6 +30,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
         _retryBurst = 4;
         _adapterPollInterval = 0.107;
         _discoversMonitors = YES;
+        _mutedHardwareIDs = [NSSet set];
     }
     return self;
 }
@@ -43,6 +44,8 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.retryBurst = self.retryBurst;
     copy.adapterPollInterval = self.adapterPollInterval;
     copy.discoversMonitors = self.discoversMonitors;
+    copy.mutedHardwareIDs = self.mutedHardwareIDs;
+    copy.mutingAll = self.mutingAll;
     return copy;
 }
 
@@ -179,7 +182,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
-        _mutedIDs = [NSMutableSet set];
+        _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
+        _adapterMuted = settings.mutingAll;
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
         _snapshot = [[QLMSnapshot alloc] init];
@@ -278,8 +282,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_adapterPollsQueued = 0;
         [self->_adapter stop];
         [self->_monitors removeAllObjects];
-        [self->_mutedIDs removeAllObjects];
-        self->_adapterMuted = NO;
         [self->_knob reset];
         self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
         self->_adapterError = nil;
@@ -835,6 +837,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }];
 }
 
+- (void)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs {
+    NSSet<NSData *> *copied = [hardwareIDs copy];
+    [self onQueue:^{
+        [self->_mutedIDs unionSet:copied];
+        self->_dirty = YES;
+    }];
+}
+
 - (void)setAllMuted:(BOOL)muted {
     [self onQueue:^{
         if (!self->_running) {
@@ -1177,6 +1187,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.idle = [self isIdle];
     snapshot.allIdentified = allIdentified;
     snapshot.allMuted = allMuted;
+    snapshot.mutedHardwareIDs = [_mutedIDs copy];
+    snapshot.mutingAll = _adapterMuted;
     snapshot.anyOn = anyOn;
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;

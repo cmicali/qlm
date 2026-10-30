@@ -56,6 +56,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) BOOL idle;
 @property (nonatomic, readwrite) BOOL allIdentified;
 @property (nonatomic, readwrite) BOOL allMuted;
+@property (nonatomic, readwrite) NSSet<NSData *> *mutedHardwareIDs;
+@property (nonatomic, readwrite) BOOL mutingAll;
 @property (nonatomic, readwrite) BOOL anyOn;
 
 @end

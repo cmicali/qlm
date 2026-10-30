@@ -1386,6 +1386,64 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(sent[leased + 1], QLMAdapterRecord(&volume));
 }
 
+// The mute record outlives a stop. The next start knows every mute, and a
+// monitor leased again hears its mute after its first poll.
+- (void)testTheMuteRecordOutlivesAStop {
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.mutedHardwareIDs containsObject:self->_left.hardwareID] && snapshot.idle;
+    }];
+    [_system stop];
+    // The leases lapse, and the monitor forgets its mute, as one switched
+    // off and on would.
+    [_bus perform:^{
+        self->_left.muteValue = QLMMuteValueUnmuted;
+        self->_left.session = 0;
+        self->_right.session = 0;
+    }];
+    [_system start];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+    }];
+    XCTAssertEqualObjects(again.mutedHardwareIDs, [NSSet setWithObject:_left.hardwareID]);
+    XCTAssertTrue(QLMFindMonitor(again, _left.hardwareID).muted);
+    [_bus perform:^{
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+    }];
+}
+
+// System starts from the record its settings give, and adds to it with
+// recordMutedHardwareIDs:, which sends nothing. Every round after says
+// muted for those monitors.
+- (void)testSystemStartsFromTheMuteRecordItIsGiven {
+    _settings.mutedHardwareIDs = [NSSet setWithObject:_left.hardwareID];
+    [self startSystem];
+    QLMSnapshot *found = [self waitForDiscovery];
+    XCTAssertTrue(QLMFindMonitor(found, _left.hardwareID).muted);
+    XCTAssertFalse(QLMFindMonitor(found, _right.hardwareID).muted);
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system recordMutedHardwareIDs:[NSSet setWithObject:_right.hardwareID]];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.idle;
+    }];
+    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 0u);
+
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.dimmed;
+    } after:^{
+        [self->_system setVolumeDecibels:-30];
+        [self->_system setDimmed:YES];
+    }];
+    NSArray<NSData *> *mutes = [self sentWithOpcode:0x2B from:before];
+    XCTAssertGreaterThan(mutes.count, 0u);
+    for (NSData *mute in mutes) {
+        XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.
