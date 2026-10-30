@@ -73,11 +73,11 @@ Most of the protocol is public. Three independent projects mapped it, and two of
 
 ### The adapter is a thin bridge
 
-While a host is connected, the adapter passes each request to the monitor bus and returns one reply. [protocol.md](protocol.md#1-usb-and-hid) has the USB side, and its [Framing](protocol.md#2-framing) the bus frame.
+While a host is connected, the adapter passes each request to the monitor bus and returns one reply. [protocol.md](protocol.md#usb-and-hid) has the USB side, and its [Framing](protocol.md#framing) the bus frame.
 
 ### The host is the bus master
 
-While a host is connected, it runs discovery, the leases, the polls, the volume, and the configuration. About 2.6 s after the host goes quiet, the adapter takes over at its knob's position ([protocol.md](protocol.md#8-what-the-adapter-and-the-monitors-do-on-their-own)). [protocol.md](protocol.md#7-sequences) has each feature on the wire, step by step, with GLM's two kinds of group apply.
+While a host is connected, it runs discovery, the leases, the polls, the volume, and the configuration. About 2.6 s after the host goes quiet, the adapter takes over at its knob's position ([protocol.md](protocol.md#what-the-adapter-and-the-monitors-do-on-their-own)). [protocol.md](protocol.md#sequences) has each feature on the wire, step by step, with GLM's two kinds of group apply.
 
 ### The setup file
 
