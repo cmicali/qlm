@@ -107,18 +107,13 @@ static NSData *QLMHex(NSString *hex) {
     return data;
 }
 
-// The frames GLM sends that qlm's block leaves out. The allowlist refuses
-// all but 40 01, the subwoofer's routing for input 1, whose meaning no
-// capture shows.
+// The frames GLM sends that qlm's block leaves out: the 8351B's two, which
+// the allowlist refuses while its rate is unverified.
 static NSSet<NSData *> *QLMExtrasForClass(QLMSetupNodeClass nodeClass) {
-    switch (nodeClass) {
-    case QLMSetupNodeClassThreeWay:
+    if (nodeClass == QLMSetupNodeClassThreeWay) {
         return [NSSet setWithArray:@[QLMHex(@"43 00 02"), QLMHex(@"4B 00 00 00 01")]];
-    case QLMSetupNodeClassSubwoofer:
-        return [NSSet setWithArray:@[QLMHex(@"40 01 02 00 00"), QLMHex(@"3E 00 00"), QLMHex(@"42 00 00"), QLMHex(@"3C 00 00")]];
-    default:
-        return [NSSet set];
     }
+    return [NSSet set];
 }
 
 // How `pass` differs from `block`. None when the pass holds every setting of
@@ -158,7 +153,7 @@ static NSArray<NSString *> *QLMDifferences(QLMDSPBlock *block, QLMCapturedPass *
 // Each capture's DSP passes in order, as session and node serial, and the
 // group GLM applied. A monitor that wakes into the group is leased again
 // and gets a second pass at its new session. At startup GLM sends every
-// node its block, off ones included; blocksForGroup skips those.
+// node its block, off ones included.
 static const struct {
     const char *scenario;
     const char *group;
@@ -200,15 +195,6 @@ static NSDictionary<NSNumber *, NSString *> *QLMModelsInCapture(QLMCapture *capt
     return models;
 }
 
-static QLMSetupGroup *QLMGroupNamed(NSString *name) {
-    for (QLMSetupGroup *group in QLMReadFixtureSetup().groups) {
-        if ([group.name isEqualToString:name]) {
-            return group;
-        }
-    }
-    return nil;
-}
-
 @implementation QLMDSPBlockGoldenTests
 
 // Every pass in the table, with its scenario, group, node, and model.
@@ -217,7 +203,7 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
     NSMutableArray<QLMCapturedPass *> *passes = [NSMutableArray array];
     for (size_t s = 0; s < sizeof QLMScenarios / sizeof QLMScenarios[0]; s++) {
         NSString *scenario = @(QLMScenarios[s].scenario);
-        QLMSetupGroup *group = QLMGroupNamed(@(QLMScenarios[s].group));
+        QLMSetupGroup *group = QLMFixtureGroup(@(QLMScenarios[s].group));
         NSArray<NSString *> *expected = [@(QLMScenarios[s].passes) componentsSeparatedByString:@" "];
         QLMCapture *capture = QLMReadCapture(scenario, NULL);
         NSArray<QLMCapturedPass *> *captured = QLMPassesInCapture(capture);
@@ -291,6 +277,20 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
         checked += 1;
     }
     XCTAssertEqual(checked, 47u);
+}
+
+// A subwoofer's pass is its block in order, frame for frame.
+- (void)testSubwooferPassesAreTheBlockInOrder {
+    NSUInteger checked = 0;
+    for (QLMCapturedPass *pass in [self passes]) {
+        if (pass.node.nodeClass != QLMSetupNodeClassSubwoofer) {
+            continue;
+        }
+        NSArray<NSData *> *mine = [QLMDSPBlock blockForNode:pass.node inGroup:pass.group error:NULL].payloads;
+        XCTAssertEqualObjects(pass.payloads, mine, @"%@", pass);
+        checked += 1;
+    }
+    XCTAssertEqual(checked, 26u);
 }
 
 // GLM floors the level word. Four captured levels tell floor from round,

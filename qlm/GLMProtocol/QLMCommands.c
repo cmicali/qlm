@@ -202,3 +202,8 @@ QLMMessage QLMCommandRouting(uint8_t session, uint8_t inputIndex, uint8_t source
     const uint8_t payload[] = {0x40, inputIndex, source, pair, aesChannel};
     return QLMMessageMake(session, payload, sizeof payload);
 }
+
+QLMMessage QLMCommandSubwooferUnknown(uint8_t session, uint8_t opcode) {
+    const uint8_t payload[] = {opcode, 0x00, 0x00};
+    return QLMMessageMake(session, payload, sizeof payload);
+}

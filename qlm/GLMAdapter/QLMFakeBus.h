@@ -36,11 +36,9 @@ NS_ASSUME_NONNULL_BEGIN
 // Two 8330A, and a 7350A when asked, each answering with model and firmware.
 + (instancetype)demoBusWithSubwoofer:(BOOL)withSubwoofer;
 
-// The shape of a sentMessages entry: the address byte, then the payload.
-+ (NSData *)recordForSession:(uint8_t)session payload:(NSData *)payload;
-
 @property (nonatomic, readonly) NSArray<QLMFakeMonitor *> *monitors;
-// Every message sent, in order, while recordsSentMessages is YES (the default).
+// Every message sent, in order, as QLMAdapterRecord gives it, while
+// recordsSentMessages is YES (the default).
 @property (nonatomic, readonly) NSArray<NSData *> *sentMessages;
 @property (atomic) BOOL recordsSentMessages;
 @property (nonatomic) BOOL disconnected;  // every send fails

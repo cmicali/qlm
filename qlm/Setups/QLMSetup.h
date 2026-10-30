@@ -71,8 +71,13 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly, nullable) QLMSetupBand *lowShelf;   // group-level, host side
 @property (nonatomic, readonly, nullable) QLMSetupBand *highShelf;
 @property (nonatomic, readonly) NSArray<QLMSetupNode *> *nodes;
+// The nodes in the order of the setup's devices, the order of GLM's DSP pass
+// and its rounds of 2B. A node with no device follows, in node order. For a
+// group no reader made, the node order.
+@property (nonatomic, readonly) NSArray<QLMSetupNode *> *nodesInDeviceOrder;
 
 - (nullable QLMSetupNode *)nodeWithSerial:(NSString *)serial;
+- (nullable QLMSetupNode *)nodeWithHardwareID:(NSData *)hardwareID;
 
 @end
 

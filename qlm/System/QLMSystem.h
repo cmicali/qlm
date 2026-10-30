@@ -65,11 +65,13 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // change sends GLM's dim sequence, or nothing while no volume is set.
 - (void)setDimmed:(BOOL)dimmed;
 
-// Each sends two rounds of 2B to every leased monitor, restating each one's
-// mute state. Mute all also re-sends the volume and sets the adapter's own
-// mute, as GLM does. A mute holds by hardware ID until the user lifts it or
-// System stops, across a lease that lapses. A muted monitor leased again
-// hears its mute first, and no 2B System sends unmutes it.
+// Each sends two rounds of 2B, restating the state of every monitor that is
+// on: its mute in the active group, and GLM's 05 and 07 outside it. Mute all
+// also re-sends the volume and sets the adapter's own mute, as GLM does. A
+// mute holds by hardware ID until the user lifts it or System stops, across
+// a lease that lapses, and for a monitor that first appears while all are
+// muted. A muted monitor leased again, or one that was not on, hears its
+// state after its next poll that says on. No 2B System sends unmutes it.
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
 
@@ -79,11 +81,15 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)sleep;
 - (void)wake;
 
-// Ducks, wakes, sends each monitor its DSP block, and restores the volume
-// and mute. Refused, with nothing sent, for a node with an unverified design
-// rate or with no leased monitor. A group whose nodes are all off still
-// ducks, wakes, and restores the volume, with no per-monitor frames. The
-// completion runs on the main queue.
+// The first apply sends what GLM sends at launch: each leased monitor's
+// block in turn, off nodes included. Each one after is GLM's group switch:
+// the duck, the wake, the routing pass, the blocks of the nodes that are
+// on, the mute state, and the restore. QLMApplySequence has both. The group
+// stays active, across stop: a monitor leased later gets its block once the
+// probe finds no more, as GLM's do at a wake. Refused, with nothing sent,
+// for a node with a leased monitor whose block fails or whose design rate
+// is unverified, for a node that is on with no leased monitor, and while no
+// volume is set. The completion runs on the main queue.
 - (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
 
 @end

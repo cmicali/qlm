@@ -77,6 +77,10 @@
     }
 }
 
+// GLM's subwoofer block (captures/startup-idle, 8.846 to 9.022 s): prepare,
+// slot 0, delay, level, 10 01 09, the routing pair, 3E, 42, the routing pair,
+// crossover, then 3C, slot 0, and delay twice, the routing pair, 3E, the
+// twenty slots, input sync, and the routing pair.
 - (void)testSubwooferBlock {
     QLMSetup *setup = QLMReadFixtureSetup();
     QLMSetupGroup *group = setup.groups[0];
@@ -87,22 +91,68 @@
     XCTAssertNotNil(block, @"%@", error);
     XCTAssertEqual(block.designRate, 12000);
     XCTAssertTrue(block.rateVerified);
+    XCTAssertEqual(block.payloads.count, 44u);
     // Section 6: phase 150 degrees at an 85 Hz crossover is 235 samples.
     const uint8_t delay[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0xEB};
-    XCTAssertEqualObjects(block.payloads[1], QLMBytes(delay, sizeof delay));
+    NSData *delayed = QLMBytes(delay, sizeof delay);
     // Twenty peaks, slot 0 holding peak 1.
     uint8_t peak[QLMBiquadPackedSize];
     QLMBiquad peakBiquad = QLMBiquadPeak(node.bands[0].frequency, node.bands[0].gain, node.bands[0].q, 12000);
     QLMBiquadPack(&peakBiquad, peak);
-    XCTAssertEqual(memcmp((const uint8_t *)block.payloads[4].bytes + 3, peak, sizeof peak), 0);
+    NSData *slot0 = block.payloads[21];
+    XCTAssertEqual(memcmp((const uint8_t *)slot0.bytes + 3, peak, sizeof peak), 0);
     const uint8_t routing[] = {0x40, 0x00, 0x02, 0x00, 0x03};  // input 3: AES3 A+B
-    XCTAssertEqualObjects(block.payloads[26], QLMBytes(routing, sizeof routing));
+    const uint8_t second[] = {0x40, 0x01, 0x02, 0x00, 0x00};
+    NSArray<NSData *> *pair = @[QLMBytes(routing, sizeof routing), QLMBytes(second, sizeof second)];
+    XCTAssertEqualObjects(block.routingPayloads, pair);
+    const uint8_t crossover[] = {0x3B, 0x00, 0x55};
+    XCTAssertEqualObjects(block.crossoverPayload, QLMBytes(crossover, sizeof crossover));
+    const uint8_t prepare[] = {0x17, 0x01};
+    const uint8_t levelUnknown[] = {0x10, 0x01, 0x09, 0x00, 0x00, 0x00};
+    const uint8_t lfe3C[] = {0x3C, 0x00, 0x00};
+    const uint8_t lfe3E[] = {0x3E, 0x00, 0x00};
+    const uint8_t lfe42[] = {0x42, 0x00, 0x00};
+    const uint8_t sync[] = {0x3D, 0x00, 0x00};
+    NSMutableArray<NSData *> *expected = [NSMutableArray array];
+    [expected addObjectsFromArray:@[QLMBytes(prepare, 2), slot0, delayed, block.payloads[3], QLMBytes(levelUnknown, 6)]];
+    [expected addObjectsFromArray:pair];
+    [expected addObjectsFromArray:@[QLMBytes(lfe3E, 3), QLMBytes(lfe42, 3)]];
+    [expected addObjectsFromArray:pair];
+    [expected addObjectsFromArray:@[block.crossoverPayload, QLMBytes(lfe3C, 3), slot0, delayed, QLMBytes(lfe3C, 3), slot0, delayed]];
+    [expected addObjectsFromArray:pair];
+    [expected addObject:QLMBytes(lfe3E, 3)];
+    [expected addObjectsFromArray:[block.payloads subarrayWithRange:NSMakeRange(21, 20)]];
+    [expected addObject:QLMBytes(sync, 3)];
+    [expected addObjectsFromArray:pair];
+    XCTAssertEqualObjects(block.payloads, expected);
+    for (NSUInteger slot = 0; slot < 20; slot++) {
+        XCTAssertEqual(((const uint8_t *)block.payloads[21 + slot].bytes)[2], slot);
+    }
     XCTAssertEqual(block.warnings.count, 0u);
+}
+
+// A two-way's routing pass sends its routing frame alone.
+- (void)testTwoWayRoutingPayloads {
+    QLMSetupGroup *group = QLMReadFixtureSetup().groups[0];
+    QLMDSPBlock *block = [QLMDSPBlock blockForNode:group.nodes[0] inGroup:group error:NULL];
+    XCTAssertEqualObjects(block.routingPayloads, @[block.payloads.lastObject]);
+    XCTAssertEqualObjects(block.crossoverPayload, block.payloads[24]);
 }
 
 // The block for the node with `serial` in `group`.
 static QLMDSPBlock *QLMBlockForSerial(QLMSetupGroup *group, NSString *serial) {
     return [QLMDSPBlock blockForNode:[group nodeWithSerial:serial] inGroup:group error:NULL];
+}
+
+// The block's first delay frame, 10 02.
+static NSData *QLMDelayOf(QLMDSPBlock *block) {
+    for (NSData *payload in block.payloads) {
+        const uint8_t *bytes = payload.bytes;
+        if (payload.length == 6 && bytes[0] == 0x10 && bytes[1] == 0x02) {
+            return payload;
+        }
+    }
+    return nil;
 }
 
 // Source: captures/group-switch-main-2x1-main-4x2, the switch to Main 4x2.
@@ -113,18 +163,18 @@ static QLMDSPBlock *QLMBlockForSerial(QLMSetupGroup *group, NSString *serial) {
     QLMSetupGroup *group = QLMReadFixtureSetup().groups[0];
     QLMDSPBlock *rearRight = QLMBlockForSerial(group, @"1000005");
     const uint8_t rearRightDelay[] = {0x10, 0x02, 0x00, 0x00, 0x01, 0x20};  // 36.125 s, to 02
-    XCTAssertEqualObjects(rearRight.payloads[1], QLMBytes(rearRightDelay, sizeof rearRightDelay));
+    XCTAssertEqualObjects(QLMDelayOf(rearRight), QLMBytes(rearRightDelay, sizeof rearRightDelay));
     XCTAssertEqual(rearRight.warnings.count, 0u);
     const uint8_t left[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0x3B};  // 35.615 s, to 03
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000002").payloads[1], QLMBytes(left, sizeof left));
+    XCTAssertEqualObjects(QLMDelayOf(QLMBlockForSerial(group, @"1000002")), QLMBytes(left, sizeof left));
     const uint8_t rearLeft[] = {0x10, 0x02, 0x00, 0x00, 0x01, 0x20};  // 35.805 s, to 04
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000004").payloads[1], QLMBytes(rearLeft, sizeof rearLeft));
+    XCTAssertEqualObjects(QLMDelayOf(QLMBlockForSerial(group, @"1000004")), QLMBytes(rearLeft, sizeof rearLeft));
     const uint8_t sub[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0xEB};  // 36.441 s, to 05
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000006").payloads[1], QLMBytes(sub, sizeof sub));
+    XCTAssertEqualObjects(QLMDelayOf(QLMBlockForSerial(group, @"1000006")), QLMBytes(sub, sizeof sub));
     const uint8_t right[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0x00};  // 35.704 s, to 06
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000003").payloads[1], QLMBytes(right, sizeof right));
+    XCTAssertEqualObjects(QLMDelayOf(QLMBlockForSerial(group, @"1000003")), QLMBytes(right, sizeof right));
     const uint8_t center[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0xA5};  // 36.672 s, to 07
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000007").payloads[1], QLMBytes(center, sizeof center));
+    XCTAssertEqualObjects(QLMDelayOf(QLMBlockForSerial(group, @"1000007")), QLMBytes(center, sizeof center));
 }
 
 // Source: captures/startup-idle, at 8.857 s. GLM opened on Main 2x1 and sent
@@ -132,7 +182,7 @@ static QLMDSPBlock *QLMBlockForSerial(QLMSetupGroup *group, NSString *serial) {
 - (void)testSubwooferDelayMatchesTheCapturedStartup {
     QLMSetupGroup *group = QLMReadFixtureSetup().groups[2];
     const uint8_t sub[] = {0x10, 0x02, 0x00, 0x00, 0x01, 0x90};
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000006").payloads[1], QLMBytes(sub, sizeof sub));
+    XCTAssertEqualObjects(QLMDelayOf(QLMBlockForSerial(group, @"1000006")), QLMBytes(sub, sizeof sub));
 }
 
 // Source: captures/group-switch-main-2x1-main-4x2, the 40 frames of the
@@ -140,11 +190,11 @@ static QLMDSPBlock *QLMBlockForSerial(QLMSetupGroup *group, NSString *serial) {
 - (void)testAESRoutingMatchesTheCapturedSwitchToMain4x2 {
     QLMSetupGroup *group = QLMReadFixtureSetup().groups[0];
     const uint8_t inputTwo[] = {0x40, 0x00, 0x02, 0x00, 0x02};  // 36.423 s, to 02
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000005").payloads.lastObject, QLMBytes(inputTwo, sizeof inputTwo));
+    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000005").routingPayloads.firstObject, QLMBytes(inputTwo, sizeof inputTwo));
     const uint8_t inputOne[] = {0x40, 0x00, 0x02, 0x00, 0x01};  // 35.699 s, to 03
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000002").payloads.lastObject, QLMBytes(inputOne, sizeof inputOne));
+    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000002").routingPayloads.firstObject, QLMBytes(inputOne, sizeof inputOne));
     const uint8_t inputThree[] = {0x40, 0x00, 0x02, 0x00, 0x03};  // 36.515 s, to 05
-    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000006").payloads.lastObject, QLMBytes(inputThree, sizeof inputThree));
+    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000006").routingPayloads.firstObject, QLMBytes(inputThree, sizeof inputThree));
 }
 
 // No capture has a node on input 4, so the analog frame stays unverified.
@@ -174,16 +224,26 @@ static QLMDSPBlock *QLMBlockForSerial(QLMSetupGroup *group, NSString *serial) {
     XCTAssertTrue([block.warnings.firstObject containsString:@"96000"]);
 }
 
-- (void)testBlocksForGroupSkipNodesThatAreOff {
-    QLMSetup *setup = QLMReadFixtureSetup();
+// GLM sends a node that is off its block too (captures/startup-idle, 8.534
+// s), so every node gets one, keyed by its monitor's hardware ID.
+- (void)testBlocksByHardwareIDIncludeNodesThatAreOff {
+    QLMSetupGroup *twoByTwo = QLMReadFixtureSetup().groups[1];
     NSError *error = nil;
-    NSArray<QLMDSPBlock *> *all = [QLMDSPBlock blocksForGroup:setup.groups[0] error:&error];
-    XCTAssertEqual(all.count, 6u, @"%@", error);
-    NSArray<QLMDSPBlock *> *twoByTwo = [QLMDSPBlock blocksForGroup:setup.groups[1] error:&error];
-    XCTAssertEqual(twoByTwo.count, 4u, @"%@", error);
-    for (QLMDSPBlock *block in twoByTwo) {
-        XCTAssertTrue(block.node.on);
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [QLMDSPBlock blocksByHardwareIDForGroup:twoByTwo error:&error];
+    XCTAssertEqual(blocks.count, 6u, @"%@", error);
+    for (QLMSetupNode *node in twoByTwo.nodes) {
+        XCTAssertEqual(blocks[node.hardwareID].node, node);
+        XCTAssertEqual([twoByTwo nodeWithHardwareID:node.hardwareID], node);
     }
+    XCTAssertFalse(twoByTwo.nodes[0].on);
+
+    QLMSetupGroup *broken = [[QLMSetupGroup alloc] init];
+    QLMSetupNode *unknownClass = [[QLMSetupNode alloc] init];
+    unknownClass.className = @"FourwayGen3";
+    unknownClass.hardwareID = twoByTwo.nodes[0].hardwareID;
+    broken.nodes = @[twoByTwo.nodes[1], unknownClass];
+    XCTAssertNil([QLMDSPBlock blocksByHardwareIDForGroup:broken error:&error]);
+    XCTAssertEqual(error.code, QLMDSPBlockErrorClass);
 }
 
 - (void)testRefusals {
@@ -230,6 +290,25 @@ static QLMDSPBlock *QLMBlockForSerial(QLMSetupGroup *group, NSString *serial) {
     badInput.bands = group.nodes[0].bands;
     XCTAssertNil([QLMDSPBlock blockForNode:badInput inGroup:group error:&error]);
     XCTAssertEqual(error.code, QLMDSPBlockErrorInput);
+
+    // The plan's Risks table: a subwoofer whose LFE fields differ from every
+    // capture's is refused, since no capture maps 3C, 3E, and 42.
+    QLMSetupNode *sub = group.nodes[3];
+    for (NSString *key in @[@"lfePlus10", @"lfeChannel", @"lfeLevel", @"subwooferGroupID", @"lfeCrossoverFrequency"]) {
+        QLMSetupNode *changed = [[QLMSetupNode alloc] init];
+        changed.nodeClass = QLMSetupNodeClassSubwoofer;
+        changed.input = sub.input;
+        changed.bands = sub.bands;
+        changed.lfePlus10 = sub.lfePlus10;
+        changed.lfeChannel = sub.lfeChannel;
+        changed.lfeLevel = sub.lfeLevel;
+        changed.subwooferGroupID = sub.subwooferGroupID;
+        changed.lfeCrossoverFrequency = sub.lfeCrossoverFrequency;
+        XCTAssertNotNil([QLMDSPBlock blockForNode:changed inGroup:group error:&error], @"%@", error);
+        [changed setValue:@1 forKey:key];
+        XCTAssertNil([QLMDSPBlock blockForNode:changed inGroup:group error:&error], @"%@", key);
+        XCTAssertEqual(error.code, QLMDSPBlockErrorLFE, @"%@", key);
+    }
 }
 
 @end

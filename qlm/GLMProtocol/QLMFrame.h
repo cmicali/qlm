@@ -56,13 +56,16 @@ typedef enum {
 // The safety allowlist. True only for a payload qlm may send. A monitor's
 // flash commit (15), the test signals (05), the standalone settings
 // (3A 01, 3A 02, 3A 06), and the startup level (10 01 05) are never allowed.
-// Of 2D, only 2D 00 is, and the encoder sends it only as a broadcast.
+// Of 2D, only 2D 00 is, and the encoder sends it only as a broadcast. Of 3C,
+// 3E, and 42, only a payload of 00 00 is, and the encoder sends it only to a
+// session.
 bool QLMFrameAllows(const uint8_t *payload, size_t length);
 
 // Encodes a message as one bus frame: the address, the payload, the CRC
 // big-endian, then the flag, with 7E and 7D in the payload and CRC escaped
 // after the CRC is computed. Refuses a payload the allowlist rejects, an
-// address of 7D or 7E, and a 2D to any address but the broadcast.
+// address of 7D or 7E, a 2D to any address but the broadcast, and a 3C, 3E,
+// or 42 to any address but a session.
 QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t capacity, size_t *outLength);
 
 // Decodes one complete frame, which must end in the flag. It does not consult

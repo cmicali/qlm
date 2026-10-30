@@ -26,10 +26,13 @@ uint32_t QLMVolumeWordForDecibels(double decibels);
 double QLMVolumeDecibelsForWord(uint32_t word);
 
 // The values GLM sends on 2B: bit 0 is mute, bits 1 and 2 pick the LED color.
-// Mute all also sends the adapter, at QLMAddressReply, bit 0 alone.
+// A monitor outside the active group gets OutsideLead, then Outside. Mute all
+// also sends the adapter, at QLMAddressReply, bit 0 alone.
 enum {
     QLMMuteValueMuted = 0x03,
     QLMMuteValueUnmuted = 0x04,
+    QLMMuteValueOutsideLead = 0x05,
+    QLMMuteValueOutside = 0x07,
     QLMMuteValueAdapterMuted = 0x01,
     QLMMuteValueAdapterUnmuted = 0x00,
 };
@@ -82,5 +85,8 @@ QLMMessage QLMCommandPEQ(uint8_t session, uint8_t slot, const uint8_t coefficien
 QLMMessage QLMCommandCrossover(uint8_t session, uint16_t value);
 QLMMessage QLMCommandInputSync(uint8_t session);
 QLMMessage QLMCommandRouting(uint8_t session, uint8_t inputIndex, uint8_t source, uint8_t pair, uint8_t aesChannel);
+// 3C, 3E, or 42, then 00 00, as GLM sends each to a subwoofer. What they set
+// is unknown. Any other opcode gives a message the allowlist refuses.
+QLMMessage QLMCommandSubwooferUnknown(uint8_t session, uint8_t opcode);
 
 #endif
