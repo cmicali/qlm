@@ -37,14 +37,13 @@ EOF
 name=$(basename "$app" .app)
 echo "Asked $name to quit. Waiting up to $wait s."
 ticks=0
-for pid in $pids; do
-    while ps -p "$pid" >/dev/null 2>&1; do
-        if [ "$ticks" -ge $((wait * 10)) ]; then
-            echo "$name is still running. If it asks before it quits, answer it, or quit it from its menu. Then try again." >&2
-            exit 1
-        fi
-        sleep 0.1
-        ticks=$((ticks + 1))
-    done
+# ps -p succeeds while any pid in the list still runs.
+while ps -p "$pids" >/dev/null 2>&1; do
+    if [ "$ticks" -ge $((wait * 10)) ]; then
+        echo "$name is still running. If it asks before it quits, answer it, or quit it from its menu. Then try again." >&2
+        exit 1
+    fi
+    sleep 0.1
+    ticks=$((ticks + 1))
 done
 echo "$name quit."
