@@ -40,27 +40,30 @@ Set it up once:
 
 1. Enable SSH on the Pi, in Raspberry Pi Imager or with `sudo raspi-config`.
 2. From the repository on the Mac, copy the kit over: `scp -r tools/pi <user>@<host>:`
-3. On the Pi, run `sudo ./pi/setup.sh`. It installs the packages, builds usb-proxy, and enables the `qlm-proxy` service.
+3. On the Pi, run `sudo ./pi/setup.sh`. It installs the packages, builds usb-proxy with `tools/pi/usb-proxy.patch`, and enables the `qlm-proxy` service.
 4. Reboot the Pi if setup says so.
 
 Check that it works:
 
-- On the Pi, `systemctl status qlm-proxy` shows it running. `journalctl -u qlm-proxy -f` follows its log.
-- On the Mac, `ioreg -p IOUSB -w0 | grep -i genelec` lists the adapter. System Information's USB section shows it too.
-- GLM sees the adapter as if it were plugged in directly.
+- On the Pi, `systemctl status qlm-proxy` shows it running. `journalctl -u qlm-proxy -f` follows its log. While GLM runs, it logs each report it relays.
+- On the Mac, `ioreg -p IOUSB -w0 | grep "Gnet Adapter"` lists the adapter. System Information's USB section shows it too.
+- On the Pi, `vcgencmd get_throttled` shows the supply. `0x0` is clean. `0x50000` means it sagged since boot, often at boot itself. A low bit set, as in `0x50005`, means it is sagging now.
+- GLM sees the adapter as if it were plugged in directly, and finds the monitors.
 
 Record each scenario:
 
 1. With `qlm-proxy` running, on the Pi run `sudo ./pi/capture.sh <scenario>`. It prints the start time.
 2. Run the scenario in GLM. Press Ctrl-C on the Pi when done.
 3. Write `notes.md`: the time of each action and what GLM showed. Note that the capture went through the proxy.
-4. On the Mac, copy it back with the `scp` command the script prints. Then convert it, as below.
+4. On the Mac, run the `scp` and convert commands the script prints. The convert command names the adapter's device.
 
 Pi route caveats:
 
 - The Mac powers the Pi. A Mac port gives at most 15 W, so the Pi warns about its supply and caps its USB-A ports at 600 mA. That suffices for the adapter. If the Pi browns out, power it from the GPIO 5 V pins instead.
 - The proxy does not forward USB suspend. So `sleep-wake` shows what GLM sends, but the adapter never sees the Mac suspend. Mark that capture as proxied in `notes.md`. Do not treat it as the answer to what the adapter does on host sleep.
-- For `unplug`, unplug the adapter from the Pi, not the Pi from the Mac. That would power the Pi off. The adapter loses power and its host either way, and the proxy drops the Mac's side too.
+- For `unplug`, unplug the adapter from the Pi, not the Pi from the Mac. That would power the Pi off. The adapter loses power and its host either way, and the proxy drops the Mac's side too. The adapter comes back at a new device number. The converter's warning lists it. Pass `--device` once for each number.
+- The Pi shows the Mac a high-speed device, though the adapter is full speed. So the Mac polls every 125 µs, not every 1 ms. The reports and their order are unchanged, and usbmon records the adapter's side at its own speed.
+- When a capture starts, dumpcap reads the descriptors of every device on the bus. Those reads are standard USB requests, not frames. They show up as `#` lines at the top of `reports.txt`.
 - The Pi's own kernel may talk to the adapter before usb-proxy takes it over. Start each capture after `qlm-proxy` is running, and that traffic stays out.
 - Keep the adapter in the same USB-A port. Its bus number, which the capture records, belongs to the port.
 - The proxy only relays. It never sends a frame of its own, so AGENTS.md's bus rules hold.
@@ -75,10 +78,10 @@ Pi route caveats:
 
 ### Converting
 
-The converter reads both routes' captures:
+The converter reads both routes' captures. `--device BUS:DEV` keeps the adapter's traffic and drops the hub's. `capture.sh` prints the adapter's number.
 
 ```
-python3 -I tools/pcapng-to-reports.py captures/<scenario>/capture.pcapng > captures/<scenario>/reports.txt
+python3 -I tools/pcapng-to-reports.py --device 1:2 captures/<scenario>/capture.pcapng > captures/<scenario>/reports.txt
 ```
 
 ## Scenarios

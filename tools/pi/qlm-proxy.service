@@ -10,6 +10,9 @@ Type=simple
 ExecStart=/usr/local/bin/qlm-proxy
 Restart=always
 RestartSec=1
+# usb-proxy waits in a blocking ioctl and misses SIGTERM while the Mac is
+# quiet. It keeps no state, so a quick SIGKILL is safe.
+TimeoutStopSec=3
 
 [Install]
 WantedBy=multi-user.target

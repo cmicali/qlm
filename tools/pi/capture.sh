@@ -27,6 +27,7 @@ for device in /sys/bus/usb/devices/*; do
     if [ "$(cat "$device/idVendor" 2> /dev/null)" = 1781 ] &&
         [ "$(cat "$device/idProduct" 2> /dev/null)" = 0e39 ]; then
         bus=$(cat "$device/busnum")
+        devnum=$(cat "$device/devnum")
         break
     fi
 done
@@ -50,13 +51,22 @@ if [ -e "$file" ]; then
 fi
 mkdir -p "$dir"
 
-echo "Recording usbmon$bus to $file"
+echo "Recording usbmon$bus to $file. The adapter is device $bus:$devnum."
 echo "Started at $(date '+%Y-%m-%d %H:%M:%S %Z'). Press Ctrl-C to stop."
-# Ctrl-C stops dumpcap. This trap keeps the script alive to fix ownership.
+# Ctrl-C stops dumpcap, which then exits 0. This trap keeps the script alive
+# to fix ownership.
+# TRAP: dumpcap as root drops every capability but capture, so it cannot
+# enter a 0700 home. This shell opens the file instead.
 trap ':' INT
-dumpcap -q -i "usbmon$bus" -w "$file" || true
+status=0
+dumpcap -q -i "usbmon$bus" -w - > "$file" || status=$?
 trap - INT
 chown -R "$user:" "$home/captures"
+if [ "$status" -ne 0 ]; then
+    echo "dumpcap failed with status $status. $file is incomplete." >&2
+    exit 1
+fi
 echo "Stopped at $(date '+%Y-%m-%d %H:%M:%S %Z')."
 echo "On the Mac, from the repository:"
 echo "  scp -r $user@$(hostname).local:captures/$scenario captures/"
+echo "  python3 -I tools/pcapng-to-reports.py --device $bus:$devnum captures/$scenario/capture.pcapng > captures/$scenario/reports.txt"

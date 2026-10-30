@@ -1,6 +1,6 @@
 # qlm: the plan
 
-**Status: 2026-10-25. Everything that needs no adapter is built and tested against a fake bus. Nothing has touched real hardware. Phase 0 is next.**
+**Status: 2026-10-29. Everything that needs no adapter is built and tested against a fake bus. qlm itself has not touched real hardware. The Pi capture proxy relays GLM 5 to the real adapter, and GLM finds every monitor through it. The Phase 0 scenario captures are next.**
 
 ## Where things stand
 
@@ -11,7 +11,7 @@ Built, with 79 tests, every protocol fact named by its section of hlm's spec:
 - **System:** discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots.
 - **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block.
 - **The app and `qlmctl`:** both run over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
-- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
+- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`. A test capture through the Pi converts cleanly.
 
 Waiting on the captures:
 

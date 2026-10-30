@@ -27,12 +27,13 @@ case "$model" in
 esac
 
 # Clones a repository into a directory, or updates it, at a pinned commit.
+# Drops local changes, so a patch applies again on a re-run.
 checkout() {
     if [ ! -d "$2/.git" ]; then
         git clone --quiet "$1" "$2"
     fi
     git -C "$2" fetch --quiet origin
-    git -C "$2" checkout --quiet "$3"
+    git -C "$2" checkout --quiet --force "$3"
 }
 
 echo "Packages"
@@ -74,6 +75,10 @@ fi
 
 echo "usb-proxy"
 checkout https://github.com/AristoChen/usb-proxy "$opt/usb-proxy" "$usb_proxy_commit"
+# The patch fixes two relay bugs. usb-proxy held back every output report of
+# exactly 64 bytes, so GLM hung waiting for a reply. And it sent the host a
+# zero-length input report on each idle read timeout, once a second.
+git -C "$opt/usb-proxy" apply "$here/usb-proxy.patch"
 make -C "$opt/usb-proxy"
 install -m 755 "$opt/usb-proxy/usb-proxy" /usr/local/bin/usb-proxy
 

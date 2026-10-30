@@ -31,4 +31,6 @@ if ! present; then
     done
 fi
 echo "Relaying the adapter through $udc"
-exec /usr/local/bin/usb-proxy --device="$udc" --driver="$udc" --vendor_id=1781 --product_id=0e39
+# TRAP: under systemd, stdout is a pipe. Without line buffering, usb-proxy's
+# log reaches the journal late, and a crash loses it.
+exec stdbuf -oL /usr/local/bin/usb-proxy --device="$udc" --driver="$udc" --vendor_id=1781 --product_id=0e39
