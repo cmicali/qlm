@@ -25,23 +25,19 @@
     return options;
 }
 
-- (NSString *)refusal:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments {
+// The reason given must contain `text`, when there is one.
+- (void)refuse:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments mentions:(NSString *)text {
     NSString *problem = nil;
     XCTAssertNil([QLMControlOptions optionsForCommand:command arguments:arguments problem:&problem], @"%@", arguments);
     XCTAssertNotNil(problem, @"%@", arguments);
-    return problem ?: @"";
-}
-
-- (void)assertRefusal:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments mentions:(NSString *)text {
-    NSString *problem = [self refusal:command arguments:arguments];
-    XCTAssertTrue([problem containsString:text], @"%@", problem);
+    XCTAssertTrue(text == nil || [problem containsString:text], @"%@", problem);
 }
 
 #pragma mark - The gates
 
 - (void)testOverUSBVolumeAndDimNeedACeiling {
-    [self assertRefusal:QLMControlCommandVolume arguments:@[@"-50"] mentions:@"--ceiling"];
-    [self assertRefusal:QLMControlCommandDim arguments:@[@"on", @"--volume", @"-50"] mentions:@"--ceiling"];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-50"] mentions:@"--ceiling"];
+    [self refuse:QLMControlCommandDim arguments:@[@"on", @"--volume", @"-50"] mentions:@"--ceiling"];
 
     QLMControlOptions *options = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-40"]];
     XCTAssertTrue(options.overUSB);
@@ -54,22 +50,22 @@
 - (void)testACeilingAboveTheLimitTakesTheFlag {
     XCTAssertEqual(QLMCeilingLimit, -30.0);
     [self read:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-30"]];
-    [self assertRefusal:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-29.5"] mentions:@"--allow-high-ceiling"];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-29.5"] mentions:@"--allow-high-ceiling"];
 
     QLMControlOptions *options = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-29.5", @"--allow-high-ceiling"]];
     XCTAssertEqual(options.ceilingDecibels, -29.5);
     options = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"0", @"--allow-high-ceiling"]];
     XCTAssertEqual(options.ceilingDecibels, 0.0);
-    [self refusal:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"0.5", @"--allow-high-ceiling"]];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"0.5", @"--allow-high-ceiling"] mentions:nil];
 }
 
 - (void)testTheVolumeMayNotBeAboveTheCeiling {
     [self read:QLMControlCommandVolume arguments:@[@"-40", @"--ceiling", @"-40"]];
-    [self refusal:QLMControlCommandVolume arguments:@[@"-39.5", @"--ceiling", @"-40"]];
-    [self refusal:QLMControlCommandDim arguments:@[@"on", @"--volume", @"-35", @"--ceiling", @"-40"]];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-39.5", @"--ceiling", @"-40"] mentions:nil];
+    [self refuse:QLMControlCommandDim arguments:@[@"on", @"--volume", @"-35", @"--ceiling", @"-40"] mentions:nil];
 
     // Unstated, the ceiling is the limit, on any bus.
-    [self refusal:QLMControlCommandVolume arguments:@[@"-20", @"--fake"]];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-20", @"--fake"] mentions:nil];
     QLMControlOptions *options = [self read:QLMControlCommandVolume arguments:@[@"-40", @"--fake"]];
     XCTAssertFalse(options.overUSB);
     XCTAssertEqual(options.ceilingDecibels, QLMCeilingLimit);
@@ -77,31 +73,30 @@
 
 - (void)testOnlyAFiniteNumberReads {
     for (NSString *level in @[@"nan", @"inf", @"-inf", @"", @"-40dB", @"loud"]) {
-        [self refusal:QLMControlCommandVolume arguments:@[level, @"--fake"]];
-        [self refusal:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", level]];
+        [self refuse:QLMControlCommandVolume arguments:@[level, @"--fake"] mentions:nil];
+        [self refuse:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", level] mentions:nil];
     }
-    [self refusal:QLMControlCommandVolume arguments:@[@"-50", @"--fake", @"--seconds", @"-1"]];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-50", @"--fake", @"--seconds", @"-1"] mentions:nil];
 }
 
-// TRAP: a loose reading sends for real: a mistyped --dry-run is ignored, and
-// --replay without its file falls back to USB.
+// The TRAP in QLMControlOptions: a loose reading sends for real.
 - (void)testAnUnknownRepeatedOrEmptyArgumentIsRefused {
     NSArray<NSString *> *usb = @[@"-40", @"--ceiling", @"-40"];
-    [self assertRefusal:QLMControlCommandVolume arguments:[usb arrayByAddingObject:@"--dryrun"] mentions:@"unknown"];
-    [self assertRefusal:QLMControlCommandVolume arguments:[usb arrayByAddingObject:@"--replay"] mentions:@"value"];
-    [self assertRefusal:QLMControlCommandVolume arguments:[usb arrayByAddingObjectsFromArray:@[@"--ceiling", @"-50"]] mentions:@"twice"];
-    [self refusal:QLMControlCommandVolume arguments:@[@"-40", @"--fake", @"--fake"]];
-    [self refusal:QLMControlCommandVolume arguments:@[@"-40", @"--fake", @"--replay", @"reports.txt"]];
-    [self refusal:QLMControlCommandVolume arguments:@[@"--fake"]];
-    [self refusal:QLMControlCommandMute arguments:@[@"--fake"]];
-    [self refusal:QLMControlCommandMute arguments:@[@"maybe", @"--fake"]];
-    [self refusal:QLMControlCommandMute arguments:@[@"on", @"off", @"--fake"]];
-    [self refusal:QLMControlCommandSleep arguments:@[@"--ceiling", @"-40"]];
-    [self refusal:QLMControlCommandWake arguments:@[@"now"]];
+    [self refuse:QLMControlCommandVolume arguments:[usb arrayByAddingObject:@"--dryrun"] mentions:@"unknown"];
+    [self refuse:QLMControlCommandVolume arguments:[usb arrayByAddingObject:@"--replay"] mentions:@"value"];
+    [self refuse:QLMControlCommandVolume arguments:[usb arrayByAddingObjectsFromArray:@[@"--ceiling", @"-50"]] mentions:@"twice"];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-40", @"--fake", @"--fake"] mentions:nil];
+    [self refuse:QLMControlCommandVolume arguments:@[@"-40", @"--fake", @"--replay", @"reports.txt"] mentions:nil];
+    [self refuse:QLMControlCommandVolume arguments:@[@"--fake"] mentions:nil];
+    [self refuse:QLMControlCommandMute arguments:@[@"--fake"] mentions:nil];
+    [self refuse:QLMControlCommandMute arguments:@[@"maybe", @"--fake"] mentions:nil];
+    [self refuse:QLMControlCommandMute arguments:@[@"on", @"off", @"--fake"] mentions:nil];
+    [self refuse:QLMControlCommandSleep arguments:@[@"--ceiling", @"-40"] mentions:nil];
+    [self refuse:QLMControlCommandWake arguments:@[@"now"] mentions:nil];
 }
 
 - (void)testDimOverUSBNeedsTheLevelToDimFrom {
-    [self assertRefusal:QLMControlCommandDim arguments:@[@"on", @"--ceiling", @"-40"] mentions:@"--volume"];
+    [self refuse:QLMControlCommandDim arguments:@[@"on", @"--ceiling", @"-40"] mentions:@"--volume"];
     QLMControlOptions *options = [self read:QLMControlCommandDim arguments:@[@"on", @"--volume", @"-50", @"--ceiling", @"-40"]];
     XCTAssertTrue(options.on);
     XCTAssertEqualObjects(options.volumeDecibels, @(-50));
@@ -199,6 +194,24 @@ static NSData *QLMRecord(QLMMessage message) {
     for (NSData *record in records) {
         XCTAssertEqualObjects(record, capped);
     }
+}
+
+- (void)testAVolumeFrameShowsItsWord {
+    QLMMessage volume = QLMCommandVolume(-50, -40);
+    uint32_t word = 0;
+    XCTAssertTrue(QLMVolumeFrameWord(&volume, &word));
+    XCTAssertEqual(word, QLMVolumeWordForDecibels(-50));
+
+    QLMMessage capped = QLMCommandVolume(-20, -40);
+    XCTAssertTrue(QLMVolumeFrameWord(&capped, &word));
+    XCTAssertEqual(word, QLMVolumeWordForDecibels(-40));
+
+    QLMMessage power = QLMCommandPower(QLMPowerStepPowerOff);
+    QLMMessage mute = QLMCommandMute(0x02, QLMMuteValueMuted);
+    QLMMessage unicast = QLMMessageMake(0x02, volume.payload, volume.length);
+    XCTAssertFalse(QLMVolumeFrameWord(&power, &word));
+    XCTAssertFalse(QLMVolumeFrameWord(&mute, &word));
+    XCTAssertFalse(QLMVolumeFrameWord(&unicast, &word));
 }
 
 - (void)testADryRunOfARefusedActionHasNoFrames {

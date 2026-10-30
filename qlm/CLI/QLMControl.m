@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sysexits.h>
 
 #import "QLMAdapter.h"
@@ -13,7 +14,6 @@
 const double QLMCeilingLimit = -30;
 
 @interface QLMControlOptions ()
-@property (nonatomic, readwrite) QLMControlCommand command;
 @property (nonatomic, readwrite) BOOL fake;
 @property (nonatomic, readwrite, nullable) NSString *replayPath;
 @property (nonatomic, readwrite) BOOL dryRun;
@@ -24,12 +24,14 @@ const double QLMCeilingLimit = -30;
 @property (nonatomic, readwrite) NSTimeInterval seconds;
 @end
 
-// Only the whole text, and only a finite number.
-static BOOL QLMReadNumber(NSString *text, double *value) {
+// Only the whole text, and only a finite number. Otherwise `problem` says
+// the text is not `what`.
+static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSString **problem) {
     const char *utf8 = text.UTF8String;
     char *end = NULL;
     double parsed = strtod(utf8, &end);
     if (end == utf8 || *end != '\0' || !isfinite(parsed)) {
+        *problem = [NSString stringWithFormat:@"'%@' is not %@", text, what];
         return NO;
     }
     *value = parsed;
@@ -42,7 +44,7 @@ static BOOL QLMReadNumber(NSString *text, double *value) {
     *problem = nil;
     NSMutableSet<NSString *> *flags = [NSMutableSet setWithObjects:@"--fake", @"--dry-run", nil];
     NSMutableSet<NSString *> *valued = [NSMutableSet setWithObjects:@"--replay", @"--seconds", nil];
-    NSUInteger positionals = 1;
+    BOOL takesPositional = YES;
     switch (command) {
     case QLMControlCommandVolume:
         [flags addObject:@"--allow-high-ceiling"];
@@ -57,31 +59,30 @@ static BOOL QLMReadNumber(NSString *text, double *value) {
         break;
     case QLMControlCommandSleep:
     case QLMControlCommandWake:
-        positionals = 0;
+        takesPositional = NO;
         break;
     }
 
     // TRAP: an argument read loosely is a safety hole. A mistyped --dry-run
     // would send for real, and --replay without its file would mean USB.
-    NSMutableArray<NSString *> *given = [NSMutableArray array];
-    NSMutableSet<NSString *> *set = [NSMutableSet set];
-    NSMutableDictionary<NSString *, NSString *> *values = [NSMutableDictionary dictionary];
+    NSString *positional = nil;
+    NSMutableDictionary<NSString *, NSString *> *given = [NSMutableDictionary dictionary];  // a flag maps to itself
     for (NSUInteger i = 0; i < arguments.count; i++) {
         NSString *argument = arguments[i];
-        if ([set containsObject:argument] || values[argument] != nil) {
+        if (given[argument] != nil) {
             *problem = [NSString stringWithFormat:@"%@ is given twice", argument];
             return nil;
         }
         if ([flags containsObject:argument]) {
-            [set addObject:argument];
+            given[argument] = argument;
         } else if ([valued containsObject:argument]) {
             if (i + 1 >= arguments.count) {
                 *problem = [NSString stringWithFormat:@"%@ needs a value", argument];
                 return nil;
             }
-            values[argument] = arguments[++i];
-        } else if (![argument hasPrefix:@"--"] && given.count < positionals) {
-            [given addObject:argument];
+            given[argument] = arguments[++i];
+        } else if (takesPositional && positional == nil && ![argument hasPrefix:@"--"]) {
+            positional = argument;
         } else {
             *problem = [NSString stringWithFormat:@"unknown argument '%@'", argument];
             return nil;
@@ -89,61 +90,57 @@ static BOOL QLMReadNumber(NSString *text, double *value) {
     }
 
     QLMControlOptions *options = [[QLMControlOptions alloc] init];
-    options.command = command;
-    options.fake = [set containsObject:@"--fake"];
-    options.replayPath = values[@"--replay"];
-    options.dryRun = [set containsObject:@"--dry-run"];
-    options.serial = values[@"--serial"];
+    options.fake = given[@"--fake"] != nil;
+    options.replayPath = given[@"--replay"];
+    options.dryRun = given[@"--dry-run"] != nil;
+    options.serial = given[@"--serial"];
     if (options.fake && options.replayPath != nil) {
         *problem = @"--fake and --replay name different buses";
         return nil;
     }
 
-    if (given.count < positionals) {
+    if (takesPositional && positional == nil) {
         *problem = command == QLMControlCommandVolume ? @"volume needs a level in dB" : @"give on or off";
         return nil;
     }
+    if (command == QLMControlCommandMute || command == QLMControlCommandDim) {
+        if (![positional isEqualToString:@"on"] && ![positional isEqualToString:@"off"]) {
+            *problem = [NSString stringWithFormat:@"'%@' is not on or off", positional];
+            return nil;
+        }
+        options.on = [positional isEqualToString:@"on"];
+    }
     double number = 0;
-    if (command == QLMControlCommandVolume) {
-        if (!QLMReadNumber(given[0], &number)) {
-            *problem = [NSString stringWithFormat:@"'%@' is not a level in dB", given[0]];
-            return nil;
-        }
-        options.volumeDecibels = @(number);
-    } else if (positionals > 0) {
-        if (![given[0] isEqualToString:@"on"] && ![given[0] isEqualToString:@"off"]) {
-            *problem = [NSString stringWithFormat:@"'%@' is not on or off", given[0]];
-            return nil;
-        }
-        options.on = [given[0] isEqualToString:@"on"];
-    }
-    if (values[@"--volume"] != nil) {
-        if (!QLMReadNumber(values[@"--volume"], &number)) {
-            *problem = [NSString stringWithFormat:@"'%@' is not a level in dB", values[@"--volume"]];
+    NSString *level = command == QLMControlCommandVolume ? positional : given[@"--volume"];
+    if (level != nil) {
+        if (!QLMReadNumber(level, @"a level in dB", &number, problem)) {
             return nil;
         }
         options.volumeDecibels = @(number);
     }
-    if (values[@"--seconds"] != nil) {
-        if (!QLMReadNumber(values[@"--seconds"], &number) || number < 0) {
-            *problem = [NSString stringWithFormat:@"'%@' is not a number of seconds", values[@"--seconds"]];
+    NSString *seconds = given[@"--seconds"];
+    if (seconds != nil) {
+        if (!QLMReadNumber(seconds, @"a number of seconds", &number, problem)) {
+            return nil;
+        }
+        if (number < 0) {
+            *problem = @"--seconds may not be negative";
             return nil;
         }
         options.seconds = number;
     }
 
     options.ceilingDecibels = QLMCeilingLimit;
-    NSString *ceiling = values[@"--ceiling"];
+    NSString *ceiling = given[@"--ceiling"];
     if (ceiling != nil) {
-        if (!QLMReadNumber(ceiling, &number)) {
-            *problem = [NSString stringWithFormat:@"'%@' is not a ceiling in dB", ceiling];
+        if (!QLMReadNumber(ceiling, @"a ceiling in dB", &number, problem)) {
             return nil;
         }
         if (number > 0) {
             *problem = @"the ceiling may not be above 0 dB";
             return nil;
         }
-        if (number > QLMCeilingLimit && ![set containsObject:@"--allow-high-ceiling"]) {
+        if (number > QLMCeilingLimit && given[@"--allow-high-ceiling"] == nil) {
             *problem = [NSString stringWithFormat:@"a ceiling above %.0f dB takes --allow-high-ceiling", QLMCeilingLimit];
             return nil;
         }
@@ -220,9 +217,8 @@ static const NSTimeInterval QLMMirrorTimeout = 5;
 // The mirror's monitors go in the order of their sessions, so the fake bus
 // answers the probe in that order and the leases come out alike.
 static QLMFakeBus *QLMMirrorBus(QLMSnapshot *discovered) {
-    NSArray<QLMMonitorState *> *found = [discovered.monitors sortedArrayUsingComparator:^NSComparisonResult(QLMMonitorState *a, QLMMonitorState *b) {
-        return a.session < b.session ? NSOrderedAscending : (a.session > b.session ? NSOrderedDescending : NSOrderedSame);
-    }];
+    NSArray<QLMMonitorState *> *found =
+        [discovered.monitors sortedArrayUsingDescriptors:@[[NSSortDescriptor sortDescriptorWithKey:@"session" ascending:YES]]];
     NSMutableArray<QLMFakeMonitor *> *monitors = [NSMutableArray arrayWithCapacity:found.count];
     for (QLMMonitorState *monitor in found) {
         uint8_t deviceClass = monitor.deviceClass == QLMMonitorClassSubwoofer ? QLMTelemetryClassSubwoofer : QLMTelemetryClassTwoWay;
@@ -309,4 +305,18 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
         [records addObject:record];
     }
     return records;
+}
+
+BOOL QLMVolumeFrameWord(const QLMMessage *message, uint32_t *word) {
+    if (message->length != 4) {
+        return NO;
+    }
+    uint32_t candidate = (uint32_t)message->payload[1] << 16 | (uint32_t)message->payload[2] << 8 | message->payload[3];
+    QLMMessage volume = QLMCommandVolumeWord(candidate, QLMVolumeWordMax);
+    if (volume.address != message->address || volume.length != message->length ||
+        memcmp(volume.payload, message->payload, volume.length) != 0) {
+        return NO;
+    }
+    *word = candidate;
+    return YES;
 }

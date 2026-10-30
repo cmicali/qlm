@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 
+#include "QLMFrame.h"
 #import "QLMSnapshot.h"
 #import "QLMSystem.h"
 
@@ -26,7 +27,6 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
                                  arguments:(NSArray<NSString *> *)arguments
                                    problem:(NSString *_Nullable *_Nonnull)problem;
 
-@property (nonatomic, readonly) QLMControlCommand command;
 @property (nonatomic, readonly) BOOL fake;
 @property (nonatomic, readonly, nullable) NSString *replayPath;
 @property (nonatomic, readonly) BOOL overUSB;  // neither --fake nor --replay
@@ -58,14 +58,16 @@ QLMSnapshotTest QLMAfterReplay(QLMSnapshotTest test);
 typedef int (^QLMControlAction)(QLMSystem *system, QLMSnapshot *discovered);
 
 // The dry run. It runs the action on a fake bus that mirrors the monitors in
-// `discovered`, never on the bus that found them, and waits for `effect`.
-// It returns every frame the action sent, as QLMAdapterRecord gives them,
-// with each monitor addressed by its session in `discovered`. The probes,
-// leases, identity queries, and polls are left out. `status` gets the
-// action's exit code, EX_TEMPFAIL when the effect did not show and the list
-// may be short, or EX_SOFTWARE when the mirror did not find every monitor.
-// The records are nil when the action did not run.
+// `discovered`, never on the bus that found them, and returns every frame
+// the action sent there but discovery's, addressed as `discovered` has each
+// monitor. `status` gets the action's exit code, EX_TEMPFAIL when `effect`
+// did not show and the list may be short, or EX_SOFTWARE when the mirror did
+// not find every monitor. Nil when the action did not run.
 NSArray<NSData *> *_Nullable QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, QLMControlAction action,
                                               QLMSnapshotTest effect, int *status);
+
+// The word a volume frame carries. The frame is rebuilt from it, so only a
+// true volume frame passes.
+BOOL QLMVolumeFrameWord(const QLMMessage *message, uint32_t *word);
 
 NS_ASSUME_NONNULL_END
