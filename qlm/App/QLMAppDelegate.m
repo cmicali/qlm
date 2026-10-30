@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "QLMCommands.h"
+#import "QLMAlerts.h"
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
@@ -21,6 +22,8 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 @interface QLMAppDelegate () <QLMPopoverControllerDelegate, QLMSettingsWindowControllerDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
+@property (nonatomic) QLMMonitorAlerts *alerts;
+@property (nonatomic) QLMNotifier *notifier;
 @property (nonatomic) NSStatusItem *statusItem;
 @property (nonatomic) NSPopover *popover;
 @property (nonatomic) QLMPopoverController *popoverController;
@@ -42,6 +45,11 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
+    self.notifier = [[QLMNotifier alloc] init];
+    QLMNotifier *notifier = self.notifier;
+    self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:^(NSString *identifier, NSString *title, NSString *body) {
+        [notifier postIdentifier:identifier title:title body:body];
+    }];
 
     self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
@@ -145,6 +153,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
     [self.monitorList updateWithSnapshot:snapshot];
+    [self.alerts updateWithSnapshot:snapshot];
     [self.popoverController refresh];
     [self.monitorsController refresh];
     if (self.fakeBusController.window.visible) {
