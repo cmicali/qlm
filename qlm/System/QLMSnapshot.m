@@ -38,6 +38,7 @@ const NSInteger QLMMonitorValueAbsent = -1;
     if (self) {
         _adapter = [[QLMAdapterState alloc] init];
         _monitors = @[];
+        _mutedHardwareIDs = [NSSet set];
     }
     return self;
 }

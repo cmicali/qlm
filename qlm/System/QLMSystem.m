@@ -30,6 +30,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
         _retryBurst = 4;
         _adapterPollInterval = 0.107;
         _discoversMonitors = YES;
+        _mutedHardwareIDs = [NSSet set];
     }
     return self;
 }
@@ -43,6 +44,8 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.retryBurst = self.retryBurst;
     copy.adapterPollInterval = self.adapterPollInterval;
     copy.discoversMonitors = self.discoversMonitors;
+    copy.mutedHardwareIDs = self.mutedHardwareIDs;
+    copy.mutingAll = self.mutingAll;
     return copy;
 }
 
@@ -179,7 +182,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
-        _mutedIDs = [NSMutableSet set];
+        _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
+        _adapterMuted = settings.mutingAll;
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
         _snapshot = [[QLMSnapshot alloc] init];
@@ -278,8 +282,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_adapterPollsQueued = 0;
         [self->_adapter stop];
         [self->_monitors removeAllObjects];
-        [self->_mutedIDs removeAllObjects];
-        self->_adapterMuted = NO;
         [self->_knob reset];
         self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
         self->_adapterError = nil;
@@ -786,6 +788,20 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self enqueue:[self volumeItem]];
 }
 
+// The knob's position under the ceiling, or with no knob read, the bottom
+// level.
+- (QLMMessage)knobOrBottomLevel {
+    NSNumber *knob = [self knobDecibels];
+    return QLMCommandVolume(knob != nil ? knob.doubleValue : QLMVolumeDecibelsMin, self.settings.ceilingDecibels);
+}
+
+// The knob's position from the last reply to 01 08, or nil with no knob read.
+- (nullable NSNumber *)knobDecibels {
+    QLMTrackedAdapter *adapter = _adapterRecord;
+    QLMAdapterStatus status = adapter.status;
+    return adapter.hasStatus && status.knob && status.hasKnobPosition ? @(status.knobTenths / 10.0) : nil;
+}
+
 - (void)sendInputPair {
     [self sendRecords:[QLMApplySequence inputPair] then:nil];
 }
@@ -832,6 +848,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             monitor.needsState = monitor.needsState || !monitor.isOn;
             [self sendMuteRounds:2];
         }
+    }];
+}
+
+- (void)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs {
+    NSSet<NSData *> *copied = [hardwareIDs copy];
+    [self onQueue:^{
+        [self->_mutedIDs unionSet:copied];
+        self->_dirty = YES;
     }];
 }
 
@@ -949,11 +973,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // GLM's three pairs, back to back within a pair and about 0.2 s apart
-// (captures/startup-idle, 7.33 s). Once a volume is set, it follows 0.235 s
-// later, then broadcast 2D 00 and 3D 00 00 (captures/standby-wake, 47.24 s).
-// A woken monitor keeps its own level until a host sends one
-// (captures/qlm-control-first/notes.md). The monitors come back under new
-// sessions, and the probe finds them.
+// (captures/startup-idle, 7.33 s). A level follows 0.235 s later, then
+// broadcast 2D 00 and 3D 00 00 (captures/standby-wake, 47.24 s). A woken
+// monitor keeps its own level until a host sends one
+// (captures/qlm-control-first/notes.md), so with no volume set the level is
+// the knob's, which the adapter applies once qlm lets go, or with no knob
+// the bottom level. The monitors come back under new sessions, and the
+// probe finds them.
 - (void)wake {
     [self onQueue:^{
         if (!self->_running) {
@@ -966,11 +992,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
         }
+        [self hold:QLMWakeVolumeDelay];
         if (self->_volumeDecibels != nil) {
-            [self hold:QLMWakeVolumeDelay];
             [self sendVolume];
-            [self sendInputPair];
+        } else {
+            [self send:[self knobOrBottomLevel] then:nil];
         }
+        [self sendInputPair];
     }];
 }
 
@@ -1177,6 +1205,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.idle = [self isIdle];
     snapshot.allIdentified = allIdentified;
     snapshot.allMuted = allMuted;
+    snapshot.mutedHardwareIDs = [_mutedIDs copy];
+    snapshot.mutingAll = _adapterMuted;
     snapshot.anyOn = anyOn;
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;

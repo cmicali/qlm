@@ -278,6 +278,58 @@ static NSArray<NSData *> *QLMPair(void) {
     XCTAssertNil([self read:QLMControlCommandWake arguments:@[]].volumeDecibels);
 }
 
+// --muted is a comma list, on every control. An empty item is refused.
+- (void)testMutedTakesACommaList {
+    QLMControlOptions *options = [self read:QLMControlCommandMute arguments:@[@"on", @"--fake", @"--muted", @"2717, 9012"]];
+    XCTAssertEqualObjects(options.mutedSerials, (@[@"2717", @"9012"]));
+    XCTAssertEqualObjects([self read:QLMControlCommandSleep arguments:@[@"--fake"]].mutedSerials, @[]);
+    for (NSNumber *command in @[@(QLMControlCommandVolume), @(QLMControlCommandDim), @(QLMControlCommandSleep), @(QLMControlCommandWake)]) {
+        NSArray<NSString *> *arguments = @[@"--fake", @"--muted", @"2717"];
+        if (command.integerValue == QLMControlCommandVolume) {
+            arguments = [@[@"-50"] arrayByAddingObjectsFromArray:arguments];
+        } else if (command.integerValue == QLMControlCommandDim) {
+            arguments = [@[@"on"] arrayByAddingObjectsFromArray:arguments];
+        }
+        XCTAssertEqualObjects([self read:(QLMControlCommand)command.integerValue arguments:arguments].mutedSerials, @[@"2717"]);
+    }
+    [self refuse:QLMControlCommandMute arguments:@[@"on", @"--fake", @"--muted", @"2717,,9012"] mentions:@"--muted"];
+    [self refuse:QLMControlCommandMute arguments:@[@"on", @"--fake", @"--muted", @","] mentions:@"--muted"];
+}
+
+// Each text names the one monitor whose serial contains it, or none at all.
+- (void)testMutedSerialsNameOneMonitorEach {
+    QLMSnapshot *discovered = QLMDiscovered();
+    NSString *problem = nil;
+    NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(@[@"5678"], discovered, &problem);
+    XCTAssertEqualObjects(hardwareIDs, [NSSet setWithObject:discovered.monitors[0].hardwareID]);
+    XCTAssertNil(QLMHardwareIDsForSerials(@[@"8330"], discovered, &problem));
+    XCTAssertTrue([problem containsString:@"2 monitors"], @"%@", problem);
+    XCTAssertNil(QLMHardwareIDsForSerials(@[@"5678", @"9999"], discovered, &problem));
+    XCTAssertTrue([problem containsString:@"0 monitors"], @"%@", problem);
+}
+
+// mute --serial restates the monitors --muted names as muted, so a monitor
+// muted in GLM stays muted (captures/qlm-control-first/notes.md, 638.7 s).
+- (void)testMuteKeepsTheMonitorsMutedElsewhereMuted {
+    QLMSnapshot *discovered = QLMDiscovered();
+    NSData *target = discovered.monitors[1].hardwareID;  // at 05
+    QLMControlAction mute = ^int(QLMSystem *system, QLMSnapshot *found) {
+        [system setMuted:YES forMonitorWithHardwareID:target];
+        return 0;
+    };
+    NSArray<NSData *> *records = [self recordsOf:QLMWithMuted(@[@"5678"], mute) effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.allMuted;
+    })];
+    NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueMuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))];
+    XCTAssertEqualObjects(records, [round arrayByAddingObjectsFromArray:round]);
+
+    int status = -1;
+    XCTAssertNil(QLMDryRunRecords(discovered, [[QLMSystemSettings alloc] init], QLMWithMuted(@[@"9999"], mute), ^BOOL(QLMSnapshot *snapshot) {
+        return YES;
+    }, &status));
+    XCTAssertEqual(status, EX_DATAERR);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {

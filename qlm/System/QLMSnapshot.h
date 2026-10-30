@@ -79,6 +79,10 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly, nullable) NSString *activeGroupName;  // the last group applied in full
 // Nothing was queued for the bus or in flight when this was published.
 @property (nonatomic, readonly) BOOL idle;
+// System's mute record: every muted hardware ID, leased or not, and whether
+// mute all is on. Give both back through QLMSystemSettings to start from it.
+@property (nonatomic, readonly) NSSet<NSData *> *mutedHardwareIDs;
+@property (nonatomic, readonly) BOOL mutingAll;
 // Each is NO when there are no monitors.
 @property (nonatomic, readonly) BOOL allIdentified;
 @property (nonatomic, readonly) BOOL allMuted;

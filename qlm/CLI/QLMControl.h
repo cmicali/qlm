@@ -35,6 +35,9 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
 // The volume's level, or dim's --volume. Nil for dim without it.
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;
 @property (nonatomic, readonly, nullable) NSString *serial;  // mute's --serial
+// --muted, a comma list: each names by text its serial contains a monitor
+// already muted elsewhere, as in GLM. Empty when not given.
+@property (nonatomic, readonly) NSArray<NSString *> *mutedSerials;
 // The stated --ceiling, or QLMCeilingLimit.
 @property (nonatomic, readonly) double ceilingDecibels;
 @property (nonatomic, readonly) NSTimeInterval seconds;  // --seconds, or 0
@@ -74,6 +77,16 @@ QLMControlAction QLMDimAction(BOOL on, NSNumber *_Nullable volumeDecibels);
 // The wake. A volume, when given, is set first, so the wake ends with it, as
 // GLM's does.
 QLMControlAction QLMWakeAction(NSNumber *_Nullable volumeDecibels);
+
+// The hardware ID of the one monitor in `discovered` whose serial contains
+// each text. Nil, with the reason, when a text matches none or several.
+NSSet<NSData *> *_Nullable QLMHardwareIDsForSerials(NSArray<NSString *> *serials, QLMSnapshot *discovered,
+                                                   NSString *_Nullable *_Nonnull problem);
+
+// Records the monitors `serials` name as muted, sending nothing, then runs
+// the action, so its rounds restate them as muted. qlm cannot read a mute.
+// A text that names no single monitor sends nothing and returns EX_DATAERR.
+QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction action);
 
 // The word a volume frame carries. The frame is rebuilt from it, so only a
 // true volume frame passes.

@@ -143,6 +143,15 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     }].count;
 }
 
+// Every monitor's lease lapses, so the next probe finds it.
+- (void)lapseLeases {
+    [_bus perform:^{
+        for (QLMFakeMonitor *monitor in self->_bus.monitors) {
+            monitor.session = 0;
+        }
+    }];
+}
+
 // Waits until the condition holds, polling.
 - (void)waitUntil:(BOOL (^)(void))condition {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
@@ -516,7 +525,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified;
     }];
-    [NSThread sleepForTimeInterval:0.5];
+    // Wait for the count, not a fixed time: under load a cycle takes longer.
+    [self waitUntil:^BOOL {
+        return replay.playedCount > 100;
+    }];
     [_system stop];
     XCTAssertEqualObjects(replay.unmatchedMessages, @[]);
     XCTAssertGreaterThan(replay.playedCount, 100u);
@@ -1384,6 +1396,103 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
     QLMMessage volume = QLMCommandVolume(-30, -20);
     XCTAssertEqualObjects(sent[leased + 1], QLMAdapterRecord(&volume));
+}
+
+// The broadcasts that end a wake from `start` on: the level, then 2D 00 and
+// 3D 00 00.
+- (NSArray<NSData *> *)wakeEndFrom:(NSUInteger)start {
+    [self waitUntil:^BOOL {
+        return [self sentWithOpcode:0x3D from:start].count > 0;
+    }];
+    XCTAssertEqual([self sentWithOpcode:0x3A from:start].count, 6u);
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return bytes[0] == QLMAddressBroadcast && bytes[1] != 0x3A;
+    }];
+}
+
+// A wake with no volume set ends with a level all the same, since a woken
+// monitor keeps its own level until a host sends one: the knob's position
+// under the ceiling, or with no knob the bottom level.
+- (void)testAWakeWithNoVolumeSendsTheKnobsLevelOrTheBottom {
+    _settings.cycleInterval = 10;
+    NSArray<NSData *> *pair = @[QLMBytes((const uint8_t[]){QLMAddressBroadcast, 0x2D, 0x00}, 3),
+                                QLMBytes((const uint8_t[]){QLMAddressBroadcast, 0x3D, 0x00, 0x00}, 4)];
+    NSArray *knobs = @[@(-450), @(-150), NSNull.null];  // -45 dB, -15 dB above the -20 dB ceiling, and no knob
+    NSArray<NSNumber *> *levels = @[@(-45), @(-20), @(QLMVolumeDecibelsMin)];
+    for (NSUInteger i = 0; i < knobs.count; i++) {
+        NSNumber *knob = knobs[i] == NSNull.null ? nil : knobs[i];
+        [_bus perform:^{
+            self->_bus.knobTenths = knob;
+        }];
+        [self lapseLeases];  // the last pass's
+        [self startSystem];
+        [self waitForDiscovery];
+        NSUInteger before = _bus.sentMessages.count;
+        [_system wake];
+        QLMMessage level = QLMCommandVolume(levels[i].doubleValue, _settings.ceilingDecibels);
+        NSArray<NSData *> *expected = [@[QLMAdapterRecord(&level)] arrayByAddingObjectsFromArray:pair];
+        XCTAssertEqualObjects([self wakeEndFrom:before], expected, @"knob %@", knob);
+        XCTAssertNil(_system.snapshot.volumeDecibels);
+        [_system stop];
+    }
+}
+
+// The mute record outlives a stop. The next start knows every mute, and a
+// monitor leased again hears its mute after its first poll.
+- (void)testTheMuteRecordOutlivesAStop {
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.mutedHardwareIDs containsObject:self->_left.hardwareID] && snapshot.idle;
+    }];
+    [_system stop];
+    // The leases lapse, and the monitor forgets its mute, as one switched
+    // off and on would.
+    [_bus perform:^{
+        self->_left.muteValue = QLMMuteValueUnmuted;
+    }];
+    [self lapseLeases];
+    [_system start];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+    }];
+    XCTAssertEqualObjects(again.mutedHardwareIDs, [NSSet setWithObject:_left.hardwareID]);
+    XCTAssertTrue(QLMFindMonitor(again, _left.hardwareID).muted);
+    [_bus perform:^{
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+    }];
+}
+
+// System starts from the record its settings give, and adds to it with
+// recordMutedHardwareIDs:, which sends nothing. Every round after says
+// muted for those monitors.
+- (void)testSystemStartsFromTheMuteRecordItIsGiven {
+    _settings.mutedHardwareIDs = [NSSet setWithObject:_left.hardwareID];
+    [self startSystem];
+    QLMSnapshot *found = [self waitForDiscovery];
+    XCTAssertTrue(QLMFindMonitor(found, _left.hardwareID).muted);
+    XCTAssertFalse(QLMFindMonitor(found, _right.hardwareID).muted);
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system recordMutedHardwareIDs:[NSSet setWithObject:_right.hardwareID]];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.idle;
+    }];
+    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 0u);
+
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.dimmed;
+    } after:^{
+        [self->_system setVolumeDecibels:-30];
+        [self->_system setDimmed:YES];
+    }];
+    NSArray<NSData *> *mutes = [self sentWithOpcode:0x2B from:before];
+    XCTAssertGreaterThan(mutes.count, 0u);
+    for (NSData *mute in mutes) {
+        XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
 }
 
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
