@@ -2,6 +2,7 @@
 
 #include "QLMCommands.h"
 #include "QLMReplies.h"
+#include "QLMReport.h"
 
 @implementation QLMFakeMonitor
 
@@ -98,21 +99,22 @@
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
 
-    uint8_t frame[QLMFrameMax];
-    size_t length = 0;
-    QLMFrameStatus status = QLMFrameEncode(&message, frame, sizeof frame, &length);
-    if (status != QLMFrameOK) {
+    uint8_t report[QLMReportLength];
+    if (QLMReportPackOutput(&message, report) != QLMReportOK) {
         NSError *error = [NSError errorWithDomain:QLMAdapterErrorDomain code:QLMAdapterErrorForbidden userInfo:nil];
         dispatch_async(queue, ^{
             handler(NULL, error);
         });
         return;
     }
+    const uint8_t *frame = NULL;
+    size_t length = 0;
     QLMMessage decoded;
     memset(&decoded, 0, sizeof decoded);
-    QLMFrameStatus decodeStatus = QLMFrameDecode(frame, length, &decoded);
-    NSAssert(decodeStatus == QLMFrameOK, @"the codec does not round-trip");
-    (void)decodeStatus;
+    BOOL roundTrips = QLMReportUnpackOutput(report, sizeof report, &frame, &length) == QLMReportOK &&
+                      QLMFrameDecode(frame, length, &decoded) == QLMFrameOK;
+    NSAssert(roundTrips, @"the codec does not round-trip");
+    (void)roundTrips;
 
     dispatch_async(queue, ^{
         if (self.recordsSentMessages) {

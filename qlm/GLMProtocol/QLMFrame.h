@@ -21,9 +21,11 @@ enum {
     QLMFrameEscapeXor = 0x20,
 };
 
-// The largest payload qlm sends is a PEQ band: 10 0E, an index, five floats,
-// and a flag, 24 bytes.
-#define QLMPayloadMax 32
+// Room for the longest reply the adapter can deliver: a frame of three input
+// reports, less the address, the CRC, and the flag. A monitor's system info
+// runs 66 bytes. What qlm sends must fit one output report; QLMReport.h has
+// that limit.
+#define QLMPayloadMax 185
 // Address, payload, and CRC with every byte escaped, then the flag.
 #define QLMFrameMax (2 * (1 + QLMPayloadMax + 2) + 1)
 

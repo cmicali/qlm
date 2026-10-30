@@ -14,13 +14,18 @@
 // TRAP: 09 06 is also a session acknowledgement for session 06. Only the
 // command just sent tells them apart, so the caller picks the parser.
 
+// The adapter answers every probe and unicast with one frame: the monitor's
+// reply, or a bare 7E from 01 when no monitor answered. An adapter passes the
+// 7E on as no reply.
+bool QLMReplyIsNoAnswer(const QLMMessage *message);
+
 bool QLMReplyIsAck(const QLMMessage *message);
 bool QLMReplyIsBusy(const QLMMessage *message);
 bool QLMReplySessionAck(const QLMMessage *message, uint8_t *session);
 bool QLMReplyHardwareID(const QLMMessage *message, uint8_t hardwareID[3]);
 
-// The serial number (15 ASCII characters, no NUL) and the system info (ASCII,
-// NUL-terminated). Copies the text, NUL-terminated, into `out`.
+// The serial number (14 or 15 ASCII characters, no NUL) and the system info
+// (ASCII, NUL-terminated). Copies the text, NUL-terminated, into `out`.
 bool QLMReplyText(const QLMMessage *message, char *out, size_t capacity);
 
 // Reads the model and the firmware version from system info text, in either
@@ -32,7 +37,8 @@ bool QLMSystemInfoParse(const char *text, char *model, size_t modelCapacity, cha
 // Telemetry: 09, an optional busy marker, 41, the temperature in degrees C,
 // then tag-value fields with no length byte. A field not present is
 // QLMTelemetryAbsent. The 47 status is the only authority on power: 01 is on,
-// anything else is not.
+// anything else is not. Tags 49, 82, 88, 89, and 8A have known lengths but
+// no known meaning, so the walk steps over them.
 #define QLMTelemetryAbsent (-1)
 
 enum {
