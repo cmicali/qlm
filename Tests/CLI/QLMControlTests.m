@@ -330,6 +330,50 @@ static NSArray<NSData *> *QLMPair(void) {
     XCTAssertEqual(status, EX_DATAERR);
 }
 
+static QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume) {
+    QLMHandBack *handBack = [[QLMHandBack alloc] init];
+    handBack.kind = kind;
+    handBack.knobDecibels = knob;
+    handBack.volumeDecibels = volume;
+    return handBack;
+}
+
+// qlmctl's note at exit says what the stop did. A louder take-over names
+// both levels.
+- (void)testTheHandBackNoteSaysWhatTheStopDid {
+    NSString *text = QLMHandBackText(QLMMakeHandBack(QLMHandBackKnobLevel, @(-43.3), @(-40)));
+    XCTAssertTrue([text containsString:@"-43.3 dB"], @"%@", text);
+
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackLouder, @(-30), @(-40)));
+    XCTAssertTrue([text containsString:@"-30.0 dB"] && [text containsString:@"-40.0 dB"], @"%@", text);
+
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, nil, @(-40)));
+    XCTAssertTrue([text containsString:@"no knob"], @"%@", text);
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, @(-40), nil));
+    XCTAssertTrue([text containsString:@"no volume"], @"%@", text);
+}
+
+// apply-group's options follow its file and group. Over USB it is a
+// supervised test: it needs the level to restore and a ceiling, and only
+// --unverified-rate lets System apply a model whose rate is unverified.
+// Its dry run reads only the setup file, so it needs neither.
+- (void)testApplyGroupOverUSBIsGated {
+    [self refuse:QLMControlCommandApplyGroup arguments:@[] mentions:@"--volume"];
+    [self refuse:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-50"] mentions:@"--ceiling"];
+    [self refuse:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-30", @"--ceiling", @"-40"] mentions:@"ceiling"];
+    QLMControlOptions *options = [self read:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-50", @"--ceiling", @"-40"]];
+    XCTAssertFalse(options.settings.allowsUnverifiedRates);
+    XCTAssertFalse(options.launch);
+    options = [self read:QLMControlCommandApplyGroup
+               arguments:@[@"--volume", @"-50", @"--ceiling", @"-40", @"--unverified-rate", @"--launch"]];
+    XCTAssertTrue(options.settings.allowsUnverifiedRates);
+    XCTAssertTrue(options.launch);
+    XCTAssertTrue([self read:QLMControlCommandApplyGroup arguments:@[@"--dry-run"]].dryRun);
+    [self refuse:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-40", @"--unverified-rate"] mentions:@"unknown"];
+    QLMControlOptions *volume = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-40"]];
+    XCTAssertFalse(volume.settings.allowsUnverifiedRates);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {

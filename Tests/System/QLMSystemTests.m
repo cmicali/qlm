@@ -3,6 +3,7 @@
 #import "QLMApplySequence.h"
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
+#import "QLMHostCheck.h"
 #import "QLMReplayAdapter.h"
 #import "QLMSetupInternal.h"
 #import "QLMSystem.h"
@@ -1495,6 +1496,255 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// Starts System with the knob at `tenths`, or none when nil, at `volume`,
+// or none when nil, and returns the snapshot once all is settled.
+- (QLMSnapshot *)startWithKnob:(nullable NSNumber *)tenths volume:(nullable NSNumber *)volume {
+    _settings.cycleInterval = 10;
+    [_bus perform:^{
+        self->_bus.knobTenths = tenths;
+    }];
+    [self startSystem];
+    [self waitForDiscovery];
+    if (volume != nil) {
+        [_system setVolumeDecibels:volume.doubleValue];
+    }
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && (volume == nil || snapshot.volumeDecibels != nil);
+    }];
+}
+
+// Stops System and returns its snapshot once it has.
+- (QLMSnapshot *)stopAndWait {
+    QLMSystem *system = _system;
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stop];
+    }];
+}
+
+// The same, with what System sent meanwhile.
+- (NSArray<NSData *> *)stopAndCollect:(QLMSnapshot *_Nullable *_Nonnull)stopped {
+    NSUInteger before = _bus.sentMessages.count;
+    *stopped = [self stopAndWait];
+    return [self sentFrom:before matching:^BOOL(NSData *message) {
+        return YES;
+    }];
+}
+
+// The adapter takes over at the knob's position (captures/qlm-control-first,
+// 289.7 and 393.7 s). With the knob at or below the level qlm sends, qlm
+// sends the knob's level as it stops, so the take-over changes nothing.
+- (void)testAStopSendsTheKnobsLevelWhenItIsNoLouder {
+    QLMSnapshot *running = [self startWithKnob:@(-600) volume:@(-40)];
+    XCTAssertEqual(running.handBack.kind, QLMHandBackKnobLevel);
+    QLMSnapshot *stopped = nil;
+    NSArray<NSData *> *sent = [self stopAndCollect:&stopped];
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    XCTAssertEqualObjects(sent, @[QLMAdapterRecord(&knob)]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackKnobLevel);
+    XCTAssertEqualObjects(stopped.handBack.knobDecibels, @(-60));
+    XCTAssertEqualWithAccuracy(stopped.handBack.volumeDecibels.doubleValue, -40, 0.01);
+}
+
+// With the knob above the level qlm sends, the take-over makes it louder.
+// qlm sends nothing extra, and its snapshot says so, with both levels.
+- (void)testAStopSendsNothingWhenTheKnobIsLouder {
+    [self startWithKnob:@(-300) volume:@(-40)];
+    QLMSnapshot *stopped = nil;
+    XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackLouder);
+    XCTAssertEqualObjects(stopped.handBack.knobDecibels, @(-30));
+    XCTAssertEqualWithAccuracy(stopped.handBack.volumeDecibels.doubleValue, -40, 0.01);
+}
+
+// With no knob, or no volume set, the level at the take-over is unknown.
+- (void)testAStopWithNoKnobOrNoVolumeLeavesTheLevelUnknown {
+    [self startWithKnob:nil volume:@(-40)];
+    QLMSnapshot *stopped = nil;
+    XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
+    XCTAssertNil(stopped.handBack.knobDecibels);
+
+    [self lapseLeases];
+    [self startWithKnob:@(-600) volume:nil];
+    XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
+    XCTAssertNil(stopped.handBack.volumeDecibels);
+}
+
+// A start while the stop sends the knob's level runs once the stop is done.
+- (void)testAStartDuringTheHandBackRunsAfterIt {
+    [self startWithKnob:@(-600) volume:@(-40)];
+    [self lapseLeases];
+    QLMSystem *system = _system;
+    __block BOOL stopped = NO;
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        stopped = stopped || !snapshot.running;
+        return stopped && snapshot.running && snapshot.monitors.count == 2 && snapshot.allIdentified;
+    } after:^{
+        [system stop];
+        [system start];
+    }];
+    XCTAssertTrue(again.running);
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    XCTAssertTrue([_bus.sentMessages containsObject:QLMAdapterRecord(&knob)]);
+}
+
+// A poll that never went out, while another host held the adapter, says
+// nothing of a monitor. So a short outage drops no monitor, and none shows
+// offline or a missed poll.
+- (void)testPollsThatNeverWentOutDoNotCount {
+    [self startSystem];
+    [self waitForDiscovery];
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running.";
+    }];
+    __block NSUInteger fewest = 2;
+    __block BOOL anyMissed = NO;
+    QLMSystem *system = _system;
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.5];
+    while ([until timeIntervalSinceNow] > 0) {
+        QLMSnapshot *snapshot = system.snapshot;
+        fewest = MIN(fewest, snapshot.monitors.count);
+        for (QLMMonitorState *monitor in snapshot.monitors) {
+            anyMissed = anyMissed || monitor.missedPolls > 0 || monitor.offline;
+        }
+        [NSThread sleepForTimeInterval:0.01];
+    }
+    XCTAssertNotNil(system.snapshot.adapterError);
+    [_bus perform:^{
+        self->_bus.busyReason = nil;
+    }];
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError == nil && snapshot.monitors.count == 2;
+    }];
+    XCTAssertEqual(fewest, 2u);
+    XCTAssertFalse(anyMissed);
+    XCTAssertEqual(back.adapter.missedPolls, 0u);
+}
+
+// The ceiling changes while System runs. The volume goes out again at once
+// under it, lower or higher.
+- (void)testTheCeilingChangesWhileSystemRuns {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-10];  // above the -20 dB ceiling
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    for (NSNumber *ceiling in @[@(-40), @(-5)]) {
+        NSUInteger before = _bus.sentMessages.count;
+        [_system setCeilingDecibels:ceiling.doubleValue];
+        QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+            return received.ceilingDecibels == ceiling.doubleValue && received.idle;
+        }];
+        XCTAssertEqual(snapshot.ceilingDecibels, ceiling.doubleValue);
+        XCTAssertEqual(_system.settings.ceilingDecibels, ceiling.doubleValue);
+        QLMMessage volume = QLMCommandVolume(-10, ceiling.doubleValue);
+        XCTAssertEqualObjects([self sentWithOpcode:0x1F from:before], @[QLMAdapterRecord(&volume)]);
+    }
+}
+
+// A stop's completion runs on the main queue once System has let go of the
+// adapter: after the hand-back level, with the snapshot stopped. A stop
+// while not running completes at once.
+- (void)testAStopCompletesOnceTheAdapterIsClosed {
+    [self startWithKnob:@(-600) volume:@(-40)];
+    XCTestExpectation *stopped = [self expectationWithDescription:@"stopped"];
+    QLMSystem *system = _system;
+    QLMFakeBus *bus = _bus;
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    NSData *knobRecord = QLMAdapterRecord(&knob);
+    [_system stopWithCompletion:^{
+        XCTAssertTrue(NSThread.isMainThread);
+        XCTAssertFalse(system.snapshot.running);
+        XCTAssertEqualObjects(bus.sentMessages.lastObject, knobRecord);
+        [stopped fulfill];
+    }];
+    [self waitForExpectations:@[stopped] timeout:5];
+
+    XCTestExpectation *again = [self expectationWithDescription:@"again"];
+    [_system stopWithCompletion:^{
+        [again fulfill];
+    }];
+    [self waitForExpectations:@[again] timeout:5];
+}
+
+// After a restart, a monitor that still holds its lease never answers the
+// probe. System asks each monitor it knew for its serial at its old
+// session, and takes the lease back at once when the serial is the same.
+// One whose old session now answers with another serial is not taken: the
+// session is another monitor's.
+- (void)testARestartTakesBackLeasesStillHeld {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    uint8_t leftSession = QLMFindMonitor(first, _left.hardwareID).session;
+    uint8_t rightSession = QLMFindMonitor(first, _right.hardwareID).session;
+    [self stopAndWait];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system start];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && snapshot.monitors.count == 2 && snapshot.allIdentified;
+    }];
+    XCTAssertEqual(QLMFindMonitor(again, _left.hardwareID).session, leftSession);
+    XCTAssertEqual(QLMFindMonitor(again, _right.hardwareID).session, rightSession);
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 0u);
+
+    // The left lets its lease lapse, and the right now holds the left's old
+    // session.
+    [self stopAndWait];
+    [_bus perform:^{
+        self->_left.session = 0;
+        self->_right.session = leftSession;
+    }];
+    [_system start];
+    QLMSnapshot *moved = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *left = QLMFindMonitor(snapshot, self->_left.hardwareID);
+        return snapshot.running && left.identified;
+    }];
+    XCTAssertNotEqual(QLMFindMonitor(moved, _left.hardwareID).session, leftSession);
+    XCTAssertNil(QLMFindMonitor(moved, _right.hardwareID));
+}
+
+// The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or
+// another host. GLM's case is pinned to the sentence QLMHostCheck writes.
+- (void)testTheSnapshotSaysWhoHoldsTheBus {
+    [self startSystem];
+    [self waitForDiscovery];
+    NSDictionary *glmClient = @{
+        @"IOUserClientCreator": @"pid 74853, GLMv5",
+        @"DebugState": @{@"ClientSeized": @NO, @"ClientOptions": @1, @"Privileged": @NO, @"ClientOpened": @YES, @"ClientSuspended": @NO},
+    };
+    NSString *glm = QLMHostCheckClientHolder(@"IOHIDLibUserClient", glmClient, 4242);
+    XCTAssertNotNil(glm);
+    NSDictionary<NSString *, NSNumber *> *cases = @{glm: @(QLMBusProblemGLM), @"Spotify (pid 7) holds the GLM adapter.": @(QLMBusProblemOtherHost)};
+    for (NSString *reason in cases) {
+        [_bus perform:^{
+            self->_bus.busyReason = reason;
+        }];
+        QLMSnapshot *refused = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.busProblem == cases[reason].integerValue;
+        }];
+        XCTAssertEqualObjects(refused.adapterError.localizedDescription, reason);
+        [_bus perform:^{
+            self->_bus.busyReason = nil;
+        }];
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.busProblem == QLMBusProblemNone && snapshot.adapterError == nil;
+        }];
+    }
+    [_bus perform:^{
+        self->_bus.disconnected = YES;
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.busProblem == QLMBusProblemNoAdapter;
+    }];
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.
@@ -1536,6 +1786,63 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [_bus perform:^{
         XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
     }];
+}
+
+// AGENTS.md's Safety rule refuses a group with an unverified model, the
+// 8351B, but for qlmctl's supervised test, which sets allowsUnverifiedRates.
+- (void)testOnlyTheSupervisedSettingAppliesAnUnverifiedRate {
+    _settings.cycleInterval = 10;
+    const uint8_t leftID[3] = {0x0F, 0x42, 0x42};  // the fixture's 1000002, the Left 8351B
+    _left = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(leftID, 3) serialNumber:@"8351BP21001234"
+                                            systemInfo:@"c-3;model-8351B" deviceClass:QLMTelemetryClassTwoWay];
+    _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left]];
+    QLMSetupGroup *source = QLMReadFixtureSetup().groups[0];
+    QLMSetupGroup *left = [self groupNamed:@"Left" from:source nodes:@[source.nodes[1]]];
+    for (NSNumber *allowed in @[@NO, @YES]) {
+        _settings.allowsUnverifiedRates = allowed.boolValue;
+        [_bus perform:^{
+            self->_left.session = 0;
+        }];
+        [self startSystem];
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.monitors.count == 1 && snapshot.allIdentified;
+        }];
+        [_system setVolumeDecibels:-40];
+        NSUInteger before = _bus.sentMessages.count;
+        NSError *error = [self applyGroup:left];
+        if (allowed.boolValue) {
+            XCTAssertNil(error);
+            XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 1u);
+        } else {
+            XCTAssertEqual(error.code, QLMSystemErrorUnverifiedRate);
+            XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 0u);
+        }
+        [self stopAndWait];
+    }
+}
+
+// switchToGroup: sends GLM's switch even as the first apply.
+- (void)testSwitchToGroupSendsTheSwitchFirstTime {
+    _settings.cycleInterval = 10;
+    _settings.ceilingDecibels = 0;
+    [self useMainsMonitors];
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-10];
+    QLMSnapshot *ready = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    QLMSetupGroup *group = [self mainsGroup];
+    NSArray<NSData *> *expected = [[self sequenceFor:group snapshot:ready] switchWithBlocks:[self blocksOf:group]
+                                                                                    volume:QLMCommandVolume(-10, 0)];
+    NSUInteger before = _bus.sentMessages.count;
+    XCTestExpectation *done = [self expectationWithDescription:@"switch"];
+    [_system switchToGroup:group completion:^(NSError *error) {
+        XCTAssertNil(error);
+        [done fulfill];
+    }];
+    [self waitForExpectations:@[done] timeout:5];
+    XCTAssertEqualObjects([self waitForApplyFrames:expected.count from:before], expected);
 }
 
 // A second apply while one runs is refused.

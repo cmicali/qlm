@@ -21,6 +21,8 @@ const double QLMCeilingLimit = -30;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
 @property (nonatomic, readwrite, nullable) NSString *serial;
 @property (nonatomic, readwrite) NSArray<NSString *> *mutedSerials;
+@property (nonatomic, readwrite) BOOL launch;
+@property (nonatomic, readwrite) BOOL unverifiedRate;
 @property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) NSTimeInterval seconds;
 @end
@@ -66,6 +68,11 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         [valued addObjectsFromArray:@[@"--ceiling", @"--volume"]];
         takesPositional = NO;
         break;
+    case QLMControlCommandApplyGroup:
+        [flags addObjectsFromArray:@[@"--allow-high-ceiling", @"--launch", @"--unverified-rate"]];
+        [valued addObjectsFromArray:@[@"--ceiling", @"--volume"]];
+        takesPositional = NO;
+        break;
     }
 
     // TRAP: an argument read loosely is a safety hole. A mistyped --dry-run
@@ -99,6 +106,8 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
     options.replayPath = given[@"--replay"];
     options.dryRun = given[@"--dry-run"] != nil;
     options.serial = given[@"--serial"];
+    options.launch = given[@"--launch"] != nil;
+    options.unverifiedRate = given[@"--unverified-rate"] != nil;
     options.mutedSerials = @[];
     NSString *muted = given[@"--muted"];
     if (muted != nil) {
@@ -166,14 +175,19 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         options.ceilingDecibels = number;
     }
 
+    // apply-group's dry run reads only the setup file.
+    BOOL reachesUSB = options.overUSB && !(command == QLMControlCommandApplyGroup && options.dryRun);
     BOOL sendsVolume = command == QLMControlCommandDim || options.volumeDecibels != nil;
-    if (options.overUSB && sendsVolume && ceiling == nil) {
-        NSString *name = command == QLMControlCommandVolume ? @"volume" : (command == QLMControlCommandDim ? @"dim" : @"wake --volume");
-        *problem = [NSString stringWithFormat:@"over USB, %@ needs --ceiling, at most %.0f dB", name, QLMCeilingLimit];
+    if (reachesUSB && sendsVolume && ceiling == nil) {
+        *problem = [NSString stringWithFormat:@"over USB, a command that sends a level needs --ceiling, at most %.0f dB", QLMCeilingLimit];
         return nil;
     }
     if (options.overUSB && command == QLMControlCommandDim && options.volumeDecibels == nil) {
         *problem = @"over USB, dim needs --volume, the level to dim from";
+        return nil;
+    }
+    if (!options.dryRun && command == QLMControlCommandApplyGroup && options.volumeDecibels == nil) {
+        *problem = @"apply-group needs --volume, the level to restore";
         return nil;
     }
     if (options.volumeDecibels != nil && options.volumeDecibels.doubleValue > options.ceilingDecibels) {
@@ -191,6 +205,7 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
 - (QLMSystemSettings *)settings {
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.ceilingDecibels;
+    settings.allowsUnverifiedRates = self.unverifiedRate;
     return settings;
 }
 
@@ -302,6 +317,25 @@ QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction act
         [system recordMutedHardwareIDs:hardwareIDs];
         return action(system, discovered);
     };
+}
+
+NSString *QLMHandBackText(QLMHandBack *handBack) {
+    switch (handBack.kind) {
+    case QLMHandBackKnobLevel:
+        return [NSString stringWithFormat:@"qlm sent the knob's level, %.1f dB, as it stopped, so the adapter's take-over "
+                                          @"about 2.6 s later changes nothing.",
+                                          handBack.knobDecibels.doubleValue];
+    case QLMHandBackLouder:
+        return [NSString stringWithFormat:@"about 2.6 s after qlm stops, the adapter takes over at the knob's %.1f dB, "
+                                          @"louder than qlm's %.1f dB. Turn the knob down.",
+                                          handBack.knobDecibels.doubleValue, handBack.volumeDecibels.doubleValue];
+    case QLMHandBackUnknown:
+        break;
+    }
+    NSString *why = handBack.knobDecibels == nil ? @"no knob is in" : @"no volume was set";
+    return [NSString stringWithFormat:@"about 2.6 s after qlm stops, the adapter takes over with its own level, unknown "
+                                      @"here because %@.",
+                                      why];
 }
 
 QLMControlAction QLMDimAction(BOOL on, NSNumber *volumeDecibels) {

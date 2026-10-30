@@ -20,6 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) NSInteger lfMeter;
 @property (nonatomic, readwrite) NSInteger subMeter;
 @property (nonatomic, readwrite) NSUInteger missedPolls;
+@property (nonatomic, readwrite) BOOL offline;
 @property (nonatomic, readwrite, nullable) NSDate *lastReply;
 @property (nonatomic, readwrite) BOOL muted;
 @property (nonatomic, readwrite) BOOL identified;
@@ -43,13 +44,21 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface QLMHandBack ()
+@property (nonatomic, readwrite) QLMHandBackKind kind;
+@property (nonatomic, readwrite, nullable) NSNumber *knobDecibels;
+@property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
+@end
+
 @interface QLMSnapshot ()
 
 @property (nonatomic, readwrite) BOOL running;
 @property (nonatomic, readwrite) QLMAdapterState *adapter;
 @property (nonatomic, readwrite, nullable) NSError *adapterError;
+@property (nonatomic, readwrite) QLMBusProblem busProblem;
 @property (nonatomic, readwrite) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
+@property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) BOOL dimmed;
 @property (nonatomic, readwrite) BOOL applying;
 @property (nonatomic, readwrite, nullable) NSString *activeGroupName;
@@ -58,6 +67,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) BOOL allMuted;
 @property (nonatomic, readwrite) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readwrite) BOOL mutingAll;
+@property (nonatomic, readwrite) QLMHandBack *handBack;
 @property (nonatomic, readwrite) BOOL anyOn;
 
 @end
