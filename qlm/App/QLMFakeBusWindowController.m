@@ -3,14 +3,15 @@
 #include <math.h>
 
 #import "QLMFormat.h"
+#import "QLMViews.h"
 
 // The shape of QLMHostCheck's description, so the banner reads as it will.
 static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applications/GLMv5.app/Contents/MacOS/GLMv5). Quit GLM first.";
 static const NSInteger QLMKnobBottomTenths = -1004;
 
-// One simulated monitor's controls.
+// One simulated monitor's controls. Each control's tag is the monitor's
+// index on the bus.
 @interface QLMFakeMonitorRow : NSObject
-@property (nonatomic, readonly) QLMFakeMonitor *monitor;
 @property (nonatomic, readonly) NSButton *onCheckbox;
 @property (nonatomic, readonly) NSButton *presentCheckbox;
 @property (nonatomic, readonly) NSStepper *temperatureStepper;
@@ -33,14 +34,15 @@ static const NSInteger QLMKnobBottomTenths = -1004;
 
 @implementation QLMFakeMonitorRow
 
-- (instancetype)initWithMonitor:(QLMFakeMonitor *)monitor target:(id)target {
+- (instancetype)initWithMonitor:(QLMFakeMonitor *)monitor index:(NSInteger)index target:(id)target {
     self = [super init];
     if (self) {
-        _monitor = monitor;
         NSTextField *name = [NSTextField labelWithString:monitor.serialNumber];
         name.font = [NSFont monospacedSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
         _onCheckbox = [NSButton checkboxWithTitle:@"On" target:target action:@selector(monitorOnClicked:)];
+        _onCheckbox.tag = index;
         _presentCheckbox = [NSButton checkboxWithTitle:@"Plugged in" target:target action:@selector(monitorPresentClicked:)];
+        _presentCheckbox.tag = index;
         _temperatureStepper = [[NSStepper alloc] init];
         _temperatureStepper.minValue = 20;
         _temperatureStepper.maxValue = 90;
@@ -48,6 +50,7 @@ static const NSInteger QLMKnobBottomTenths = -1004;
         _temperatureStepper.autorepeat = YES;
         _temperatureStepper.target = target;
         _temperatureStepper.action = @selector(monitorTemperatureStepped:);
+        _temperatureStepper.tag = index;
         _temperatureLabel = [NSTextField labelWithString:@""];
         _temperatureLabel.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.systemFontSize weight:NSFontWeightRegular];
         NSStackView *temperature = [NSStackView stackViewWithViews:@[_temperatureStepper, _temperatureLabel]];
@@ -58,7 +61,6 @@ static const NSInteger QLMKnobBottomTenths = -1004;
 }
 
 @end
-
 
 @implementation QLMFakeBusWindowController
 
@@ -82,11 +84,9 @@ static const NSInteger QLMKnobBottomTenths = -1004;
 - (void)buildContent {
     NSView *content = self.window.contentView;
 
-    NSTextField *intro = [NSTextField wrappingLabelWithString:
-        @"qlm runs on a fake bus until the controls are checked on real monitors. These play what the bus can do. qlm never opens the adapter."];
-    intro.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
-    intro.textColor = NSColor.secondaryLabelColor;
-    intro.preferredMaxLayoutWidth = 480;
+    NSTextField *intro = QLMNoteLabel(
+        @"qlm runs on a fake bus until the controls are checked on real monitors. These play what the bus can do. qlm never opens the adapter.",
+        480);
 
     self.knobCheckbox = [NSButton checkboxWithTitle:@"Attached" target:self action:@selector(knobAttachedClicked:)];
     self.knobSlider = [NSSlider sliderWithValue:QLMKnobBottomTenths minValue:QLMKnobBottomTenths maxValue:0
@@ -123,14 +123,8 @@ static const NSInteger QLMKnobBottomTenths = -1004;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 14;
     stack.edgeInsets = NSEdgeInsetsMake(16, 18, 18, 18);
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
     [content addSubview:stack];
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
-        [stack.topAnchor constraintEqualToAnchor:content.topAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:content.bottomAnchor],
-    ]];
+    QLMPinToEdges(stack, content);
 }
 
 - (void)setBus:(QLMFakeBus *)bus {
@@ -139,22 +133,23 @@ static const NSInteger QLMKnobBottomTenths = -1004;
         [self.monitorsGrid removeRowAtIndex:0];
     }
     NSMutableArray<QLMFakeMonitorRow *> *rows = [NSMutableArray array];
-    for (QLMFakeMonitor *monitor in bus.monitors) {
-        QLMFakeMonitorRow *row = [[QLMFakeMonitorRow alloc] initWithMonitor:monitor target:self];
+    [bus.monitors enumerateObjectsUsingBlock:^(QLMFakeMonitor *monitor, NSUInteger i, BOOL *stop) {
+        QLMFakeMonitorRow *row = [[QLMFakeMonitorRow alloc] initWithMonitor:monitor index:(NSInteger)i target:self];
         [self.monitorsGrid addRowWithViews:row.views];
         [rows addObject:row];
-    }
-    self.rows = rows;
-    __block NSNumber *knob = nil;
-    [bus perform:^{
-        knob = bus.knobTenths;
     }];
-    self.knobSlider.doubleValue = knob != nil ? knob.doubleValue : QLMKnobBottomTenths;
+    self.rows = rows;
     [self refresh];
     [self.window setContentSize:self.window.contentView.fittingSize];
 }
 
 - (void)refresh {
+    [self change:nil];
+}
+
+// Runs the change on the bus's queue, reads the bus back in the same visit,
+// and shows what it read.
+- (void)change:(nullable void (^)(QLMFakeBus *bus))change {
     QLMFakeBus *bus = self.bus;
     if (bus == nil) {
         return;
@@ -163,6 +158,9 @@ static const NSInteger QLMKnobBottomTenths = -1004;
     __block BOOL unplugged = NO;
     NSMutableArray<NSArray<NSNumber *> *> *monitors = [NSMutableArray array];
     [bus perform:^{
+        if (change != nil) {
+            change(bus);
+        }
         knob = bus.knobTenths;
         unplugged = bus.disconnected;
         for (QLMFakeMonitor *monitor in bus.monitors) {
@@ -171,6 +169,9 @@ static const NSInteger QLMKnobBottomTenths = -1004;
     }];
     self.knobCheckbox.state = knob != nil ? NSControlStateValueOn : NSControlStateValueOff;
     self.knobSlider.enabled = knob != nil;
+    if (knob != nil) {
+        self.knobSlider.doubleValue = knob.doubleValue;
+    }
     self.knobLabel.stringValue = knob != nil ? QLMDecibelsText(knob.doubleValue / 10) : @"Out";
     self.busyCheckbox.state = bus.busyReason != nil ? NSControlStateValueOn : NSControlStateValueOff;
     self.unpluggedCheckbox.state = unplugged ? NSControlStateValueOn : NSControlStateValueOff;
@@ -187,7 +188,7 @@ static const NSInteger QLMKnobBottomTenths = -1004;
 // within 23 to 42 s of the host going quiet (qlm-first-discover), and System
 // finds it again only by a probe, which a leased monitor ignores. So when
 // the adapter comes back, the leases lapse here.
-- (void)dropLeasesOnBus:(QLMFakeBus *)bus {
+static void QLMDropLeases(QLMFakeBus *bus) {
     for (QLMFakeMonitor *monitor in bus.monitors) {
         monitor.session = 0;
     }
@@ -196,85 +197,66 @@ static const NSInteger QLMKnobBottomTenths = -1004;
 #pragma mark - Actions
 
 - (void)knobAttachedClicked:(NSButton *)checkbox {
-    QLMFakeBus *bus = self.bus;
     NSNumber *knob = checkbox.state == NSControlStateValueOn ? @((NSInteger)self.knobSlider.doubleValue) : nil;
-    [bus perform:^{
+    [self change:^(QLMFakeBus *bus) {
         bus.knobTenths = knob;
     }];
-    [self refresh];
 }
 
 - (void)knobTurned:(NSSlider *)slider {
-    QLMFakeBus *bus = self.bus;
     NSNumber *knob = @((NSInteger)lround(slider.doubleValue));
-    [bus perform:^{
+    [self change:^(QLMFakeBus *bus) {
         bus.knobTenths = knob;
     }];
-    [self refresh];
 }
 
 - (void)busyClicked:(NSButton *)checkbox {
-    QLMFakeBus *bus = self.bus;
     BOOL busy = checkbox.state == NSControlStateValueOn;
-    [bus perform:^{
+    [self change:^(QLMFakeBus *bus) {
         bus.busyReason = busy ? QLMFakeBusyReason : nil;
         if (!busy) {
-            [self dropLeasesOnBus:bus];
+            QLMDropLeases(bus);
         }
     }];
-    [self refresh];
 }
 
 - (void)unpluggedClicked:(NSButton *)checkbox {
-    QLMFakeBus *bus = self.bus;
     BOOL unplugged = checkbox.state == NSControlStateValueOn;
-    [bus perform:^{
+    [self change:^(QLMFakeBus *bus) {
         bus.disconnected = unplugged;
         if (!unplugged) {
-            [self dropLeasesOnBus:bus];
+            QLMDropLeases(bus);
         }
     }];
-    [self refresh];
-}
-
-- (nullable QLMFakeMonitorRow *)rowForControl:(NSControl *)control {
-    for (QLMFakeMonitorRow *row in self.rows) {
-        if (row.onCheckbox == control || row.presentCheckbox == control || row.temperatureStepper == control) {
-            return row;
-        }
-    }
-    return nil;
 }
 
 - (void)monitorOnClicked:(NSButton *)checkbox {
-    QLMFakeMonitor *monitor = [self rowForControl:checkbox].monitor;
+    NSUInteger index = (NSUInteger)checkbox.tag;
     BOOL on = checkbox.state == NSControlStateValueOn;
-    [self.bus perform:^{
-        monitor.on = on;
+    [self change:^(QLMFakeBus *bus) {
+        bus.monitors[index].on = on;
     }];
-    [self refresh];
 }
 
 - (void)monitorPresentClicked:(NSButton *)checkbox {
-    QLMFakeMonitor *monitor = [self rowForControl:checkbox].monitor;
+    NSUInteger index = (NSUInteger)checkbox.tag;
     BOOL present = checkbox.state == NSControlStateValueOn;
-    [self.bus perform:^{
+    [self change:^(QLMFakeBus *bus) {
+        QLMFakeMonitor *monitor = bus.monitors[index];
         monitor.present = present;
         // A monitor plugged back in holds no lease.
         if (present) {
             monitor.session = 0;
         }
     }];
-    [self refresh];
 }
 
 - (void)monitorTemperatureStepped:(NSStepper *)stepper {
-    QLMFakeMonitor *monitor = [self rowForControl:stepper].monitor;
+    NSUInteger index = (NSUInteger)stepper.tag;
     uint8_t temperature = (uint8_t)stepper.integerValue;
-    [self.bus perform:^{
-        monitor.temperature = temperature;
+    [self change:^(QLMFakeBus *bus) {
+        bus.monitors[index].temperature = temperature;
     }];
-    [self refresh];
 }
 
 @end

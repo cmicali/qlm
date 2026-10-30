@@ -20,7 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 // mute toggle. It reads snapshots and drives System. On the main queue.
 @interface QLMPopoverController : NSViewController
 
-- (instancetype)initWithPreferences:(QLMPreferences *)preferences;
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList;
 
 @property (nonatomic, weak, nullable) id<QLMPopoverControllerDelegate> delegate;
 // The System it drives. A new one replaces it when the ceiling changes.
@@ -28,8 +28,9 @@ NS_ASSUME_NONNULL_BEGIN
 // Nil disables the group picker.
 @property (nonatomic, nullable) QLMSetup *setup;
 
-// Stored, and shown while the popover is open or when it next opens.
-- (void)showSnapshot:(QLMSnapshot *)snapshot monitors:(NSArray<QLMMonitorEntry *> *)monitors;
+// Draws the monitor list's snapshot while the popover is open. It draws
+// again when it next opens.
+- (void)refresh;
 
 // Reads the volume range and the ceiling from the preferences again.
 - (void)reloadVolumeRange;

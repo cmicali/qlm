@@ -1,7 +1,6 @@
 #import <Cocoa/Cocoa.h>
 
 #import "QLMMonitorList.h"
-#import "QLMSnapshot.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -10,10 +9,11 @@ NS_ASSUME_NONNULL_BEGIN
 // adapter is above them. It only reads. On the main queue.
 @interface QLMMonitorsWindowController : NSWindowController
 
-- (instancetype)init;
+- (instancetype)initWithMonitorList:(QLMMonitorList *)monitorList;
 
-// Stored, and shown while the window is open or when it next opens.
-- (void)showSnapshot:(QLMSnapshot *)snapshot monitors:(NSArray<QLMMonitorEntry *> *)monitors;
+// Draws the monitor list's snapshot while the window is open. It draws again
+// when it next opens.
+- (void)refresh;
 
 @end
 

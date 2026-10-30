@@ -1,6 +1,7 @@
 #import "QLMBannerView.h"
 
 #import "QLMFormat.h"
+#import "QLMViews.h"
 
 @implementation QLMBannerView {
     NSTextField *_title;
@@ -21,10 +22,7 @@
         _title = [NSTextField wrappingLabelWithString:@""];
         _title.font = [NSFont systemFontOfSize:NSFont.systemFontSize weight:NSFontWeightSemibold];
         _title.preferredMaxLayoutWidth = textWidth;
-        _detail = [NSTextField wrappingLabelWithString:@""];
-        _detail.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
-        _detail.textColor = NSColor.secondaryLabelColor;
-        _detail.preferredMaxLayoutWidth = textWidth;
+        _detail = QLMNoteLabel(@"", textWidth);
         _detail.selectable = YES;
 
         NSStackView *text = [NSStackView stackViewWithViews:@[_title, _detail]];
@@ -35,14 +33,8 @@
         row.orientation = NSUserInterfaceLayoutOrientationHorizontal;
         row.alignment = NSLayoutAttributeTop;
         row.edgeInsets = NSEdgeInsetsMake(8, 10, 8, 10);
-        row.translatesAutoresizingMaskIntoConstraints = NO;
         [self addSubview:row];
-        [NSLayoutConstraint activateConstraints:@[
-            [row.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
-            [row.trailingAnchor constraintEqualToAnchor:self.trailingAnchor],
-            [row.topAnchor constraintEqualToAnchor:self.topAnchor],
-            [row.bottomAnchor constraintEqualToAnchor:self.bottomAnchor],
-        ]];
+        QLMPinToEdges(row, self);
     }
     return self;
 }

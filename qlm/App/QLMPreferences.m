@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "QLMCommands.h"
+#import "QLMSystem.h"
 
 const double QLMVolumeRangeMinimumSpan = 10;
 
@@ -16,7 +17,7 @@ static double QLMStepBelow(double decibels) {
     return floor(decibels / QLMVolumeDecibelsStep) * QLMVolumeDecibelsStep;
 }
 
-static double QLMNearestStep(double decibels) {
+double QLMNearestStepDecibels(double decibels) {
     return round(decibels / QLMVolumeDecibelsStep) * QLMVolumeDecibelsStep;
 }
 
@@ -29,7 +30,7 @@ static double QLMNearestStep(double decibels) {
     if (self) {
         _defaults = defaults;
         [defaults registerDefaults:@{
-            QLMCeilingKey: @(-20),
+            QLMCeilingKey: @([[QLMSystemSettings alloc] init].ceilingDecibels),
             QLMLowestKey: @(-60),
             QLMVolumeKey: @(-40),
             QLMWakesAtLaunchKey: @NO,
@@ -50,24 +51,32 @@ static double QLMNearestStep(double decibels) {
     [_defaults setDouble:ceiling forKey:QLMCeilingKey];
 }
 
+- (double)boundedLowest:(double)decibels {
+    return fmax(QLMVolumeDecibelsMin, fmin(self.ceilingDecibels - QLMVolumeRangeMinimumSpan, QLMNearestStepDecibels(decibels)));
+}
+
 - (double)lowestDecibels {
-    double stored = [_defaults doubleForKey:QLMLowestKey];
-    return fmax(QLMVolumeDecibelsMin, fmin(self.ceilingDecibels - QLMVolumeRangeMinimumSpan, QLMNearestStep(stored)));
+    return [self boundedLowest:[_defaults doubleForKey:QLMLowestKey]];
 }
 
 - (void)setLowestDecibels:(double)lowestDecibels {
-    double lowest = fmax(QLMVolumeDecibelsMin, fmin(self.ceilingDecibels - QLMVolumeRangeMinimumSpan, QLMNearestStep(lowestDecibels)));
-    [_defaults setDouble:lowest forKey:QLMLowestKey];
+    [_defaults setDouble:[self boundedLowest:lowestDecibels] forKey:QLMLowestKey];
+}
+
+- (double)boundedVolume:(double)decibels {
+    return fmax(QLMVolumeDecibelsMin, fmin(self.ceilingDecibels, QLMNearestStepDecibels(decibels)));
 }
 
 - (double)volumeDecibels {
-    double stored = [_defaults doubleForKey:QLMVolumeKey];
-    return fmax(QLMVolumeDecibelsMin, fmin(self.ceilingDecibels, QLMNearestStep(stored)));
+    return [self boundedVolume:[_defaults doubleForKey:QLMVolumeKey]];
 }
 
 - (void)setVolumeDecibels:(double)volumeDecibels {
-    double volume = fmax(QLMVolumeDecibelsMin, fmin(self.ceilingDecibels, QLMNearestStep(volumeDecibels)));
-    [_defaults setDouble:volume forKey:QLMVolumeKey];
+    [_defaults setDouble:[self boundedVolume:volumeDecibels] forKey:QLMVolumeKey];
+}
+
+- (double)cappedDecibels:(double)decibels {
+    return fmin(decibels, self.ceilingDecibels);
 }
 
 - (BOOL)wakesAtLaunch {

@@ -2,6 +2,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// What a value with no reading shows.
+extern NSString *const QLMEmDash;
+
 // "−30.0 dB", with a true minus sign.
 NSString *QLMDecibelsText(double decibels);
 
@@ -13,6 +16,7 @@ NSString *QLMTemperatureText(NSInteger temperature);
 NSInteger QLMMeterCounts(NSInteger raw);
 
 // "0.4 s ago" within a minute, then the time of day. An em dash for nil.
+// On the main queue: it keeps one formatter.
 NSString *QLMReplyAgeText(NSDate *_Nullable date);
 
 // The banner's lines for System's adapterError.

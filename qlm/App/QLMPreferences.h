@@ -13,7 +13,7 @@ extern const double QLMVolumeRangeMinimumSpan;
 
 // System caps every volume frame at it. At most 0 dB, and at least the
 // span above the bottom of the range. A value between steps falls to the
-// step below. -20 by default, as System's.
+// step below. System's default until the user sets one.
 @property (nonatomic) double ceilingDecibels;
 // The slider's bottom. At least QLMVolumeDecibelsMin, and at least the span
 // below the ceiling.
@@ -25,7 +25,14 @@ extern const double QLMVolumeRangeMinimumSpan;
 // A file name in QLMSetupDirectory(). Nil takes the first by name.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
 
+// What goes out for this volume: GLMProtocol caps every frame at the
+// ceiling.
+- (double)cappedDecibels:(double)decibels;
+
 @end
+
+// The nearest of GLM's 0.5 dB steps.
+double QLMNearestStepDecibels(double decibels);
 
 // GLM 5's folder of setup files.
 NSString *QLMSetupDirectory(void);

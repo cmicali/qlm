@@ -2,6 +2,7 @@
 
 #import "QLMBannerView.h"
 #import "QLMFormat.h"
+#import "QLMViews.h"
 
 static NSUserInterfaceItemIdentifier const QLMColumnStatus = @"status";
 static NSUserInterfaceItemIdentifier const QLMColumnModel = @"model";
@@ -55,8 +56,7 @@ static const double QLMMeterBarCounts = 48;
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        _dot = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:nil]];
-        _dot.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:8 weight:NSFontWeightRegular];
+        _dot = QLMDotView();
         _label = [NSTextField labelWithString:@""];
         _label.lineBreakMode = NSLineBreakByTruncatingTail;
         NSStackView *stack = [NSStackView stackViewWithViews:@[_dot, _label]];
@@ -115,25 +115,24 @@ static const double QLMMeterBarCounts = 48;
     NSInteger counts = QLMMeterCounts(raw);
     self.bar.hidden = counts < 0;
     self.bar.doubleValue = (double)MAX(0, counts);
-    self.label.stringValue = counts < 0 ? @"—" : [NSString stringWithFormat:@"%ld", (long)counts];
+    self.label.stringValue = counts < 0 ? QLMEmDash : [NSString stringWithFormat:@"%ld", (long)counts];
     self.toolTip = counts < 0 ? @"Not in the last telemetry" : [NSString stringWithFormat:@"Raw %02lX: about %ld dB over the floor", (long)raw, (long)counts];
 }
 
 @end
 
-@interface QLMMonitorsWindowController () <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate>
+@interface QLMMonitorsWindowController () <NSTableViewDataSource, NSTableViewDelegate>
+@property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMBannerView *banner;
 @property (nonatomic) NSTextField *adapterLabel;
 @property (nonatomic) NSTextField *knobLabel;
 @property (nonatomic) NSTextField *busLabel;
 @property (nonatomic) NSTableView *table;
-@property (nonatomic, nullable) QLMSnapshot *shownSnapshot;
-@property (nonatomic, copy) NSArray<QLMMonitorEntry *> *shownMonitors;
 @end
 
 @implementation QLMMonitorsWindowController
 
-- (instancetype)init {
+- (instancetype)initWithMonitorList:(QLMMonitorList *)monitorList {
     NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1000, 330)
                                                    styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                              NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable
@@ -145,8 +144,7 @@ static const double QLMMeterBarCounts = 48;
     window.frameAutosaveName = @"QLMMonitors";
     self = [super initWithWindow:window];
     if (self) {
-        _shownMonitors = @[];
-        window.delegate = self;
+        _monitorList = monitorList;
         [self buildContent];
         [window center];
     }
@@ -196,10 +194,9 @@ static const double QLMMeterBarCounts = 48;
     scroll.borderType = NSBezelBorder;
     [scroll setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationVertical];
 
-    NSTextField *note = [NSTextField wrappingLabelWithString:
-        @"Meters are approximate: counts over each meter's floor, about 1 dB a count. The input meter is before the volume, and the outputs after it. A monitor System drops stays here, offline."];
-    note.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
-    note.textColor = NSColor.secondaryLabelColor;
+    NSTextField *note = QLMNoteLabel(
+        @"Meters are approximate: counts over each meter's floor, about 1 dB a count. The input meter is before the volume, and the outputs after it. A monitor System drops stays here, offline.",
+        0);
     [note setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
 
     NSStackView *stack = [NSStackView stackViewWithViews:@[self.banner, adapter, scroll, note]];
@@ -207,13 +204,9 @@ static const double QLMMeterBarCounts = 48;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 12;
     stack.edgeInsets = NSEdgeInsetsMake(16, 16, 14, 16);
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
     [content addSubview:stack];
+    QLMPinToEdges(stack, content);
     [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:content.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:content.trailingAnchor],
-        [stack.topAnchor constraintEqualToAnchor:content.topAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:content.bottomAnchor],
         [self.banner.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-32],
         [scroll.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-32],
         [note.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-32],
@@ -246,16 +239,14 @@ static const double QLMMeterBarCounts = 48;
     [super showWindow:sender];
 }
 
-- (void)showSnapshot:(QLMSnapshot *)snapshot monitors:(NSArray<QLMMonitorEntry *> *)monitors {
-    self.shownSnapshot = snapshot;
-    self.shownMonitors = monitors;
+- (void)refresh {
     if (self.window.visible) {
         [self render];
     }
 }
 
 - (void)render {
-    QLMSnapshot *snapshot = self.shownSnapshot;
+    QLMSnapshot *snapshot = self.monitorList.snapshot;
     QLMAdapterState *adapter = snapshot.adapter;
     [self.banner showError:snapshot.adapterError];
 
@@ -269,38 +260,42 @@ static const double QLMMeterBarCounts = 48;
     }
     self.adapterLabel.stringValue = [identity componentsJoinedByString:@", "];
     if (!adapter.hasStatus) {
-        self.knobLabel.stringValue = @"—";
+        self.knobLabel.stringValue = QLMEmDash;
     } else if (adapter.knobTenths == nil) {
         self.knobLabel.stringValue = @"Not attached";
     } else {
         self.knobLabel.stringValue = QLMDecibelsText(adapter.knobTenths.doubleValue / 10);
     }
-    NSString *device = adapter.device ?: @"—";
+    NSString *device = adapter.device ?: QLMEmDash;
     self.busLabel.stringValue = [NSString stringWithFormat:@"%@, last reply %@", device, QLMReplyAgeText(adapter.lastReply)];
-    [self.table reloadData];
+    // Keeps the row views when only their contents change.
+    NSUInteger rows = self.monitorList.entries.count;
+    if ((NSInteger)rows == self.table.numberOfRows) {
+        [self.table reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, rows)]
+                              columnIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)self.table.numberOfColumns)]];
+    } else {
+        [self.table reloadData];
+    }
 }
 
 #pragma mark - The table
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView *)tableView {
-    return (NSInteger)self.shownMonitors.count;
+    return (NSInteger)self.monitorList.entries.count;
 }
 
 - (nullable NSView *)tableView:(NSTableView *)tableView viewForTableColumn:(nullable NSTableColumn *)tableColumn row:(NSInteger)row {
     if (tableColumn == nil) {
         return nil;
     }
-    QLMMonitorEntry *entry = self.shownMonitors[(NSUInteger)row];
+    QLMMonitorEntry *entry = self.monitorList.entries[(NSUInteger)row];
     QLMMonitorState *monitor = entry.state;
     NSUserInterfaceItemIdentifier identifier = tableColumn.identifier;
 
     if ([identifier isEqualToString:QLMColumnStatus]) {
-        QLMStatusCell *cell = [tableView makeViewWithIdentifier:identifier owner:self] ?: [self cellOfClass:[QLMStatusCell class] identifier:identifier];
+        QLMStatusCell *cell = [self cellOfClass:[QLMStatusCell class] identifier:identifier];
         cell.dot.contentTintColor = QLMPresenceColor(entry.presence);
-        NSString *status = QLMPresenceName(entry.presence);
-        if (entry.presence == QLMMonitorPresenceOffline && entry.tracked) {
-            status = [NSString stringWithFormat:@"Not answering (%lu)", (unsigned long)monitor.missedPolls];
-        }
+        NSString *status = QLMEntryStatusText(entry);
         if (entry.tracked && monitor.muted) {
             status = [status stringByAppendingString:@", muted"];
         }
@@ -308,38 +303,31 @@ static const double QLMMeterBarCounts = 48;
         cell.toolTip = [NSString stringWithFormat:@"Hardware ID %@, session %02X", [self hexOf:monitor.hardwareID], monitor.session];
         return cell;
     }
-    if ([identifier isEqualToString:QLMColumnInput] || [identifier isEqualToString:QLMColumnHF] ||
-        [identifier isEqualToString:QLMColumnLF] || [identifier isEqualToString:QLMColumnSub]) {
-        QLMMeterCell *cell = [tableView makeViewWithIdentifier:identifier owner:self] ?: [self cellOfClass:[QLMMeterCell class] identifier:identifier];
-        NSInteger raw = QLMMonitorValueAbsent;
-        if (entry.tracked) {
-            if ([identifier isEqualToString:QLMColumnInput]) {
-                raw = monitor.inputMeter;
-            } else if ([identifier isEqualToString:QLMColumnHF]) {
-                raw = monitor.hfMeter;
-            } else if ([identifier isEqualToString:QLMColumnLF]) {
-                raw = monitor.lfMeter;
-            } else {
-                raw = monitor.subMeter;
-            }
-        }
-        [cell showRaw:raw];
+    NSNumber *meter = @{
+        QLMColumnInput: @(monitor.inputMeter),
+        QLMColumnHF: @(monitor.hfMeter),
+        QLMColumnLF: @(monitor.lfMeter),
+        QLMColumnSub: @(monitor.subMeter),
+    }[identifier];
+    if (meter != nil) {
+        QLMMeterCell *cell = [self cellOfClass:[QLMMeterCell class] identifier:identifier];
+        [cell showRaw:entry.tracked ? meter.integerValue : QLMMonitorValueAbsent];
         return cell;
     }
 
-    QLMTextCell *cell = [tableView makeViewWithIdentifier:identifier owner:self] ?: [self cellOfClass:[QLMTextCell class] identifier:identifier];
+    QLMTextCell *cell = [self cellOfClass:[QLMTextCell class] identifier:identifier];
     NSTextField *label = cell.textField;
     label.textColor = entry.tracked ? NSColor.labelColor : NSColor.secondaryLabelColor;
     label.font = [NSFont systemFontOfSize:NSFont.systemFontSize];
     if ([identifier isEqualToString:QLMColumnModel]) {
-        label.stringValue = monitor.model ?: @"—";
+        label.stringValue = monitor.model ?: QLMEmDash;
     } else if ([identifier isEqualToString:QLMColumnSerial]) {
-        label.stringValue = monitor.serialNumber ?: @"—";
+        label.stringValue = monitor.serialNumber ?: QLMEmDash;
         label.font = [NSFont monospacedSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
     } else if ([identifier isEqualToString:QLMColumnFirmware]) {
-        label.stringValue = monitor.firmwareVersion ?: @"—";
+        label.stringValue = monitor.firmwareVersion ?: QLMEmDash;
     } else if ([identifier isEqualToString:QLMColumnTemperature]) {
-        label.stringValue = entry.tracked ? QLMTemperatureText(monitor.temperature) : @"—";
+        label.stringValue = entry.tracked ? QLMTemperatureText(monitor.temperature) : QLMEmDash;
         label.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.systemFontSize weight:NSFontWeightRegular];
     } else {
         label.stringValue = QLMReplyAgeText(monitor.lastReply);
@@ -348,9 +336,13 @@ static const double QLMMeterBarCounts = 48;
     return cell;
 }
 
+// A reused cell for the column, or a new one.
 - (__kindof NSTableCellView *)cellOfClass:(Class)cellClass identifier:(NSUserInterfaceItemIdentifier)identifier {
-    NSTableCellView *cell = [[cellClass alloc] initWithFrame:NSZeroRect];
-    cell.identifier = identifier;
+    NSTableCellView *cell = [self.table makeViewWithIdentifier:identifier owner:self];
+    if (cell == nil) {
+        cell = [[cellClass alloc] initWithFrame:NSZeroRect];
+        cell.identifier = identifier;
+    }
     return cell;
 }
 

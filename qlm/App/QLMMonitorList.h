@@ -25,13 +25,18 @@ NSString *QLMPresenceName(QLMMonitorPresence presence);
 
 @end
 
-// Every monitor seen since launch, in the order first seen. System drops a
-// monitor that stops answering, and the list keeps it, offline. On the main
-// queue.
+// "Not answering (3)" for a tracked monitor that misses polls, else the
+// presence's name.
+NSString *QLMEntryStatusText(QLMMonitorEntry *entry);
+
+// The latest snapshot, and every monitor seen since launch. System drops a
+// monitor that stops answering, and the list keeps it, offline. Entries
+// only append, in the order first seen. On the main queue.
 @interface QLMMonitorList : NSObject
 
 - (void)updateWithSnapshot:(QLMSnapshot *)snapshot;
 
+@property (nonatomic, readonly, nullable) QLMSnapshot *snapshot;
 @property (nonatomic, readonly) NSArray<QLMMonitorEntry *> *entries;
 
 @end

@@ -3,18 +3,11 @@
 #import <ServiceManagement/ServiceManagement.h>
 
 #include "QLMCommands.h"
+#import "QLMViews.h"
 
 static const CGFloat QLMSettingsTextWidth = 360;
 
-static NSTextField *QLMNoteLabel(NSString *text) {
-    NSTextField *label = [NSTextField wrappingLabelWithString:text];
-    label.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
-    label.textColor = NSColor.secondaryLabelColor;
-    label.preferredMaxLayoutWidth = QLMSettingsTextWidth;
-    return label;
-}
-
-@interface QLMSettingsWindowController ()
+@interface QLMSettingsWindowController () <NSWindowDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) NSPopUpButton *setupPicker;
 @property (nonatomic) NSTextField *setupNote;
@@ -44,6 +37,7 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     self = [super initWithWindow:window];
     if (self) {
         _preferences = preferences;
+        window.delegate = self;
         [self buildContent];
         [window center];
     }
@@ -58,7 +52,7 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     self.setupPicker.action = @selector(setupChosen:);
     NSButton *reveal = [NSButton buttonWithTitle:@"Show in Finder" target:self action:@selector(revealSetups:)];
     NSStackView *setupRow = [NSStackView stackViewWithViews:@[self.setupPicker, reveal]];
-    self.setupNote = QLMNoteLabel(@"");
+    self.setupNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
     self.setupNote.selectable = YES;
 
     self.lowestField = [self decibelsField];
@@ -73,11 +67,12 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     NSTextField *ceilingNote = QLMNoteLabel(
         @"No volume goes out above the ceiling. qlm's protocol layer caps every volume frame at it, "
         @"whether the level comes from the slider, the knob, dim, or a group. 0 dB is the monitors' full level. "
-        @"A change reconnects to the monitors.");
+        @"A change reconnects to the monitors.",
+        QLMSettingsTextWidth);
 
     self.wakeCheckbox = [NSButton checkboxWithTitle:@"Wake the monitors" target:self action:@selector(wakeClicked:)];
     self.loginCheckbox = [NSButton checkboxWithTitle:@"Open qlm at login" target:self action:@selector(loginClicked:)];
-    self.loginNote = QLMNoteLabel(@"");
+    self.loginNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
     self.loginItemsButton = [NSButton buttonWithTitle:@"Open Login Items" target:self action:@selector(openLoginItems:)];
     self.loginItemsButton.controlSize = NSControlSizeSmall;
 
@@ -129,7 +124,7 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     field.formatter = formatter;
     field.alignment = NSTextAlignmentRight;
     field.target = self;
-    field.action = @selector(decibelsEdited:);
+    field.action = @selector(rangeChanged:);
     [field.widthAnchor constraintEqualToConstant:64].active = YES;
     return field;
 }
@@ -140,15 +135,23 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     stepper.autorepeat = YES;
     stepper.valueWraps = NO;
     stepper.target = self;
-    stepper.action = @selector(stepped:);
+    stepper.action = @selector(rangeChanged:);
     return stepper;
 }
 
 - (void)showWindow:(id)sender {
     [self reloadSetupNames];
-    [self render];
+    [self renderSetup];
+    [self renderRange];
+    [self renderLaunch];
     [self fitWindow];
     [super showWindow:sender];
+}
+
+// Login Items may have changed in System Settings meanwhile.
+- (void)windowDidBecomeKey:(NSNotification *)notification {
+    [self renderLaunch];
+    [self fitWindow];
 }
 
 #pragma mark - The setup file
@@ -185,29 +188,26 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     [NSWorkspace.sharedWorkspace openURL:directory];
 }
 
+// While the window is closed, showWindow: draws it.
 - (void)showSetup:(QLMSetup *)setup error:(NSError *)error {
     self.setup = setup;
     self.setupError = error;
-    [self render];
+    if (self.window.visible) {
+        [self renderSetup];
+        [self fitWindow];
+    }
 }
 
 #pragma mark - The volume range
 
-- (void)decibelsEdited:(NSTextField *)field {
-    [self setDecibels:field.doubleValue forCeiling:field == self.ceilingField];
-}
-
-- (void)stepped:(NSStepper *)stepper {
-    [self setDecibels:stepper.doubleValue forCeiling:stepper == self.ceilingStepper];
-}
-
-- (void)setDecibels:(double)decibels forCeiling:(BOOL)ceiling {
-    if (ceiling) {
-        self.preferences.ceilingDecibels = decibels;
+// The fields and the steppers both send it.
+- (void)rangeChanged:(NSControl *)control {
+    if (control == self.ceilingField || control == self.ceilingStepper) {
+        self.preferences.ceilingDecibels = control.doubleValue;
     } else {
-        self.preferences.lowestDecibels = decibels;
+        self.preferences.lowestDecibels = control.doubleValue;
     }
-    [self render];
+    [self renderRange];
     [self.delegate settingsDidChangeVolumeRange:self];
 }
 
@@ -222,7 +222,8 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     NSError *error = nil;
     BOOL done = checkbox.state == NSControlStateValueOn ? [service registerAndReturnError:&error] : [service unregisterAndReturnError:&error];
     self.loginError = done ? nil : error.localizedDescription;
-    [self render];
+    [self renderLaunch];
+    [self fitWindow];
 }
 
 - (void)openLoginItems:(id)sender {
@@ -231,7 +232,7 @@ static NSTextField *QLMNoteLabel(NSString *text) {
 
 #pragma mark - Drawing
 
-- (void)render {
+- (void)renderSetup {
     if (self.setup != nil) {
         NSMutableArray<NSString *> *names = [NSMutableArray array];
         for (QLMSetupGroup *group in self.setup.groups) {
@@ -244,7 +245,9 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     } else {
         self.setupNote.stringValue = [NSString stringWithFormat:@"GLM saves setup files in %@.", QLMSetupDirectory().stringByAbbreviatingWithTildeInPath];
     }
+}
 
+- (void)renderRange {
     double lowest = self.preferences.lowestDecibels;
     double ceiling = self.preferences.ceilingDecibels;
     self.lowestField.doubleValue = lowest;
@@ -255,7 +258,10 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     self.ceilingStepper.minValue = lowest + QLMVolumeRangeMinimumSpan;
     self.ceilingStepper.maxValue = 0;
     self.ceilingStepper.doubleValue = ceiling;
+}
 
+// Asks macOS for the login item's status, so only when the window shows.
+- (void)renderLaunch {
     self.wakeCheckbox.state = self.preferences.wakesAtLaunch ? NSControlStateValueOn : NSControlStateValueOff;
 
     SMAppServiceStatus status = SMAppService.mainAppService.status;
@@ -268,9 +274,6 @@ static NSTextField *QLMNoteLabel(NSString *text) {
     self.loginNote.stringValue = note ?: @"";
     [self.grid cellForView:self.loginNote].row.hidden = note == nil;
     [self.grid cellForView:self.loginItemsButton].row.hidden = status != SMAppServiceStatusRequiresApproval;
-    if (self.window.visible) {
-        [self fitWindow];
-    }
 }
 
 @end

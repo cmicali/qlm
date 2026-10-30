@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "QLMCommands.h"
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
@@ -27,10 +28,12 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 @property (nonatomic, nullable) QLMFakeBusWindowController *fakeBusController;
 @property (nonatomic, nullable) QLMFakeBus *bus;
 @property (nonatomic, nullable) QLMSystem *system;
-@property (nonatomic, nullable) QLMSnapshot *snapshot;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
+// What the status item shows, so an unchanged snapshot does not redraw it.
+@property (nonatomic, copy, nullable) NSString *statusSymbol;
+@property (nonatomic, copy, nullable) NSString *statusTip;
 @end
 
 @implementation QLMAppDelegate
@@ -39,7 +42,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
 
-    self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences];
+    self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
     self.popover = [[NSPopover alloc] init];
     self.popover.contentViewController = self.popoverController;
@@ -93,11 +96,11 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 // System copies its settings when made, so a new ceiling takes a new System.
 // It takes a new fake bus too: a stopped adapter is not handed to another.
-// Dim carries over. Mute does not: it is per monitor, and the new System
-// has leased none yet.
+// Dim carries over. Mutes, the active group, and the fake bus's state do
+// not: the new System has leased no monitor, and the bus is new.
 - (void)restartSystem {
     QLMSystem *old = self.system;
-    BOOL dimmed = self.snapshot.dimmed;
+    BOOL dimmed = self.monitorList.snapshot.dimmed;
     [old setSnapshotHandler:nil queue:dispatch_get_main_queue()];
     [old stop];
     [self startSystem];
@@ -107,19 +110,17 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 }
 
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
-    self.snapshot = snapshot;
     [self.monitorList updateWithSnapshot:snapshot];
-    NSArray<QLMMonitorEntry *> *monitors = self.monitorList.entries;
-    [self.popoverController showSnapshot:snapshot monitors:monitors];
-    [self.monitorsController showSnapshot:snapshot monitors:monitors];
+    [self.popoverController refresh];
+    [self.monitorsController refresh];
     if (self.fakeBusController.window.visible) {
         [self.fakeBusController refresh];
     }
     // The knob moves the volume too. Keep whichever set it last.
     NSNumber *volume = snapshot.volumeDecibels;
     if (volume != nil) {
-        double kept = fmin(volume.doubleValue, self.preferences.ceilingDecibels);
-        if (fabs(kept - self.preferences.volumeDecibels) >= 0.25) {
+        double kept = [self.preferences cappedDecibels:volume.doubleValue];
+        if (fabs(kept - self.preferences.volumeDecibels) >= QLMVolumeDecibelsStep / 2) {
             self.preferences.volumeDecibels = kept;
         }
     }
@@ -127,7 +128,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 }
 
 - (void)renderStatusItem {
-    QLMSnapshot *snapshot = self.snapshot;
+    QLMSnapshot *snapshot = self.monitorList.snapshot;
     NSString *symbol = @"hifispeaker.2";
     NSString *tip = @"qlm";
     if (snapshot.adapterError != nil) {
@@ -137,9 +138,14 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
         symbol = @"speaker.slash";
         tip = @"qlm: muted";
     } else if (snapshot.volumeDecibels != nil) {
-        double volume = fmin(snapshot.volumeDecibels.doubleValue, self.preferences.ceilingDecibels);
+        double volume = [self.preferences cappedDecibels:snapshot.volumeDecibels.doubleValue];
         tip = [NSString stringWithFormat:@"qlm: %@%@", QLMDecibelsText(volume), snapshot.dimmed ? @", dimmed" : @""];
     }
+    if ([symbol isEqualToString:self.statusSymbol] && [tip isEqualToString:self.statusTip]) {
+        return;
+    }
+    self.statusSymbol = symbol;
+    self.statusTip = tip;
     NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:tip];
     image.template = YES;
     self.statusItem.button.image = image;
@@ -190,15 +196,11 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
         [NSApp activateIgnoringOtherApps:YES];
     }
     [controller showWindow:self];
-    [controller.window makeKeyAndOrderFront:self];
 }
 
 - (void)popoverControllerShowMonitors:(QLMPopoverController *)controller {
     if (self.monitorsController == nil) {
-        self.monitorsController = [[QLMMonitorsWindowController alloc] init];
-        if (self.snapshot != nil) {
-            [self.monitorsController showSnapshot:self.snapshot monitors:self.monitorList.entries];
-        }
+        self.monitorsController = [[QLMMonitorsWindowController alloc] initWithMonitorList:self.monitorList];
     }
     [self bringForward:self.monitorsController];
 }
@@ -230,7 +232,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
         return;
     }
     // Until the restart, keep the level under the new ceiling.
-    NSNumber *volume = self.snapshot.volumeDecibels;
+    NSNumber *volume = self.monitorList.snapshot.volumeDecibels;
     if (volume != nil && volume.doubleValue > ceiling) {
         [system setVolumeDecibels:ceiling];
     }

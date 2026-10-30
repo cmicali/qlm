@@ -29,6 +29,13 @@ NSString *QLMPresenceName(QLMMonitorPresence presence) {
 @implementation QLMMonitorEntry
 @end
 
+NSString *QLMEntryStatusText(QLMMonitorEntry *entry) {
+    if (entry.presence == QLMMonitorPresenceOffline && entry.tracked) {
+        return [NSString stringWithFormat:@"Not answering (%lu)", (unsigned long)entry.state.missedPolls];
+    }
+    return QLMPresenceName(entry.presence);
+}
+
 @implementation QLMMonitorList {
     NSMutableArray<NSData *> *_order;  // hardware IDs, first seen first
     NSMutableDictionary<NSData *, QLMMonitorState *> *_lastStates;
@@ -45,6 +52,7 @@ NSString *QLMPresenceName(QLMMonitorPresence presence) {
 }
 
 - (void)updateWithSnapshot:(QLMSnapshot *)snapshot {
+    _snapshot = snapshot;
     NSMutableSet<NSData *> *tracked = [NSMutableSet setWithCapacity:snapshot.monitors.count];
     for (QLMMonitorState *monitor in snapshot.monitors) {
         if (_lastStates[monitor.hardwareID] == nil) {

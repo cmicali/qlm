@@ -3,14 +3,15 @@
 #import "QLMAdapter.h"
 #import "QLMSnapshot.h"
 
-static NSString *const QLMEmDash = @"—";
+NSString *const QLMEmDash = @"—";
 
+// A no-break space keeps the unit on the number's line.
 NSString *QLMDecibelsText(double decibels) {
-    NSString *text = [NSString stringWithFormat:@"%.1f dB", decibels];
-    if ([text isEqualToString:@"-0.0 dB"]) {
-        return @"0.0 dB";
+    NSString *number = [NSString stringWithFormat:@"%.1f", decibels];
+    if ([number isEqualToString:@"-0.0"]) {
+        number = @"0.0";
     }
-    return [text stringByReplacingOccurrencesOfString:@"-" withString:@"−"];
+    return [[number stringByReplacingOccurrencesOfString:@"-" withString:@"−"] stringByAppendingString:@"\u00A0dB"];
 }
 
 NSString *QLMTemperatureText(NSInteger temperature) {
@@ -35,7 +36,14 @@ NSString *QLMReplyAgeText(NSDate *date) {
     if (age < 60) {
         return [NSString stringWithFormat:@"%.1f s ago", age];
     }
-    return [NSDateFormatter localizedStringFromDate:date dateStyle:NSDateFormatterNoStyle timeStyle:NSDateFormatterMediumStyle];
+    static NSDateFormatter *formatter;
+    if (formatter == nil) {
+        formatter = [[NSDateFormatter alloc] init];
+        formatter.locale = NSLocale.autoupdatingCurrentLocale;
+        formatter.dateStyle = NSDateFormatterNoStyle;
+        formatter.timeStyle = NSDateFormatterMediumStyle;
+    }
+    return [formatter stringFromDate:date];
 }
 
 NSString *QLMAdapterErrorTitle(NSError *error) {
