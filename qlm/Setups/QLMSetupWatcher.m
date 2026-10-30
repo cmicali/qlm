@@ -136,9 +136,14 @@ static BOOL QLMFileStatesEqual(QLMFileState a, QLMFileState b) {
     [self watchFile];
     NSUInteger event = ++_events;
     __weak QLMSetupWatcher *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_settleInterval * (double)NSEC_PER_SEC)), _queue, ^{
+    dispatch_block_t settle = ^{
         [weakSelf settleAfterEvent:event];
-    });
+    };
+    if (_runAfter != nil) {
+        _runAfter(_settleInterval, settle);
+    } else {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_settleInterval * (double)NSEC_PER_SEC)), _queue, settle);
+    }
 }
 
 // A missing file is no change, but its return is one.

@@ -1,13 +1,16 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMSetupWatcher.h"
+#import "QLMTestSupport.h"
 
 // No capture names how GLM saves a setup file, so both kinds of save are
-// covered: a write in place, and a save that replaces the file. The watcher
-// hears the file system, so these tests run in real time. They wait for each
-// change with a generous deadline, and a slow host can only make one too many
-// go unseen.
+// covered: a write in place, and a save that replaces the file. The file
+// system's events come in real time, so each test waits for them with a
+// generous deadline. The settle checks run on a virtual clock, which moves
+// only after the test's writes, so the writes before one check always make
+// one change. A slow host can only make one change too many go unseen.
 @interface QLMSetupWatcherTests : XCTestCase
+@property (nonatomic) QLMVirtualClock *time;
 @property (nonatomic) NSString *folder;
 @property (nonatomic) NSString *path;
 @property (nonatomic) NSUInteger changes;
@@ -17,6 +20,7 @@
 @implementation QLMSetupWatcherTests
 
 - (void)setUp {
+    self.time = [[QLMVirtualClock alloc] init];
     self.folder = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
     [NSFileManager.defaultManager createDirectoryAtPath:self.folder withIntermediateDirectories:YES attributes:nil error:NULL];
     self.path = [self.folder stringByAppendingPathComponent:@"Main.sam"];
@@ -33,7 +37,10 @@
     self.watcher = [[QLMSetupWatcher alloc] initWithPath:self.path queue:dispatch_get_main_queue() handler:^{
         weakSelf.changes += 1;
     }];
-    self.watcher.settleInterval = 0.05;
+    QLMVirtualClock *time = self.time;
+    self.watcher.runAfter = ^(NSTimeInterval delay, dispatch_block_t block) {
+        [time after:delay queue:dispatch_get_main_queue() run:block];
+    };
     [self.watcher start];
 }
 
@@ -42,17 +49,21 @@
     XCTAssertTrue([data writeToFile:self.path options:atomically ? NSDataWritingAtomic : 0 error:NULL]);
 }
 
-// Runs the main queue past the settle interval, with time to spare.
+// Gives a late event 0.25 s to come on the main queue, where the file
+// system's events do, then runs the settle checks the events put on the
+// clock.
 - (void)settle {
-    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:self.watcher.settleInterval + 0.25]];
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
+    [self.time advanceBy:self.watcher.settleInterval];
 }
 
-// Runs the main queue until the handler has run `count` times in all, then
-// settles, so one change too many would show.
+// Runs the main queue and the clock until the handler has run `count` times
+// in all, then settles, so one change too many would show.
 - (void)waitForChanges:(NSUInteger)count {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:30];
     while (self.changes < count && [deadline timeIntervalSinceNow] > 0) {
         [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+        [self.time advanceBy:self.watcher.settleInterval];
     }
     [self settle];
     XCTAssertEqual(self.changes, count);
@@ -75,12 +86,10 @@
     [self waitForChanges:3];
 }
 
-// The writes all land before the main queue, the watcher's, runs again, so
-// it hears them as one burst. The default settle interval leaves the file
-// system time to report them all.
+// The writes all land before the clock moves, so the first settle check
+// sees the last, and any later check sees no change.
 - (void)testWritesCloseTogetherMakeOneChange {
     [self startWatching];
-    self.watcher.settleInterval = 0.5;
     [self write:@"a" atomically:NO];
     [self write:@"bb" atomically:YES];
     [self write:@"ccc" atomically:NO];
