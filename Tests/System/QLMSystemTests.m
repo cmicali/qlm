@@ -3,6 +3,7 @@
 #import "QLMApplySequence.h"
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
+#import "QLMHostCheck.h"
 #import "QLMReplayAdapter.h"
 #import "QLMSetupInternal.h"
 #import "QLMSystem.h"
@@ -1707,6 +1708,41 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertNotEqual(QLMFindMonitor(moved, _left.hardwareID).session, leftSession);
     XCTAssertNil(QLMFindMonitor(moved, _right.hardwareID));
+}
+
+// The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or
+// another host. GLM's case is pinned to the sentence QLMHostCheck writes.
+- (void)testTheSnapshotSaysWhoHoldsTheBus {
+    [self startSystem];
+    [self waitForDiscovery];
+    NSDictionary *glmClient = @{
+        @"IOUserClientCreator": @"pid 74853, GLMv5",
+        @"DebugState": @{@"ClientSeized": @NO, @"ClientOptions": @1, @"Privileged": @NO, @"ClientOpened": @YES, @"ClientSuspended": @NO},
+    };
+    NSString *glm = QLMHostCheckClientHolder(@"IOHIDLibUserClient", glmClient, 4242);
+    XCTAssertNotNil(glm);
+    NSArray *cases = @[@[glm, @(QLMBusProblemGLM)], @[@"Spotify (pid 7) holds the GLM adapter.", @(QLMBusProblemOtherHost)]];
+    for (NSArray *busy in cases) {
+        [_bus perform:^{
+            self->_bus.busyReason = busy[0];
+        }];
+        QLMSnapshot *refused = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.busProblem == [busy[1] integerValue];
+        }];
+        XCTAssertEqualObjects(refused.adapterError.localizedDescription, busy[0]);
+        [_bus perform:^{
+            self->_bus.busyReason = nil;
+        }];
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.busProblem == QLMBusProblemNone && snapshot.adapterError == nil;
+        }];
+    }
+    [_bus perform:^{
+        self->_bus.disconnected = YES;
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.busProblem == QLMBusProblemNoAdapter;
+    }];
 }
 
 // Mute all holds for a monitor that first appears after it: it hears 2B 03

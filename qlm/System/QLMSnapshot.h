@@ -70,6 +70,14 @@ extern const NSInteger QLMMonitorValueAbsent;
 
 @end
 
+// Why nothing reaches the bus.
+typedef NS_ENUM(NSInteger, QLMBusProblem) {
+    QLMBusProblemNone = 0,
+    QLMBusProblemNoAdapter,  // no GLM adapter is connected
+    QLMBusProblemGLM,        // GLM holds the adapter: quit it first
+    QLMBusProblemOtherHost,  // another process holds the adapter, or qlm could not seize it
+};
+
 // What the adapter's take-over does to the level. About 2.6 s after the
 // host goes quiet, the adapter applies the knob's position
 // (captures/qlm-control-first/notes.md).
@@ -100,6 +108,8 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // Why nothing reaches the bus: QLMAdapterErrorBusy while another host has
 // the adapter, or QLMAdapterErrorDisconnected. Nil once a send goes out.
 @property (nonatomic, readonly, nullable) NSError *adapterError;
+// The same, typed, so the app need not read GLMAdapter's error codes.
+@property (nonatomic, readonly) QLMBusProblem busProblem;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed
 @property (nonatomic, readonly) double ceilingDecibels;            // every volume frame is capped at it

@@ -116,6 +116,21 @@ static BOOL QLMSendWentOut(NSError *_Nullable error) {
                             (error.code == QLMAdapterErrorTimeout || error.code == QLMAdapterErrorBadReply));
 }
 
+// TRAP: GLMAdapter says that GLM holds the adapter only in its error's
+// sentence, which QLMHostCheck writes. QLMSystemTests pins the sentence.
+static QLMBusProblem QLMBusProblemFor(NSError *_Nullable error) {
+    if (error == nil || ![error.domain isEqualToString:QLMAdapterErrorDomain]) {
+        return QLMBusProblemNone;
+    }
+    if (error.code == QLMAdapterErrorDisconnected) {
+        return QLMBusProblemNoAdapter;
+    }
+    if (error.code != QLMAdapterErrorBusy) {
+        return QLMBusProblemNone;
+    }
+    return [error.localizedDescription hasPrefix:@"GLM is running"] ? QLMBusProblemGLM : QLMBusProblemOtherHost;
+}
+
 static QLMMonitorStatus QLMMonitorStatusFor(const QLMTelemetry *telemetry) {
     if (telemetry->status == QLMTelemetryStatusOn) {
         return QLMMonitorStatusOn;
@@ -1354,6 +1369,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.running = _running;
     snapshot.adapter = [self adapterState];
     snapshot.adapterError = _adapterError;
+    snapshot.busProblem = QLMBusProblemFor(_adapterError);
     snapshot.monitors = states;
     snapshot.volumeDecibels = _volumeDecibels;
     snapshot.ceilingDecibels = self.settings.ceilingDecibels;
