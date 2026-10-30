@@ -1662,6 +1662,53 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForExpectations:@[again] timeout:5];
 }
 
+// After a restart, a monitor that still holds its lease never answers the
+// probe. System asks each monitor it knew for its serial at its old
+// session, and takes the lease back at once when the serial is the same.
+// One whose old session now answers with another serial is not taken: the
+// session is another monitor's.
+- (void)testARestartTakesBackLeasesStillHeld {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    uint8_t leftSession = QLMFindMonitor(first, _left.hardwareID).session;
+    uint8_t rightSession = QLMFindMonitor(first, _right.hardwareID).session;
+    QLMSystem *system = _system;
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stop];
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system start];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && snapshot.monitors.count == 2 && snapshot.allIdentified;
+    }];
+    XCTAssertEqual(QLMFindMonitor(again, _left.hardwareID).session, leftSession);
+    XCTAssertEqual(QLMFindMonitor(again, _right.hardwareID).session, rightSession);
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 0u);
+
+    // The left lets its lease lapse, and the right now holds the left's old
+    // session.
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stop];
+    }];
+    [_bus perform:^{
+        self->_left.session = 0;
+        self->_right.session = leftSession;
+    }];
+    [_system start];
+    QLMSnapshot *moved = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *left = QLMFindMonitor(snapshot, self->_left.hardwareID);
+        return snapshot.running && left.identified;
+    }];
+    XCTAssertNotEqual(QLMFindMonitor(moved, _left.hardwareID).session, leftSession);
+    XCTAssertNil(QLMFindMonitor(moved, _right.hardwareID));
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.
