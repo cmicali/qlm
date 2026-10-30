@@ -19,11 +19,15 @@
 
 // A ceiling change restarts System. Steps closer together than this make one.
 static const NSTimeInterval QLMRestartDelay = 0.6;
+// How long quit waits for System to let go. A stop sends at most the
+// hand-back level, then closes the adapter.
+static const NSTimeInterval QLMStopAllowance = 3;
 
 @interface QLMAppDelegate () <QLMPopoverControllerDelegate, QLMSettingsWindowControllerDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMMonitorAlerts *alerts;
+@property (nonatomic) QLMNotifier *notifier;
 @property (nonatomic) NSStatusItem *statusItem;
 @property (nonatomic) NSPopover *popover;
 @property (nonatomic) QLMPopoverController *popoverController;
@@ -46,7 +50,8 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
-    self.alerts = [[QLMMonitorAlerts alloc] initWithNotifier:[[QLMNotifier alloc] init]];
+    self.notifier = [[QLMNotifier alloc] init];
+    self.alerts = [[QLMMonitorAlerts alloc] initWithNotifier:self.notifier];
 
     self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
@@ -70,8 +75,50 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     [workspace addObserver:self selector:@selector(macDidWake:) name:NSWorkspaceDidWakeNotification object:nil];
 }
 
-- (void)applicationWillTerminate:(NSNotification *)notification {
-    [self.system stop];
+// Quit waits for the stop, so the hand-back level goes out before qlm does.
+// On the real monitors, a take-over that would raise the level asks first.
+- (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
+    QLMSystem *system = self.system;
+    if (system == nil) {
+        return NSTerminateNow;
+    }
+    NSAlert *alert = self.bus == nil ? [self louderHandBackAlert:self.monitorList.snapshot.handBack] : nil;
+    if (alert != nil) {
+        if (@available(macOS 14.0, *)) {
+            [NSApp activate];
+        } else {
+            [NSApp activateIgnoringOtherApps:YES];
+        }
+        if ([alert runModal] != NSAlertSecondButtonReturn) {
+            return NSTerminateCancel;
+        }
+    }
+    __block BOOL replied = NO;
+    dispatch_block_t reply = ^{
+        if (!replied) {
+            replied = YES;
+            [NSApp replyToApplicationShouldTerminate:YES];
+        }
+    };
+    [system stopWithCompletion:reply];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(QLMStopAllowance * (double)NSEC_PER_SEC)), dispatch_get_main_queue(), reply);
+    return NSTerminateLater;
+}
+
+// Nil unless the take-over would raise the level. Cancel is the default.
+- (nullable NSAlert *)louderHandBackAlert:(QLMHandBack *)handBack {
+    if (handBack.kind != QLMHandBackLouder) {
+        return nil;
+    }
+    NSAlert *alert = [[NSAlert alloc] init];
+    alert.messageText = @"Quitting makes the monitors louder";
+    alert.informativeText = [NSString stringWithFormat:@"%@ About 2.6 s after qlm quits, the adapter sets the knob's level. "
+                                                       @"Turn the knob down first, or quit anyway.",
+                                                       QLMHandBackRiseText(handBack)];
+    [alert addButtonWithTitle:@"Cancel"];
+    NSButton *quit = [alert addButtonWithTitle:@"Quit Anyway"];
+    quit.hasDestructiveAction = YES;
+    return alert;
 }
 
 #pragma mark - System
@@ -120,7 +167,17 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 // System lets go of the adapter before the Mac sleeps. As at quit, the
 // adapter takes over at the knob's level about 2.6 s after the last report
 // (qlm-control-first).
+// No one can answer a prompt now, so a louder take-over is logged, and on
+// the real monitors it is a notification.
 - (void)macWillSleep:(NSNotification *)notification {
+    QLMHandBack *handBack = self.monitorList.snapshot.handBack;
+    NSString *line = QLMHandBackLine(self.monitorList.snapshot) ?: @"the level at the take-over is unknown.";
+    NSLog(@"qlm: the Mac sleeps. %@", line);
+    if (handBack.kind == QLMHandBackLouder && self.bus == nil) {
+        [self.notifier postIdentifier:@"hand-back"
+                                title:@"The level may have risen as the Mac slept"
+                                 body:QLMHandBackRiseText(handBack)];
+    }
     [self.system stop];
 }
 

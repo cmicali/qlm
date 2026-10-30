@@ -50,6 +50,32 @@ BOOL QLMAdapterErrorIsBusy(NSError *error) {
     return [error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorBusy;
 }
 
+NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
+    QLMHandBack *handBack = snapshot.handBack;
+    switch (handBack.kind) {
+    case QLMHandBackKnobLevel:
+        return [NSString stringWithFormat:@"Now: the knob reads %@, at or below qlm's %@. qlm sends the knob's level as it stops, "
+                                          @"so the take-over changes nothing.",
+                                          QLMDecibelsText(handBack.knobDecibels.doubleValue),
+                                          QLMDecibelsText(handBack.volumeDecibels.doubleValue)];
+    case QLMHandBackLouder:
+        return [@"Now: " stringByAppendingString:QLMHandBackRiseText(handBack)];
+    case QLMHandBackUnknown:
+        break;
+    }
+    if (snapshot.adapter.hasStatus && handBack.knobDecibels == nil) {
+        return @"Now: no knob is in, so the level at the take-over is unknown.";
+    }
+    return nil;
+}
+
+NSString *QLMHandBackRiseText(QLMHandBack *handBack) {
+    double knob = handBack.knobDecibels.doubleValue;
+    double volume = handBack.volumeDecibels.doubleValue;
+    return [NSString stringWithFormat:@"The knob reads %@, above qlm's %@. At the take-over, the level would rise %@.",
+                                      QLMDecibelsText(knob), QLMDecibelsText(volume), QLMDecibelsText(knob - volume)];
+}
+
 NSString *QLMAdapterErrorTitle(NSError *error) {
     if (QLMAdapterErrorIsBusy(error)) {
         return @"Another host has the adapter";

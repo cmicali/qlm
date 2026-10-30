@@ -2,8 +2,6 @@
 
 #import <ServiceManagement/ServiceManagement.h>
 
-#include <math.h>
-
 #include "QLMCommands.h"
 #import "QLMFormat.h"
 #import "QLMViews.h"
@@ -61,10 +59,10 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @"On, qlm sends volume, mute, dim, power, and groups to the real monitors through the GLM adapter, "
         @"every volume at or below the ceiling. Off, qlm runs on a fake bus and sends nothing. A change reconnects.",
         QLMSettingsTextWidth);
-    // Until System can match the knob when it stops (qlm-control-first).
     NSTextField *handBackNote = QLMNoteLabel(
-        @"When qlm quits, the Mac sleeps, or USB drops, the adapter takes over about 2.6 s later, at its knob's level. "
-        @"The ceiling does not apply to it. qlm does not yet match the knob when it stops, so the level can jump.",
+        @"When qlm quits or the Mac sleeps, the adapter takes over about 2.6 s after qlm lets go, at its knob's level. "
+        @"The ceiling does not apply to the knob. With the knob at or below qlm's level, qlm sends the knob's level first, "
+        @"so nothing changes. With it above, the level rises, and qlm asks before it quits. If USB drops, qlm can send nothing first.",
         QLMSettingsTextWidth);
     self.handBackLevel = QLMNoteLabel(@"", QLMSettingsTextWidth);
 
@@ -283,20 +281,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 // Returns whether the line's height changed.
 - (BOOL)renderHandBack {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
-    NSNumber *knob = snapshot.adapter.knobTenths;
-    NSNumber *volume = snapshot.volumeDecibels;
-    NSString *text = nil;
-    if (snapshot.adapter.hasStatus && knob == nil) {
-        text = @"Now: no knob is in, so what the adapter would set is unknown.";
-    } else if (knob != nil && volume != nil) {
-        double sent = [self.preferences sentDecibels:volume.doubleValue dimmed:snapshot.dimmed];
-        double knobDecibels = knob.doubleValue / 10;
-        double jump = knobDecibels - sent;
-        NSString *change = fabs(jump) < QLMVolumeDecibelsStep ? @"barely move"
-            : [NSString stringWithFormat:@"%@ %@", jump > 0 ? @"rise" : @"fall", QLMDecibelsText(fabs(jump))];
-        text = [NSString stringWithFormat:@"Now: qlm sends %@, and the knob reads %@. If the adapter took over now, the level would %@.",
-                                          QLMDecibelsText(sent), QLMDecibelsText(knobDecibels), change];
-    }
+    NSString *text = snapshot == nil ? nil : QLMHandBackLine(snapshot);
     if ([self.handBackLevel.stringValue isEqualToString:text ?: @""] && self.handBackRow.hidden == (text == nil)) {
         return NO;
     }

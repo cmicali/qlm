@@ -2,6 +2,8 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class QLMHandBack, QLMSnapshot;
+
 // What a value with no reading shows.
 extern NSString *const QLMEmDash;
 
@@ -21,6 +23,13 @@ NSString *QLMReplyAgeText(NSDate *_Nullable date);
 
 // System's adapterError says another host has the adapter.
 BOOL QLMAdapterErrorIsBusy(NSError *_Nullable error);
+
+// What a stop would do to the level now, from the snapshot's hand-back.
+// Nil while no volume is set.
+NSString *_Nullable QLMHandBackLine(QLMSnapshot *snapshot);
+
+// For a louder hand-back: the knob above qlm's level, and the rise.
+NSString *QLMHandBackRiseText(QLMHandBack *handBack);
 
 // The banner's lines for System's adapterError.
 NSString *QLMAdapterErrorTitle(NSError *error);
