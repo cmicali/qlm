@@ -20,6 +20,8 @@ Decided since Phase 1:
 
 - **qlm matches GLM byte for byte.** So the allowlist takes exactly `2D 00`, as a broadcast right before `FF 3D 00 00`, and dim sends it.
 - **qlm refuses the adapter only for GLM, or for a process that holds it the way GLM does.** A process that only enumerates it does not count. Spotify puts a USB device client on every USB device, the adapter among them, and that made qlm refuse in `qlm-standby-discover`. GLM's client is an HID library client that has opened the HID device.
+- **The hand-back.** When qlm stops, it compares the knob's position with its own volume. If the knob is at or below it, qlm sends the knob's level just before it lets go, so the adapter's take-over changes nothing. If the knob is above it, the take-over would make the level louder, so qlm warns instead.
+- **The 8351B in a supervised test.** `qlmctl apply-group` may apply a group with an 8351B over USB only behind an explicit flag, at a low level, one monitor first. The app still refuses. A measurement after that apply decides whether the refusal lifts.
 
 Next:
 
@@ -28,10 +30,10 @@ Next:
   - Send the volume on wake.
   - Make `qlmctl dim` send GLM's whole sequence. It sets dim before the volume, so it sends only the dimmed level.
   - `mute --serial` restates every other monitor as unmuted, as GLM does, so a monitor muted in GLM starts playing. Whether a monitor reports its mute state decides the fix.
-- The hand-back. The adapter takes over at the knob's position about 2.6 s after qlm stops. So qlm stops without a jump only when its volume equals the knob's. How the CLI and the app get there is open.
+- The hand-back, as decided above. The adapter takes over at the knob's position about 2.6 s after qlm stops, so qlm stops without a jump only when its volume equals the knob's.
 - The app on the real adapter, behind a setting, with GLM's quit offered, sleep and wake, notifications, and the setup file watched.
 - What System lacks for the app: a ceiling that changes while it runs, a kind of adapter error in the snapshot, and the group an apply is running.
-- Phase 3 on the monitors. `apply-group` reaches only the fake bus, and every group in the user's setup has an 8351B, which is still refused.
+- Phase 3 on the monitors. `apply-group` reaches only the fake bus, and every group in the user's setup has an 8351B. The supervised test, as decided above, opens it.
 - The knob's slow drift. In `sleep-wake-darkwake`, GLM follows a 7 dB drift that qlm ignores until the knob's first turn.
 - The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 - Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So the encoder refuses a `7D` or `7E` address, and System's leases skip both, and `F0`, the adapter's multicast. The question cannot arise.
