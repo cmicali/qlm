@@ -662,6 +662,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Dim
 
+// GLM's dim: the level twice, one round of 2B, then broadcast 2D 00 and
+// 3D 00 00 (captures/mute-dim, 51.24 s). 2D is not on the allowlist, so qlm
+// leaves it out.
 - (void)setDimmed:(BOOL)dimmed {
     [self onQueue:^{
         if (self->_dimmed == dimmed) {
@@ -669,9 +672,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         self->_dimmed = dimmed;
         self->_dirty = YES;
-        if (self->_volumeDecibels != nil) {
-            [self scheduleVolumeSend];
+        if (!self->_running || self->_volumeDecibels == nil) {
+            return;
         }
+        // Part of the sequence, so it skips the coalescing timer.
+        [self sendVolume];
+        [self sendVolume];
+        [self sendMuteRounds:1];
+        [self send:QLMCommandInputSync(QLMAddressBroadcast) then:nil];
     }];
 }
 
@@ -686,7 +694,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
         if (monitor != nil) {
             monitor.muted = muted;
-            [self sendMuteRounds];
+            [self sendMuteRounds:2];
         }
     }];
 }
@@ -703,15 +711,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             // Part of the sequence, so it skips the coalescing timer.
             [self sendVolume];
         }
-        [self sendMuteRounds];
+        [self sendMuteRounds:2];
     }];
 }
 
-// Two rounds, each restating every monitor's mute state. A 2B reply is a
-// bare ack, and a missed one is a lost send, not a missed poll.
-- (void)sendMuteRounds {
+// Each round restates every monitor's mute state. A 2B reply is a bare ack,
+// and a missed one is a lost send, not a missed poll.
+- (void)sendMuteRounds:(NSUInteger)rounds {
     NSArray<QLMMonitorRecord *> *monitors = [_monitors copy];
-    for (NSUInteger round = 0; round < 2; round++) {
+    for (NSUInteger round = 0; round < rounds; round++) {
         for (QLMMonitorRecord *monitor in monitors) {
             [self send:QLMCommandMute(monitor.session, QLMMuteValueFor(monitor)) then:nil];
         }

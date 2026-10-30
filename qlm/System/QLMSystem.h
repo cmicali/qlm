@@ -59,7 +59,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // every cycle. Clamped to the ceiling in the builder.
 - (void)setVolumeDecibels:(double)decibels;
 
-// While dimmed, every volume frame is the volume less QLMDimDecibels.
+// While dimmed, every volume frame is the volume less QLMDimDecibels. A
+// change sends GLM's dim: the level twice, a round of 2B, and 3D. With no
+// volume set, it sends nothing.
 - (void)setDimmed:(BOOL)dimmed;
 
 // Each sends two rounds of 2B to every leased monitor, restating each one's

@@ -703,6 +703,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 
 // Section 7, 1F, and section 9, "Mute, Solo & Dim": no dim command, a plain
 // volume frame 20 dB down. Dim off restores with an ordinary volume frame.
+// captures/mute-dim, 51.24 s: GLM sends each twice.
 - (void)testDimSendsAPlainVolumeFrameTwentyDecibelsDown {
     _settings.cycleInterval = 10;
     _settings.ceilingDecibels = 0;
@@ -731,13 +732,13 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertEqualObjects(dimmed.volumeDecibels, @(-10));
     [self waitUntil:^BOOL {
-        return [self countSent:minus30 from:before] == 1;
+        return [self countSent:minus30 from:before] == 2;
     }];
 
     before = _bus.sentMessages.count;
     [_system setDimmed:NO];
     [self waitUntil:^BOOL {
-        return [self countSent:minus10 from:before] == 1 && !self->_system.snapshot.dimmed;
+        return [self countSent:minus10 from:before] == 2 && !self->_system.snapshot.dimmed;
     }];
 
     // A volume change while dimmed stores the volume and sends it dimmed.
@@ -747,6 +748,22 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         QLMSnapshot *snapshot = self->_system.snapshot;
         return [self countSent:minus40 from:before] == 1 && [snapshot.volumeDecibels isEqual:@(-20)] && snapshot.dimmed;
     }];
+}
+
+// With no volume set, as in qlmctl dim over a replay, dim sends nothing.
+- (void)testDimWithNoVolumeSendsNothing {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSystem *system = _system;
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.dimmed && snapshot.idle;
+    } after:^{
+        [system setDimmed:YES];
+    }];
+    [NSThread sleepForTimeInterval:0.05];
+    XCTAssertEqual(_bus.sentMessages.count, before);
 }
 
 // Section 7, 1F: the cycle re-sends the volume, and while dimmed that is the
