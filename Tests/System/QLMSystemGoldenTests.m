@@ -108,18 +108,25 @@
 
 // Starts System, finds all six monitors, and sets GLM's level in mute-dim.
 - (NSArray<QLMMonitorState *> *)startSystem {
+    return [self startSystemAt:@(-56.5)];
+}
+
+// The same, at `decibels`, or with no volume set when it is nil.
+- (NSArray<QLMMonitorState *> *)startSystemAt:(nullable NSNumber *)decibels {
     _system = [[QLMSystem alloc] initWithAdapter:_clock settings:_settings];
     [_system start];
     [self waitUntil:^BOOL {
         QLMSnapshot *snapshot = self->_system.snapshot;
         return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
     }];
-    [_system setVolumeDecibels:-56.5];
-    const uint8_t levelBytes[] = {QLMAddressBroadcast, 0x1F, 0x00, 0x31, 0x07};
-    NSData *level = QLMBytes(levelBytes, sizeof levelBytes);
-    [self waitUntil:^BOOL {
-        return [self->_bus.sentMessages containsObject:level];
-    }];
+    if (decibels != nil) {
+        [_system setVolumeDecibels:decibels.doubleValue];
+        QLMMessage volume = QLMCommandVolume(decibels.doubleValue, _settings.ceilingDecibels);
+        NSData *level = QLMAdapterRecord(&volume);
+        [self waitUntil:^BOOL {
+            return [self->_bus.sentMessages containsObject:level];
+        }];
+    }
     return _system.snapshot.monitors;
 }
 
@@ -189,6 +196,12 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
                                               from:(NSTimeInterval)time
                                              count:(NSUInteger)count {
     NSArray<QLMCaptureExchange *> *captured = [self frames:count of:scenario from:time];
+    [self assertSentFrom:start are:captured];
+    return captured;
+}
+
+// Checks what System sent from `start` on against `captured`, in order.
+- (void)assertSentFrom:(NSUInteger)start are:(NSArray<QLMCaptureExchange *> *)captured {
     NSMutableArray<NSData *> *expected = [NSMutableArray array];
     for (QLMCaptureExchange *exchange in captured) {
         QLMMessage message = exchange.message;
@@ -199,8 +212,7 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
     }];
     // Long enough for a frame too many to show.
     [NSThread sleepForTimeInterval:0.05];
-    XCTAssertEqualObjects(QLMRenumberSessions([self sentFrom:start]), QLMRenumberSessions(expected), @"%@ from %.6f s", scenario, time);
-    return captured;
+    XCTAssertEqualObjects(QLMRenumberSessions([self sentFrom:start]), QLMRenumberSessions(expected));
 }
 
 // The gaps between the frames System sent from `start` on are the captured
@@ -208,7 +220,6 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
 // slack below is small and the slack above is wide.
 - (void)assertSpacingFrom:(NSUInteger)start matches:(NSArray<QLMCaptureExchange *> *)captured {
     NSArray<NSNumber *> *times = _clock.sendTimes;
-    XCTAssertEqual(times.count, start + captured.count);
     for (NSUInteger i = 1; i < captured.count && start + i < times.count; i++) {
         NSTimeInterval glm = captured[i].time - captured[i - 1].time;
         NSTimeInterval qlm = times[start + i].doubleValue - times[start + i - 1].doubleValue;
@@ -227,18 +238,39 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
     NSUInteger clocked = _clock.sendTimes.count;
     [_system sleep];
     NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"standby-wake" from:34.855835 count:4];
+    XCTAssertEqual(_clock.sendTimes.count, clocked + captured.count);
     [self assertSpacingFrom:clocked matches:captured];
 }
 
 // Wake, startup-idle, 7.33 s: broadcast `3A 03 7F` then `3A 03 01`, back to
-// back, three times, 0.20 to 0.21 s apart.
+// back, three times, 0.20 to 0.21 s apart. Then standby-wake, 47.24 s: the
+// level, 0.235 s after the last pair, then broadcast `2D 00` and `3D 00 00`.
+// GLM's level there is the knob's bottom stop, so System's is set to it.
 - (void)testWakeIsGLMs {
-    [self startSystem];
+    [self startSystemAt:@(QLMVolumeDecibelsMin)];
     NSUInteger before = _bus.sentMessages.count;
     NSUInteger clocked = _clock.sendTimes.count;
     [_system wake];
-    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6];
-    [self assertSpacingFrom:clocked matches:captured];
+
+    NSArray<QLMCaptureExchange *> *pairs = [self frames:6 of:@"startup-idle" from:7.331654];
+    NSArray<QLMCaptureExchange *> *level = [self frames:3 of:@"standby-wake" from:47.243052];
+    [self assertSentFrom:before are:[pairs arrayByAddingObjectsFromArray:level]];
+    XCTAssertEqual(_clock.sendTimes.count, clocked + pairs.count + level.count);
+    // The pairs' spacing is startup-idle's, and the level's delay after them
+    // standby-wake's. 47.0087 s picks its last 3A 03 01, at 47.008437 s, and
+    // not the 3A 03 7F 0.27 ms before it.
+    [self assertSpacingFrom:clocked matches:pairs];
+    [self assertSpacingFrom:clocked + 5 matches:[self frames:2 of:@"standby-wake" from:47.0087]];
+}
+
+// A wake with no volume set sends the pairs alone.
+- (void)testWakeWithNoVolumeSendsThePairsAlone {
+    [self startSystemAt:nil];
+    NSUInteger before = _bus.sentMessages.count;
+    [_system wake];
+    [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6];
+    [NSThread sleepForTimeInterval:0.3];
+    XCTAssertEqual([self sentFrom:before].count, 6u);
 }
 
 #pragma mark - The knob

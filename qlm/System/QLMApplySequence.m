@@ -125,10 +125,8 @@ static NSData *QLMRecordTo(uint8_t session, NSData *payload) {
     }];
 }
 
-// The pair GLM sends after configuring monitors (docs/refused-frames.md).
-- (void)addPairInto:(NSMutableArray<NSData *> *)frames {
-    [frames addObject:QLMRecord(QLMCommandInputPreamble())];
-    [frames addObject:QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
++ (NSArray<NSData *> *)inputPair {
+    return @[QLMRecord(QLMCommandInputPreamble()), QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
 }
 
 // captures/group-switch-main-4x2-main-2x1, 12.359 to 13.476 s. GLM also
@@ -182,7 +180,7 @@ static NSData *QLMRecordTo(uint8_t session, NSData *payload) {
         [frames addObject:QLMRecord(volume)];
     }
     [frames addObjectsFromArray:[self rounds:1]];
-    [self addPairInto:frames];
+    [frames addObjectsFromArray:[QLMApplySequence inputPair]];
     return frames;
 }
 
@@ -207,7 +205,7 @@ static NSData *QLMRecordTo(uint8_t session, NSData *payload) {
         return frames;
     }
     [frames addObjectsFromArray:[self roundFirstOfTwo:NO excluding:fresh]];
-    [self addPairInto:frames];
+    [frames addObjectsFromArray:[QLMApplySequence inputPair]];
     return frames;
 }
 

@@ -58,7 +58,11 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         [valued addObject:@"--serial"];
         break;
     case QLMControlCommandSleep:
+        takesPositional = NO;
+        break;
     case QLMControlCommandWake:
+        [flags addObject:@"--allow-high-ceiling"];
+        [valued addObjectsFromArray:@[@"--ceiling", @"--volume"]];
         takesPositional = NO;
         break;
     }
@@ -147,10 +151,10 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         options.ceilingDecibels = number;
     }
 
-    BOOL sendsVolume = command == QLMControlCommandVolume || command == QLMControlCommandDim;
+    BOOL sendsVolume = command == QLMControlCommandDim || options.volumeDecibels != nil;
     if (options.overUSB && sendsVolume && ceiling == nil) {
-        *problem = [NSString stringWithFormat:@"over USB, %@ needs --ceiling, at most %.0f dB", command == QLMControlCommandVolume ? @"volume" : @"dim",
-                                              QLMCeilingLimit];
+        NSString *name = command == QLMControlCommandVolume ? @"volume" : (command == QLMControlCommandDim ? @"dim" : @"wake --volume");
+        *problem = [NSString stringWithFormat:@"over USB, %@ needs --ceiling, at most %.0f dB", name, QLMCeilingLimit];
         return nil;
     }
     if (options.overUSB && command == QLMControlCommandDim && options.volumeDecibels == nil) {
@@ -251,6 +255,27 @@ static BOOL QLMIsDiscovery(NSData *record) {
     }
     // A lease: the address, then 02, the hardware ID, and the session.
     return record.length == 6 && QLMRecordIs(record, QLMCommandAssignSession(bytes + 2, bytes[5]));
+}
+
+QLMControlAction QLMDimAction(BOOL on, NSNumber *volumeDecibels) {
+    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        [system setDimmed:!on];
+        if (volumeDecibels != nil) {
+            [system setVolumeDecibels:volumeDecibels.doubleValue];
+        }
+        [system setDimmed:on];
+        return 0;
+    };
+}
+
+QLMControlAction QLMWakeAction(NSNumber *volumeDecibels) {
+    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        if (volumeDecibels != nil) {
+            [system setVolumeDecibels:volumeDecibels.doubleValue];
+        }
+        [system wake];
+        return 0;
+    };
 }
 
 NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, QLMControlAction action, QLMSnapshotTest effect,
