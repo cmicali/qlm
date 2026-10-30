@@ -3,6 +3,7 @@
 #import "QLMApplySequence.h"
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
+#import "QLMHIDAdapterInternal.h"
 #import "QLMHostCheck.h"
 #import "QLMReplayAdapter.h"
 #import "QLMSetupInternal.h"
@@ -88,12 +89,12 @@
 @end
 
 // Passes each message on, but while `failure` is set, fails each one it
-// matches with that error, and sends nothing. It matches every message, or
-// with `failsOnlySessions`, only those to a session.
+// matches with that error, and sends nothing. With no `matches`, it matches
+// every message.
 @interface QLMFailingAdapter : NSObject <QLMAdapter>
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
 @property (atomic, nullable) NSError *failure;
-@property (atomic) BOOL failsOnlySessions;
+@property (atomic, copy, nullable) BOOL (^matches)(const QLMMessage *message);
 @end
 
 @implementation QLMFailingAdapter {
@@ -126,7 +127,8 @@
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
     NSError *failure = self.failure;
-    if (failure != nil && (!self.failsOnlySessions || QLMAddressIsLeasable(message.address))) {
+    BOOL (^matches)(const QLMMessage *) = self.matches;
+    if (failure != nil && (matches == nil || matches(&message))) {
         [_clock async:_queue run:^{
             handler(NULL, failure);
         }];
@@ -2094,6 +2096,33 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(lost.adapterProblem, QLMAdapterProblemLostTrack);
     XCTAssertEqual(lost.busProblem, QLMBusProblemNoAdapter);
     XCTAssertEqualObjects(lost.handBack.knobDecibels, @(-100.4));
+}
+
+// IOHIDDeviceSetReport blocks up to the device's 5 s timeout when the
+// adapter stops taking reports (QLMHIDAdapter.m), and then nothing went out.
+// So a poll IOKit never took is no missed poll, and drops no monitor that
+// still holds its lease.
+- (void)testAPollIOKitDidNotTakeIsNoMissedPoll {
+    QLMFailingAdapter *failing = [[QLMFailingAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:failing];
+    [self waitForDiscovery];
+    failing.matches = ^BOOL(const QLMMessage *message) {
+        return QLMAddressIsLeasable(message->address) && message->payload[0] == 0x08;
+    };
+    failing.failure = QLMHIDWriteError(kIOReturnTimeout);
+    __block NSUInteger fewest = 2;
+    __block NSUInteger mostMissed = 0;
+    QLMSystem *system = _system;
+    [_time runUntil:^BOOL {
+        QLMSnapshot *snapshot = system.snapshot;
+        fewest = MIN(fewest, snapshot.monitors.count);
+        for (QLMMonitorState *monitor in snapshot.monitors) {
+            mostMissed = MAX(mostMissed, monitor.missedPolls);
+        }
+        return NO;
+    } within:1];
+    XCTAssertEqual(fewest, 2u);
+    XCTAssertEqual(mostMissed, 0u);
 }
 
 // The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or
