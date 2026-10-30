@@ -6,7 +6,9 @@
 
 // One second-order section, normalized by a0, in the textbook form
 // y = b0 x + b1 x1 + b2 x2 - a1 y1 - a2 y2. The wire wants a1 and a2 with
-// their signs flipped; QLMBiquadPack does that.
+// their signs flipped; QLMBiquadPack does that. GLM designs in double and
+// normalizes in single precision, so each coefficient is the float the wire
+// carries.
 typedef struct {
     double b0, b1, b2, a1, a2;
 } QLMBiquad;

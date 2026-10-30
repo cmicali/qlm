@@ -8,8 +8,11 @@ QLMBiquad QLMBiquadBypass(void) {
     return biquad;
 }
 
+// TRAP: the division is in float. Dividing in double and rounding after
+// misses GLM's coefficients by a bit or two.
 static QLMBiquad QLMBiquadNormalize(double b0, double b1, double b2, double a0, double a1, double a2) {
-    QLMBiquad biquad = {b0 / a0, b1 / a0, b2 / a0, a1 / a0, a2 / a0};
+    float scale = (float)a0;
+    QLMBiquad biquad = {(float)b0 / scale, (float)b1 / scale, (float)b2 / scale, (float)a1 / scale, (float)a2 / scale};
     return biquad;
 }
 
