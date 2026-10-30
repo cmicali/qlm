@@ -214,6 +214,70 @@ static NSData *QLMRecord(QLMMessage message) {
     XCTAssertFalse(QLMVolumeFrameWord(&unicast, &word));
 }
 
+// What `action` sends on the dry run's mirror of QLMDiscovered, its monitors
+// at 09 and 05, with no cycle inside it.
+- (NSArray<NSData *> *)recordsOf:(QLMControlAction)action effect:(QLMSnapshotTest)effect {
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.ceilingDecibels = -35;
+    settings.cycleInterval = 10;
+    int status = -1;
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, action, effect, &status);
+    XCTAssertEqual(status, 0);
+    return records;
+}
+
+// Broadcast 2D 00 and 3D 00 00.
+static NSArray<NSData *> *QLMPair(void) {
+    return @[QLMRecord(QLMCommandInputPreamble()), QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
+}
+
+// qlmctl dim sends GLM's whole dim (captures/mute-dim, 51.24 s on and
+// 54.77 s off): the level it changes from, then the new level twice, a
+// round of 2B, and 2D 00 and 3D 00 00. qlm's first run set dim before the
+// volume, and sent the dimmed level alone (captures/qlm-control-first,
+// 538.3 s).
+- (void)testDimSendsGLMsWholeSequence {
+    NSData *level = QLMRecord(QLMCommandVolume(-43.5, -35));
+    NSData *dimmed = QLMRecord(QLMCommandDim(-43.5, -35));
+    for (NSNumber *on in @[@YES, @NO]) {
+        NSArray<NSData *> *records = [self recordsOf:QLMDimAction(on.boolValue, @(-43.5)) effect:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.idle && snapshot.dimmed == on.boolValue && [snapshot.volumeDecibels isEqual:@(-43.5)];
+        }];
+        NSData *from = on.boolValue ? level : dimmed;
+        NSData *to = on.boolValue ? dimmed : level;
+        // The round of 2B goes in the mirror's lease order.
+        NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueUnmuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueUnmuted))];
+        NSArray<NSData *> *expected = [[@[from, to, to] arrayByAddingObjectsFromArray:round] arrayByAddingObjectsFromArray:QLMPair()];
+        XCTAssertEqualObjects(records, expected, @"dim %@", on.boolValue ? @"on" : @"off");
+    }
+}
+
+// qlmctl wake --volume sets the level, then wakes, so the wake ends with the
+// level and the pair, as GLM's does (captures/standby-wake, 47.24 s).
+- (void)testWakeWithAVolumeEndsWithIt {
+    NSData *level = QLMRecord(QLMCommandVolume(-43.5, -35));
+    NSArray<NSData *> *records = [self recordsOf:QLMWakeAction(@(-43.5)) effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.anyOn && [snapshot.volumeDecibels isEqual:@(-43.5)];
+    })];
+    NSMutableArray<NSData *> *expected = [NSMutableArray arrayWithObject:level];
+    for (int pair = 0; pair < 3; pair++) {
+        [expected addObject:QLMRecord(QLMCommandPower(QLMPowerStepWakeFirst))];
+        [expected addObject:QLMRecord(QLMCommandPower(QLMPowerStepWakeSecond))];
+    }
+    [expected addObject:level];
+    [expected addObjectsFromArray:QLMPair()];
+    XCTAssertEqualObjects(records, expected);
+}
+
+// Over USB, wake --volume needs a ceiling. Without --volume it needs none.
+- (void)testWakeWithAVolumeOverUSBNeedsACeiling {
+    [self refuse:QLMControlCommandWake arguments:@[@"--volume", @"-40"] mentions:@"--ceiling"];
+    [self refuse:QLMControlCommandWake arguments:@[@"--volume", @"-30", @"--ceiling", @"-35"] mentions:nil];
+    QLMControlOptions *options = [self read:QLMControlCommandWake arguments:@[@"--volume", @"-40", @"--ceiling", @"-35"]];
+    XCTAssertEqualObjects(options.volumeDecibels, @(-40));
+    XCTAssertNil([self read:QLMControlCommandWake arguments:@[]].volumeDecibels);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {

@@ -1346,6 +1346,46 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(sent, expected);
 }
 
+// A monitor just switched on plays at its own stored level until a host
+// sends one (captures/qlm-control-first/notes.md, after the capture). So
+// once a volume is set, it goes out right after a lease, before anything
+// reaches the new monitor. With none set, as in info, discover, and poll,
+// no volume goes out at all.
+- (void)testANewMonitorHearsTheVolumeFirst {
+    [_bus perform:^{
+        self->_right.present = NO;
+    }];
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 1 && snapshot.allIdentified && snapshot.idle;
+    }];
+    XCTAssertEqual([self sentWithOpcode:0x1F from:0].count, 0u);
+
+    [_system setVolumeDecibels:-30];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_right.present = YES;
+    }];
+    NSData *rightID = _right.hardwareID;
+    QLMSnapshot *joined = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, rightID).identified;
+    }];
+    uint8_t session = QLMFindMonitor(joined, rightID).session;
+    NSArray<NSData *> *all = _bus.sentMessages;
+    NSArray<NSData *> *sent = [all subarrayWithRange:NSMakeRange(before, all.count - before)];
+    QLMMessage lease = QLMCommandAssignSession(rightID.bytes, session);
+    NSUInteger leased = [sent indexOfObject:QLMAdapterRecord(&lease)];
+    XCTAssertNotEqual(leased, NSNotFound);
+    if (leased == NSNotFound || leased + 1 >= sent.count) {
+        return;
+    }
+    QLMMessage volume = QLMCommandVolume(-30, -20);
+    XCTAssertEqualObjects(sent[leased + 1], QLMAdapterRecord(&volume));
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.

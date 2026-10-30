@@ -32,7 +32,8 @@ static void QLMPrintUsage(FILE *stream) {
             "  dim <on|off> [BUS] [CONTROL] [--volume dB] [--ceiling dB [--allow-high-ceiling]]\n"
             "                                 dim the volume by %.0f dB, or restore it\n"
             "  sleep [BUS] [CONTROL]          put every monitor in standby\n"
-            "  wake [BUS] [CONTROL]           wake every monitor\n"
+            "  wake [BUS] [CONTROL] [--volume dB --ceiling dB [--allow-high-ceiling]]\n"
+            "                                 wake every monitor, then send the volume if one is given\n"
             "  setup <file.sam> [--bands]     print a GLM 5 setup file\n"
             "  apply-group <file.sam> <group> --dry-run [--launch] [--volume dB] [--ceiling dB] | --fake\n"
             "                                 print every frame of a switch to the group, or of the apply at\n"
@@ -54,11 +55,13 @@ static void QLMPrintUsage(FILE *stream) {
             "                                 out again every cycle.\n"
             "\n"
             "The controls over USB:\n"
-            "  - volume and dim need --ceiling. GLMProtocol caps every volume frame at it. It may be at most\n"
-            "    %.0f dB, or 0 dB with --allow-high-ceiling. The volume may not be above it.\n"
+            "  - volume, dim, and wake --volume need --ceiling. GLMProtocol caps every volume frame at it. It may\n"
+            "    be at most %.0f dB, or 0 dB with --allow-high-ceiling. The volume may not be above it.\n"
             "  - dim needs --volume, the level to dim from. qlm cannot read the level.\n"
+            "  - wake without --volume sends no level, so each monitor comes back at the level it kept.\n"
             "  - One monitor first. mute --serial changes one monitor. As GLM does, it also restates every other\n"
-            "    monitor as unmuted. volume, dim, sleep, and wake are broadcasts, and every monitor obeys them.\n"
+            "    monitor as unmuted, and so do dim and a turn of the knob. A monitor muted in GLM plays again.\n"
+            "    volume, dim, sleep, and wake are broadcasts, and every monitor obeys them.\n"
             "    To try one on a single monitor, put the others in standby in GLM, then quit GLM. wake wakes\n"
             "    them all, so try it last.\n"
             "  - About 2.6 s after qlmctl exits, the adapter takes over with its own level, likely the knob's\n"
@@ -557,14 +560,7 @@ static int QLMDim(int argc, const char *argv[]) {
     }
     NSNumber *volume = options.volumeDecibels;
     // Without a volume, dim sends nothing, and the replay may pass.
-    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
-        // TRAP: dim first. A volume set first goes out undimmed.
-        [system setDimmed:options.on];
-        if (volume != nil) {
-            [system setVolumeDecibels:volume.doubleValue];
-        }
-        return 0;
-    }, ^BOOL(QLMSnapshot *snapshot) {
+    return QLMRunControlCommand(options, QLMDimAction(options.on, volume), ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && snapshot.dimmed == options.on && (volume == nil || [snapshot.volumeDecibels isEqualToNumber:volume]);
     });
 }
@@ -577,17 +573,20 @@ static int QLMPower(int argc, const char *argv[], BOOL wake) {
         return EX_USAGE;
     }
     QLMMonitorStatus wanted = wake ? QLMMonitorStatusOn : QLMMonitorStatusStandby;
+    NSNumber *volume = options.volumeDecibels;
     __block NSUInteger count = 0;
+    QLMControlAction power = wake ? QLMWakeAction(volume) : ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        [system sleep];
+        return 0;
+    };
     return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
         count = discovered.monitors.count;
-        if (wake) {
-            [system wake];
-        } else {
-            [system sleep];
-        }
-        return 0;
+        return power(system, discovered);
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
         if (!snapshot.idle || snapshot.monitors.count != count) {
+            return NO;
+        }
+        if (volume != nil && ![snapshot.volumeDecibels isEqualToNumber:volume]) {
             return NO;
         }
         for (QLMMonitorState *monitor in snapshot.monitors) {

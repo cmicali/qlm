@@ -54,6 +54,7 @@ static const NSUInteger QLMAdapterPollsPerRound = 2;
 // GLM's spacing between the power steps.
 static const NSTimeInterval QLMSleepStepSpacing = 0.022;
 static const NSTimeInterval QLMWakePairSpacing = 0.2;
+static const NSTimeInterval QLMWakeVolumeDelay = 0.235;
 
 // A monitor System is tracking. Touched only on the queue.
 @interface QLMMonitorRecord : NSObject
@@ -328,11 +329,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // Ahead of everything queued, in order. Call it only from an item's
 // completion, which runs before the next item goes out.
+- (void)enqueueNext:(NSArray<dispatch_block_t> *)items {
+    [_sends insertObjects:items atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, items.count)]];
+}
+
 - (void)sendRecordsNext:(NSArray<NSData *> *)records {
-    NSUInteger index = 0;
+    NSMutableArray<dispatch_block_t> *items = [NSMutableArray arrayWithCapacity:records.count];
     for (NSData *record in records) {
-        [_sends insertObject:[self itemSending:QLMApplyMessage(record) then:nil] atIndex:index++];
+        [items addObject:[self itemSending:QLMApplyMessage(record) then:nil]];
     }
+    [self enqueueNext:items];
 }
 
 // A busy or missing adapter shows in the snapshot until a send goes out.
@@ -504,6 +510,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         // lease its polls answer; if not, the next probe finds it.
         if (reply == NULL && !QLMSendWentOut(error)) {
             return;
+        }
+        // TRAP: a monitor just switched on plays at its own stored level
+        // until a host sends one, and that can be loud
+        // (captures/qlm-control-first/notes.md, after the capture).
+        if (self->_volumeDecibels != nil) {
+            [self enqueueNext:@[[self volumeItem]]];
         }
         QLMMonitorRecord *monitor = [[QLMMonitorRecord alloc] init];
         monitor.hardwareID = identity;
@@ -765,9 +777,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return _dimmed ? QLMCommandDim(decibels, ceiling) : QLMCommandVolume(decibels, ceiling);
 }
 
-- (void)sendVolume {
+- (dispatch_block_t)volumeItem {
     _lastVolumeSend = [NSDate date];
-    [self send:[self volumeMessage] then:nil];
+    return [self itemSending:[self volumeMessage] then:nil];
+}
+
+- (void)sendVolume {
+    [self enqueue:[self volumeItem]];
+}
+
+- (void)sendInputPair {
+    [self sendRecords:[QLMApplySequence inputPair] then:nil];
 }
 
 #pragma mark - Dim
@@ -788,8 +808,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self sendVolume];
         [self sendVolume];
         [self sendMuteRounds:1];
-        [self send:QLMCommandInputPreamble() then:nil];
-        [self send:QLMCommandInputSync(QLMAddressBroadcast) then:nil];
+        [self sendInputPair];
     }];
 }
 
@@ -930,7 +949,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // GLM's three pairs, back to back within a pair and about 0.2 s apart
-// (captures/startup-idle, 7.33 s). The monitors come back under new
+// (captures/startup-idle, 7.33 s). Once a volume is set, it follows 0.235 s
+// later, then broadcast 2D 00 and 3D 00 00 (captures/standby-wake, 47.24 s).
+// A woken monitor keeps its own level until a host sends one
+// (captures/qlm-control-first/notes.md). The monitors come back under new
 // sessions, and the probe finds them.
 - (void)wake {
     [self onQueue:^{
@@ -943,6 +965,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             }
             [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
+        }
+        if (self->_volumeDecibels != nil) {
+            [self hold:QLMWakeVolumeDelay];
+            [self sendVolume];
+            [self sendInputPair];
         }
     }];
 }
