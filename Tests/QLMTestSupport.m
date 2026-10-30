@@ -55,13 +55,15 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
     NSMutableArray<NSData *> *_written;
     NSMutableArray<NSArray<NSData *> *> *_replies;  // due, in order
     NSUInteger _repliesDue;
-    dispatch_time_t _lastDue;
+    NSTimeInterval _lastDue;  // on the clock
 }
 
 - (instancetype)initWithCapture:(QLMCapture *)capture {
     self = [super init];
     if (self) {
         _replyDelay = 0.001;
+        _clock = QLMRealClock.shared;
+        _lastDue = -INFINITY;
         _written = [NSMutableArray array];
         _replies = [NSMutableArray array];
         _unplayed = [NSMutableDictionary dictionary];
@@ -104,6 +106,7 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
         [weakSelf answer:[NSData dataWithBytes:report length:QLMReportLength]];
         return nil;
     }];
+    _link.clock = self.clock;
 }
 
 - (void)stop {
@@ -129,16 +132,16 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
         delay = self.nextReplyDelay;
         self.nextReplyDelay = 0;
     }
-    dispatch_time_t due = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * (double)NSEC_PER_SEC));
-    due = MAX(due, _lastDue);
+    NSTimeInterval now = self.clock.now;
+    NSTimeInterval due = MAX(now + delay, _lastDue);
     _lastDue = due;
     [_replies addObject:[QLMCaptureDevice inputReportsForFrame:exchange.replyFrame]];
     _repliesDue += 1;
     NSUInteger number = _repliesDue;
     __weak QLMCaptureDevice *weakSelf = self;
-    dispatch_after(due, _queue, ^{
+    [self.clock after:due - now queue:_queue run:^{
         [weakSelf deliverRepliesThrough:number];
-    });
+    }];
 }
 
 // The replies ahead of this one are due too, since none is due before them.
@@ -240,3 +243,120 @@ QLMSetup *QLMReadFixtureSetup(void) {
     });
     return setup;
 }
+
+@interface QLMVirtualTimer : NSObject <QLMTimer>
+@property (nonatomic) NSTimeInterval due;
+@property (nonatomic) NSTimeInterval period;  // 0 for once
+@property (nonatomic) NSUInteger order;
+@property (nonatomic) dispatch_queue_t queue;
+@property (nonatomic, copy) dispatch_block_t block;
+@property (atomic) BOOL cancelled;
+@end
+
+@implementation QLMVirtualTimer
+
+- (void)cancel {
+    self.cancelled = YES;
+}
+
+@end
+
+@implementation QLMVirtualClock {
+    NSTimeInterval _now;
+    NSUInteger _order;
+    NSMutableArray<QLMVirtualTimer *> *_timers;
+    dispatch_group_t _group;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _timers = [NSMutableArray array];
+        _group = dispatch_group_create();
+    }
+    return self;
+}
+
+- (NSTimeInterval)now {
+    @synchronized(self) {
+        return _now;
+    }
+}
+
+- (void)async:(dispatch_queue_t)queue run:(dispatch_block_t)block {
+    dispatch_group_async(_group, queue, block);
+}
+
+- (id<QLMTimer>)schedule:(NSTimeInterval)seconds period:(NSTimeInterval)period queue:(dispatch_queue_t)queue run:(dispatch_block_t)block {
+    QLMVirtualTimer *timer = [[QLMVirtualTimer alloc] init];
+    timer.period = period;
+    timer.queue = queue;
+    timer.block = block;
+    @synchronized(self) {
+        timer.due = _now + seconds;
+        timer.order = _order++;
+        [_timers addObject:timer];
+    }
+    return timer;
+}
+
+- (id<QLMTimer>)after:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block {
+    return [self schedule:seconds period:0 queue:queue run:block];
+}
+
+- (id<QLMTimer>)every:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block {
+    return [self schedule:seconds period:seconds queue:queue run:block];
+}
+
+- (BOOL)settle {
+    return dispatch_group_wait(_group, dispatch_time(DISPATCH_TIME_NOW, 30 * (int64_t)NSEC_PER_SEC)) == 0;
+}
+
+// The next timer due by `limit`, taken off or moved on, with now at its time.
+- (nullable QLMVirtualTimer *)takeDueBy:(NSTimeInterval)limit {
+    @synchronized(self) {
+        [_timers filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(QLMVirtualTimer *timer, NSDictionary *bindings) {
+            return !timer.cancelled;
+        }]];
+        QLMVirtualTimer *next = nil;
+        for (QLMVirtualTimer *timer in _timers) {
+            if (timer.due <= limit && (next == nil || timer.due < next.due || (timer.due == next.due && timer.order < next.order))) {
+                next = timer;
+            }
+        }
+        if (next == nil) {
+            return nil;
+        }
+        _now = MAX(_now, next.due);
+        if (next.period > 0) {
+            next.due += next.period;
+            next.order = _order++;
+        } else {
+            [_timers removeObject:next];
+        }
+        return next;
+    }
+}
+
+- (void)advanceBy:(NSTimeInterval)seconds {
+    NSTimeInterval limit;
+    @synchronized(self) {
+        limit = _now + seconds;
+    }
+    NSAssert([self settle], @"work did not settle");
+    QLMVirtualTimer *timer = nil;
+    while ((timer = [self takeDueBy:limit]) != nil) {
+        QLMVirtualTimer *fired = timer;
+        dispatch_group_async(_group, fired.queue, ^{
+            if (!fired.cancelled) {
+                fired.block();
+            }
+        });
+        NSAssert([self settle], @"work did not settle");
+    }
+    @synchronized(self) {
+        _now = MAX(_now, limit);
+    }
+}
+
+@end

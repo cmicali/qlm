@@ -7,6 +7,7 @@
 
 #import "QLMAdapter.h"
 #import "QLMCapture.h"
+#import "QLMClock.h"
 #include "QLMFrame.h"
 #import "QLMSetup.h"
 
@@ -70,6 +71,8 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
 @property (nonatomic, readonly, nullable) QLMReportLink *link;  // made by startOnQueue:
 @property (atomic) NSTimeInterval replyDelay;                   // 1 ms
+// The reply delays' clock, and its link's. Set it before start.
+@property (nonatomic) id<QLMClock> clock;                       // QLMRealClock.shared
 @property (atomic) NSTimeInterval nextReplyDelay;               // above 0: the next reply's delay, once
 @property (atomic) BOOL silent;
 // Every output report written, as 64 bytes. Read on the queue.
@@ -80,6 +83,21 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 // A frame as the adapter delivers it: one input report per 63 bytes, each
 // starting with 3F and padded with zeros.
 + (NSArray<NSData *> *)inputReportsForFrame:(NSData *)frame;
+
+@end
+
+// A clock that moves only when a test advances it. Every hop and timer it
+// runs joins one dispatch group, so it can wait until the work a timer
+// starts is done. Time then depends on the test alone, never on the host.
+@interface QLMVirtualClock : NSObject <QLMClock>
+
+// Runs each timer due by now + seconds, in order of time, the earlier first
+// when two are due together, with now set to its time. Before each, and at
+// the end, it waits for the work started so far. Then now is now + seconds.
+- (void)advanceBy:(NSTimeInterval)seconds;
+// Waits for the work started so far, with time still. NO if it is not done
+// within a generous deadline, which only a hang would reach.
+- (BOOL)settle;
 
 @end
 
