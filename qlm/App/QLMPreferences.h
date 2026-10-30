@@ -22,6 +22,9 @@ extern const double QLMVolumeRangeMinimumSpan;
 // until the knob turns. Never above the ceiling.
 @property (nonatomic) double volumeDecibels;
 @property (nonatomic) BOOL wakesAtLaunch;
+// On, System drives the real monitors through the GLM adapter. Off, the
+// fake bus. Off by default.
+@property (nonatomic) BOOL usesAdapter;
 // A file name in QLMSetupDirectory(). Nil takes the first by name.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
 

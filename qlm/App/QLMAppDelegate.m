@@ -6,6 +6,7 @@
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
+#import "QLMHIDAdapter.h"
 #import "QLMMonitorList.h"
 #import "QLMMonitorsWindowController.h"
 #import "QLMPopoverController.h"
@@ -66,18 +67,29 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 #pragma mark - System
 
-// TRAP: the app runs on the fake bus. The controls are not yet checked on
-// real monitors, so it never makes a QLMHIDAdapter.
+// TRAP: a QLMHIDAdapter drives the real monitors. Only the user's setting
+// makes one. Tests and harnesses leave it off.
 - (void)startSystem {
-    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:YES];
-    bus.recordsSentMessages = NO;
+    id<QLMAdapter> adapter = nil;
+    QLMFakeBus *bus = nil;
+    if (self.preferences.usesAdapter) {
+        adapter = [[QLMHIDAdapter alloc] init];
+    } else {
+        bus = [QLMFakeBus demoBusWithSubwoofer:YES];
+        bus.recordsSentMessages = NO;
+        adapter = bus;
+    }
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.preferences.ceilingDecibels;
-    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
     self.bus = bus;
     self.system = system;
     self.popoverController.system = system;
+    self.popoverController.showsFakeBus = bus != nil;
     self.fakeBusController.bus = bus;
+    if (bus == nil) {
+        [self.fakeBusController close];
+    }
 
     __weak QLMAppDelegate *weakSelf = self;
     __weak QLMSystem *weakSystem = system;
@@ -94,10 +106,11 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     [system setVolumeDecibels:self.preferences.volumeDecibels];
 }
 
-// System copies its settings when made, so a new ceiling takes a new System.
-// It takes a new fake bus too: a stopped adapter is not handed to another.
-// Dim carries over. Mutes, the active group, and the fake bus's state do
-// not: the new System has leased no monitor, and the bus is new.
+// System copies its settings when made, so a new ceiling or adapter setting
+// takes a new System. It takes a new adapter too: a stopped one is not
+// handed to another. Dim carries over. Mutes, the active group, and the fake
+// bus's state do not: the new System has leased no monitor, and the bus is
+// new.
 - (void)restartSystem {
     QLMSystem *old = self.system;
     BOOL dimmed = self.monitorList.snapshot.dimmed;
@@ -215,6 +228,9 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 }
 
 - (void)popoverControllerShowFakeBus:(QLMPopoverController *)controller {
+    if (self.bus == nil) {
+        return;
+    }
     if (self.fakeBusController == nil) {
         self.fakeBusController = [[QLMFakeBusWindowController alloc] init];
         self.fakeBusController.bus = self.bus;
@@ -242,6 +258,11 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 - (void)settingsDidChooseSetupFile:(QLMSettingsWindowController *)controller {
     [self loadSetup];
+}
+
+- (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(restartSystem) object:nil];
+    [self restartSystem];
 }
 
 @end

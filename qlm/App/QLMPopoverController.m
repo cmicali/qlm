@@ -50,6 +50,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSButton *muteButton;
 @property (nonatomic) NSButton *dimButton;
 @property (nonatomic) NSButton *powerButton;
+@property (nonatomic) NSButton *fakeBusButton;
 @property (nonatomic) NSPopUpButton *groupPicker;
 @property (nonatomic) NSTextField *summaryLabel;
 @property (nonatomic) NSStackView *monitorsStack;
@@ -121,6 +122,11 @@ static NSView *QLMSpacer(void) {
         _rows = [NSMutableArray array];
     }
     return self;
+}
+
+- (void)setShowsFakeBus:(BOOL)showsFakeBus {
+    _showsFakeBus = showsFakeBus;
+    self.fakeBusButton.hidden = !showsFakeBus;
 }
 
 - (void)setSetup:(QLMSetup *)setup {
@@ -206,10 +212,11 @@ static NSView *QLMSpacer(void) {
 
     NSButton *monitorsButton = [self footerButtonWithTitle:@"Monitors…" action:@selector(showMonitorsClicked:)];
     NSButton *settingsButton = [self footerButtonWithTitle:@"Settings…" action:@selector(showSettingsClicked:)];
-    NSButton *fakeBusButton = [self footerButtonWithTitle:@"Fake Bus…" action:@selector(showFakeBusClicked:)];
+    self.fakeBusButton = [self footerButtonWithTitle:@"Fake Bus…" action:@selector(showFakeBusClicked:)];
+    self.fakeBusButton.hidden = !self.showsFakeBus;
     NSButton *quit = [self footerButtonWithTitle:@"Quit" action:@selector(terminate:)];
     quit.target = NSApp;
-    NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, fakeBusButton, QLMSpacer(), quit]];
+    NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, self.fakeBusButton, QLMSpacer(), quit]];
     footer.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     footer.spacing = 6;
 

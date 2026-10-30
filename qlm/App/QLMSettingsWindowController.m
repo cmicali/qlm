@@ -9,6 +9,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 @interface QLMSettingsWindowController () <NSWindowDelegate>
 @property (nonatomic) QLMPreferences *preferences;
+@property (nonatomic) NSButton *adapterCheckbox;
 @property (nonatomic) NSPopUpButton *setupPicker;
 @property (nonatomic) NSTextField *setupNote;
 @property (nonatomic) NSTextField *lowestField;
@@ -47,6 +48,13 @@ static const CGFloat QLMSettingsTextWidth = 360;
 - (void)buildContent {
     NSView *content = self.window.contentView;
 
+    self.adapterCheckbox = [NSButton checkboxWithTitle:@"Drive the real monitors through the GLM adapter" target:self
+                                                action:@selector(adapterClicked:)];
+    NSTextField *adapterNote = QLMNoteLabel(
+        @"On, qlm sends volume, mute, dim, power, and groups to the real monitors through the GLM adapter, "
+        @"every volume at or below the ceiling. Off, qlm runs on a fake bus and sends nothing. A change reconnects.",
+        QLMSettingsTextWidth);
+
     self.setupPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     self.setupPicker.target = self;
     self.setupPicker.action = @selector(setupChosen:);
@@ -76,13 +84,18 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.loginItemsButton = [NSButton buttonWithTitle:@"Open Login Items" target:self action:@selector(openLoginItems:)];
     self.loginItemsButton.controlSize = NSControlSizeSmall;
 
+    NSTextField *rangeTitle = [NSTextField labelWithString:@"Volume range:"];
+    NSTextField *launchTitle = [NSTextField labelWithString:@"At launch:"];
+    NSTextField *setupTitle = [NSTextField labelWithString:@"Setup file:"];
     NSGridView *grid = [NSGridView gridViewWithViews:@[
-        @[[NSTextField labelWithString:@"Setup file:"], setupRow],
+        @[[NSTextField labelWithString:@"Monitors:"], self.adapterCheckbox],
+        @[[NSGridCell emptyContentView], adapterNote],
+        @[setupTitle, setupRow],
         @[[NSGridCell emptyContentView], self.setupNote],
-        @[[NSTextField labelWithString:@"Volume range:"], lowestRow],
+        @[rangeTitle, lowestRow],
         @[[NSTextField labelWithString:@"Ceiling:"], ceilingRow],
         @[[NSGridCell emptyContentView], ceilingNote],
-        @[[NSTextField labelWithString:@"At launch:"], self.wakeCheckbox],
+        @[launchTitle, self.wakeCheckbox],
         @[[NSGridCell emptyContentView], self.loginCheckbox],
         @[[NSGridCell emptyContentView], self.loginNote],
         @[[NSGridCell emptyContentView], self.loginItemsButton],
@@ -91,11 +104,13 @@ static const CGFloat QLMSettingsTextWidth = 360;
     grid.columnSpacing = 8;
     grid.rowAlignment = NSGridRowAlignmentFirstBaseline;
     [grid columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
-    [grid rowAtIndex:1].topPadding = -4;
-    [grid rowAtIndex:2].topPadding = 10;
-    [grid rowAtIndex:4].topPadding = -4;
-    [grid rowAtIndex:5].topPadding = 10;
-    [grid rowAtIndex:7].topPadding = -4;
+    // A note sits close under its control, and a new section stands apart.
+    for (NSView *note in @[adapterNote, self.setupNote, ceilingNote, self.loginNote]) {
+        [grid cellForView:note].row.topPadding = -4;
+    }
+    for (NSView *title in @[setupTitle, rangeTitle, launchTitle]) {
+        [grid cellForView:title].row.topPadding = 10;
+    }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
     self.grid = grid;
     [content addSubview:grid];
@@ -140,6 +155,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 }
 
 - (void)showWindow:(id)sender {
+    self.adapterCheckbox.state = self.preferences.usesAdapter ? NSControlStateValueOn : NSControlStateValueOff;
     [self reloadSetupNames];
     [self renderSetup];
     [self renderRange];
@@ -152,6 +168,13 @@ static const CGFloat QLMSettingsTextWidth = 360;
 - (void)windowDidBecomeKey:(NSNotification *)notification {
     [self renderLaunch];
     [self fitWindow];
+}
+
+#pragma mark - The adapter
+
+- (void)adapterClicked:(NSButton *)checkbox {
+    self.preferences.usesAdapter = checkbox.state == NSControlStateValueOn;
+    [self.delegate settingsDidChangeAdapter:self];
 }
 
 #pragma mark - The setup file

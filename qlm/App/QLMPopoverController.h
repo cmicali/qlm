@@ -23,10 +23,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList;
 
 @property (nonatomic, weak, nullable) id<QLMPopoverControllerDelegate> delegate;
-// The System it drives. A new one replaces it when the ceiling changes.
+// The System it drives. A new one replaces it when the ceiling or the
+// adapter setting changes.
 @property (nonatomic, nullable) QLMSystem *system;
 // Nil disables the group picker.
 @property (nonatomic, nullable) QLMSetup *setup;
+// Shows the Fake Bus button.
+@property (nonatomic) BOOL showsFakeBus;
 
 // Draws the monitor list's snapshot while the popover is open. It draws
 // again when it next opens.

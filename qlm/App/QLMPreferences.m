@@ -11,6 +11,7 @@ static NSString *const QLMCeilingKey = @"QLMCeilingDecibels";
 static NSString *const QLMLowestKey = @"QLMLowestDecibels";
 static NSString *const QLMVolumeKey = @"QLMVolumeDecibels";
 static NSString *const QLMWakesAtLaunchKey = @"QLMWakesAtLaunch";
+static NSString *const QLMUsesAdapterKey = @"QLMUsesAdapter";
 static NSString *const QLMSetupFileNameKey = @"QLMSetupFileName";
 
 static double QLMStepBelow(double decibels) {
@@ -34,6 +35,7 @@ double QLMNearestStepDecibels(double decibels) {
             QLMLowestKey: @(-60),
             QLMVolumeKey: @(-40),
             QLMWakesAtLaunchKey: @NO,
+            QLMUsesAdapterKey: @NO,
         }];
     }
     return self;
@@ -85,6 +87,14 @@ double QLMNearestStepDecibels(double decibels) {
 
 - (void)setWakesAtLaunch:(BOOL)wakesAtLaunch {
     [_defaults setBool:wakesAtLaunch forKey:QLMWakesAtLaunchKey];
+}
+
+- (BOOL)usesAdapter {
+    return [_defaults boolForKey:QLMUsesAdapterKey];
+}
+
+- (void)setUsesAdapter:(BOOL)usesAdapter {
+    [_defaults setBool:usesAdapter forKey:QLMUsesAdapterKey];
 }
 
 - (NSString *)setupFileName {

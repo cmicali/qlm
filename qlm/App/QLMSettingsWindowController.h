@@ -12,10 +12,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)settingsDidChangeVolumeRange:(QLMSettingsWindowController *)controller;
 // The preferences name another setup file.
 - (void)settingsDidChooseSetupFile:(QLMSettingsWindowController *)controller;
+// The preferences switched between the GLM adapter and the fake bus.
+- (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller;
 @end
 
-// Settings: the setup file, the volume range and ceiling, waking the
-// monitors at launch, and opening at login. Each change is saved at once.
+// Settings: the GLM adapter or the fake bus, the setup file, the volume
+// range and ceiling, waking the monitors at launch, and opening at login. Each change is saved at once.
 // On the main queue.
 @interface QLMSettingsWindowController : NSWindowController
 
