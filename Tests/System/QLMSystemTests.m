@@ -589,6 +589,58 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
 }
 
+// The plan: after any gap in polling, lease again. captures/qlm-first-discover:
+// the monitors drop their leases within 23 to 42 s of the host going quiet,
+// then answer the probe. Here System's queue stalls, as in a sleep, and both
+// monitors drop their leases meanwhile. The next cycle's probe finds them,
+// and each gets the next session.
+- (void)testAGapInPollingLeasesAgain {
+    [self startSystem];
+    [self waitForDiscovery];
+    NSUInteger before = _bus.sentMessages.count;
+    // perform: runs on System's queue, so nothing goes out while it sleeps.
+    [_bus perform:^{
+        [NSThread sleepForTimeInterval:0.2];
+        self->_left.session = 0;
+        self->_right.session = 0;
+    }];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *left = QLMFindMonitor(snapshot, self->_left.hardwareID);
+        QLMMonitorState *right = QLMFindMonitor(snapshot, self->_right.hardwareID);
+        return snapshot.monitors.count == 2 && left.session > 0x03 && right.session > 0x03 && snapshot.allIdentified;
+    }];
+    NSMutableIndexSet *sessions = [NSMutableIndexSet indexSet];
+    for (QLMMonitorState *monitor in again.monitors) {
+        [sessions addIndex:monitor.session];
+        XCTAssertEqual(monitor.status, QLMMonitorStatusOn);
+    }
+    XCTAssertEqualObjects(sessions, [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0x04, 2)]);
+
+    NSArray<NSData *> *probes = [self sentFrom:before matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return bytes[0] == QLMAddressBroadcast && bytes[1] == 0xFE;
+    }];
+    XCTAssertGreaterThanOrEqual(probes.count, 2u);
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 2u);
+}
+
+// A gap the monitors ride out keeps every lease.
+- (void)testAShortGapKeepsTheLeases {
+    [self startSystem];
+    [self waitForDiscovery];
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        [NSThread sleepForTimeInterval:0.2];
+    }];
+    [self waitUntil:^BOOL {
+        return [self countSentTo:0x02 opcode:0x08 from:before] >= 3;
+    }];
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 0u);
+    QLMSnapshot *snapshot = _system.snapshot;
+    XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
+    XCTAssertEqual(QLMFindMonitor(snapshot, _right.hardwareID).session, 0x03);
+}
+
 // A crowded bus runs the leases past 7C in one discovery. They skip 7D and
 // 7E, which no capture shows as an address, and F0, the adapter's multicast.
 - (void)testLeasesSkipAddressesThatNeedEscapingAndTheMulticast {
