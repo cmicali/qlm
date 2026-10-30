@@ -35,9 +35,12 @@ static void QLMPrintUsage(FILE *stream) {
             "  wake [BUS] [CONTROL] [--volume dB --ceiling dB [--allow-high-ceiling]]\n"
             "                                 wake every monitor, then send the volume if one is given\n"
             "  setup <file.sam> [--bands]     print a GLM 5 setup file\n"
-            "  apply-group <file.sam> <group> --dry-run [--launch] [--volume dB] [--ceiling dB] | --fake\n"
-            "                                 print every frame of a switch to the group, or of the apply at\n"
-            "                                 launch and wake, or apply the group\n"
+            "  apply-group <file.sam> <group> [--launch] --dry-run [--volume dB] [--ceiling dB]\n"
+            "  apply-group <file.sam> <group> [--launch] [BUS] [CONTROL] --volume dB --ceiling dB\n"
+            "              [--allow-high-ceiling] [--unverified-rate]\n"
+            "                                 print, or send, every frame of a switch to the group, or with\n"
+            "                                 --launch, of the apply at launch and wake. The dry run reads only\n"
+            "                                 the setup file. --volume is the level the apply restores.\n"
             "\n"
             "BUS picks what a command drives:\n"
             "  (none)                         the GLM adapter over USB, opened only seized. Refused, with exit 69,\n"
@@ -72,7 +75,8 @@ static void QLMPrintUsage(FILE *stream) {
             "    level as it exits when it is at or below its own. When the knob is higher, the level rises then,\n"
             "    so turn the knob down first.\n"
             "\n"
-            "apply-group runs only with --dry-run or --fake until its frames are checked on the monitors.\n",
+            "apply-group over USB is a supervised test. Run it at a low level, with one monitor first. A group\n"
+            "with a model whose filter design rate is unverified, the 8351B, also needs --unverified-rate.\n",
             QLMDimDecibels, QLMCeilingLimit);
 }
 
@@ -485,10 +489,10 @@ static int QLMRunControl(QLMSystem *system, QLMControlOptions *_Nullable options
 }
 
 // The options after the command's name, or nil once it has said why not.
-static QLMControlOptions *_Nullable QLMReadControlOptions(QLMControlCommand command, int argc, const char *argv[]) {
+static QLMControlOptions *_Nullable QLMReadOptionsFrom(int first, QLMControlCommand command, int argc, const char *argv[]) {
     NSMutableArray<NSString *> *arguments = [NSMutableArray array];
     NSString *problem = nil;
-    for (int i = 2; i < argc; i++) {
+    for (int i = first; i < argc; i++) {
         NSString *argument = [NSString stringWithUTF8String:argv[i]];
         if (argument == nil) {
             problem = @"an argument is not UTF-8";
@@ -501,6 +505,10 @@ static QLMControlOptions *_Nullable QLMReadControlOptions(QLMControlCommand comm
         fprintf(stderr, "qlmctl: %s\nqlmctl: nothing was sent. qlmctl help lists the options.\n", problem.UTF8String);
     }
     return options;
+}
+
+static QLMControlOptions *_Nullable QLMReadControlOptions(QLMControlCommand command, int argc, const char *argv[]) {
+    return QLMReadOptionsFrom(2, command, argc, argv);
 }
 
 static int QLMRunControlCommand(QLMControlOptions *options, QLMControlAction action, QLMSnapshotTest effect) {
@@ -693,17 +701,22 @@ static int QLMPrintSetup(int argc, const char *argv[]) {
     return 0;
 }
 
-// System completes an apply on the main queue, so spin the main run loop.
-static int QLMApplyGroupOnFakeBus(QLMSetupGroup *group) {
-    QLMSystem *fakeSystem = [[QLMSystem alloc] initWithAdapter:[QLMFakeBus demoBusWithSubwoofer:NO]
-                                                      settings:[[QLMSystemSettings alloc] init]];
-    return QLMRunControl(fakeSystem, nil, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+// The switch, or with `launch` the apply at launch, at `volume`. System
+// completes an apply on the main queue, so spin the main run loop.
+static QLMControlAction QLMApplyGroupAction(QLMSetupGroup *group, BOOL launch, NSNumber *volume) {
+    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        [system setVolumeDecibels:volume.doubleValue];
         __block BOOL done = NO;
         __block NSError *result = nil;
-        [system applyGroup:group completion:^(NSError *error) {
+        void (^completion)(NSError *) = ^(NSError *error) {
             result = error;
             done = YES;
-        }];
+        };
+        if (launch) {
+            [system applyGroup:group completion:completion];
+        } else {
+            [system switchToGroup:group completion:completion];
+        }
         while (!done) {
             [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
         }
@@ -714,26 +727,24 @@ static int QLMApplyGroupOnFakeBus(QLMSetupGroup *group) {
         }
         printf("applied %s\n", group.name.UTF8String);
         return 0;
-    }, ^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.idle;
-    });
+    };
 }
 
+// A switch to the group, or with --launch the apply at launch and wake.
 // The dry run prints every frame System sends, as QLMApplySequence builds
-// it: a switch to the group, or with --launch the apply at launch and wake.
-// Each node's monitor stands in at a session, from 02 in node order, on and
-// unmuted. The restore's volume is --volume, or the setup's, capped at
-// --ceiling. --fake applies over the fake bus. System refuses an apply for
-// any node whose design rate is unverified.
+// it. Each node's monitor stands in at a session, from 02 in node order, on
+// and unmuted. The restore's volume is --volume, or the setup's, capped at
+// --ceiling. Otherwise the apply runs on the bus, as a control does.
+// System refuses any node whose design rate is unverified, but in the
+// supervised test behind --unverified-rate.
 static int QLMApplyGroup(int argc, const char *argv[]) {
     if (argc < 4) {
         QLMPrintUsage(stderr);
         return EX_USAGE;
     }
-    BOOL dryRun = QLMHasFlag(argc, argv, "--dry-run");
-    if (!dryRun && !QLMHasFlag(argc, argv, "--fake")) {
-        fputs("qlmctl: apply-group runs only with --dry-run or --fake until its frames are checked on the monitors\n", stderr);
-        return EX_UNAVAILABLE;
+    QLMControlOptions *options = QLMReadOptionsFrom(4, QLMControlCommandApplyGroup, argc, argv);
+    if (options == nil) {
+        return EX_USAGE;
     }
     NSError *error = nil;
     QLMSetup *setup = [QLMSetupReader readFileAtPath:@(argv[2]) error:&error];
@@ -751,19 +762,31 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         fprintf(stderr, "qlmctl: no group named '%s'\n", argv[3]);
         return EX_DATAERR;
     }
-    if (!dryRun) {
-        return QLMApplyGroupOnFakeBus(group);
-    }
-
-    const char *volumeOption = QLMOptionValue(argc, argv, "--volume");
-    const char *ceilingOption = QLMOptionValue(argc, argv, "--ceiling");
-    double volume = volumeOption != NULL ? atof(volumeOption) : setup.volume;
-    double ceiling = ceilingOption != NULL ? atof(ceilingOption) : QLMCeilingLimit;
     NSDictionary<NSData *, QLMDSPBlock *> *blocks = [QLMDSPBlock blocksByHardwareIDForGroup:group error:&error];
     if (blocks == nil) {
         fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
         return EX_DATAERR;
     }
+    if (!options.dryRun) {
+        BOOL unverified = NO;
+        for (QLMDSPBlock *block in blocks.allValues) {
+            unverified = unverified || !block.rateVerified;
+        }
+        if (unverified && !options.unverifiedRate) {
+            fputs("qlmctl: the group has a model whose filter design rate is unverified, the 8351B. Its supervised test "
+                  "takes --unverified-rate.\nqlmctl: nothing was sent.\n",
+                  stderr);
+            return EX_UNAVAILABLE;
+        }
+        NSString *name = group.name;
+        return QLMRunControlCommand(options, QLMApplyGroupAction(group, options.launch, options.volumeDecibels),
+                                    ^BOOL(QLMSnapshot *snapshot) {
+                                        return snapshot.idle && [snapshot.activeGroupName isEqualToString:name];
+                                    });
+    }
+
+    double volume = options.volumeDecibels != nil ? options.volumeDecibels.doubleValue : setup.volume;
+    double ceiling = options.ceilingDecibels;
     BOOL allowed = YES;
     uint8_t session = QLMAddressSessionFirst;
     NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
@@ -788,7 +811,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
 
     QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:NO];
     NSMutableArray<NSData *> *records;
-    if (QLMHasFlag(argc, argv, "--launch")) {
+    if (options.launch) {
         printf("\nthe apply at launch and wake, to every monitor, then each one's state after its next poll\n");
         records = [[sequence enumerationOf:monitors blocks:blocks] mutableCopy];
         for (QLMApplyMonitor *monitor in monitors) {
@@ -807,7 +830,8 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
            "4B 00 00 00 01.\n",
            (unsigned long)records.count);
     printf("%s\n", allowed ? "every node's rate is verified: an apply would be allowed"
-                            : "REFUSED: a node's design rate is unverified, so an apply would not run");
+                            : "REFUSED: a node's design rate is unverified, so an apply runs only as its supervised "
+                              "test, with --unverified-rate");
     return 0;
 }
 

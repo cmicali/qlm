@@ -357,6 +357,27 @@ static QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable kn
     XCTAssertTrue([text containsString:@"no volume"], @"%@", text);
 }
 
+// apply-group's options follow its file and group. Over USB it is a
+// supervised test: it needs the level to restore and a ceiling, and only
+// --unverified-rate lets System apply a model whose rate is unverified.
+// Its dry run reads only the setup file, so it needs neither.
+- (void)testApplyGroupOverUSBIsGated {
+    [self refuse:QLMControlCommandApplyGroup arguments:@[] mentions:@"--volume"];
+    [self refuse:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-50"] mentions:@"--ceiling"];
+    [self refuse:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-30", @"--ceiling", @"-40"] mentions:@"ceiling"];
+    QLMControlOptions *options = [self read:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-50", @"--ceiling", @"-40"]];
+    XCTAssertFalse(options.settings.allowsUnverifiedRates);
+    XCTAssertFalse(options.launch);
+    options = [self read:QLMControlCommandApplyGroup
+               arguments:@[@"--volume", @"-50", @"--ceiling", @"-40", @"--unverified-rate", @"--launch"]];
+    XCTAssertTrue(options.settings.allowsUnverifiedRates);
+    XCTAssertTrue(options.launch);
+    XCTAssertTrue([self read:QLMControlCommandApplyGroup arguments:@[@"--dry-run"]].dryRun);
+    [self refuse:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-40", @"--unverified-rate"] mentions:@"unknown"];
+    QLMControlOptions *volume = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-40"]];
+    XCTAssertFalse(volume.settings.allowsUnverifiedRates);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {

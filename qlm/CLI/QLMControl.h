@@ -16,6 +16,8 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
     QLMControlCommandDim,
     QLMControlCommandSleep,
     QLMControlCommandWake,
+    // Its file and group come before these options, and are not parsed here.
+    QLMControlCommandApplyGroup,
 };
 
 // A control command's arguments, read and checked before any bus opens.
@@ -38,6 +40,11 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
 // --muted, a comma list: each names by text its serial contains a monitor
 // already muted elsewhere, as in GLM. Empty when not given.
 @property (nonatomic, readonly) NSArray<NSString *> *mutedSerials;
+@property (nonatomic, readonly) BOOL launch;  // apply-group's --launch
+// apply-group's --unverified-rate: the supervised test of a group with a
+// model whose filter design rate is unverified, the 8351B. It sets the
+// settings' allowsUnverifiedRates.
+@property (nonatomic, readonly) BOOL unverifiedRate;
 // The stated --ceiling, or QLMCeilingLimit.
 @property (nonatomic, readonly) double ceilingDecibels;
 @property (nonatomic, readonly) NSTimeInterval seconds;  // --seconds, or 0
