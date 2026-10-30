@@ -65,7 +65,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)setDimmed:(BOOL)dimmed;
 
 // Each sends two rounds of 2B to every leased monitor, restating each one's
-// mute state. Mute-all re-sends the volume first.
+// mute state. Mute all first re-sends the volume, then sets the adapter's
+// own mute at 01.
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
 

@@ -670,6 +670,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 }
 
 // Section 7, 2B: mute-all is preceded by a volume re-broadcast.
+// captures/mute-dim, 46.19 s: then 2B 01 to the adapter at 01.
 - (void)testMuteAllRebroadcastsTheVolumeFirst {
     _settings.cycleInterval = 10;
     _settings.ceilingDecibels = 0;
@@ -690,13 +691,24 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(muted.monitors.count, 2u);
     NSArray<NSData *> *sent = _bus.sentMessages;
     const uint8_t volume[] = {QLMAddressBroadcast, 0x1F, 0x04, 0x0C, 0x37};
-    XCTAssertTrue(sent.count > before);
+    const uint8_t adapter[] = {QLMAddressAdapter, 0x2B, QLMMuteValueAdapterMuted};
+    XCTAssertTrue(sent.count > before + 1);
     XCTAssertEqualObjects(sent[before], QLMBytes(volume, sizeof volume));
+    XCTAssertEqualObjects(sent[before + 1], QLMBytes(adapter, sizeof adapter));
     for (QLMMonitorState *monitor in discovered.monitors) {
         const uint8_t mute[] = {monitor.session, 0x2B, QLMMuteValueMuted};
         XCTAssertEqual([self countSent:QLMBytes(mute, 3) from:before], 2u);
     }
-    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 4u);
+    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 5u);
+
+    before = _bus.sentMessages.count;
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !QLMFindMonitor(snapshot, self->_left.hardwareID).muted && !QLMFindMonitor(snapshot, self->_right.hardwareID).muted;
+    } after:^{
+        [system setAllMuted:NO];
+    }];
+    const uint8_t adapterUnmuted[] = {QLMAddressAdapter, 0x2B, QLMMuteValueAdapterUnmuted};
+    XCTAssertEqual([self countSent:QLMBytes(adapterUnmuted, 3) from:before], 1u);
 }
 
 #pragma mark - Dim

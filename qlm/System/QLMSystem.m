@@ -139,6 +139,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     BOOL _volumeSendPending;
     NSDate *_lastVolumeSend;
     BOOL _dimmed;
+    BOOL _adapterMuted;
     NSString *_activeGroupName;
     void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
     QLMSnapshotHandler _snapshotHandler;
@@ -250,6 +251,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_adapterPollsQueued = 0;
         [self->_adapter stop];
         [self->_monitors removeAllObjects];
+        self->_adapterMuted = NO;
         self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
         self->_adapterError = nil;
         if (self->_applyFinish != nil) {
@@ -707,12 +709,21 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         for (QLMMonitorRecord *monitor in self->_monitors) {
             monitor.muted = muted;
         }
+        self->_adapterMuted = muted;
         if (self->_volumeDecibels != nil) {
             // Part of the sequence, so it skips the coalescing timer.
             [self sendVolume];
         }
-        [self sendMuteRounds:2];
+        [self sendMuteState];
     }];
+}
+
+// The adapter's own mute at 01, then two rounds to the monitors
+// (captures/mute-dim, 46.19 s). Only mute all changes the adapter's.
+- (void)sendMuteState {
+    uint8_t value = _adapterMuted ? QLMMuteValueAdapterMuted : QLMMuteValueAdapterUnmuted;
+    [self send:QLMCommandMute(QLMAddressAdapter, value) then:nil];
+    [self sendMuteRounds:2];
 }
 
 // Each round restates every monitor's mute state. A 2B reply is a bare ack,

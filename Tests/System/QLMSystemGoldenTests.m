@@ -181,6 +181,41 @@ static BOOL QLMIsSession(uint8_t address) {
     XCTAssertEqualObjects(sent, expected, @"%@ from %.6f s", scenario, time);
 }
 
+#pragma mark - Mute
+
+// Mute one monitor, mute-dim, 19.19 s, and unmute it, 22.74 s: two rounds of
+// 2B to every monitor, 03 to the muted one and 04 to the rest. GLM muted
+// 0B, last in its round.
+- (void)testMutingOneMonitorIsGLMs {
+    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    NSData *last = monitors.lastObject.hardwareID;
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system setMuted:YES forMonitorWithHardwareID:last];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:19.186196 count:12 refused:@[] monitors:monitors];
+
+    before = _bus.sentMessages.count;
+    [_system setMuted:NO forMonitorWithHardwareID:last];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:22.739597 count:12 refused:@[] monitors:monitors];
+}
+
+// Mute all, mute-dim, 46.19 s, and unmute all, 48.60 s: the level, then
+// `2B 01` or `2B 00` to the adapter at 01, then two rounds of 2B to every
+// monitor.
+- (void)testMutingAllIsGLMs {
+    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system setAllMuted:YES];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:46.188342 count:14 refused:@[] monitors:monitors];
+    XCTAssertTrue(_system.snapshot.allMuted);
+
+    before = _bus.sentMessages.count;
+    [_system setAllMuted:NO];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:48.595249 count:14 refused:@[] monitors:monitors];
+    XCTAssertFalse(_system.snapshot.allMuted);
+}
+
 #pragma mark - Dim
 
 // Dim, mute-dim, 51.24 s on and 54.77 s off: the level twice, one round of
