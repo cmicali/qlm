@@ -533,15 +533,12 @@ static int QLMMute(int argc, const char *argv[]) {
             [system setAllMuted:options.on];
             return 0;
         }
-        NSArray<QLMMonitorState *> *matches = [discovered.monitors filteredArrayUsingPredicate:
-            [NSPredicate predicateWithBlock:^BOOL(QLMMonitorState *monitor, NSDictionary *bindings) {
-                return [monitor.serialNumber containsString:options.serial];
-            }]];
-        if (matches.count != 1) {
-            fprintf(stderr, "qlmctl: %lu monitors match '%s'\n", (unsigned long)matches.count, options.serial.UTF8String);
+        NSString *problem = nil;
+        target = QLMHardwareIDsForSerials(@[options.serial], discovered, &problem).anyObject;
+        if (target == nil) {
+            fprintf(stderr, "qlmctl: %s\n", problem.UTF8String);
             return EX_DATAERR;
         }
-        target = matches[0].hardwareID;
         [system setMuted:options.on forMonitorWithHardwareID:target];
         return 0;
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {

@@ -791,12 +791,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // The knob's position under the ceiling, or with no knob read, the bottom
 // level.
 - (QLMMessage)knobOrBottomLevel {
+    NSNumber *knob = [self knobDecibels];
+    return QLMCommandVolume(knob != nil ? knob.doubleValue : QLMVolumeDecibelsMin, self.settings.ceilingDecibels);
+}
+
+// The knob's position from the last reply to 01 08, or nil with no knob read.
+- (nullable NSNumber *)knobDecibels {
     QLMTrackedAdapter *adapter = _adapterRecord;
     QLMAdapterStatus status = adapter.status;
-    if (adapter.hasStatus && status.knob && status.hasKnobPosition) {
-        return QLMCommandVolume(status.knobTenths / 10.0, self.settings.ceilingDecibels);
-    }
-    return QLMCommandVolumeWord(QLMVolumeWordMin, QLMVolumeWordMax);
+    return adapter.hasStatus && status.knob && status.hasKnobPosition ? @(status.knobTenths / 10.0) : nil;
 }
 
 - (void)sendInputPair {
