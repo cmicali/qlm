@@ -19,4 +19,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+// TRAP: the fake bus keeps a lease forever. A real monitor drops its lease
+// within 23 to 42 s of the host going quiet (qlm-first-discover), and System
+// finds it again only by a probe, which a leased monitor ignores. So when
+// the host comes back after a gap, this lapses every fake monitor's lease.
+// Call it inside the bus's perform:.
+void QLMFakeBusDropLeases(QLMFakeBus *bus);
+
 NS_ASSUME_NONNULL_END

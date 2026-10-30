@@ -2,7 +2,7 @@
 
 Guidance for any coding agent working in this repository.
 
-qlm is a native Mac controller for Genelec SAM monitors. It talks to them through the GLM network adapter. It replaces GLM for status, volume, mute, dim, power, and group switching. It never calibrates. **Only `qlmctl info`, `discover`, and `poll` have run on real hardware**; everything else runs over a fake bus. The plan is [docs/plan.md](docs/plan.md), and its "Where things stand" section says what is built and what waits. Read it before changing anything here.
+qlm is a native Mac controller for Genelec SAM monitors. It talks to them through the GLM network adapter. It replaces GLM for status, volume, mute, dim, power, and group switching. It never calibrates. **Only `qlmctl` has run on real hardware**, and its controls only on one monitor; the app and the group apply run over a fake bus. The plan is [docs/plan.md](docs/plan.md), and its "Where things stand" section says what is built and what waits. Read it before changing anything here.
 
 ## Building
 
@@ -39,7 +39,7 @@ These rules protect the monitors and the listener. They outrank any feature.
 - **Send only opcodes on GLMProtocol's allowlist.** Never send `15` (flash commit), `05` (test signals), or the standalone settings `3A 01`, `3A 02`, and `3A 06`.
 - **GLMProtocol clamps every volume frame to the user's ceiling.** `7F FF FF` is 0 dB. A test covers every builder.
 - **Never drive the bus while GLM runs.**
-- **Refuse a group apply for any model whose filter design rate is unverified.**
+- **Refuse a group apply for any model whose filter design rate is unverified, except in qlmctl's supervised test behind its flag, `--unverified-rate`.**
 - **Test against real monitors at a low level, one monitor first.**
 
 ## The protocol and licensing

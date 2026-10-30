@@ -184,11 +184,7 @@ static const NSInteger QLMKnobBottomTenths = -1004;
     }];
 }
 
-// TRAP: the fake bus keeps a lease forever. A real monitor drops its lease
-// within 23 to 42 s of the host going quiet (qlm-first-discover), and System
-// finds it again only by a probe, which a leased monitor ignores. So when
-// the adapter comes back, the leases lapse here.
-static void QLMDropLeases(QLMFakeBus *bus) {
+void QLMFakeBusDropLeases(QLMFakeBus *bus) {
     for (QLMFakeMonitor *monitor in bus.monitors) {
         monitor.session = 0;
     }
@@ -215,7 +211,7 @@ static void QLMDropLeases(QLMFakeBus *bus) {
     [self change:^(QLMFakeBus *bus) {
         bus.busyReason = busy ? QLMFakeBusyReason : nil;
         if (!busy) {
-            QLMDropLeases(bus);
+            QLMFakeBusDropLeases(bus);
         }
     }];
 }
@@ -225,7 +221,7 @@ static void QLMDropLeases(QLMFakeBus *bus) {
     [self change:^(QLMFakeBus *bus) {
         bus.disconnected = unplugged;
         if (!unplugged) {
-            QLMDropLeases(bus);
+            QLMFakeBusDropLeases(bus);
         }
     }];
 }

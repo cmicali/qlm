@@ -517,7 +517,11 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified;
     }];
-    [NSThread sleepForTimeInterval:0.5];
+    // Wait for the count, not a fixed time: under load a cycle takes longer.
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
+    while (replay.playedCount <= 100 && [deadline timeIntervalSinceNow] > 0) {
+        [NSThread sleepForTimeInterval:0.01];
+    }
     [_system stop];
     XCTAssertEqualObjects(replay.unmatchedMessages, @[]);
     XCTAssertGreaterThan(replay.playedCount, 100u);

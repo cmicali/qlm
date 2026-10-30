@@ -6,6 +6,9 @@ NS_ASSUME_NONNULL_BEGIN
 // width of 0 leaves the wrap to Auto Layout.
 NSTextField *QLMNoteLabel(NSString *text, CGFloat width);
 
+// A button in the small control size and font.
+NSButton *QLMSmallButton(NSString *title, id _Nullable target, SEL _Nullable action);
+
 // A monitor's status dot. The caller tints it.
 NSImageView *QLMDotView(void);
 
