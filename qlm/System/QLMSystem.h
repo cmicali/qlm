@@ -104,7 +104,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // on: its mute in the active group, and GLM's 05 and 07 outside it. Mute all
 // also re-sends the volume and sets the adapter's own mute, as GLM does. A
 // lift of one mute under mute all lifts the adapter's own mute too, as
-// GLM's unmute all does, but mute all holds for every other monitor. A
+// GLM's unmute all does, but mute all holds for every other monitor. A mute
+// of the last one lifted brings it back, as GLM's mute all. A
 // mute holds by hardware ID until the user lifts it, across a lease that
 // lapses, a stop and a start, and for a monitor that first appears while all
 // are muted. A muted monitor leased again, or one that was not on, hears its

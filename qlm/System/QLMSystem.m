@@ -244,7 +244,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // one that appears later included.
     BOOL _mutingAll;
     NSMutableSet<NSData *> *_liftedIDs;
-    BOOL _adapterMuted;  // the adapter's own, at 01: mute all sets it, and any lift ends it
     NSString *_activeGroupName;
     // Set when an apply starts, since GLM's routing pass already treats the
     // new group's members as such; _activeGroupName waits for it to finish.
@@ -287,7 +286,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _mutingAll = settings.mutingAll;
         _liftedIDs = _mutingAll ? [settings.liftedHardwareIDs mutableCopy] : [NSMutableSet set];
         [_liftedIDs minusSet:settings.mutedHardwareIDs];
-        _adapterMuted = _mutingAll && _liftedIDs.count == 0;
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
         _snapshot = [[QLMSnapshot alloc] init];
@@ -542,7 +540,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     uint8_t value = state->payload[1];
     if (state->address == QLMAddressAdapter) {
-        state->payload[1] = _adapterMuted ? QLMMuteValueAdapterMuted : QLMMuteValueAdapterUnmuted;
+        state->payload[1] = [self adapterMuted] ? QLMMuteValueAdapterMuted : QLMMuteValueAdapterUnmuted;
         return;
     }
     QLMMonitorRecord *monitor = [self monitorAtSession:state->address];
@@ -1084,7 +1082,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (monitor.needsState && monitor.isOn) {
         monitor.needsState = NO;
         QLMApplyMonitor *stated = [self applyMonitor:monitor];
-        QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:_activeGroup monitors:@[stated] adapterMuted:_adapterMuted];
+        QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:_activeGroup monitors:@[stated] adapterMuted:[self adapterMuted]];
         [self sendRecordsNext:[sequence stateOf:stated firstOfTwo:NO]];
     }
 }
@@ -1226,6 +1224,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!self->_running) {
             return;
         }
+        BOOL adapterMuted = [self adapterMuted];
         if (muted) {
             [self->_mutedIDs addObject:identity];
             [self->_liftedIDs removeObject:identity];
@@ -1238,22 +1237,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self->_unstatedIDs addObject:identity];
         self->_dirty = YES;
         QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
-        if (!muted && self->_adapterMuted) {
-            // A lift ends the adapter's own mute, so it is GLM's unmute all,
-            // with the others still muted: the level, 01 2B 00, then two
-            // rounds (captures/mute-dim, 48.60 s). No capture shows GLM lift
-            // one mute under mute all.
-            self->_adapterMuted = NO;
-            monitor.needsState = monitor.needsState || !monitor.isOn;
-            if (self->_volumeDecibels != nil) {
-                [self sendVolume];
-            }
-            [self sendMuteState];
-            return;
-        }
-        if (monitor != nil) {
-            // A round reaches only a monitor that is on.
-            monitor.needsState = monitor.needsState || !monitor.isOn;
+        // A round reaches only a monitor that is on.
+        monitor.needsState = monitor.needsState || !monitor.isOn;
+        if ([self adapterMuted] != adapterMuted) {
+            // A lift ends the adapter's own mute, and a mute of the last one
+            // lifted brings it back. So it is GLM's unmute all or mute all,
+            // with each monitor's own mute. No capture shows GLM lift one
+            // mute under mute all.
+            [self sendMuteAllState];
+        } else if (monitor != nil) {
             [self sendMuteRounds:2];
         }
     }];
@@ -1287,17 +1279,28 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         [self->_liftedIDs removeAllObjects];
         self->_mutingAll = muted;
-        self->_adapterMuted = muted;
-        if (self->_volumeDecibels != nil) {
-            // Part of the sequence, so it skips the coalescing timer.
-            [self sendVolume];
-        }
-        [self sendMuteState];
+        [self sendMuteAllState];
     }];
 }
 
+// The adapter's own mute, at 01: on while mute all holds, with no mute
+// lifted, as a relaunch from the record restores it.
+- (BOOL)adapterMuted {
+    return _mutingAll && _liftedIDs.count == 0;
+}
+
+// GLM's mute all and unmute all: the level, then the mute state
+// (captures/mute-dim, 46.19 and 48.60 s).
+- (void)sendMuteAllState {
+    if (_volumeDecibels != nil) {
+        // Part of the sequence, so it skips the coalescing timer.
+        [self sendVolume];
+    }
+    [self sendMuteState];
+}
+
 // The adapter's own mute at 01, then two rounds to the monitors
-// (captures/mute-dim, 46.19 s). Only mute all changes the adapter's.
+// (captures/mute-dim, 46.19 s).
 - (void)sendMuteState {
     [self sendStateRecords:[[self sequenceFor:_activeGroup] muteState]];
 }
@@ -1332,7 +1335,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     for (QLMMonitorRecord *record in _monitors) {
         [monitors addObject:[self applyMonitor:record]];
     }
-    return [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:_adapterMuted];
+    return [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:[self adapterMuted]];
 }
 
 // GLM's apply to the monitors leased since the active group was set, once

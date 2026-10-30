@@ -1254,6 +1254,30 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
 }
 
+// A mute of the last monitor lifted brings mute all back whole: GLM's mute
+// all, with 01 2B 01 (captures/mute-dim, 46.19 s), as a relaunch from the
+// record would have it.
+- (void)testMutingTheLastLiftedMonitorBringsMuteAllBack {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [_system setAllMuted:YES];
+    [_system setMuted:NO forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForIdle];
+    NSUInteger before = _bus.sentMessages.count;
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+    XCTAssertTrue(again.mutingAll);
+    XCTAssertEqualObjects(again.liftedHardwareIDs, [NSSet set]);
+    const uint8_t adapterMuted[] = {QLMAddressAdapter, 0x2B, QLMMuteValueAdapterMuted};
+    XCTAssertEqual([self countSent:QLMBytes(adapterMuted, 3) from:before], 1u);
+    QLMMessage volume = QLMCommandVolume(-30, _settings.ceilingDecibels);
+    XCTAssertEqualObjects(_bus.sentMessages[before], QLMAdapterRecord(&volume));
+}
+
 // A round waits in line, and the mutes may change meanwhile. Here the user
 // mutes the left, lifts mute all, and mutes the left again, quicker than
 // the rounds go out (QLMSafetyFuzzTests, seed 0x2095). Each 2B says the
