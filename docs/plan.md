@@ -207,9 +207,9 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 
 Nothing else applies: no decoding, playback, tags, or waveforms.
 
-**The submodule is in place at `vibe-libs/`, but this app includes nothing from it yet.** When a target takes its first piece, `project.yml` adds `include: [vibe-libs/vibe-libs.yml]`, sets `VIBE_LIBS_ROOT`, and lists the pieces under `templates:`. The comment at the top of `project.yml` has the steps.
+**The app takes one piece so far, `dev/DebugChannel`, and the tests take it too.** `project.yml` includes `vibe-libs/vibe-libs.yml`, sets `VIBE_LIBS_ROOT`, and lists the piece under each target's `templates:`. The pin moved from `23cf330` to `9fab6e0` for it. The rest of the app still runs on Apple's frameworks.
 
-qlm's pin of vibe-libs, `23cf330`, predates every move. Upstream, vibe-libs now holds every piece in the table above. So the first piece qlm takes starts with a bump of the pin. Until then, the app runs on Apple's frameworks.
+The channel lets a script drive a running Debug build: `qlm debug <verb>` reads the snapshot, or moves the slider, a Settings value, a mute, dim, power, Quit GLM, or Quit. Each verb is the app's own action, so the ceiling, the allowlist, and the GLM check hold. The skill in `.claude/skills/app-hardware-run` runs a supervised test on the monitors with it, one step at a time, and logs each step's time for the capture's `notes.md`. A Release build has none of it, and `make check-release` checks the Release app in CI.
 
 **The protocol stays in this app.** No other app needs it, so by vibe-libs's own rule it is not a candidate.
 

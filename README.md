@@ -15,6 +15,8 @@ make cli       # qlmctl
 make test      # the unit tests
 ```
 
+A Debug build of the app, `make build CONFIG=Debug`, has a debug channel: a script drives the running app with `qlm.app/Contents/MacOS/qlm debug <verb>`, and `qlm debug help` lists the verbs. Each verb is one of the app's own actions, so the ceiling and the GLM check hold. A Release build has none of it, and `make check-release` checks that.
+
 `vibe-libs/` is [vibe-libs](https://github.com/cmicali/vibe-libs), a git submodule. `make project` fetches it.
 
 ## qlmctl

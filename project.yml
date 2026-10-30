@@ -1,10 +1,10 @@
 name: qlm
 
-# vibe-libs/ is the shared toolbox, a git submodule. When a target takes its
-# first piece, add `include: [vibe-libs/vibe-libs.yml]` here, set
-# `VIBE_LIBS_ROOT: "$(SRCROOT)/vibe-libs"` in the base settings, set
-# `templateAttributes: {excludedPlatform: iOS}` on that target, and list the
-# pieces it takes under `templates:`.
+# vibe-libs/ is the shared toolbox, a git submodule. A target takes a piece by
+# listing its template under `templates:`, with
+# `templateAttributes: {excludedPlatform: iOS}`.
+include:
+  - vibe-libs/vibe-libs.yml
 
 options:
   bundleIdPrefix: com.commonwealthrecordings
@@ -67,6 +67,7 @@ settings:
     GCC_WARN_UNUSED_FUNCTION: YES
     GCC_WARN_UNUSED_VARIABLE: YES
     SDKROOT: macosx
+    VIBE_LIBS_ROOT: "$(SRCROOT)/vibe-libs"
   configs:
     Debug:
       ENABLE_TESTABILITY: YES
@@ -96,7 +97,9 @@ targets:
   qlm:
     type: application
     platform: macOS
-    templates: [QLMShared]
+    # DebugChannel compiles to nothing outside Debug.
+    templates: [QLMShared, VibeLibsDebugChannel]
+    templateAttributes: {excludedPlatform: iOS}
     sources:
       - path: qlm/App
         excludes:
@@ -144,13 +147,19 @@ targets:
   QLMTests:
     type: bundle.unit-test
     platform: macOS
-    templates: [QLMShared]
+    templates: [QLMShared, VibeLibsDebugChannel]
+    templateAttributes: {excludedPlatform: iOS}
     sources:
       - path: Tests
         excludes: ["**/.DS_Store", "**/*.md"]
       # qlmctl's gates and dry run. Its main.m is the tool's own.
       - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md", "main.m"]
+      # The app's debug verbs, and the Foundation-only files they read. The
+      # rest of the app is AppKit.
+      - qlm/App/QLMDebugChannel.m
+      - qlm/App/QLMFormat.m
+      - qlm/App/QLMPreferences.m
     settings:
       base:
         PRODUCT_NAME: "$(TARGET_NAME)"

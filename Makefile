@@ -2,7 +2,7 @@
 
 CONFIG ?= Release
 
-.PHONY: help setup project build cli test open clean
+.PHONY: help setup project build cli test check-release open clean
 
 # Install the dev-tool dependencies (xcodegen) from the Brewfile.
 setup:
@@ -46,6 +46,10 @@ cli: project
 test: project
 	xcodebuild -project qlm.xcodeproj -scheme qlm -configuration Debug \
 	    -derivedDataPath build/DerivedData $(ARGS) test
+
+# Fails if the Release app holds the debug channel. Run make test and make build first.
+check-release:
+	tools/check-release.sh
 
 # Open the generated project in Xcode.
 open: project

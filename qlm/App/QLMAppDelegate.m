@@ -4,6 +4,7 @@
 
 #include "QLMCommands.h"
 #import "QLMAlerts.h"
+#import "QLMDebugChannel.h"
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
@@ -45,7 +46,16 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // What the status item shows, so an unchanged snapshot does not redraw it.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
+#if DEBUG
+// A debug command's answer to the hand-back alert, for the quit it sends.
+@property (nonatomic, nullable) NSNumber *debugQuitAnswer;
+#endif
 @end
+
+#if DEBUG
+@interface QLMAppDelegate () <QLMDebugApp>
+@end
+#endif
 
 @implementation QLMAppDelegate
 
@@ -75,20 +85,31 @@ static const NSTimeInterval QLMStopAllowance = 3;
     NSNotificationCenter *workspace = NSWorkspace.sharedWorkspace.notificationCenter;
     [workspace addObserver:self selector:@selector(macWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
     [workspace addObserver:self selector:@selector(macDidWake:) name:NSWorkspaceDidWakeNotification object:nil];
+#if DEBUG
+    QLMInstallDebugChannel(self);
+#endif
 }
 
 // Quit waits for the stop, so the hand-back level goes out before qlm does.
 // On the real monitors, a take-over that would raise the level asks first.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     QLMHandBack *handBack = self.monitorList.snapshot.handBack;
-    if ([self takeOverRaisesLevel:handBack]) {
-        [self activateApp];
-        if ([[self louderHandBackAlert:handBack] runModal] != NSAlertSecondButtonReturn) {
-            return NSTerminateCancel;
-        }
+    if ([self takeOverRaisesLevel:handBack] && [self answerLouderHandBack:handBack] != NSAlertSecondButtonReturn) {
+        return NSTerminateCancel;
     }
     [self stopSystemAndWait];
     return NSTerminateNow;
+}
+
+// A debug command's quit answers in place of the user.
+- (NSModalResponse)answerLouderHandBack:(QLMHandBack *)handBack {
+#if DEBUG
+    if (self.debugQuitAnswer != nil) {
+        return self.debugQuitAnswer.integerValue;
+    }
+#endif
+    [self activateApp];
+    return [[self louderHandBackAlert:handBack] runModal];
 }
 
 // Only on the real monitors: on the fake bus a take-over moves no level.
@@ -388,9 +409,13 @@ static const NSTimeInterval QLMStopAllowance = 3;
 
 #pragma mark - Settings
 
+- (void)settingsDidChangeVolumeRange:(QLMSettingsWindowController *)controller {
+    [self volumeRangeDidChange];
+}
+
 // System caps every frame at once, and sends a volume already set again
 // under the new ceiling. Mutes and the active group are untouched.
-- (void)settingsDidChangeVolumeRange:(QLMSettingsWindowController *)controller {
+- (void)volumeRangeDidChange {
     [self.popoverController reloadVolumeRange];
     [self.system setCeilingDecibels:self.preferences.ceilingDecibels];
 }
@@ -402,5 +427,43 @@ static const NSTimeInterval QLMStopAllowance = 3;
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
     [self restartSystem];
 }
+
+#if DEBUG
+#pragma mark - The debug channel
+
+- (QLMSnapshot *)shownSnapshot {
+    return self.monitorList.snapshot;
+}
+
+- (NSString *)quitGLMTitle {
+    return self.popoverController.quitGLMTitle;
+}
+
+- (BOOL)quitAsksFirst {
+    return [self takeOverRaisesLevel:self.monitorList.snapshot.handBack];
+}
+
+// Settings reads the preferences as its window opens, so an open window
+// shows the old value.
+- (void)changeCeilingDecibels:(double)decibels {
+    self.preferences.ceilingDecibels = decibels;
+    [self volumeRangeDidChange];
+}
+
+- (void)changeUsesAdapter:(BOOL)usesAdapter {
+    self.preferences.usesAdapter = usesAdapter;
+    [self restartSystem];
+}
+
+- (BOOL)quitGLM {
+    return [self.popoverController quitGLM];
+}
+
+- (void)quitAnswering:(BOOL)quitAnyway {
+    self.debugQuitAnswer = @(quitAnyway ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn);
+    [NSApp terminate:self];
+    self.debugQuitAnswer = nil;
+}
+#endif
 
 @end

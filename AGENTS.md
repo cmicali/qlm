@@ -7,7 +7,7 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 ## Building
 
 - `make setup` installs XcodeGen. `make project` fetches `vibe-libs/` and generates `qlm.xcodeproj`.
-- `make build` builds the app, `make cli` builds `qlmctl`, and `make test` runs the unit tests.
+- `make build` builds the app, `make cli` builds `qlmctl`, and `make test` runs the unit tests. `make build CONFIG=Debug` builds the app with its debug channel.
 - **The Xcode project is generated.** Change `project.yml`, never the project. The app's `Info.plist` is generated too.
 - **Warnings are errors.** Fix the warning. Do not turn the setting off.
 - **TRAP: `make project` checks out `vibe-libs/` at its pinned commit.** Commit or stash any work inside `vibe-libs/` first.
@@ -53,7 +53,8 @@ These rules protect the monitors and the listener. They outrank any feature.
 
 - `vibe-libs/` is the [vibe-libs](https://github.com/cmicali/vibe-libs) submodule. Read `vibe-libs/AGENTS.md`, and the `AGENTS.md` of every piece you touch, before changing one.
 - **A change to a piece lands in vibe-libs first.** Then qlm bumps the submodule.
-- **qlm takes no piece yet**, so `project.yml` includes nothing from it. When a target takes its first piece, include `vibe-libs/vibe-libs.yml`, set `VIBE_LIBS_ROOT`, and list the pieces under `templates:`. The comment at the top of `project.yml` has the steps.
+- **The app and the tests take one piece, `dev/DebugChannel`.** A target takes a piece by listing its template under `templates:` in `project.yml`, with `templateAttributes: {excludedPlatform: iOS}`.
+- **The debug channel ships in no Release build.** Its code compiles only under `#if DEBUG`, and every caller in the app sits under it too. `make check-release` checks the Release app, and CI runs it. `.claude/skills/app-hardware-run` drives a Debug build through it on the real monitors.
 - **The protocol stays in qlm.** No other app needs it.
 - vibe-libs serves another app, which is closed source. **Never name it here.**
 
