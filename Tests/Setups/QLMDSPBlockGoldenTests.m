@@ -2,6 +2,7 @@
 
 #import "QLMDSPBlock.h"
 #include "QLMCommands.h"
+#include "QLMReplies.h"
 #import "QLMSetupInternal.h"
 
 // Sources: the DSP passes GLM sent in the captures below, each scenario's
@@ -183,6 +184,23 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *QLMCapturedPasses(void) 
     };
 }
 
+// Each session's model, from its reply to 39, where the capture holds one.
+static NSDictionary<NSNumber *, NSString *> *QLMModelsInCapture(QLMCapture *capture) {
+    NSMutableDictionary<NSNumber *, NSString *> *models = [NSMutableDictionary dictionary];
+    for (QLMCaptureExchange *exchange in capture.exchanges) {
+        QLMMessage message = exchange.message;
+        QLMMessage reply = exchange.reply;
+        char text[QLMPayloadMax];
+        char model[32];
+        char firmware[32];
+        if (message.length == 1 && message.payload[0] == 0x39 && exchange.answered && QLMReplyText(&reply, text, sizeof text) &&
+            QLMSystemInfoParse(text, model, sizeof model, firmware, sizeof firmware)) {
+            models[@(message.address)] = @(model);
+        }
+    }
+    return models;
+}
+
 static QLMSetupGroup *QLMGroupNamed(NSString *name) {
     for (QLMSetupGroup *group in QLMReadFixtureSetup().groups) {
         if ([group.name isEqualToString:name]) {
@@ -193,20 +211,30 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
 }
 
 // Every captured pass matches its node's block, setting for setting, and
-// no other node's. What qlm leaves out is exactly its class's extras.
+// no other node's. What qlm leaves out is exactly its class's extras. Where
+// the capture holds the session's reply to 39, its model is the node's.
 - (void)testEveryCapturedPassMatchesItsBlock {
     NSUInteger passes = 0;
     NSUInteger payloads = 0;
+    NSUInteger identified = 0;
+    QLMSetup *setup = QLMReadFixtureSetup();
     NSDictionary<NSString *, NSArray<NSString *> *> *table = QLMCapturedPasses();
     for (NSString *scenario in [table.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         QLMSetupGroup *group = QLMGroupNamed(table[scenario][0]);
         NSArray<NSString *> *expected = [table[scenario][1] componentsSeparatedByString:@" "];
-        NSArray<QLMCapturedPass *> *captured = QLMPassesInCapture(QLMReadCapture(scenario, NULL));
+        QLMCapture *capture = QLMReadCapture(scenario, NULL);
+        NSArray<QLMCapturedPass *> *captured = QLMPassesInCapture(capture);
+        NSDictionary<NSNumber *, NSString *> *models = QLMModelsInCapture(capture);
         XCTAssertEqual(captured.count, expected.count, @"%@", scenario);
         for (NSUInteger i = 0; i < MIN(captured.count, expected.count); i++) {
             QLMCapturedPass *pass = captured[i];
             NSArray<NSString *> *parts = [expected[i] componentsSeparatedByString:@":"];
             XCTAssertEqual(pass.session, (uint8_t)strtoul(parts[0].UTF8String, NULL, 16), @"%@ pass %lu", scenario, (unsigned long)i);
+            NSString *model = models[@(pass.session)];
+            if (model != nil) {
+                XCTAssertEqualObjects(model, [setup deviceWithSerial:parts[1]].model, @"%@ at %.3f s", scenario, pass.time);
+                identified += 1;
+            }
             for (QLMSetupNode *node in group.nodes) {
                 NSError *error = nil;
                 QLMDSPBlock *block = [QLMDSPBlock blockForNode:node inGroup:group error:&error];
@@ -224,6 +252,7 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
     }
     XCTAssertEqual(passes, 73u);
     XCTAssertEqual(payloads, 2467u);
+    XCTAssertEqual(identified, 44u);
 }
 
 // A two-way's pass is its block in order, the 8351B's two extras aside: 43
