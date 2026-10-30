@@ -12,9 +12,9 @@ Every monitor answers its `08` poll with a telemetry frame. hlm's spec lists mos
 | `88` | the 8351B | A steady reading, different on each monitor, that standby does not change. | Unknown |
 | `89` | the 8351B | A steady reading that falls 16 to 19 within a second of standby, and comes back at the wake. | Unknown |
 
-- **The meters work as approximate meters.** On the output meters, a count is about a dB, and the floor is `80`. `42` reads before the volume. `44`, which the spec never saw, is the 8351B's midrange.
+- **The meters work as approximate meters.** On the output meters, a count is about a dB, and the floor is `80`. `42` reads before the volume. `44` is the 8351B's midrange.
 - **A monitor sometimes splits a frame across two polls**, at a field. That explains the replies that lack the leading `41`: each is the second part of a split frame.
-- `QLMReplyTelemetry` decodes `49` as `wakeSeconds`, `8A` as `wakeSteps`, and `82` as `sensor82`. It steps over `88` and `89`. A first part reads as `QLMTelemetryErrorPartial`.
+- `QLMReplyTelemetry` decodes `49` as `wakeSeconds`, `8A` as `wakeSteps`, and `82` as `sensor82`. It steps over `88` and `89`.
 
 ## Sources
 
@@ -22,8 +22,7 @@ Every monitor answers its `08` poll with a telemetry frame. hlm's spec lists mos
 - **hlm's spec**, `docs/Genelec GLM Protocol.13.md` in [robcazzaro/hlm](https://github.com/robcazzaro/hlm), revision 13. It is GPL-3.0. This page states its facts in its own words, and takes no text or code from it.
   - Section 4: multi-byte values are big-endian.
   - Section 8: a busy byte, `06` or `07`, may follow the `09`. A reply of `09` and a busy byte alone carries no telemetry this round.
-  - Section 8.1: the tags `42` to `47`, `81`, `83`, and `84`. It expects `44` on three-way models but has never seen it. Its VU mapping gives the meters' floors and slope.
-  - Appendix B, item 5: `44` is still open.
+  - Section 8.1: the tags `42` to `47`, `81`, `83`, and `84`, and the VU mapping for the meters.
   - None of `49`, `82`, `88`, `89`, or `8A` appears in the spec.
 - **The monitors.** Two 8351B (the Left and the Right), two 8330A, a 7370A, and a 7350A. The Right 8351B is the one `qlm-control-first` played.
 
@@ -61,10 +60,9 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 
 - The captures have 21 split frames, from every model, in 11 scenarios. The split falls at any field: after `41` in 13, and after `83`, `46`, `42`, `47`, or `89` in the rest.
 - Every first part is followed by its second part at the monitor's next poll. No second part comes alone.
-- These second parts are the replies the plan notes as lacking the leading `41`.
 - **Guess:** the poll reads the monitor's reply while the monitor is still writing that second's frame.
 
-`QLMReplyTelemetry` reads a first part as `QLMTelemetryErrorPartial`, with its fields filled, and a second part as `QLMTelemetryErrorNotTelemetry`. System uses only `QLMTelemetryOK` and `QLMTelemetryErrorUnknownTag`, so it keeps the last whole frame. Before, a first part read as OK with no `47`, and the monitor's status went to unknown until the next frame.
+`QLMReplyTelemetry` reads a first part as `QLMTelemetryErrorPartial`, with its fields filled, and a second part as `QLMTelemetryErrorNotTelemetry`. System uses only `QLMTelemetryOK` and `QLMTelemetryErrorUnknownTag`, so it keeps the last whole frame.
 
 ## `49`: seconds since the wake
 
@@ -75,8 +73,6 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 - **A wake resets it.** In `standby-wake`, GLM woke the six at 46.0 s. At 49.05 s, each read `01` or `02`. Monitors that join a group from standby read `02` too (`group-switch-main-2x1-main-4x2`, 38.2 s, and `group-switch-main-2x2-main-4x2`, 12.8 s). After qlm's wake, the 8351Bs and the 7370A read `01` (`qlm-control-first`, 829.4 s).
 - **Monitors woken together count together.** The two 8330A woke in the same group switch at about 21:14:48. A minute later, in `mute-dim`, both read `35` at 0.19 s.
 - **Guess:** a power-on at the mains switch also resets it. No capture has one.
-
-So `49` is the seconds since the monitor last woke, mod 256. A host can also use it to tell a new frame from an old one.
 
 ## `8A`: a slow clock since the wake
 
@@ -90,8 +86,6 @@ So `49` is the seconds since the monitor last woke, mod 256. A host can also use
   - `00 00` to `00 05` after the evening's wakes.
   - `00 A7` to `00 C0` the next morning. That fits about 11 to 13 hours since the last wake, the night before.
   - `13 04` to `13 0D` (the 8351Bs and the subwoofers) and `2B DF` to `2B E3` (the 8330A) before that evening's first wake. That is about 13.5 and 31 days. **Guess:** these monitors had not woken in that long.
-
-So `8A` is the time since the monitor last woke, in steps of about 240 s.
 
 ## `81`, `82`, and `83`
 
@@ -133,7 +127,7 @@ No temperature moves 18 °C in a second. **Guess:** a supply voltage that the 83
 
 ## The meters
 
-Section 8.1 lists the meters: `42` the input, `43` the HF output, `45` the LF output, and `46` the subwoofer's driver. It expects `44` on three-way models. Its VU mapping puts the output meters' floor at `80`, gives them about a dB per count, and has `42` read before the volume.
+Section 8.1 lists the meters: `42` the input, `43` the HF output, `45` the LF output, and `46` the subwoofer's driver. It expects `44` on three-way models, and has never seen it (Appendix B, item 5). Its VU mapping puts the output meters' floor at `80`, gives them about a dB per count, and has `42` read before the volume.
 
 ### `44` is the 8351B's midrange
 
