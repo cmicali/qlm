@@ -6,19 +6,23 @@
 
 #include "QLMFrame.h"
 
-// A volume word is 24-bit linear gain, floor(10^(dB/20) * 2^23), clipped at
-// 0 dB. GLM's slider stops at -120.4 dB. The duck under a group apply, 2,
-// is below it and is not a volume.
+// A volume word is 24-bit linear gain, with 7F FF FF at 0 dB. GLM's volume
+// runs from 0 to -99.5 dB in 0.5 dB steps. Its bottom stop, -100 dB, sends
+// QLMVolumeWordMin, about -120.4 dB. The duck under a group apply, 2, is
+// below it and is not a volume.
 enum {
     QLMVolumeWordMax = 0x7FFFFF,
     QLMVolumeWordMin = 0x000008,
     QLMVolumeWordDuck = 0x000002,
 };
-#define QLMVolumeDecibelsMin (-120.4)
+#define QLMVolumeDecibelsStep (0.5)
+#define QLMVolumeDecibelsMin (-100.0)
 #define QLMVolumeDecibelsMax (0.0)
 #define QLMDimDecibels (20.0)
 
-// Clamps to [QLMVolumeDecibelsMin, QLMVolumeDecibelsMax] before converting.
+// GLM's word for the nearest step, from a table of the words GLM sends: no
+// formula gives all of them. At or below QLMVolumeDecibelsMin, and for NaN,
+// it is QLMVolumeWordMin.
 uint32_t QLMVolumeWordForDecibels(double decibels);
 // The inverse, for display. Word 0 gives -INFINITY.
 double QLMVolumeDecibelsForWord(uint32_t word);
@@ -51,8 +55,9 @@ QLMMessage QLMCommandPower(QLMPowerStep step);
 // Every volume frame passes through QLMCommandVolumeWord, which caps the word
 // at the ceiling. The ceiling is the user's, at most QLMVolumeWordMax.
 QLMMessage QLMCommandVolumeWord(uint32_t word, uint32_t ceilingWord);
+// A ceiling between steps falls to the step below it.
 QLMMessage QLMCommandVolume(double decibels, double ceilingDecibels);
-// Dim is a plain volume frame QLMDimDecibels down, floored at the slider's minimum.
+// Dim is a plain volume frame QLMDimDecibels down, floored at QLMVolumeWordMin.
 QLMMessage QLMCommandDim(double decibels, double ceilingDecibels);
 QLMMessage QLMCommandDuck(void);
 
