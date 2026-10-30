@@ -20,6 +20,73 @@
 @interface QLMSystemTests : XCTestCase
 @end
 
+// Holds each reply until the test lets it through, so a test can fire a
+// timer between any two.
+@interface QLMHeldAdapter : NSObject <QLMAdapter>
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
+// Hands the oldest reply held over, on the adapter's queue. NO when none is.
+- (BOOL)releaseReply;
+@end
+
+@implementation QLMHeldAdapter {
+    id<QLMAdapter> _adapter;
+    dispatch_queue_t _queue;
+    id<QLMClock> _clock;
+    NSMutableArray<dispatch_block_t> *_held;
+}
+
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
+    self = [super init];
+    if (self) {
+        _adapter = adapter;
+        _held = [NSMutableArray array];
+    }
+    return self;
+}
+
+- (NSString *)deviceDescription {
+    return _adapter.deviceDescription;
+}
+
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
+    _queue = queue;
+    _clock = clock;
+    [_adapter startOnQueue:queue clock:clock];
+}
+
+- (void)stop {
+    [_adapter stop];
+}
+
+- (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    [_adapter sendMessage:message replyHandler:^(const QLMMessage *reply, NSError *error) {
+        BOOL answered = reply != NULL;
+        QLMMessage copy = answered ? *reply : QLMMessageMake(0, NULL, 0);
+        @synchronized(self) {
+            [self->_held addObject:^{
+                handler(answered ? &copy : NULL, error);
+            }];
+        }
+    }];
+}
+
+- (BOOL)releaseReply {
+    dispatch_block_t reply = nil;
+    @synchronized(self) {
+        reply = _held.firstObject;
+        if (reply != nil) {
+            [_held removeObjectAtIndex:0];
+        }
+    }
+    if (reply == nil) {
+        return NO;
+    }
+    [_clock async:_queue run:reply];
+    return YES;
+}
+
+@end
+
 @implementation QLMSystemTests {
     QLMFakeMonitor *_left;
     QLMFakeMonitor *_right;
@@ -739,6 +806,42 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     for (NSData *mute in mutes) {
         XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
     }
+}
+
+// Lets the held replies through, one at a time, until the condition holds
+// or none is left.
+- (BOOL)releaseRepliesOf:(QLMHeldAdapter *)held until:(BOOL (^)(void))condition {
+    [_time settle];
+    while (!condition()) {
+        if (![held releaseReply]) {
+            return NO;
+        }
+        [_time settle];
+    }
+    return YES;
+}
+
+// The cycle fires at the worst moment: the lease chain's next probe is out,
+// and the monitor that answers it holds no lease yet. The cycle must not
+// probe too, or that monitor answers both probes and gets two leases.
+- (void)testACycleInsideTheLeaseChainLeasesNoMonitorTwice {
+    QLMHeldAdapter *held = [[QLMHeldAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:held];
+    XCTAssertTrue([self releaseRepliesOf:held until:^BOOL {
+        const uint8_t *last = self->_bus.sentMessages.lastObject.bytes;
+        BOOL probeOut = last != NULL && last[0] == QLMAddressBroadcast && last[1] == 0xFE;
+        return probeOut && [self countSentTo:QLMAddressMulticast opcode:0x02 from:0] == 1;
+    }]);
+    [_time advanceBy:_settings.cycleInterval];
+    [self releaseRepliesOf:held until:^BOOL {
+        return NO;
+    }];
+
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:0], 2u);
+    QLMSnapshot *snapshot = _system.snapshot;
+    XCTAssertEqual(snapshot.monitors.count, 2u);
+    XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
+    XCTAssertEqual(QLMFindMonitor(snapshot, _right.hardwareID).session, 0x03);
 }
 
 // A gap the monitors ride out keeps every lease.

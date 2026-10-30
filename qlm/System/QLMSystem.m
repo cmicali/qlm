@@ -184,6 +184,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     id<QLMClock> _clock;  // the settings', which every replacement keeps
     id<QLMTimer> _cycleTimer;
     BOOL _cycleQueued;
+    BOOL _probing;  // a lease chain runs
     QLMTrackedAdapter *_adapterRecord;
     NSError *_adapterError;
     id<QLMTimer> _adapterTimer;
@@ -350,6 +351,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // A reply that never comes must not stall the next start.
     _inFlight = NO;
     _cycleQueued = NO;
+    _probing = NO;
     _adapterPollsQueued = 0;
     [_adapter stop];
     [_monitors removeAllObjects];
@@ -573,12 +575,24 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // A probe is answered by one monitor without a lease. It gets the next
 // session ID, then its identity is read, and the probe repeats for the next.
 // Once no monitor answers, the new ones get the active group's blocks.
+// TRAP: only one lease chain runs. A second probe, from a cycle inside the
+// chain, would reach the monitor the chain's probe found before its lease
+// goes out, and that monitor would answer both and get two leases.
 - (void)probe {
+    if (_probing) {
+        return;
+    }
+    _probing = YES;
+    [self probeNext];
+}
+
+- (void)probeNext {
     [self send:QLMCommandProbe() then:^(const QLMMessage *reply, NSError *error) {
         uint8_t hardwareID[3];
         if (reply != NULL && QLMReplyHardwareID(reply, hardwareID)) {
             [self assignSessionTo:hardwareID];
         } else {
+            self->_probing = NO;
             [self applyToNewMonitors];
         }
     }];
@@ -595,21 +609,24 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     uint8_t session = [self takeSession];
     if (session == 0) {
+        _probing = NO;
         return;
     }
     [self send:QLMCommandAssignSession(hardwareID, session) then:^(const QLMMessage *reply, NSError *error) {
         uint8_t acked = 0;
         if (reply != NULL && (!QLMReplySessionAck(reply, &acked) || acked != session)) {
+            self->_probing = NO;
             return;
         }
         // A lost ack may hide a lease the monitor took, and then it never
         // answers a probe again. So it is tracked anyway. If it holds the
         // lease its polls answer; if not, the next probe finds it.
         if (reply == NULL && !QLMSendWentOut(error)) {
+            self->_probing = NO;
             return;
         }
         [self track:identity session:session serial:nil];
-        [self probe];
+        [self probeNext];
     }];
 }
 
@@ -641,8 +658,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return nil;
 }
 
-// A monitor that holds `session`, from a lease or one taken back.
+// A monitor that holds `session`, from a lease or one taken back. It
+// replaces any record of the same monitor, whose lease is gone.
 - (void)track:(NSData *)identity session:(uint8_t)session serial:(nullable NSString *)serial {
+    QLMMonitorRecord *stale = [self monitorWithHardwareID:identity];
+    if (stale != nil) {
+        [_monitors removeObject:stale];
+    }
     // TRAP: a monitor just switched on plays at its own stored level until a
     // host sends one, and that can be loud
     // (captures/qlm-control-first/notes.md, after the capture).
