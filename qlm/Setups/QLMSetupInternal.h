@@ -56,6 +56,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) NSString *model;
 @property (nonatomic, readwrite) NSInteger type;
 @property (nonatomic, readwrite, nullable) NSString *serial;
+@property (nonatomic, readwrite, nullable) NSData *hardwareID;
 @property (nonatomic, readwrite) NSString *name;
 @property (nonatomic, readwrite, nullable) NSString *hardwareVersion;
 @property (nonatomic, readwrite, nullable) NSString *dspVersion;

@@ -39,6 +39,9 @@
     _settings = [[QLMSystemSettings alloc] init];
     _settings.cycleInterval = 0.02;
     _settings.ceilingDecibels = -20;
+    // The adapter polls only at start, so the tests that count frames see
+    // none but GLM's opening pair. The adapter's own tests turn them on.
+    _settings.adapterPollInterval = 0;
     _snapshots = dispatch_queue_create("qlm.tests.snapshots", DISPATCH_QUEUE_SERIAL);
     _received = [NSMutableArray array];
 }
@@ -184,7 +187,270 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
         if (info == NSNotFound && bytes[0] == 0x02 && bytes[1] == 0x39) info = i;
     }
     XCTAssertTrue(probe < assign && assign < info);
-    XCTAssertGreaterThan([self countSentTo:QLMAddressBroadcast opcode:0x04 from:0], 0u);
+    // captures/startup-idle: GLM's idle cycle has no keep-alive.
+    XCTAssertEqual([self countSentTo:QLMAddressBroadcast opcode:0x04 from:0], 0u);
+
+    // GLM's opening: the adapter's status twice, its system info, its
+    // serial, then the probe.
+    const uint8_t poll[] = {QLMAddressAdapter, 0x08};
+    const uint8_t info39[] = {QLMAddressAdapter, 0x39};
+    const uint8_t serial[] = {QLMAddressAdapter, 0x19, 0x01};
+    const uint8_t probeBytes[] = {QLMAddressBroadcast, 0xFE};
+    NSArray<NSData *> *opening = @[QLMBytes(poll, 2), QLMBytes(poll, 2), QLMBytes(info39, 2), QLMBytes(serial, 3), QLMBytes(probeBytes, 2)];
+    XCTAssertEqualObjects([sent subarrayWithRange:NSMakeRange(0, opening.count)], opening);
+    XCTAssertTrue(snapshot.adapter.identified);
+    XCTAssertEqualObjects(snapshot.adapter.model, @"GLM Adapter");
+    XCTAssertEqualObjects(snapshot.adapter.firmwareVersion, @"1.4.0.6113");
+    XCTAssertEqualObjects(snapshot.adapter.serialNumber, @"H00000F001");
+    XCTAssertEqualObjects(snapshot.adapter.knobTenths, @(-1004));
+    XCTAssertEqualObjects(snapshot.adapter.device, @"a fake bus of 2 monitors");
+    XCTAssertNil(snapshot.adapterError);
+}
+
+#pragma mark - Phase 1: only GLM's discovery and polls
+
+// What info, discover, and poll may send: the probe, the lease, and polls
+// and identity queries, to a monitor or to the adapter at 01. Every one is
+// a frame GLM sends in captures/startup-idle.
+static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
+    const uint8_t *bytes = record.bytes;
+    if (record.length == 2 && bytes[0] == QLMAddressBroadcast && bytes[1] == 0xFE) {
+        return YES;
+    }
+    if (record.length == 6 && bytes[0] == QLMAddressMulticast && bytes[1] == 0x02) {
+        return YES;
+    }
+    if (bytes[0] == QLMAddressBroadcast || bytes[0] == QLMAddressMulticast) {
+        return NO;
+    }
+    return (record.length == 2 && (bytes[1] == 0x08 || bytes[1] == 0x39)) ||
+           (record.length == 3 && bytes[1] == 0x19 && bytes[2] == 0x01);
+}
+
+- (void)testSendsOnlyDiscoveryAndPolls {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [NSThread sleepForTimeInterval:0.3];
+    NSArray<NSData *> *sent = _bus.sentMessages;
+    XCTAssertGreaterThan(sent.count, 40u);
+    for (NSData *record in sent) {
+        XCTAssertTrue(QLMIsDiscoveryOrPoll(record), @"%@", record);
+    }
+    XCTAssertGreaterThan([self countSentTo:QLMAddressAdapter opcode:0x08 from:0], 10u);
+}
+
+// qlmctl info: with discovery off, System talks to the adapter alone.
+- (void)testTalksToTheAdapterAloneWithoutDiscovery {
+    _settings.discoversMonitors = NO;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.adapter.identified;
+    }];
+    [NSThread sleepForTimeInterval:0.1];
+    XCTAssertEqual(snapshot.monitors.count, 0u);
+    for (NSData *record in _bus.sentMessages) {
+        XCTAssertEqual(((const uint8_t *)record.bytes)[0], QLMAddressAdapter, @"%@", record);
+        XCTAssertTrue(QLMIsDiscoveryOrPoll(record), @"%@", record);
+    }
+    XCTAssertEqual(_left.session, 0);
+}
+
+// docs/adapter-status.md: GLM polls the adapter in pairs about every 107 ms.
+- (void)testPollsTheAdapterInPairs {
+    _settings.cycleInterval = 10;
+    _settings.adapterPollInterval = 0.04;
+    [self startSystem];
+    [self waitForDiscovery];
+    const uint8_t pollBytes[] = {QLMAddressAdapter, 0x08};
+    NSData *poll = QLMBytes(pollBytes, 2);
+    // TRAP: a fixed sleep, read while System ran, failed under load.
+    [self waitUntil:^BOOL {
+        return [self countSent:poll from:0] >= 10;
+    }];
+    [_system stop];
+    NSArray<NSData *> *sent = _bus.sentMessages;
+    NSUInteger polls = 0;
+    for (NSUInteger i = 0; i < sent.count; i++) {
+        if ([sent[i] isEqualToData:poll]) {
+            polls += 1;
+            // The stop may cut the last pair in half.
+            if (polls % 2 == 1 && i + 1 < sent.count) {
+                XCTAssertEqualObjects(sent[i + 1], poll, @"a poll at %lu with no pair", (unsigned long)i);
+            }
+        }
+    }
+    XCTAssertGreaterThanOrEqual(polls, 10u);
+}
+
+// The knob's position rides the adapter's status, and a change publishes.
+- (void)testTheKnobShowsInTheSnapshot {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.adapter.knobTenths isEqual:@(-1004)];
+    }];
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-123);
+    }];
+    QLMSnapshot *turned = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.adapter.knobTenths isEqual:@(-123)];
+    }];
+    XCTAssertTrue(turned.adapter.knobPresent);
+    [_bus perform:^{
+        self->_bus.knobTenths = nil;
+    }];
+    QLMSnapshot *unplugged = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.hasStatus && !snapshot.adapter.knobPresent;
+    }];
+    XCTAssertNil(unplugged.adapter.knobTenths);
+    XCTAssertFalse(unplugged.adapter.micPresent);
+}
+
+// Never drive the bus while GLM runs: while the adapter is busy, the
+// snapshot says why and nothing goes out. Once it frees up, discovery runs.
+- (void)testABusyAdapterShowsAndNothingGoesOut {
+    _bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
+    [self startSystem];
+    QLMSnapshot *busy = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    XCTAssertEqualObjects(busy.adapterError.domain, QLMAdapterErrorDomain);
+    XCTAssertEqual(busy.adapterError.code, QLMAdapterErrorBusy);
+    XCTAssertEqualObjects(busy.adapterError.localizedDescription, @"GLM is running (pid 1). Quit GLM first.");
+    [NSThread sleepForTimeInterval:0.1];
+    XCTAssertEqual(_bus.sentMessages.count, 0u);
+    XCTAssertEqual(_system.snapshot.monitors.count, 0u);
+
+    _bus.busyReason = nil;
+    QLMSnapshot *freed = [self waitForDiscovery];
+    XCTAssertNil(freed.adapterError);
+}
+
+// A lost connection takes the adapter's identity with it, since another
+// adapter may answer the reconnect. The new one's identity is read afresh.
+- (void)testAReconnectReadsTheNewAdaptersIdentity {
+    _settings.discoversMonitors = NO;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.identified;
+    }];
+    XCTAssertEqualObjects(first.adapter.serialNumber, @"H00000F001");
+
+    [_bus perform:^{
+        self->_bus.disconnected = YES;
+    }];
+    QLMSnapshot *lost = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    XCTAssertEqual(lost.adapterError.code, QLMAdapterErrorDisconnected);
+    XCTAssertFalse(lost.adapter.identified);
+    XCTAssertNil(lost.adapter.serialNumber);
+    XCTAssertNil(lost.adapter.model);
+    XCTAssertNil(lost.adapter.firmwareVersion);
+
+    [_bus perform:^{
+        self->_bus.adapterSystemInfo = @"c-0;model-GLM Adapter B;ver-1.5.2.7001;hw-0.0.203;build-2026.01.10.s  ";
+        self->_bus.adapterSerialNumber = @"H00000F002";
+        self->_bus.disconnected = NO;
+    }];
+    QLMSnapshot *second = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.identified;
+    }];
+    XCTAssertNil(second.adapterError);
+    XCTAssertEqualObjects(second.adapter.serialNumber, @"H00000F002");
+    XCTAssertEqualObjects(second.adapter.model, @"GLM Adapter B");
+    XCTAssertEqualObjects(second.adapter.firmwareVersion, @"1.5.2.7001");
+}
+
+#pragma mark - Phase 1: lost replies
+
+// A lost lease ack: the monitor holds the lease but never said so, so it
+// would never answer a probe again. It is tracked anyway, and its polls and
+// identity queries answer under the lease it took.
+- (void)testALostLeaseAckIsRecovered {
+    _left.dropReplies = 1;
+    [self startSystem];
+    QLMSnapshot *snapshot = [self waitForDiscovery];
+    XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
+    XCTAssertEqual(QLMFindMonitor(snapshot, _right.hardwareID).session, 0x03);
+    NSUInteger leasesToLeft = [self sentFrom:0 matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return bytes[0] == QLMAddressMulticast && memcmp(bytes + 2, self->_left.hardwareID.bytes, 3) == 0;
+    }].count;
+    XCTAssertEqual(leasesToLeft, 1u);
+}
+
+// A lost reply to an identity query is asked again on the next cycle.
+- (void)testALostIdentityReplyIsAskedAgain {
+    _left.dropReplies = 2;  // the lease ack, then the system info
+    [self startSystem];
+    QLMSnapshot *snapshot = [self waitForDiscovery];
+    QLMMonitorState *left = QLMFindMonitor(snapshot, _left.hardwareID);
+    XCTAssertEqualObjects(left.model, @"8320A");
+    XCTAssertEqual([self countSentTo:left.session opcode:0x39 from:0], 2u);
+    XCTAssertEqual([self countSentTo:left.session opcode:0x19 from:0], 1u);
+}
+
+// Lost replies to the adapter's status polls are missed polls, then clear.
+// A snapshot waits for the pair, so both polls of one are lost here.
+- (void)testALostAdapterReplyIsAMissedPoll {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.identified;
+    }];
+    [_bus perform:^{
+        self->_bus.adapterDropReplies = 2;
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.missedPolls == 2;
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.missedPolls == 0;
+    }];
+}
+
+#pragma mark - Phase 1: GLM's own traffic
+
+// captures/startup-idle, replayed while System polls the adapter as GLM
+// does: every message System sends is one GLM sent, byte for byte.
+- (void)testSendsNothingGLMDidNotInStartupIdle {
+    _settings.cycleInterval = 0.05;
+    _settings.adapterPollInterval = 0.02;
+    QLMReplayAdapter *replay = [[QLMReplayAdapter alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
+    [self startSystemWithAdapter:replay];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified;
+    }];
+    [NSThread sleepForTimeInterval:0.5];
+    [_system stop];
+    XCTAssertEqualObjects(replay.unmatchedMessages, @[]);
+    XCTAssertGreaterThan(replay.playedCount, 100u);
+}
+
+// The same capture, report by report, through the report link the HID
+// adapter uses: every reply is assembled from input reports, the adapter's
+// system info from two.
+- (void)testDiscoversEveryMonitorThroughTheReportLink {
+    _settings.cycleInterval = 0.05;
+    _settings.adapterPollInterval = 0.02;
+    QLMCaptureDevice *device = [[QLMCaptureDevice alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
+    [self startSystemWithAdapter:device];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        BOOL known = received.monitors.count == 6 && received.allIdentified && received.adapter.identified;
+        for (QLMMonitorState *monitor in received.monitors) {
+            known = known && monitor.deviceClass != QLMMonitorClassUnknown;
+        }
+        return known;
+    }];
+    XCTAssertEqualObjects(snapshot.adapter.model, @"GLM Adapter");
+    XCTAssertEqualObjects(snapshot.adapter.serialNumber, @"H99999F000");
+    XCTAssertEqualObjects(snapshot.adapter.knobTenths, @(-1004));
+    [_system stop];
+    XCTAssertEqual(device.unmatchedReports, 0u);
 }
 
 - (void)testALostReplyDoesNotDropAMonitor {

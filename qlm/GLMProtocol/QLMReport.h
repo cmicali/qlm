@@ -45,6 +45,11 @@ typedef enum {
 // report. Every byte qlm hands the adapter comes from here.
 QLMReportStatus QLMReportPackOutput(const QLMMessage *message, uint8_t report[QLMReportLength]);
 
+// The adapter answers the probe, the lease, and every unicast, its own
+// address included, with exactly one frame: the monitor's reply, or the
+// no-answer frame. Every other broadcast gets none.
+bool QLMReportExpectsReply(const QLMMessage *message);
+
 // Finds the frame in an output report, as a capture holds one. `frame`
 // points into `report`.
 QLMReportStatus QLMReportUnpackOutput(const uint8_t *report, size_t length, const uint8_t **frame, size_t *frameLength);

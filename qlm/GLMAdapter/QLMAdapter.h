@@ -13,6 +13,8 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
     QLMAdapterErrorDisconnected,  // no adapter
     QLMAdapterErrorTimeout,       // the adapter never answered
     QLMAdapterErrorCapture,       // a capture does not read; the description names the line
+    QLMAdapterErrorBusy,          // another host has the adapter, or qlm could not seize it; the description says which, and nothing was sent
+    QLMAdapterErrorBadReply,      // the reply did not read
 };
 
 // One handler call per send, on the queue given to startOnQueue:. `reply` is
@@ -29,6 +31,9 @@ typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSErro
 - (void)stop;
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
 
+// What this adapter drives, for display. Read on the queue.
+@property (nonatomic, readonly) NSString *deviceDescription;
+
 @end
 
 // Packs the message as an output report, through the allowlist. Every adapter
@@ -37,5 +42,7 @@ BOOL QLMAdapterPackReport(const QLMMessage *message, uint8_t report[_Nonnull QLM
 
 // A message as the adapters record it: the address byte, then the payload.
 NSData *QLMAdapterRecord(const QLMMessage *message);
+
+NSError *QLMAdapterErrorMake(QLMAdapterError code, NSString *description);
 
 NS_ASSUME_NONNULL_END

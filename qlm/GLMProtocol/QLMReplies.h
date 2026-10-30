@@ -76,4 +76,40 @@ typedef enum {
 // before it are valid and unknownTag names it.
 QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *telemetry);
 
+// The adapter's reply to 01 08: 09, then fields with no length byte. The top
+// two bits of a tag give its value's length: 00 none, 01 one byte, 10 two,
+// and 11 four. 30 or 31 says whether the knob is in, and 32 or 33 the mic.
+// The knob's position, DF, is a signed big-endian count of tenths of a dB.
+// The mic's readings, DE and DD, have no known scale.
+typedef struct {
+    bool knob;
+    bool mic;
+    bool hasKnobPosition;
+    int32_t knobTenths;
+    uint32_t micDE;
+    uint32_t micDD;
+    uint8_t unknownTag;  // the first tag the walk stepped over, or 0
+} QLMAdapterStatus;
+
+typedef enum {
+    QLMAdapterStatusOK = 0,
+    QLMAdapterStatusErrorNotStatus,
+    QLMAdapterStatusErrorTruncated,
+} QLMAdapterStatusResult;
+
+// The tag rule lets the walk step over a tag it does not know.
+QLMAdapterStatusResult QLMReplyAdapterStatus(const QLMMessage *message, QLMAdapterStatus *status);
+
+// Replies name no request, so only a reply's shape can say what it answers.
+// These two shapes belong to one request each in every capture.
+//
+// The adapter's status, exactly: 33, or 32 34 DE DD with the mic, then 31,
+// or 30 36 DF with the knob, and nothing after. Only 01 08 gets one.
+// TRAP: QLMReplyAdapterStatus's walk reads a serial, and most other replies,
+// as a status. Use this to tell a status reply from any other.
+bool QLMReplyIsAdapterStatus(const QLMMessage *message);
+
+// System info text, with a model- field. Only 39 gets one.
+bool QLMReplyIsSystemInfo(const QLMMessage *message);
+
 #endif

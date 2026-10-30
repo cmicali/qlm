@@ -42,6 +42,24 @@ static QLMReportStatus QLMRead(QLMReportAssembly *assembly, const uint8_t *bytes
     XCTAssertEqualObjects(QLMBytes(report, sizeof report), QLMBytes(padded, sizeof padded));
 }
 
+// The probe, the lease, and every unicast, the adapter's own 01 included,
+// get a reply. Other broadcasts get none. QLMGoldenTests checks the rule
+// against every exchange in the captures.
+- (void)testWhichMessagesExpectAReply {
+    const uint8_t hardwareID[3] = {0x12, 0x2F, 0xAB};
+    QLMMessage expecting[] = {QLMCommandProbe(), QLMCommandAssignSession(hardwareID, 0x02), QLMCommandPoll(0x02),
+                              QLMCommandPoll(QLMAddressAdapter), QLMCommandSystemInfo(QLMAddressAdapter),
+                              QLMCommandMute(QLMAddressAdapter, 0x00)};
+    for (size_t i = 0; i < sizeof expecting / sizeof expecting[0]; i++) {
+        XCTAssertTrue(QLMReportExpectsReply(&expecting[i]), @"%zu", i);
+    }
+    QLMMessage silent[] = {QLMCommandKeepAlive(), QLMCommandVolume(-20, -20), QLMCommandPower(QLMPowerStepWakeFirst)};
+    for (size_t i = 0; i < sizeof silent / sizeof silent[0]; i++) {
+        XCTAssertFalse(QLMReportExpectsReply(&silent[i]), @"%zu", i);
+    }
+    XCTAssertFalse(QLMReportExpectsReply(NULL));
+}
+
 - (void)testPacksAVolumeFrameAsCaptured {
     QLMMessage volume = QLMCommandVolumeWord(0x003107, QLMVolumeWordMax);
     uint8_t report[QLMReportLength];

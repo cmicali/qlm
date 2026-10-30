@@ -43,6 +43,33 @@ NSArray<NSString *> *QLMCaptureScenarios(void);
 // captures/<scenario>/reports.txt, read once and shared.
 QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
+@class QLMReportLink;
+
+// The GLM adapter as a capture saw it, at the level of reports, behind a
+// QLMReportLink as the HID adapter is. Each output report the link writes
+// gets the input reports that answered it in the capture, split as the
+// adapter sent them, after replyDelay. Replies come in order, as the
+// adapter's do: none before the one ahead of it. A report the capture never
+// sent, or any report while silent, gets none.
+@interface QLMCaptureDevice : NSObject <QLMAdapter>
+
+- (instancetype)initWithCapture:(QLMCapture *)capture;
+
+@property (nonatomic, readonly, nullable) QLMReportLink *link;  // made by startOnQueue:
+@property (atomic) NSTimeInterval replyDelay;                   // 1 ms
+@property (atomic) NSTimeInterval nextReplyDelay;               // above 0: the next reply's delay, once
+@property (atomic) BOOL silent;
+// Every output report written, as 64 bytes. Read on the queue.
+@property (nonatomic, readonly) NSArray<NSData *> *writtenReports;
+@property (nonatomic, readonly) NSUInteger unmatchedReports;
+@property (nonatomic, readonly) NSUInteger deliveredReplies;  // read on the queue
+
+// A frame as the adapter delivers it: one input report per 63 bytes, each
+// starting with 3F and padded with zeros.
++ (NSArray<NSData *> *)inputReportsForFrame:(NSData *)frame;
+
+@end
+
 @interface XCTestCase (QLMAdapter)
 
 // Sends on the adapter's queue and waits for the handler, failing the test

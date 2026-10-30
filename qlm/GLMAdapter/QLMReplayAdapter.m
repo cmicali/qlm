@@ -25,6 +25,10 @@
     return self;
 }
 
+- (NSString *)deviceDescription {
+    return @"a replay of a capture";
+}
+
 - (NSUInteger)playedCount {
     @synchronized(self) {
         return _played;

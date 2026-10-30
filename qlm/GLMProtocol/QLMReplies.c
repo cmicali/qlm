@@ -182,3 +182,72 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
     }
     return QLMTelemetryOK;
 }
+
+static uint32_t QLMReadBigEndian32(const uint8_t *bytes) {
+    return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 | (uint32_t)bytes[2] << 8 | (uint32_t)bytes[3];
+}
+
+QLMAdapterStatusResult QLMReplyAdapterStatus(const QLMMessage *message, QLMAdapterStatus *status) {
+    if (status == NULL) {
+        return QLMAdapterStatusErrorNotStatus;
+    }
+    memset(status, 0, sizeof *status);
+    if (!QLMReplyIsReply(message) || message->length < 2) {
+        return QLMAdapterStatusErrorNotStatus;
+    }
+    static const size_t lengths[4] = {0, 1, 2, 4};
+    size_t i = 1;
+    while (i < message->length) {
+        uint8_t tag = message->payload[i];
+        size_t valueLength = lengths[tag >> 6];
+        if (i + valueLength >= message->length) {
+            return QLMAdapterStatusErrorTruncated;
+        }
+        const uint8_t *value = message->payload + i + 1;
+        switch (tag) {
+        case 0x30: status->knob = true; break;
+        case 0x31: status->knob = false; break;
+        case 0x32: status->mic = true; break;
+        case 0x33: status->mic = false; break;
+        case 0x34: case 0x36: break;
+        case 0xDD: status->micDD = QLMReadBigEndian32(value); break;
+        case 0xDE: status->micDE = QLMReadBigEndian32(value); break;
+        case 0xDF:
+            status->knobTenths = (int32_t)QLMReadBigEndian32(value);
+            status->hasKnobPosition = true;
+            break;
+        default:
+            if (status->unknownTag == 0) {
+                status->unknownTag = tag;
+            }
+            break;
+        }
+        i += 1 + valueLength;
+    }
+    return QLMAdapterStatusOK;
+}
+
+bool QLMReplyIsAdapterStatus(const QLMMessage *message) {
+    if (!QLMReplyIsReply(message)) {
+        return false;
+    }
+    const uint8_t *payload = message->payload;
+    size_t length = message->length;
+    size_t i = 1;
+    if (i < length && payload[i] == 0x33) {
+        i += 1;
+    } else if (i + 11 < length && payload[i] == 0x32 && payload[i + 1] == 0x34 && payload[i + 2] == 0xDE && payload[i + 7] == 0xDD) {
+        i += 12;
+    } else {
+        return false;
+    }
+    if (i + 1 == length && payload[i] == 0x31) {
+        return true;
+    }
+    return i + 7 == length && payload[i] == 0x30 && payload[i + 1] == 0x36 && payload[i + 2] == 0xDF;
+}
+
+bool QLMReplyIsSystemInfo(const QLMMessage *message) {
+    char text[QLMPayloadMax];
+    return QLMReplyText(message, text, sizeof text) && strstr(text, "model-") != NULL;
+}

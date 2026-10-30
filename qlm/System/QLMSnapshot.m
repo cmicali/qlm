@@ -19,11 +19,24 @@ const NSInteger QLMMonitorValueAbsent = -1;
 
 @end
 
+@implementation QLMAdapterState
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _device = @"";
+    }
+    return self;
+}
+
+@end
+
 @implementation QLMSnapshot
 
 - (instancetype)init {
     self = [super init];
     if (self) {
+        _adapter = [[QLMAdapterState alloc] init];
         _monitors = @[];
     }
     return self;

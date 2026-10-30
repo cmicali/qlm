@@ -26,9 +26,28 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface QLMAdapterState ()
+
+@property (nonatomic, readwrite) NSString *device;
+@property (nonatomic, readwrite, nullable) NSString *systemInfo;
+@property (nonatomic, readwrite, nullable) NSString *model;
+@property (nonatomic, readwrite, nullable) NSString *firmwareVersion;
+@property (nonatomic, readwrite, nullable) NSString *serialNumber;
+@property (nonatomic, readwrite) BOOL hasStatus;
+@property (nonatomic, readwrite) BOOL knobPresent;
+@property (nonatomic, readwrite) BOOL micPresent;
+@property (nonatomic, readwrite, nullable) NSNumber *knobTenths;
+@property (nonatomic, readwrite) NSUInteger missedPolls;
+@property (nonatomic, readwrite, nullable) NSDate *lastReply;
+@property (nonatomic, readwrite) BOOL identified;
+
+@end
+
 @interface QLMSnapshot ()
 
 @property (nonatomic, readwrite) BOOL running;
+@property (nonatomic, readwrite) QLMAdapterState *adapter;
+@property (nonatomic, readwrite, nullable) NSError *adapterError;
 @property (nonatomic, readwrite) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
 @property (nonatomic, readwrite) BOOL dimmed;

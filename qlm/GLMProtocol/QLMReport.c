@@ -34,6 +34,13 @@ QLMReportStatus QLMReportPackOutput(const QLMMessage *message, uint8_t report[QL
     return QLMReportOK;
 }
 
+bool QLMReportExpectsReply(const QLMMessage *message) {
+    if (message == NULL || message->length == 0) {
+        return false;
+    }
+    return message->address != QLMAddressBroadcast || message->payload[0] == 0xFE;
+}
+
 QLMReportStatus QLMReportUnpackOutput(const uint8_t *report, size_t length, const uint8_t **frame, size_t *frameLength) {
     if (report == NULL || length != QLMReportLength) {
         return QLMReportErrorLength;

@@ -2,7 +2,7 @@
 
 A native Mac controller for Genelec SAM monitors, through the GLM network adapter. It shows the system's status. It sets volume, mute, dim, and power. It switches groups. GLM stays installed for calibration.
 
-**Nothing has touched real hardware yet.** Everything runs over a fake bus until the adapter is captured. The plan is [docs/plan.md](docs/plan.md).
+**Nothing has touched real hardware yet.** `qlmctl info`, `discover`, and `poll` can drive the adapter over USB, but have not run on it. Everything else runs over a fake bus. The plan is [docs/plan.md](docs/plan.md).
 
 ## Building
 

@@ -29,8 +29,9 @@ static QLMSetup *_Nullable QLMLoadSetup(void) {
 @implementation QLMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
-    // Until the adapter over HID exists, the app runs on a fake bus, so the
-    // menu bar and the popover can be seen working.
+    // The app sends volume, mute, and power, which are not yet checked on
+    // the monitors, so it runs on a fake bus, and the menu bar and the
+    // popover can be seen working.
     QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:YES];
     bus.recordsSentMessages = NO;
     self.system = [[QLMSystem alloc] initWithAdapter:bus settings:[[QLMSystemSettings alloc] init]];

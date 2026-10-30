@@ -74,4 +74,13 @@
     return nil;
 }
 
+- (QLMSetupDevice *)deviceWithHardwareID:(NSData *)hardwareID {
+    for (QLMSetupDevice *device in _devices) {
+        if (device.hardwareID != nil && [device.hardwareID isEqualToData:hardwareID]) {
+            return device;
+        }
+    }
+    return nil;
+}
+
 @end

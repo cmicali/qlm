@@ -42,10 +42,36 @@ extern const NSInteger QLMMonitorValueAbsent;
 
 @end
 
+// The GLM adapter itself, as System last saw it. Immutable.
+@interface QLMAdapterState : NSObject
+
+@property (nonatomic, readonly) NSString *device;  // what the adapter object drives, for display
+@property (nonatomic, readonly, nullable) NSString *systemInfo;       // from 01 39
+@property (nonatomic, readonly, nullable) NSString *model;            // from systemInfo
+@property (nonatomic, readonly, nullable) NSString *firmwareVersion;  // from systemInfo
+@property (nonatomic, readonly, nullable) NSString *serialNumber;     // from 01 19 01
+// From the last reply to 01 08. hasStatus is NO until one reads.
+@property (nonatomic, readonly) BOOL hasStatus;
+@property (nonatomic, readonly) BOOL knobPresent;
+@property (nonatomic, readonly) BOOL micPresent;
+// The knob's position in tenths of a dB: 0 at the top, about -1004 at the
+// bottom. Nil without the knob.
+@property (nonatomic, readonly, nullable) NSNumber *knobTenths;
+@property (nonatomic, readonly) NSUInteger missedPolls;  // since the last reply to 01 08
+@property (nonatomic, readonly, nullable) NSDate *lastReply;
+// The system info, the serial number, and the status are known.
+@property (nonatomic, readonly) BOOL identified;
+
+@end
+
 // The whole system at one moment. Immutable.
 @interface QLMSnapshot : NSObject
 
 @property (nonatomic, readonly) BOOL running;
+@property (nonatomic, readonly) QLMAdapterState *adapter;
+// Why nothing reaches the bus: QLMAdapterErrorBusy while another host has
+// the adapter, or QLMAdapterErrorDisconnected. Nil once a send goes out.
+@property (nonatomic, readonly, nullable) NSError *adapterError;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed
 @property (nonatomic, readonly) BOOL dimmed;
