@@ -748,17 +748,17 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
     const char *ceilingOption = QLMOptionValue(argc, argv, "--ceiling");
     double volume = volumeOption != NULL ? atof(volumeOption) : setup.volume;
     double ceiling = ceilingOption != NULL ? atof(ceilingOption) : QLMCeilingLimit;
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [QLMDSPBlock blocksByHardwareIDForGroup:group error:&error];
+    if (blocks == nil) {
+        fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
+        return EX_DATAERR;
+    }
     BOOL allowed = YES;
     uint8_t session = QLMAddressSessionFirst;
     NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
-    NSMutableDictionary<NSData *, QLMDSPBlock *> *blocks = [NSMutableDictionary dictionary];
     for (QLMSetupNode *node in group.nodes) {
-        QLMDSPBlock *block = [QLMDSPBlock blockForNode:node inGroup:group error:&error];
+        QLMDSPBlock *block = node.hardwareID != nil ? blocks[node.hardwareID] : nil;
         if (block == nil) {
-            fprintf(stderr, "qlmctl: node %s: %s\n", node.serial.UTF8String, error.localizedDescription.UTF8String);
-            return EX_DATAERR;
-        }
-        if (node.hardwareID == nil) {
             fprintf(stderr, "qlmctl: node %s has no hardware ID\n", node.serial.UTF8String);
             return EX_DATAERR;
         }
@@ -773,33 +773,28 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         QLMApplyMonitor *monitor = [[QLMApplyMonitor alloc] initWithHardwareID:node.hardwareID session:session++];
         monitor.on = YES;
         [monitors addObject:monitor];
-        blocks[node.hardwareID] = block;
     }
 
     QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:NO];
-    NSArray<NSData *> *records;
-    NSMutableArray<NSData *> *afterPolls = [NSMutableArray array];
+    NSMutableArray<NSData *> *records;
     if (QLMHasFlag(argc, argv, "--launch")) {
         printf("\nthe apply at launch and wake, to every monitor, then each one's state after its next poll\n");
-        records = [sequence enumerationOf:monitors blocks:blocks];
+        records = [[sequence enumerationOf:monitors blocks:blocks] mutableCopy];
         for (QLMApplyMonitor *monitor in monitors) {
-            [afterPolls addObjectsFromArray:[sequence stateOf:monitor firstOfTwo:NO]];
+            [records addObjectsFromArray:[sequence stateOf:monitor firstOfTwo:NO]];
         }
     } else {
         printf("\na switch to %s with every monitor on, restoring %.1f dB under a %.1f dB ceiling\n", group.name.UTF8String,
                volume, ceiling);
-        records = [sequence switchWithBlocks:blocks volume:QLMCommandVolume(volume, ceiling)];
+        records = [[sequence switchWithBlocks:blocks volume:QLMCommandVolume(volume, ceiling)] mutableCopy];
     }
-    for (NSArray<NSData *> *part in @[records, afterPolls]) {
-        for (NSData *record in part) {
-            const uint8_t *bytes = record.bytes;
-            QLMMessage message = QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
-            QLMPrintFrame(&message, NULL, NULL);
-        }
+    for (NSData *record in records) {
+        QLMMessage message = QLMApplyMessage(record);
+        QLMPrintFrame(&message, NULL, NULL);
     }
     printf("%lu frames. Not sent, though GLM sends them: 05 04 before each block, and the 8351B's 43 00 02 and "
            "4B 00 00 00 01.\n",
-           (unsigned long)(records.count + afterPolls.count));
+           (unsigned long)records.count);
     printf("%s\n", allowed ? "every node's rate is verified: an apply would be allowed"
                             : "REFUSED: a node's design rate is unverified, so an apply would not run");
     return 0;
