@@ -1,103 +1,130 @@
 #import "QLMPopoverController.h"
 
-static const double QLMSliderMinimumDecibels = -60;
-static const double QLMSliderStepDecibels = 0.5;
+#include <math.h>
 
-static NSColor *QLMDotColor(QLMMonitorState *monitor) {
-    if (monitor.missedPolls > 0) {
-        return NSColor.systemRedColor;
-    }
-    switch (monitor.status) {
-    case QLMMonitorStatusOn: return NSColor.systemGreenColor;
-    case QLMMonitorStatusStandby: return NSColor.systemYellowColor;
-    case QLMMonitorStatusUnknown: break;
-    }
-    return NSColor.systemGrayColor;
+#include "QLMCommands.h"
+#import "QLMBannerView.h"
+#import "QLMFormat.h"
+#import "QLMViews.h"
+
+static const CGFloat QLMPopoverWidth = 320;
+static const CGFloat QLMPopoverInset = 14;
+// After the user moves the slider, snapshots leave it alone this long, so a
+// snapshot from before the move cannot pull it back mid-drag.
+static const NSTimeInterval QLMSliderHoldInterval = 0.5;
+
+static NSTextField *QLMSmallLabel(NSString *text) {
+    NSTextField *label = [NSTextField labelWithString:text];
+    label.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    label.textColor = NSColor.secondaryLabelColor;
+    return label;
 }
 
-// One monitor's line: its status dot, its label, and its mute toggle.
+static NSView *QLMSpacer(void) {
+    NSView *spacer = [[NSView alloc] init];
+    [spacer setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+    return spacer;
+}
+
+// One monitor's line: its status dot, model, serial, state, and mute toggle.
 @interface QLMMonitorRow : NSObject
 @property (nonatomic, readonly) NSStackView *view;
 @property (nonatomic, readonly) NSImageView *dot;
-@property (nonatomic, readonly) NSTextField *label;
+@property (nonatomic, readonly) NSTextField *model;
+@property (nonatomic, readonly) NSTextField *serial;
+@property (nonatomic, readonly) NSTextField *detail;
 @property (nonatomic, readonly) NSButton *muteButton;
-@property (nonatomic, readonly) QLMSystem *system;
-@property (nonatomic, nullable) QLMMonitorState *monitor;
+@property (nonatomic, weak) QLMPopoverController *owner;
+@property (nonatomic, nullable) QLMMonitorEntry *entry;
+@end
+
+@interface QLMPopoverController ()
+@property (nonatomic) QLMPreferences *preferences;
+@property (nonatomic) QLMMonitorList *monitorList;
+@property (nonatomic) QLMBannerView *banner;
+@property (nonatomic) NSTextField *deviceLabel;
+@property (nonatomic) NSTextField *messageLabel;
+@property (nonatomic) NSSlider *volumeSlider;
+@property (nonatomic) NSTextField *volumeLabel;
+@property (nonatomic) NSTextField *ceilingLabel;
+@property (nonatomic) NSButton *muteButton;
+@property (nonatomic) NSButton *dimButton;
+@property (nonatomic) NSButton *powerButton;
+@property (nonatomic) NSPopUpButton *groupPicker;
+@property (nonatomic) NSTextField *summaryLabel;
+@property (nonatomic) NSStackView *monitorsStack;
+@property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry, as the list only appends
+@property (nonatomic) NSTimeInterval sliderMovedAt;
+// The snapshot says an apply is running, not which group.
+@property (nonatomic, copy, nullable) NSString *applyingGroupName;
+@property (nonatomic, copy, nullable) NSString *message;  // the last apply's error
+- (void)monitorRowMuteClicked:(QLMMonitorRow *)row;
 @end
 
 @implementation QLMMonitorRow
 
-- (instancetype)initWithSystem:(QLMSystem *)system {
+- (instancetype)initWithOwner:(QLMPopoverController *)owner {
     self = [super init];
     if (self) {
-        _system = system;
-        _dot = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:nil]];
+        _owner = owner;
+        _dot = QLMDotView();
         [_dot.widthAnchor constraintEqualToConstant:10].active = YES;
-        _label = [NSTextField labelWithString:@""];
-        _label.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
+        _model = [NSTextField labelWithString:@""];
+        [_model.widthAnchor constraintEqualToConstant:52].active = YES;
+        _serial = QLMSmallLabel(@"");
+        _serial.font = [NSFont monospacedSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
+        _serial.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        [_serial setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+        _detail = QLMSmallLabel(@"");
+        _detail.alignment = NSTextAlignmentRight;
         _muteButton = [NSButton buttonWithImage:[[NSImage alloc] init] target:self action:@selector(muteClicked:)];
         _muteButton.bordered = NO;
         _muteButton.imagePosition = NSImageOnly;
-        NSView *spacer = [[NSView alloc] init];
-        [spacer setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
-        _view = [NSStackView stackViewWithViews:@[_dot, _label, spacer, _muteButton]];
+        [_muteButton.widthAnchor constraintEqualToConstant:18].active = YES;
+        _view = [NSStackView stackViewWithViews:@[_dot, _model, _serial, QLMSpacer(), _detail, _muteButton]];
         _view.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+        _view.spacing = 6;
     }
     return self;
 }
 
-- (void)setMonitor:(QLMMonitorState *)monitor {
-    BOOL mutedChanged = _monitor == nil || _monitor.muted != monitor.muted;
-    _monitor = monitor;
-    self.dot.contentTintColor = QLMDotColor(monitor);
-    NSString *temperature = monitor.temperature == QLMMonitorValueAbsent ? @"" : [NSString stringWithFormat:@"  %ld °C", (long)monitor.temperature];
-    self.label.stringValue = [NSString stringWithFormat:@"%@  %@%@", monitor.model ?: @"?", monitor.serialNumber ?: @"", temperature];
+- (void)setEntry:(QLMMonitorEntry *)entry {
+    BOOL mutedChanged = _entry == nil || _entry.state.muted != entry.state.muted;
+    _entry = entry;
+    QLMMonitorState *monitor = entry.state;
+    self.dot.contentTintColor = QLMPresenceColor(entry.presence);
+    self.dot.toolTip = QLMPresenceName(entry.presence);
+    self.model.stringValue = monitor.model ?: @"?";
+    self.serial.stringValue = monitor.serialNumber ?: @"";
+    self.detail.stringValue = entry.presence == QLMMonitorPresenceOnline ? QLMTemperatureText(monitor.temperature) : QLMEntryStatusText(entry);
+    self.muteButton.enabled = entry.tracked;
     if (mutedChanged) {
         self.muteButton.image = [NSImage imageWithSystemSymbolName:monitor.muted ? @"speaker.slash.fill" : @"speaker.fill"
                                           accessibilityDescription:monitor.muted ? @"Unmute" : @"Mute"];
+        self.muteButton.contentTintColor = monitor.muted ? NSColor.systemRedColor : nil;
     }
 }
 
 - (void)muteClicked:(NSButton *)button {
-    QLMMonitorState *monitor = self.monitor;
-    if (monitor != nil) {
-        [self.system setMuted:!monitor.muted forMonitorWithHardwareID:monitor.hardwareID];
-    }
+    [self.owner monitorRowMuteClicked:self];
 }
 
 @end
 
-@interface QLMPopoverController ()
-@property (nonatomic) QLMSystem *system;
-@property (nonatomic) NSTextField *stateLabel;
-@property (nonatomic) NSSlider *volumeSlider;
-@property (nonatomic) NSTextField *volumeLabel;
-@property (nonatomic) NSPopUpButton *groupPicker;
-@property (nonatomic) NSStackView *monitorsStack;
-@property (nonatomic) NSMutableDictionary<NSData *, QLMMonitorRow *> *rows;  // by hardware ID
-@property (nonatomic) NSButton *muteButton;
-@property (nonatomic) NSButton *dimButton;
-@property (nonatomic) NSButton *powerButton;
-@property (nonatomic, nullable) QLMSnapshot *shownSnapshot;
-// The snapshot says an apply is running, not which group.
-@property (nonatomic, copy, nullable) NSString *applyingGroupName;
-@property (nonatomic, copy, nullable) NSString *message;  // shown in place of the monitor count
-@end
-
 @implementation QLMPopoverController
 
-- (instancetype)initWithSystem:(QLMSystem *)system {
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList {
     self = [super initWithNibName:nil bundle:nil];
     if (self) {
-        _system = system;
-        _rows = [NSMutableDictionary dictionary];
+        _preferences = preferences;
+        _monitorList = monitorList;
+        _rows = [NSMutableArray array];
     }
     return self;
 }
 
 - (void)setSetup:(QLMSetup *)setup {
     _setup = setup;
-    self.message = setup == nil ? @"no setup file" : nil;
     if (self.isViewLoaded) {
         [self reloadGroups];
         [self refresh];
@@ -105,75 +132,126 @@ static NSColor *QLMDotColor(QLMMonitorState *monitor) {
 }
 
 - (void)loadView {
-    NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 320, 10)];
+    NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, QLMPopoverWidth, 10)];
+    CGFloat contentWidth = QLMPopoverWidth - 2 * QLMPopoverInset;
+
+    self.banner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50];
 
     NSTextField *title = [NSTextField labelWithString:@"qlm"];
-    title.font = [NSFont systemFontOfSize:NSFont.systemFontSize weight:NSFontWeightSemibold];
+    title.font = [NSFont systemFontOfSize:NSFont.systemFontSize + 1 weight:NSFontWeightSemibold];
     [title setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
-    // Wraps, so a refusal reads in full.
-    self.stateLabel = [NSTextField wrappingLabelWithString:@"starting"];
-    self.stateLabel.textColor = NSColor.secondaryLabelColor;
-    self.stateLabel.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
-    self.stateLabel.preferredMaxLayoutWidth = 250;
-    [self.stateLabel setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow
-                                              forOrientation:NSLayoutConstraintOrientationHorizontal];
-    NSStackView *header = [NSStackView stackViewWithViews:@[title, self.stateLabel]];
+    self.deviceLabel = QLMSmallLabel(@"");
+    self.deviceLabel.alignment = NSTextAlignmentRight;
+    self.deviceLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+    [self.deviceLabel setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow
+                                               forOrientation:NSLayoutConstraintOrientationHorizontal];
+    NSStackView *header = [NSStackView stackViewWithViews:@[title, QLMSpacer(), self.deviceLabel]];
     header.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     header.alignment = NSLayoutAttributeFirstBaseline;
 
-    // Volume, in 0.5 dB steps, up to the user's ceiling.
-    self.volumeSlider = [NSSlider sliderWithValue:QLMSliderMinimumDecibels minValue:QLMSliderMinimumDecibels
-                                         maxValue:self.system.settings.ceilingDecibels target:self action:@selector(volumeChanged:)];
+    // Wraps, so a refusal reads in full.
+    self.messageLabel = QLMNoteLabel(@"", contentWidth);
+    self.messageLabel.selectable = YES;
+    self.messageLabel.hidden = YES;
+
+    NSImageView *speaker = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"speaker.wave.2.fill"
+                                                                       accessibilityDescription:@"Volume"]];
+    speaker.contentTintColor = NSColor.secondaryLabelColor;
+    [speaker setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
+    // Volume, in 0.5 dB steps, up to the ceiling.
+    self.volumeSlider = [NSSlider sliderWithValue:self.preferences.lowestDecibels minValue:self.preferences.lowestDecibels
+                                         maxValue:self.preferences.ceilingDecibels target:self action:@selector(volumeChanged:)];
     self.volumeSlider.continuous = YES;
-    self.volumeLabel = [NSTextField labelWithString:@"—"];
-    self.volumeLabel.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.systemFontSize weight:NSFontWeightRegular];
+    self.volumeSlider.enabled = NO;
+    self.volumeLabel = [NSTextField labelWithString:QLMEmDash];
+    self.volumeLabel.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.systemFontSize weight:NSFontWeightMedium];
     self.volumeLabel.alignment = NSTextAlignmentRight;
-    [self.volumeLabel.widthAnchor constraintEqualToConstant:64].active = YES;
-    NSStackView *volume = [NSStackView stackViewWithViews:@[self.volumeSlider, self.volumeLabel]];
+    [self.volumeLabel.widthAnchor constraintEqualToConstant:72].active = YES;
+    NSStackView *volume = [NSStackView stackViewWithViews:@[speaker, self.volumeSlider, self.volumeLabel]];
     volume.orientation = NSUserInterfaceLayoutOrientationHorizontal;
 
+    self.ceilingLabel = QLMNoteLabel(@"", contentWidth);
+    self.ceilingLabel.toolTip = @"No volume frame goes above the ceiling. Change it in Settings.";
+
+    self.muteButton = [self toggleWithTitle:@"Mute" symbol:@"speaker.slash.fill" action:@selector(muteClicked:)];
+    self.dimButton = [self toggleWithTitle:@"Dim" symbol:@"speaker.wave.1.fill" action:@selector(dimClicked:)];
+    self.dimButton.toolTip = [NSString stringWithFormat:@"Lowers the volume by %.0f dB.", QLMDimDecibels];
+    self.powerButton = [NSButton buttonWithTitle:@"Standby" image:[NSImage imageWithSystemSymbolName:@"power" accessibilityDescription:nil]
+                                          target:self action:@selector(powerClicked:)];
+    self.powerButton.enabled = NO;
+    NSStackView *buttons = [NSStackView stackViewWithViews:@[self.muteButton, self.dimButton, self.powerButton]];
+    buttons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    buttons.distribution = NSStackViewDistributionFillEqually;
+
+    NSTextField *groupTitle = [NSTextField labelWithString:@"Group"];
+    [groupTitle setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
     self.groupPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     self.groupPicker.target = self;
     self.groupPicker.action = @selector(groupChosen:);
+    NSStackView *group = [NSStackView stackViewWithViews:@[groupTitle, self.groupPicker]];
+    group.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    group.alignment = NSLayoutAttributeFirstBaseline;
 
-    self.muteButton = [NSButton buttonWithTitle:@"Mute" target:self action:@selector(muteClicked:)];
-    self.muteButton.buttonType = NSButtonTypePushOnPushOff;
-    self.dimButton = [NSButton buttonWithTitle:@"Dim" target:self action:@selector(dimClicked:)];
-    self.dimButton.buttonType = NSButtonTypePushOnPushOff;
-    self.powerButton = [NSButton buttonWithTitle:@"Wake" target:self action:@selector(powerClicked:)];
-    self.powerButton.enabled = NO;
-    NSButton *quit = [NSButton buttonWithTitle:@"Quit" target:NSApp action:@selector(terminate:)];
-    NSView *spacer = [[NSView alloc] init];
-    [spacer setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
-    NSStackView *buttons = [NSStackView stackViewWithViews:@[self.muteButton, self.dimButton, self.powerButton, spacer, quit]];
-    buttons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    NSTextField *monitorsTitle = [NSTextField labelWithString:@"Monitors"];
+    monitorsTitle.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightSemibold];
+    monitorsTitle.textColor = NSColor.secondaryLabelColor;
+    self.summaryLabel = QLMSmallLabel(@"");
+    NSStackView *monitorsHeader = [NSStackView stackViewWithViews:@[monitorsTitle, QLMSpacer(), self.summaryLabel]];
+    monitorsHeader.orientation = NSUserInterfaceLayoutOrientationHorizontal;
 
     self.monitorsStack = [NSStackView stackViewWithViews:@[]];
     self.monitorsStack.orientation = NSUserInterfaceLayoutOrientationVertical;
     self.monitorsStack.alignment = NSLayoutAttributeLeading;
-    self.monitorsStack.spacing = 4;
+    self.monitorsStack.spacing = 5;
 
-    NSStackView *stack = [NSStackView stackViewWithViews:@[header, volume, self.groupPicker, self.monitorsStack, buttons]];
+    NSButton *monitorsButton = [self footerButtonWithTitle:@"Monitors…" action:@selector(showMonitorsClicked:)];
+    NSButton *settingsButton = [self footerButtonWithTitle:@"Settings…" action:@selector(showSettingsClicked:)];
+    NSButton *fakeBusButton = [self footerButtonWithTitle:@"Fake Bus…" action:@selector(showFakeBusClicked:)];
+    NSButton *quit = [self footerButtonWithTitle:@"Quit" action:@selector(terminate:)];
+    quit.target = NSApp;
+    NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, fakeBusButton, QLMSpacer(), quit]];
+    footer.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    footer.spacing = 6;
+
+    NSArray<NSView *> *fullWidth = @[
+        self.banner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
+        [self separator], monitorsHeader, self.monitorsStack, [self separator], footer,
+    ];
+    NSStackView *stack = [NSStackView stackViewWithViews:fullWidth];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
     stack.alignment = NSLayoutAttributeLeading;
     stack.spacing = 10;
-    stack.edgeInsets = NSEdgeInsetsMake(12, 12, 12, 12);
-    stack.translatesAutoresizingMaskIntoConstraints = NO;
+    [stack setCustomSpacing:2 afterView:volume];
+    [stack setCustomSpacing:6 afterView:monitorsHeader];
+    stack.edgeInsets = NSEdgeInsetsMake(QLMPopoverInset, QLMPopoverInset, QLMPopoverInset - 2, QLMPopoverInset);
     [view addSubview:stack];
-    [NSLayoutConstraint activateConstraints:@[
-        [stack.leadingAnchor constraintEqualToAnchor:view.leadingAnchor],
-        [stack.trailingAnchor constraintEqualToAnchor:view.trailingAnchor],
-        [stack.topAnchor constraintEqualToAnchor:view.topAnchor],
-        [stack.bottomAnchor constraintEqualToAnchor:view.bottomAnchor],
-        [view.widthAnchor constraintEqualToConstant:320],
-        [header.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-24],
-        [volume.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-24],
-        [self.groupPicker.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-24],
-        [self.monitorsStack.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-24],
-        [buttons.widthAnchor constraintEqualToAnchor:stack.widthAnchor constant:-24],
-    ]];
+    QLMPinToEdges(stack, view);
+    [view.widthAnchor constraintEqualToConstant:QLMPopoverWidth].active = YES;
+    for (NSView *row in fullWidth) {
+        [row.widthAnchor constraintEqualToConstant:contentWidth].active = YES;
+    }
     self.view = view;
     [self reloadGroups];
+}
+
+- (NSButton *)toggleWithTitle:(NSString *)title symbol:(NSString *)symbol action:(SEL)action {
+    NSButton *button = [NSButton buttonWithTitle:title image:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]
+                                          target:self action:action];
+    button.buttonType = NSButtonTypePushOnPushOff;
+    return button;
+}
+
+- (NSButton *)footerButtonWithTitle:(NSString *)title action:(SEL)action {
+    NSButton *button = [NSButton buttonWithTitle:title target:self action:action];
+    button.controlSize = NSControlSizeSmall;
+    button.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    return button;
+}
+
+- (NSBox *)separator {
+    NSBox *box = [[NSBox alloc] init];
+    box.boxType = NSBoxSeparator;
+    return box;
 }
 
 - (void)viewWillAppear {
@@ -181,11 +259,22 @@ static NSColor *QLMDotColor(QLMMonitorState *monitor) {
     [self render];
 }
 
+- (void)reloadVolumeRange {
+    if (!self.isViewLoaded) {
+        return;
+    }
+    self.volumeSlider.minValue = self.preferences.lowestDecibels;
+    self.volumeSlider.maxValue = self.preferences.ceilingDecibels;
+    self.sliderMovedAt = 0;
+    [self refresh];
+}
+
 #pragma mark - Actions
 
 - (void)volumeChanged:(NSSlider *)slider {
-    double decibels = round(slider.doubleValue / QLMSliderStepDecibels) * QLMSliderStepDecibels;
-    self.volumeLabel.stringValue = [NSString stringWithFormat:@"%.1f dB", decibels];
+    double decibels = QLMNearestStepDecibels(slider.doubleValue);
+    self.sliderMovedAt = NSProcessInfo.processInfo.systemUptime;
+    self.volumeLabel.stringValue = QLMDecibelsText(decibels);
     [self.system setVolumeDecibels:decibels];
 }
 
@@ -198,25 +287,33 @@ static NSColor *QLMDotColor(QLMMonitorState *monitor) {
 }
 
 - (void)powerClicked:(NSButton *)button {
-    if (self.shownSnapshot.anyOn) {
+    if (self.monitorList.snapshot.anyOn) {
         [self.system sleep];
     } else {
         [self.system wake];
     }
 }
 
+- (void)monitorRowMuteClicked:(QLMMonitorRow *)row {
+    QLMMonitorEntry *entry = row.entry;
+    if (entry.tracked) {
+        [self.system setMuted:!entry.state.muted forMonitorWithHardwareID:entry.state.hardwareID];
+    }
+}
+
 - (void)groupChosen:(NSPopUpButton *)picker {
     NSInteger index = picker.indexOfSelectedItem - 1;
-    if (self.setup == nil || index < 0 || (NSUInteger)index >= self.setup.groups.count) {
-        [self selectGroupNamed:self.shownSnapshot.activeGroupName];
+    QLMSystem *system = self.system;
+    if (system == nil || index < 0 || (NSUInteger)index >= self.setup.groups.count) {
+        [self selectGroupNamed:self.monitorList.snapshot.activeGroupName];
         return;
     }
     QLMSetupGroup *group = self.setup.groups[(NSUInteger)index];
     self.applyingGroupName = group.name;
     self.message = nil;
-    [self refreshGroupControls];
+    [self refresh];
     __weak QLMPopoverController *weakSelf = self;
-    [self.system applyGroup:group completion:^(NSError *error) {
+    [system applyGroup:group completion:^(NSError *error) {
         QLMPopoverController *strongSelf = weakSelf;
         strongSelf.applyingGroupName = nil;
         strongSelf.message = error.localizedDescription;
@@ -224,15 +321,27 @@ static NSColor *QLMDotColor(QLMMonitorState *monitor) {
     }];
 }
 
+- (void)showMonitorsClicked:(id)sender {
+    [self.delegate popoverControllerShowMonitors:self];
+}
+
+- (void)showSettingsClicked:(id)sender {
+    [self.delegate popoverControllerShowSettings:self];
+}
+
+- (void)showFakeBusClicked:(id)sender {
+    [self.delegate popoverControllerShowFakeBus:self];
+}
+
 #pragma mark - Snapshots
 
 - (void)reloadGroups {
     [self.groupPicker removeAllItems];
-    [self.groupPicker addItemWithTitle:@"Group"];
+    [self.groupPicker addItemWithTitle:self.setup == nil ? @"No setup file" : @"Choose a group"];
     for (QLMSetupGroup *group in self.setup.groups) {
         [self.groupPicker addItemWithTitle:group.name];
     }
-    [self refreshGroupControls];
+    [self selectGroupNamed:self.monitorList.snapshot.activeGroupName];
 }
 
 - (void)selectGroupNamed:(nullable NSString *)name {
@@ -240,84 +349,102 @@ static NSColor *QLMDotColor(QLMMonitorState *monitor) {
     [self.groupPicker selectItemAtIndex:index >= 0 ? index : 0];
 }
 
-- (void)refreshGroupControls {
-    QLMSnapshot *snapshot = self.shownSnapshot;
-    BOOL applying = self.applyingGroupName != nil || snapshot.applying;
-    self.groupPicker.enabled = self.setup != nil && !applying;
-    if (!applying) {
-        [self selectGroupNamed:snapshot.activeGroupName];
-    }
-    if (self.applyingGroupName != nil) {
-        self.stateLabel.stringValue = [NSString stringWithFormat:@"applying %@", self.applyingGroupName];
-    } else if (self.message != nil) {
-        self.stateLabel.stringValue = self.message;
-    } else if (snapshot == nil || !snapshot.running) {
-        self.stateLabel.stringValue = snapshot == nil ? @"starting" : @"stopped";
-    } else if (snapshot.monitors.count == 0) {
-        self.stateLabel.stringValue = @"looking for monitors";
-    } else {
-        self.stateLabel.stringValue = [NSString stringWithFormat:@"%lu monitors on the fake bus", (unsigned long)snapshot.monitors.count];
-    }
-}
-
-- (void)showSnapshot:(QLMSnapshot *)snapshot {
-    self.shownSnapshot = snapshot;
-    [self refresh];
-}
-
-// Draws only while the popover is open. viewWillAppear draws the rest.
+// viewWillAppear draws on opening.
 - (void)refresh {
-    if (self.isViewLoaded && self.view.window != nil) {
+    if (self.isViewLoaded && self.view.window.visible) {
         [self render];
     }
 }
 
 - (void)render {
-    QLMSnapshot *snapshot = self.shownSnapshot;
-    if (snapshot.volumeDecibels != nil) {
-        double decibels = snapshot.volumeDecibels.doubleValue;
-        self.volumeLabel.stringValue = [NSString stringWithFormat:@"%.1f dB", decibels];
-        if (fabs(self.volumeSlider.doubleValue - decibels) >= QLMSliderStepDecibels) {
-            self.volumeSlider.doubleValue = decibels;
-        }
-    }
+    QLMSnapshot *snapshot = self.monitorList.snapshot;
+    [self.banner showError:snapshot.adapterError];
+    self.deviceLabel.stringValue = snapshot.adapter.device ?: @"";
+    self.deviceLabel.toolTip = snapshot.adapter.systemInfo;
+    [self renderVolume:snapshot];
+
+    BOOL haveMonitors = snapshot.running && snapshot.monitors.count > 0;
     self.muteButton.state = snapshot.allMuted ? NSControlStateValueOn : NSControlStateValueOff;
+    self.muteButton.enabled = haveMonitors;
     self.dimButton.state = snapshot.dimmed ? NSControlStateValueOn : NSControlStateValueOff;
-    self.powerButton.title = snapshot.anyOn ? @"Sleep" : @"Wake";
-    self.powerButton.enabled = snapshot.monitors.count > 0;
-    [self refreshGroupControls];
-    [self renderMonitors:snapshot.monitors ?: @[]];
+    self.dimButton.enabled = snapshot.running;
+    self.powerButton.title = snapshot.anyOn ? @"Standby" : @"Wake";
+    self.powerButton.enabled = haveMonitors;
+
+    BOOL applying = self.applyingGroupName != nil || snapshot.applying;
+    self.groupPicker.enabled = self.setup != nil && haveMonitors && !applying;
+    if (!applying) {
+        [self selectGroupNamed:snapshot.activeGroupName];
+    }
+    NSString *message = self.message;
+    if (self.applyingGroupName != nil) {
+        message = [NSString stringWithFormat:@"Applying %@…", self.applyingGroupName];
+    }
+    self.messageLabel.stringValue = message ?: @"";
+    self.messageLabel.hidden = message == nil;
+
+    [self renderMonitors:self.monitorList.entries snapshot:snapshot];
 }
 
-- (void)renderMonitors:(NSArray<QLMMonitorState *> *)monitors {
-    NSMutableArray<NSView *> *order = [NSMutableArray arrayWithCapacity:monitors.count];
-    NSMutableSet<NSData *> *present = [NSMutableSet setWithCapacity:monitors.count];
-    for (QLMMonitorState *monitor in monitors) {
-        QLMMonitorRow *row = self.rows[monitor.hardwareID];
-        if (row == nil) {
-            row = [[QLMMonitorRow alloc] initWithSystem:self.system];
-            self.rows[monitor.hardwareID] = row;
-        }
-        row.monitor = monitor;
-        [order addObject:row.view];
-        [present addObject:monitor.hardwareID];
-    }
-    for (NSData *hardwareID in self.rows.allKeys) {
-        if (![present containsObject:hardwareID]) {
-            [self.rows removeObjectForKey:hardwareID];
-        }
-    }
-    if ([self.monitorsStack.arrangedSubviews isEqualToArray:order]) {
+- (void)renderVolume:(nullable QLMSnapshot *)snapshot {
+    double ceiling = self.preferences.ceilingDecibels;
+    NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
+    NSNumber *volume = snapshot.volumeDecibels;
+    self.volumeSlider.enabled = snapshot.running;
+    if (volume == nil) {
+        self.volumeLabel.stringValue = QLMEmDash;
+        self.ceilingLabel.stringValue = ceilingText;
         return;
     }
-    for (NSView *view in [self.monitorsStack.arrangedSubviews copy]) {
-        [self.monitorsStack removeArrangedSubview:view];
-        [view removeFromSuperview];
+    double decibels = volume.doubleValue;
+    double sent = [self.preferences cappedDecibels:decibels];
+    self.volumeLabel.stringValue = QLMDecibelsText(sent);
+    BOOL held = NSProcessInfo.processInfo.systemUptime - self.sliderMovedAt < QLMSliderHoldInterval;
+    if (!held) {
+        self.volumeSlider.doubleValue = fmax(self.volumeSlider.minValue, sent);
     }
-    for (NSView *view in order) {
-        [self.monitorsStack addArrangedSubview:view];
-        [view.widthAnchor constraintEqualToAnchor:self.monitorsStack.widthAnchor].active = YES;
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    if (decibels > ceiling) {
+        [parts addObject:[NSString stringWithFormat:@"Capped at the %@ ceiling", QLMDecibelsText(ceiling)]];
+    } else {
+        [parts addObject:ceilingText];
     }
+    if (snapshot.dimmed) {
+        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText(fmax(QLMVolumeDecibelsMin, sent - QLMDimDecibels))]];
+    }
+    if (snapshot.allMuted) {
+        [parts addObject:@"muted"];
+    }
+    self.ceilingLabel.stringValue = [parts componentsJoinedByString:@"\u00A0· "];
+    self.ceilingLabel.textColor = decibels > ceiling ? NSColor.systemOrangeColor : NSColor.secondaryLabelColor;
+}
+
+- (void)renderMonitors:(NSArray<QLMMonitorEntry *> *)monitors snapshot:(nullable QLMSnapshot *)snapshot {
+    NSUInteger counts[4] = {0};
+    for (NSUInteger i = 0; i < monitors.count; i++) {
+        if (i == self.rows.count) {
+            QLMMonitorRow *row = [[QLMMonitorRow alloc] initWithOwner:self];
+            [self.rows addObject:row];
+            [self.monitorsStack addArrangedSubview:row.view];
+            [row.view.widthAnchor constraintEqualToAnchor:self.monitorsStack.widthAnchor].active = YES;
+        }
+        self.rows[i].entry = monitors[i];
+        counts[monitors[i].presence] += 1;
+    }
+
+    NSMutableArray<NSString *> *summary = [NSMutableArray array];
+    const QLMMonitorPresence shown[] = {QLMMonitorPresenceOnline, QLMMonitorPresenceStandby, QLMMonitorPresenceOffline,
+                                        QLMMonitorPresenceIdentifying};
+    for (size_t i = 0; i < sizeof shown / sizeof shown[0]; i++) {
+        if (counts[shown[i]] > 0) {
+            [summary addObject:[NSString stringWithFormat:@"%lu %@", (unsigned long)counts[shown[i]],
+                                                          QLMPresenceName(shown[i]).lowercaseString]];
+        }
+    }
+    if (monitors.count == 0) {
+        [summary addObject:snapshot == nil ? @"Starting" : snapshot.running ? @"Looking for monitors" : @"Stopped"];
+    }
+    self.summaryLabel.stringValue = [summary componentsJoinedByString:@"\u00A0· "];
 }
 
 @end
