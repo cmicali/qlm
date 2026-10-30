@@ -13,25 +13,28 @@
 // frames System sends against the frames GLM sent for it, byte for byte. The
 // session IDs differ, so both sides number them in the order each first
 // appears. The adapter's 01 08 polls run on their own timer, so both sides
-// leave them out.
+// leave them out. System runs on a virtual clock, so each gap between sends
+// is the one System schedules, whatever the host's load.
 @interface QLMSystemGoldenTests : XCTestCase
 @end
 
 // An adapter that notes when each message reaches it, then passes it on.
 @interface QLMClockedAdapter : NSObject <QLMAdapter>
-- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
-@property (nonatomic, readonly) NSArray<NSNumber *> *sendTimes;  // system uptime, in seconds
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter clock:(id<QLMClock>)clock;
+@property (nonatomic, readonly) NSArray<NSNumber *> *sendTimes;  // on the clock, in seconds
 @end
 
 @implementation QLMClockedAdapter {
     id<QLMAdapter> _adapter;
+    id<QLMClock> _clock;
     NSMutableArray<NSNumber *> *_times;
 }
 
-- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter clock:(id<QLMClock>)clock {
     self = [super init];
     if (self) {
         _adapter = adapter;
+        _clock = clock;
         _times = [NSMutableArray array];
     }
     return self;
@@ -57,7 +60,7 @@
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
     @synchronized(self) {
-        [_times addObject:@(NSProcessInfo.processInfo.systemUptime)];
+        [_times addObject:@(_clock.now)];
     }
     [_adapter sendMessage:message replyHandler:handler];
 }
@@ -66,7 +69,8 @@
 
 @implementation QLMSystemGoldenTests {
     QLMFakeBus *_bus;
-    QLMClockedAdapter *_clock;
+    QLMVirtualClock *_time;
+    QLMClockedAdapter *_clocked;
     QLMSystemSettings *_settings;
     QLMSystem *_system;
 }
@@ -80,30 +84,22 @@
         [monitors addObject:[[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(hardwareID, 3) serialNumber:serial
                                                             systemInfo:@"c-2;model-8330A" deviceClass:QLMTelemetryClassTwoWay]];
     }
+    _time = [[QLMVirtualClock alloc] init];
     _bus = [[QLMFakeBus alloc] initWithMonitors:monitors];
-    _clock = [[QLMClockedAdapter alloc] initWithAdapter:_bus];
+    _bus.clock = _time;
+    _clocked = [[QLMClockedAdapter alloc] initWithAdapter:_bus clock:_time];
     _settings = [[QLMSystemSettings alloc] init];
+    _settings.clock = _time;
     // No cycle may fire inside an action.
-    _settings.cycleInterval = 10;
+    _settings.cycleInterval = 1000;
     _settings.ceilingDecibels = 0;
     _settings.adapterPollInterval = 0;
 }
 
 - (void)tearDown {
     [_system stop];
+    [_time settle];
     [super tearDown];
-}
-
-// Waits until the condition holds, polling.
-- (void)waitUntil:(BOOL (^)(void))condition {
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
-    while (!condition()) {
-        if ([deadline timeIntervalSinceNow] < 0) {
-            XCTFail(@"timed out");
-            return;
-        }
-        [NSThread sleepForTimeInterval:0.005];
-    }
 }
 
 // Starts System, finds all six monitors, and sets GLM's level in mute-dim.
@@ -113,19 +109,16 @@
 
 // The same, at `decibels`, or with no volume set when it is nil.
 - (NSArray<QLMMonitorState *> *)startSystemAt:(nullable NSNumber *)decibels {
-    _system = [[QLMSystem alloc] initWithAdapter:_clock settings:_settings];
+    _system = [[QLMSystem alloc] initWithAdapter:_clocked settings:_settings];
     [_system start];
-    [self waitUntil:^BOOL {
-        QLMSnapshot *snapshot = self->_system.snapshot;
-        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
-    }];
+    [_time settle];
+    QLMSnapshot *snapshot = _system.snapshot;
+    XCTAssertTrue(snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle);
     if (decibels != nil) {
         [_system setVolumeDecibels:decibels.doubleValue];
+        [_time settle];
         QLMMessage volume = QLMCommandVolume(decibels.doubleValue, _settings.ceilingDecibels);
-        NSData *level = QLMAdapterRecord(&volume);
-        [self waitUntil:^BOOL {
-            return [self->_bus.sentMessages containsObject:level];
-        }];
+        XCTAssertEqualObjects(_bus.sentMessages.lastObject, QLMAdapterRecord(&volume));
     }
     return _system.snapshot.monitors;
 }
@@ -207,24 +200,29 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
         QLMMessage message = exchange.message;
         [expected addObject:QLMAdapterRecord(&message)];
     }
-    [self waitUntil:^BOOL {
-        return [self sentFrom:start].count >= expected.count;
-    }];
-    // Long enough for a frame too many to show.
-    [NSThread sleepForTimeInterval:0.05];
+    // Every hold and every hop the action starts has run.
+    [_time advanceBy:1];
     XCTAssertEqualObjects(QLMRenumberSessions([self sentFrom:start]), QLMRenumberSessions(expected));
 }
 
-// The gaps between the frames System sent from `start` on are the captured
-// frames' gaps, give or take. A dispatch timer never fires early, so the
-// slack below is small and the slack above is wide.
-- (void)assertSpacingFrom:(NSUInteger)start matches:(NSArray<QLMCaptureExchange *> *)captured {
-    NSArray<NSNumber *> *times = _clock.sendTimes;
-    for (NSUInteger i = 1; i < captured.count && start + i < times.count; i++) {
-        NSTimeInterval glm = captured[i].time - captured[i - 1].time;
-        NSTimeInterval qlm = times[start + i].doubleValue - times[start + i - 1].doubleValue;
-        XCTAssertGreaterThan(qlm, 0.9 * glm - 0.001, @"gap %lu: GLM %.4f s", (unsigned long)i, glm);
-        XCTAssertLessThan(qlm, glm + 0.1, @"gap %lu: GLM %.4f s", (unsigned long)i, glm);
+// The gaps between System's sends from `start` on are exactly `scheduled`,
+// on its clock.
+- (void)assertGapsFrom:(NSUInteger)start are:(NSArray<NSNumber *> *)scheduled {
+    NSArray<NSNumber *> *times = _clocked.sendTimes;
+    XCTAssertEqual(times.count, start + scheduled.count + 1);
+    for (NSUInteger i = 0; i < scheduled.count && start + i + 1 < times.count; i++) {
+        NSTimeInterval qlm = times[start + i + 1].doubleValue - times[start + i].doubleValue;
+        XCTAssertEqualWithAccuracy(qlm, scheduled[i].doubleValue, 1e-9, @"gap %lu", (unsigned long)i);
+    }
+}
+
+// GLM's gaps between the captured frames are `scheduled`, within `slack`.
+// This checks the capture against the spacing System copies.
+- (void)assertGLMGaps:(NSArray<QLMCaptureExchange *> *)captured are:(NSArray<NSNumber *> *)scheduled slack:(NSTimeInterval)slack {
+    XCTAssertEqual(captured.count, scheduled.count + 1);
+    for (NSUInteger i = 0; i < scheduled.count && i + 1 < captured.count; i++) {
+        NSTimeInterval glm = captured[i + 1].time - captured[i].time;
+        XCTAssertEqualWithAccuracy(glm, scheduled[i].doubleValue, slack, @"GLM gap %lu", (unsigned long)i);
     }
 }
 
@@ -235,11 +233,12 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
 - (void)testSleepIsGLMs {
     [self startSystem];
     NSUInteger before = _bus.sentMessages.count;
-    NSUInteger clocked = _clock.sendTimes.count;
+    NSUInteger clocked = _clocked.sendTimes.count;
     [_system sleep];
     NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"standby-wake" from:34.855835 count:4];
-    XCTAssertEqual(_clock.sendTimes.count, clocked + captured.count);
-    [self assertSpacingFrom:clocked matches:captured];
+    NSArray<NSNumber *> *scheduled = @[@0.022, @0.022, @0.022];
+    [self assertGapsFrom:clocked are:scheduled];
+    [self assertGLMGaps:captured are:scheduled slack:0.001];
 }
 
 // Wake, startup-idle, 7.33 s: broadcast `3A 03 7F` then `3A 03 01`, back to
@@ -249,18 +248,22 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
 - (void)testWakeIsGLMs {
     [self startSystemAt:@(QLMVolumeDecibelsMin)];
     NSUInteger before = _bus.sentMessages.count;
-    NSUInteger clocked = _clock.sendTimes.count;
+    NSUInteger clocked = _clocked.sendTimes.count;
     [_system wake];
 
     NSArray<QLMCaptureExchange *> *pairs = [self frames:6 of:@"startup-idle" from:7.331654];
     NSArray<QLMCaptureExchange *> *level = [self frames:3 of:@"standby-wake" from:47.243052];
     [self assertSentFrom:before are:[pairs arrayByAddingObjectsFromArray:level]];
-    XCTAssertEqual(_clock.sendTimes.count, clocked + pairs.count + level.count);
-    // The pairs' spacing is startup-idle's, and the level's delay after them
-    // standby-wake's. 47.0087 s picks its last 3A 03 01, at 47.008437 s, and
-    // not the 3A 03 7F 0.27 ms before it.
-    [self assertSpacingFrom:clocked matches:pairs];
-    [self assertSpacingFrom:clocked + 5 matches:[self frames:2 of:@"standby-wake" from:47.0087]];
+    // Each pair back to back, 0.2 s between pairs, the level 0.235 s after
+    // the last, and the broadcast pair right after it.
+    NSArray<NSNumber *> *pairGaps = @[@0, @0.2, @0, @0.2, @0];
+    [self assertGapsFrom:clocked are:[pairGaps arrayByAddingObjectsFromArray:@[@0.235, @0, @0]]];
+    // GLM's pairs are startup-idle's, and its level's delay standby-wake's.
+    // 47.0087 s picks its last 3A 03 01, at 47.008437 s, and not the 3A 03 7F
+    // 0.27 ms before it. GLM's broadcast pair came 23 ms after its level,
+    // which System does not copy.
+    [self assertGLMGaps:pairs are:pairGaps slack:0.01];
+    [self assertGLMGaps:[self frames:2 of:@"standby-wake" from:47.0087] are:@[@0.235] slack:0.001];
 }
 
 // A wake with no volume set ends with the knob's level. The fake bus's knob
@@ -291,9 +294,7 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
         self->_bus.knobTenths = @(-1002);
     }];
     [self assertSentFrom:before isCapture:@"standby-wake" from:0.988149 count:17];
-    [self waitUntil:^BOOL {
-        return [self->_system.snapshot.volumeDecibels isEqual:@(QLMVolumeDecibelsMin)];
-    }];
+    XCTAssertEqualObjects(_system.snapshot.volumeDecibels, @(QLMVolumeDecibelsMin));
 }
 
 #pragma mark - Mute
