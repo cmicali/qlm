@@ -308,6 +308,109 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertFalse(unplugged.adapter.micPresent);
 }
 
+#pragma mark - The knob
+
+// The plan's "Behavior System must copy from GLM": at connect, keep qlm's own
+// level. docs/adapter-status.md: GLM opens at its own level, and the knob's
+// position moves nothing until the knob turns.
+- (void)testTheKnobLeavesTheVolumeAtStart {
+    _settings.cycleInterval = 10;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    NSUInteger polls = [self countSentTo:QLMAddressAdapter opcode:0x08 from:0];
+    [self waitUntil:^BOOL {
+        return [self countSentTo:QLMAddressAdapter opcode:0x08 from:0] >= polls + 20;
+    }];
+    XCTAssertEqualObjects(_system.snapshot.volumeDecibels, @(-30));
+    XCTAssertEqual([self countSentTo:QLMAddressAdapter opcode:0x2B from:0], 0u);
+}
+
+// A turn sets the volume to the knob's nearest step, and sends it as GLM
+// does: the level three times, the mute state, then the level. The ceiling
+// still caps it. Jitter after the turn sends nothing.
+- (void)testATurnOfTheKnobSetsTheVolume {
+    _settings.cycleInterval = 10;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *discovered = [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-30)];
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-503);
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-50.5)];
+    }];
+    QLMMessage levelMessage = QLMCommandVolume(-50.5, _settings.ceilingDecibels);
+    NSData *level = QLMAdapterRecord(&levelMessage);
+    NSMutableArray<NSData *> *expected = [NSMutableArray arrayWithObjects:level, level, level, nil];
+    const uint8_t adapter[] = {QLMAddressAdapter, 0x2B, QLMMuteValueAdapterUnmuted};
+    [expected addObject:QLMBytes(adapter, sizeof adapter)];
+    for (int round = 0; round < 2; round++) {
+        for (QLMMonitorState *monitor in discovered.monitors) {
+            const uint8_t mute[] = {monitor.session, 0x2B, QLMMuteValueUnmuted};
+            [expected addObject:QLMBytes(mute, sizeof mute)];
+        }
+    }
+    [expected addObject:level];
+    const uint8_t pollBytes[] = {QLMAddressAdapter, 0x08};
+    NSData *poll = QLMBytes(pollBytes, sizeof pollBytes);
+    NSArray<NSData *> *sent = [self sentFrom:before matching:^BOOL(NSData *message) {
+        return ![message isEqualToData:poll];
+    }];
+    XCTAssertEqualObjects(sent, expected);
+
+    before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-505);
+    }];
+    NSUInteger polls = [self countSentTo:QLMAddressAdapter opcode:0x08 from:0];
+    [self waitUntil:^BOOL {
+        return [self countSentTo:QLMAddressAdapter opcode:0x08 from:0] >= polls + 20;
+    }];
+    XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
+
+    // The top stop: 0 dB, capped at the -20 dB ceiling.
+    [_bus perform:^{
+        self->_bus.knobTenths = @(0);
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(0)];
+    }];
+    const uint8_t ceiling[] = {QLMAddressBroadcast, 0x1F, 0x0C, 0xCC, 0xCC};
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertEqual(levels.count, 4u);
+    for (NSData *sentLevel in levels) {
+        XCTAssertEqualObjects(sentLevel, QLMBytes(ceiling, sizeof ceiling));
+    }
+}
+
+// qlmctl info, discover, and poll set no volume, and send only discovery and
+// polls. A turn of the knob changes that for none of them.
+- (void)testTheKnobSetsNoVolumeWhenNoneIsSet {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-300);
+    }];
+    NSUInteger polls = [self countSentTo:QLMAddressAdapter opcode:0x08 from:0];
+    [self waitUntil:^BOOL {
+        return [self countSentTo:QLMAddressAdapter opcode:0x08 from:0] >= polls + 20;
+    }];
+    XCTAssertNil(_system.snapshot.volumeDecibels);
+    XCTAssertEqualObjects(_system.snapshot.adapter.knobTenths, @(-300));
+    for (NSData *record in _bus.sentMessages) {
+        XCTAssertTrue(QLMIsDiscoveryOrPoll(record), @"%@", record);
+    }
+}
+
 // Never drive the bus while GLM runs: while the adapter is busy, the
 // snapshot says why and nothing goes out. Once it frees up, discovery runs.
 - (void)testABusyAdapterShowsAndNothingGoesOut {

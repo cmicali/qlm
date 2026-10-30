@@ -269,6 +269,28 @@ static BOOL QLMIsSession(uint8_t address) {
     [self assertSpacingFrom:clocked isCapture:@"startup-idle" from:7.331654 count:6];
 }
 
+#pragma mark - The knob
+
+// A knob turn, standby-wake, 0.99 s: the level three times, `2B 00` to the
+// adapter at 01, two rounds of 2B to every monitor, then the level again.
+// The knob turns to its bottom, so the level is 00 00 08.
+- (void)testAKnobTurnIsGLMs {
+    _settings.adapterPollInterval = 0.02;
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-900);
+    }];
+    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-1002);
+    }];
+    [self assertSentFrom:before isCapture:@"standby-wake" from:0.988149 count:17 refused:@[] monitors:monitors];
+    [self waitUntil:^BOOL {
+        return [self->_system.snapshot.volumeDecibels isEqual:@(QLMVolumeDecibelsMin)];
+    }];
+}
+
 #pragma mark - Mute
 
 // Mute one monitor, mute-dim, 19.19 s, and unmute it, 22.74 s: two rounds of

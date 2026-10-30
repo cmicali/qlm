@@ -3,6 +3,7 @@
 #include "QLMCommands.h"
 #include "QLMReplies.h"
 #import "QLMDSPBlock.h"
+#import "QLMKnob.h"
 #import "QLMSnapshotInternal.h"
 
 NSErrorDomain const QLMSystemErrorDomain = @"com.commonwealthrecordings.qlm.system";
@@ -140,6 +141,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSError *_adapterError;
     dispatch_source_t _adapterTimer;
     NSUInteger _adapterPollsQueued;
+    QLMKnob *_knob;
     NSNumber *_volumeDecibels;
     BOOL _volumeSendPending;
     NSDate *_lastVolumeSend;
@@ -161,6 +163,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
+        _knob = [[QLMKnob alloc] init];
         _snapshot = [[QLMSnapshot alloc] init];
     }
     return self;
@@ -258,6 +261,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self->_adapter stop];
         [self->_monitors removeAllObjects];
         self->_adapterMuted = NO;
+        [self->_knob reset];
         self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
         self->_adapterError = nil;
         if (self->_applyFinish != nil) {
@@ -582,8 +586,29 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             adapter.hasStatus = YES;
             adapter.missedPolls = 0;
             adapter.lastReply = [NSDate date];
+            [self followKnob:&status];
         }];
     }
+}
+
+// A volume the knob sets goes out as GLM sends it: the level three times,
+// the mute state, then the level again (captures/standby-wake, 0.99 s).
+- (void)followKnob:(const QLMAdapterStatus *)status {
+    if (!status->knob || !status->hasKnobPosition) {
+        [_knob reset];
+        return;
+    }
+    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:NSProcessInfo.processInfo.systemUptime volume:_volumeDecibels];
+    if (volume == nil) {
+        return;
+    }
+    _volumeDecibels = volume;
+    _dirty = YES;
+    for (int i = 0; i < 3; i++) {
+        [self sendVolume];
+    }
+    [self sendMuteState];
+    [self sendVolume];
 }
 
 #pragma mark - Polling
