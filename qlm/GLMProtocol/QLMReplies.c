@@ -129,10 +129,13 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
     telemetry->lfMeter = QLMTelemetryAbsent;
     telemetry->subMeter = QLMTelemetryAbsent;
     telemetry->status = QLMTelemetryAbsent;
+    telemetry->wakeSeconds = QLMTelemetryAbsent;
     telemetry->sensor81 = QLMTelemetryAbsent;
+    telemetry->sensor82 = QLMTelemetryAbsent;
     telemetry->sensor83 = QLMTelemetryAbsent;
     telemetry->deviceClass = QLMTelemetryAbsent;
     telemetry->stateMetric = QLMTelemetryAbsent;
+    telemetry->wakeSteps = QLMTelemetryAbsent;
     telemetry->unknownTag = 0;
 
     if (!QLMReplyIsReply(message)) {
@@ -152,6 +155,7 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
     }
     telemetry->temperature = message->payload[i++];
 
+    bool whole = false;
     while (i < message->length) {
         uint8_t tag = message->payload[i];
         size_t valueLength = QLMTelemetryValueLength(tag);
@@ -170,17 +174,21 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
         case 0x45: telemetry->lfMeter = value[0]; break;
         case 0x46: telemetry->subMeter = value[0]; break;
         case 0x47: telemetry->status = value[0]; break;
+        case 0x49: telemetry->wakeSeconds = value[0]; break;
         case 0x81: telemetry->sensor81 = value[1]; break;
+        case 0x82: telemetry->sensor82 = value[1]; break;
         case 0x83: telemetry->sensor83 = value[1]; break;
         case 0x84:
             telemetry->deviceClass = value[0];
             telemetry->stateMetric = value[1];
+            whole = true;
             break;
+        case 0x8A: telemetry->wakeSteps = (int32_t)value[0] << 8 | value[1]; break;
         default: break;
         }
         i += 1 + valueLength;
     }
-    return QLMTelemetryOK;
+    return whole ? QLMTelemetryOK : QLMTelemetryErrorPartial;
 }
 
 static uint32_t QLMReadBigEndian32(const uint8_t *bytes) {
