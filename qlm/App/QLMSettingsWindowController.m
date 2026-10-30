@@ -280,7 +280,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 // Returns whether the line's height changed.
 - (BOOL)renderHandBack {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
-    NSString *text = snapshot == nil ? nil : QLMHandBackLine(snapshot);
+    NSString *text = QLMHandBackLine(snapshot);
     if ([self.handBackLevel.stringValue isEqualToString:text ?: @""] && self.handBackRow.hidden == (text == nil)) {
         return NO;
     }

@@ -185,7 +185,6 @@ static const NSInteger QLMKnobBottomTenths = -1004;
     }];
 }
 
-
 #pragma mark - Actions
 
 - (void)knobAttachedClicked:(NSButton *)checkbox {

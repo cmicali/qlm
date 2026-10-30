@@ -27,15 +27,12 @@ extern const double QLMVolumeRangeMinimumSpan;
 @property (nonatomic) BOOL usesAdapter;
 // System's mute record, kept across launches: the muted hardware IDs, and
 // whether mute all is on. No reply reports a monitor's mute, so the record
-// is the truth.
+// is the truth. Each bus keeps its own, read by usesAdapter, so a mute on
+// the fake bus never reaches the real monitors.
 @property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic) BOOL mutingAll;
 // A file name in QLMSetupDirectory(). Nil takes the first by name.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
-
-// What goes out for this volume: GLMProtocol caps every frame at the
-// ceiling.
-- (double)cappedDecibels:(double)decibels;
 
 @end
 

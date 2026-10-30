@@ -1,6 +1,5 @@
 #import "QLMFormat.h"
 
-
 NSString *const QLMEmDash = @"—";
 
 // A no-break space keeps the unit on the number's line.
@@ -45,23 +44,27 @@ NSString *QLMReplyAgeText(NSDate *date) {
 }
 
 // The knob above qlm's level, and the rise, to follow "Now: ".
-static NSString *QLMRiseClause(QLMHandBack *handBack) {
-    double knob = handBack.knobDecibels.doubleValue;
-    double volume = handBack.volumeDecibels.doubleValue;
-    return [NSString stringWithFormat:@"the knob reads %@, above qlm's %@. At the take-over, the level would rise %@.",
-                                      QLMDecibelsText(knob), QLMDecibelsText(volume), QLMDecibelsText(knob - volume)];
+// "<lead> reads −10.0 dB, above qlm's −50.0 dB.": the knob against the
+// level qlm sends.
+static NSString *QLMKnobText(NSString *lead, NSString *relation, QLMHandBack *handBack) {
+    return [NSString stringWithFormat:@"%@ reads %@, %@ qlm's %@.", lead, QLMDecibelsText(handBack.knobDecibels.doubleValue),
+                                      relation, QLMDecibelsText(handBack.volumeDecibels.doubleValue)];
+}
+
+static NSString *QLMRiseText(NSString *lead, QLMHandBack *handBack) {
+    double rise = handBack.knobDecibels.doubleValue - handBack.volumeDecibels.doubleValue;
+    return [NSString stringWithFormat:@"%@ At the take-over, the level would rise %@.", QLMKnobText(lead, @"above", handBack),
+                                      QLMDecibelsText(rise)];
 }
 
 NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
     QLMHandBack *handBack = snapshot.handBack;
     switch (handBack.kind) {
     case QLMHandBackKnobLevel:
-        return [NSString stringWithFormat:@"Now: the knob reads %@, at or below qlm's %@. qlm sends the knob's level as it stops, "
-                                          @"so the take-over changes nothing.",
-                                          QLMDecibelsText(handBack.knobDecibels.doubleValue),
-                                          QLMDecibelsText(handBack.volumeDecibels.doubleValue)];
+        return [NSString stringWithFormat:@"%@ qlm sends the knob's level as it stops, so the take-over changes nothing.",
+                                          QLMKnobText(@"Now: the knob", @"at or below", handBack)];
     case QLMHandBackLouder:
-        return [@"Now: " stringByAppendingString:QLMRiseClause(handBack)];
+        return QLMRiseText(@"Now: the knob", handBack);
     case QLMHandBackUnknown:
         break;
     }
@@ -72,8 +75,7 @@ NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
 }
 
 NSString *QLMHandBackRiseText(QLMHandBack *handBack) {
-    NSString *clause = QLMRiseClause(handBack);
-    return [[clause substringToIndex:1].uppercaseString stringByAppendingString:[clause substringFromIndex:1]];
+    return QLMRiseText(@"The knob", handBack);
 }
 
 NSString *QLMBusProblemTitle(QLMBusProblem problem) {

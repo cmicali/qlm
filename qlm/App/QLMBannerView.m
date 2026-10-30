@@ -69,7 +69,7 @@
 }
 
 - (void)showBusProblemOf:(QLMSnapshot *)snapshot {
-    NSString *title = snapshot == nil ? nil : QLMBusProblemTitle(snapshot.busProblem);
+    NSString *title = QLMBusProblemTitle(snapshot.busProblem);
     [self showTitle:title detail:title == nil ? nil : QLMBusProblemDetail(snapshot)];
 }
 

@@ -449,10 +449,12 @@ static NSView *QLMSpacer(void) {
     quit.title = self.askedGLMToQuit ? @"Asked GLM to Quit" : @"Quit GLM";
 }
 
+// With a volume set, the snapshot is a published one, so its ceiling is the
+// one System caps at. Before that, the preferences say it.
 - (void)renderVolume:(nullable QLMSnapshot *)snapshot {
-    double ceiling = self.preferences.ceilingDecibels;
-    NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
     NSNumber *volume = snapshot.volumeDecibels;
+    double ceiling = volume != nil ? snapshot.ceilingDecibels : self.preferences.ceilingDecibels;
+    NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
     self.volumeSlider.enabled = snapshot.running;
     if (volume == nil) {
         self.volumeLabel.stringValue = QLMEmDash;
@@ -460,7 +462,7 @@ static NSView *QLMSpacer(void) {
         return;
     }
     double decibels = volume.doubleValue;
-    double sent = [self.preferences cappedDecibels:decibels];
+    double sent = fmin(decibels, ceiling);
     self.volumeLabel.stringValue = QLMDecibelsText(sent);
     BOOL held = NSProcessInfo.processInfo.systemUptime - self.sliderMovedAt < QLMSliderHoldInterval;
     if (!held) {

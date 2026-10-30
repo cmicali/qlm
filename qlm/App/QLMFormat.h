@@ -4,7 +4,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-
 // What a value with no reading shows.
 extern NSString *const QLMEmDash;
 
@@ -22,10 +21,9 @@ NSInteger QLMMeterCounts(NSInteger raw);
 // On the main queue: it keeps one formatter.
 NSString *QLMReplyAgeText(NSDate *_Nullable date);
 
-
 // What a stop would do to the level now, from the snapshot's hand-back.
-// Nil while no volume is set.
-NSString *_Nullable QLMHandBackLine(QLMSnapshot *snapshot);
+// Nil while no volume is set, and for no snapshot.
+NSString *_Nullable QLMHandBackLine(QLMSnapshot *_Nullable snapshot);
 
 // For a louder hand-back: the knob above qlm's level, and the rise.
 NSString *QLMHandBackRiseText(QLMHandBack *handBack);

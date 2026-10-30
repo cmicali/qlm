@@ -1,6 +1,6 @@
 #import <Cocoa/Cocoa.h>
 
-#import "QLMSnapshot.h"
+@class QLMSnapshot;
 
 NS_ASSUME_NONNULL_BEGIN
 

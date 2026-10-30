@@ -12,8 +12,10 @@ static NSString *const QLMLowestKey = @"QLMLowestDecibels";
 static NSString *const QLMVolumeKey = @"QLMVolumeDecibels";
 static NSString *const QLMWakesAtLaunchKey = @"QLMWakesAtLaunch";
 static NSString *const QLMUsesAdapterKey = @"QLMUsesAdapter";
-static NSString *const QLMMutedHardwareIDsKey = @"QLMMutedHardwareIDs";
+static NSString *const QLMMutedHardwareIDsKey = @"QLMMutedHardwareIDs";      // the real monitors'
 static NSString *const QLMMutingAllKey = @"QLMMutingAll";
+static NSString *const QLMFakeMutedHardwareIDsKey = @"QLMFakeMutedHardwareIDs";  // the fake bus's
+static NSString *const QLMFakeMutingAllKey = @"QLMFakeMutingAll";
 static NSString *const QLMSetupFileNameKey = @"QLMSetupFileName";
 
 static double QLMStepBelow(double decibels) {
@@ -79,10 +81,6 @@ double QLMNearestStepDecibels(double decibels) {
     [_defaults setDouble:[self boundedVolume:volumeDecibels] forKey:QLMVolumeKey];
 }
 
-- (double)cappedDecibels:(double)decibels {
-    return fmin(decibels, self.ceilingDecibels);
-}
-
 - (BOOL)wakesAtLaunch {
     return [_defaults boolForKey:QLMWakesAtLaunchKey];
 }
@@ -102,7 +100,7 @@ double QLMNearestStepDecibels(double decibels) {
 // Kept as a list of data, which a property list can hold.
 - (NSSet<NSData *> *)mutedHardwareIDs {
     NSMutableSet<NSData *> *hardwareIDs = [NSMutableSet set];
-    for (id item in [_defaults arrayForKey:QLMMutedHardwareIDsKey]) {
+    for (id item in [_defaults arrayForKey:self.usesAdapter ? QLMMutedHardwareIDsKey : QLMFakeMutedHardwareIDsKey]) {
         if ([item isKindOfClass:[NSData class]]) {
             [hardwareIDs addObject:item];
         }
@@ -111,15 +109,15 @@ double QLMNearestStepDecibels(double decibels) {
 }
 
 - (void)setMutedHardwareIDs:(NSSet<NSData *> *)mutedHardwareIDs {
-    [_defaults setObject:mutedHardwareIDs.allObjects forKey:QLMMutedHardwareIDsKey];
+    [_defaults setObject:mutedHardwareIDs.allObjects forKey:self.usesAdapter ? QLMMutedHardwareIDsKey : QLMFakeMutedHardwareIDsKey];
 }
 
 - (BOOL)mutingAll {
-    return [_defaults boolForKey:QLMMutingAllKey];
+    return [_defaults boolForKey:self.usesAdapter ? QLMMutingAllKey : QLMFakeMutingAllKey];
 }
 
 - (void)setMutingAll:(BOOL)mutingAll {
-    [_defaults setBool:mutingAll forKey:QLMMutingAllKey];
+    [_defaults setBool:mutingAll forKey:self.usesAdapter ? QLMMutingAllKey : QLMFakeMutingAllKey];
 }
 
 - (NSString *)setupFileName {
