@@ -14,6 +14,7 @@
 #import "QLMPreferences.h"
 #import "QLMSettingsWindowController.h"
 #import "QLMSetupReader.h"
+#import "QLMSetupWatcher.h"
 #import "QLMSystem.h"
 
 // A ceiling change restarts System. Steps closer together than this make one.
@@ -35,6 +36,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
+@property (nonatomic, nullable) QLMSetupWatcher *setupWatcher;
 // What the status item shows, so an unchanged snapshot does not redraw it.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
@@ -204,9 +206,9 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
         NSArray<NSString *> *names = QLMSetupFileNames();
         NSString *name = chosen != nil && [names containsObject:chosen] ? chosen : names.firstObject;
+        NSString *path = name == nil ? nil : [QLMSetupDirectory() stringByAppendingPathComponent:name];
         NSError *error = nil;
-        QLMSetup *setup = name == nil ? nil : [QLMSetupReader readFileAtPath:[QLMSetupDirectory() stringByAppendingPathComponent:name]
-                                                                       error:&error];
+        QLMSetup *setup = path == nil ? nil : [QLMSetupReader readFileAtPath:path error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
             QLMAppDelegate *strongSelf = weakSelf;
             if (strongSelf == nil || load != strongSelf.setupLoads) {
@@ -215,9 +217,32 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
             strongSelf.setup = setup;
             strongSelf.setupError = setup == nil ? error : nil;
             strongSelf.popoverController.setup = setup;
+            strongSelf.popoverController.changedSetupName = nil;
             [strongSelf.settingsController showSetup:setup error:strongSelf.setupError];
+            [strongSelf watchSetupAtPath:path];
         });
     });
+}
+
+// When GLM saves the file in use, the popover offers to read it again.
+- (void)watchSetupAtPath:(nullable NSString *)path {
+    if (path != nil && [path isEqualToString:self.setupWatcher.path]) {
+        return;
+    }
+    [self.setupWatcher stop];
+    self.setupWatcher = nil;
+    if (path == nil) {
+        return;
+    }
+    __weak QLMAppDelegate *weakSelf = self;
+    self.setupWatcher = [[QLMSetupWatcher alloc] initWithPath:path queue:dispatch_get_main_queue() handler:^{
+        weakSelf.popoverController.changedSetupName = path.lastPathComponent;
+    }];
+    [self.setupWatcher start];
+}
+
+- (void)popoverControllerReadSetupAgain:(QLMPopoverController *)controller {
+    [self loadSetup];
 }
 
 #pragma mark - Windows

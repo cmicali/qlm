@@ -43,6 +43,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMBannerView *banner;
+@property (nonatomic) QLMBannerView *setupBanner;
 @property (nonatomic) NSTextField *deviceLabel;
 @property (nonatomic) NSTextField *messageLabel;
 @property (nonatomic) NSSlider *volumeSlider;
@@ -131,6 +132,11 @@ static NSView *QLMSpacer(void) {
     self.fakeBusButton.hidden = !showsFakeBus;
 }
 
+- (void)setChangedSetupName:(NSString *)changedSetupName {
+    _changedSetupName = [changedSetupName copy];
+    [self refresh];
+}
+
 - (void)setSetup:(QLMSetup *)setup {
     _setup = setup;
     if (self.isViewLoaded) {
@@ -146,6 +152,11 @@ static NSView *QLMSpacer(void) {
     self.banner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50 style:QLMBannerStyleWarning];
     self.banner.actionButton.target = self;
     self.banner.actionButton.action = @selector(quitGLMClicked:);
+    self.setupBanner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50 style:QLMBannerStyleNotice];
+    self.setupBanner.actionButton.title = @"Read Again";
+    self.setupBanner.actionButton.target = self;
+    self.setupBanner.actionButton.action = @selector(readSetupAgainClicked:);
+    self.setupBanner.actionButton.hidden = NO;
 
     NSTextField *title = [NSTextField labelWithString:@"qlm"];
     title.font = [NSFont systemFontOfSize:NSFont.systemFontSize + 1 weight:NSFontWeightSemibold];
@@ -225,7 +236,7 @@ static NSView *QLMSpacer(void) {
     footer.spacing = 6;
 
     NSArray<NSView *> *fullWidth = @[
-        self.banner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
+        self.banner, self.setupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
         [self separator], monitorsHeader, self.monitorsStack, [self separator], footer,
     ];
     NSStackView *stack = [NSStackView stackViewWithViews:fullWidth];
@@ -339,6 +350,10 @@ static NSView *QLMSpacer(void) {
     [self refresh];
 }
 
+- (void)readSetupAgainClicked:(id)sender {
+    [self.delegate popoverControllerReadSetupAgain:self];
+}
+
 - (nullable NSRunningApplication *)runningGLM {
     return QLMRunningGLM();
 }
@@ -381,6 +396,9 @@ static NSView *QLMSpacer(void) {
 - (void)render {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
     [self renderBanner:snapshot.adapterError];
+    NSString *changed = self.changedSetupName;
+    [self.setupBanner showTitle:changed == nil ? nil : [NSString stringWithFormat:@"GLM saved %@", changed]
+                         detail:@"Read it again for its new groups."];
     self.deviceLabel.stringValue = snapshot.adapter.device ?: @"";
     self.deviceLabel.toolTip = snapshot.adapter.systemInfo;
     [self renderVolume:snapshot];
