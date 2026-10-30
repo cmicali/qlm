@@ -1,5 +1,6 @@
 #import <XCTest/XCTest.h>
 
+#import "QLMApplySequence.h"
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
 #import "QLMReplayAdapter.h"
@@ -635,8 +636,9 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 }
 
 // The user's mute outlives a lapsed lease. When the monitor answers the
-// probe again, it hears its mute first, under its new session. After that,
-// every 2B it gets says muted.
+// probe again, it hears its mute right after its first poll, under its new
+// session, as GLM sends a new monitor its state (captures/startup-idle,
+// 9.861 s). After that, every 2B it gets says muted.
 - (void)testAMuteOutlivesALapsedLease {
     _settings.adapterPollInterval = 0.01;
     [self startSystem];
@@ -665,10 +667,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     const uint8_t mutedBytes[] = {session, 0x2B, QLMMuteValueMuted};
     NSData *muted = QLMBytes(mutedBytes, sizeof mutedBytes);
-    XCTAssertGreaterThanOrEqual(toLeft.count, 2u);
-    if (toLeft.count >= 2) {
-        XCTAssertEqualObjects([toLeft subarrayWithRange:NSMakeRange(0, 2)], (@[muted, muted]));
-    }
+    const uint8_t pollBytes[] = {session, 0x08};
+    NSUInteger poll = [toLeft indexOfObject:QLMBytes(pollBytes, sizeof pollBytes)];
+    XCTAssertNotEqual(poll, NSNotFound);
+    XCTAssertEqual([toLeft indexOfObject:muted], poll + 1);
 
     [self sendEveryMuteRound];
     NSMutableIndexSet *sessions = [NSMutableIndexSet indexSetWithIndex:session];
@@ -1168,103 +1170,195 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(_bus.sentMessages.count, before);
 }
 
-static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
+// Two 8330A and a 7370A whose hardware IDs are the fixture's 1000005,
+// 1000004, and 1000006: nodes 0, 2, and 3 of each group, all verified.
+- (QLMFakeMonitor *)useMainsAndSub {
+    [self useMainsMonitors];
+    const uint8_t subID[3] = {0x0F, 0x42, 0x46};
+    QLMFakeMonitor *sub = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(subID, 3) serialNumber:@"7370AP21009012"
+                                                         systemInfo:@"c-1;model-7370A" deviceClass:QLMTelemetryClassSubwoofer];
+    _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right, sub]];
+    return sub;
+}
+
+// Group `index` of the fixture with only nodes 0, 2, and 3.
+- (QLMSetupGroup *)mainsAndSubOf:(NSUInteger)index named:(NSString *)name {
+    QLMSetupGroup *source = QLMReadFixtureSetup().groups[index];
+    return [self groupNamed:name from:source nodes:@[source.nodes[0], source.nodes[2], source.nodes[3]]];
+}
+
+// What System sent from `start` on, less its cycle: the probes and leases,
+// the volume after a probe, the polls, and identity asked before a block.
+- (NSArray<NSData *> *)applyFramesFrom:(NSUInteger)start {
+    NSArray<NSData *> *sent = _bus.sentMessages;
     NSMutableArray<NSData *> *frames = [NSMutableArray array];
-    for (NSData *payload in block.payloads) {
-        [frames addObject:[QLMFakeBus recordForSession:session payload:payload]];
+    NSMutableSet<NSNumber *> *prepared = [NSMutableSet set];
+    BOOL afterProbe = NO;
+    for (NSUInteger i = start; i < sent.count; i++) {
+        const uint8_t *bytes = sent[i].bytes;
+        BOOL probing = (bytes[0] == QLMAddressBroadcast && bytes[1] == 0xFE) || (bytes[0] == QLMAddressMulticast && bytes[1] == 0x02);
+        BOOL cycleVolume = afterProbe && bytes[0] == QLMAddressBroadcast && bytes[1] == 0x1F;
+        afterProbe = probing;
+        if (bytes[1] == 0x17) {
+            [prepared addObject:@(bytes[0])];
+        }
+        BOOL identifying = (bytes[1] == 0x39 || bytes[1] == 0x19) && ![prepared containsObject:@(bytes[0])];
+        if (probing || cycleVolume || identifying || (sent[i].length == 2 && bytes[1] == 0x08)) {
+            continue;
+        }
+        [frames addObject:sent[i]];
     }
     return frames;
 }
 
-// Section 9, "Apply / Group": duck, wake, per monitor 2B 04 and routing,
-// then 04 and the DSP block per monitor, then the volume five times and
-// 2B and 3D per monitor. qlm leaves out GLM's 05 04 00 (section 7's 05 is
-// on the never-send list). The muted monitor gets 2B 03 in place of 2B 04,
-// so the apply never unmutes it.
-- (void)testVerifiedApplySendsGLMsSequence {
-    _settings.cycleInterval = 10;
+- (QLMApplySequence *)sequenceFor:(QLMSetupGroup *)group snapshot:(QLMSnapshot *)snapshot {
+    NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
+    for (QLMMonitorState *state in snapshot.monitors) {
+        QLMApplyMonitor *monitor = [[QLMApplyMonitor alloc] initWithHardwareID:state.hardwareID session:state.session];
+        monitor.on = state.status == QLMMonitorStatusOn;
+        monitor.muted = state.muted;
+        [monitors addObject:monitor];
+    }
+    return [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:NO];
+}
+
+- (NSDictionary<NSData *, QLMDSPBlock *> *)blocksOf:(QLMSetupGroup *)group {
+    NSMutableDictionary<NSData *, QLMDSPBlock *> *blocks = [NSMutableDictionary dictionary];
+    for (QLMSetupNode *node in group.nodes) {
+        blocks[node.hardwareID] = [QLMDSPBlock blockForNode:node inGroup:group error:NULL];
+    }
+    return blocks;
+}
+
+// Waits until the frames System sent from `start` on, less its cycle, are
+// at least `count`, then a little longer for one too many to show.
+- (NSArray<NSData *> *)waitForApplyFrames:(NSUInteger)count from:(NSUInteger)start {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
+    while ([self applyFramesFrom:start].count < count && [deadline timeIntervalSinceNow] > 0) {
+        [NSThread sleepForTimeInterval:0.01];
+    }
+    [NSThread sleepForTimeInterval:0.1];
+    return [self applyFramesFrom:start];
+}
+
+// The first apply is GLM's at launch (captures/startup-idle, 8.534 s): each
+// monitor's block in turn, then the pair, then each one's state right after
+// its next poll. The next is GLM's group switch
+// (captures/group-switch-main-4x2-main-2x1, 12.359 s). System sends exactly
+// what QLMApplySequence builds, which QLMApplyGoldenTests checks against
+// every captured apply. The muted monitor gets 2B 03, so no apply unmutes
+// it. Neither apply sends 05 04, which is never-send.
+- (void)testTheFirstApplyIsGLMsLaunchAndTheNextIsItsSwitch {
+    _settings.cycleInterval = 0.3;
     _settings.ceilingDecibels = 0;
-    [self useMainsMonitors];
+    [self useMainsAndSub];
     [self startSystem];
-    QLMSnapshot *discovered = [self waitForDiscovery];
-    uint8_t first = QLMFindMonitor(discovered, _left.hardwareID).session;   // node 0, serial 1000005
-    uint8_t second = QLMFindMonitor(discovered, _right.hardwareID).session; // node 2, serial 1000004
+    QLMSnapshot *discovered = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 3 && snapshot.allIdentified && snapshot.idle;
+    }];
     [_system setMuted:YES forMonitorWithHardwareID:_right.hardwareID];
     [_system setVolumeDecibels:-10];
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+    discovered = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.volumeDecibels != nil && snapshot.idle;
     }];
 
-    QLMSetupGroup *group = [self mainsGroup];
-    NSArray<QLMDSPBlock *> *blocks = [QLMDSPBlock blocksForGroup:group error:NULL];
-    XCTAssertEqual(blocks.count, 2u);
+    QLMSetupGroup *mains = [self mainsAndSubOf:0 named:@"Mains"];
+    QLMApplySequence *launch = [self sequenceFor:mains snapshot:discovered];
+    NSMutableArray<NSData *> *expected = [[launch enumerationOf:launch.monitors blocks:[self blocksOf:mains]] mutableCopy];
+    for (QLMApplyMonitor *monitor in launch.monitors) {
+        [expected addObjectsFromArray:[launch stateOf:monitor firstOfTwo:NO]];
+    }
     NSUInteger before = _bus.sentMessages.count;
-    QLMSystem *system = _system;
-    __block BOOL sawApplying = NO;
-    __block NSError *result = nil;
-    XCTestExpectation *done = [self expectationWithDescription:@"apply"];
+    XCTAssertNil([self applyGroup:mains]);
+    XCTAssertEqualObjects([self waitForApplyFrames:expected.count from:before], expected);
+    XCTAssertEqualObjects(_system.snapshot.activeGroupName, @"Mains");
+
+    // The switch to the sub alone: both 8330A leave the group.
+    QLMSetupGroup *sub = [self mainsAndSubOf:1 named:@"Sub"];
     QLMSnapshot *applied = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        sawApplying = sawApplying || snapshot.applying;
-        return snapshot.activeGroupName != nil;
-    } after:^{
-        [system applyGroup:group completion:^(NSError *error) {
-            result = error;
-            [done fulfill];
-        }];
+        return snapshot.idle;
     }];
-    [self waitForExpectations:@[done] timeout:5];
-    XCTAssertNil(result);
-    XCTAssertTrue(sawApplying);
-    XCTAssertFalse(applied.applying);
-    XCTAssertEqualObjects(applied.activeGroupName, @"Mains");
-
-    NSMutableArray<NSData *> *expected = [NSMutableArray array];
-    const uint8_t duckMin[] = {QLMAddressBroadcast, 0x1F, 0x00, 0x00, 0x08};
-    const uint8_t duck[] = {QLMAddressBroadcast, 0x1F, 0x00, 0x00, 0x02};
-    [expected addObject:QLMBytes(duckMin, 5)];
-    [expected addObject:QLMBytes(duck, 5)];
-    const uint8_t wakeFirst[] = {QLMAddressBroadcast, 0x3A, 0x03, 0x7F};
-    const uint8_t wakeSecond[] = {QLMAddressBroadcast, 0x3A, 0x03, 0x01};
-    [expected addObject:QLMBytes(wakeFirst, 4)];
-    [expected addObject:QLMBytes(wakeFirst, 4)];
-    [expected addObject:QLMBytes(wakeSecond, 4)];
-    const uint8_t sessions[2] = {first, second};
-    for (int i = 0; i < 2; i++) {
-        const uint8_t unmute[] = {sessions[i], 0x2B, i == 1 ? QLMMuteValueMuted : QLMMuteValueUnmuted};
-        [expected addObject:QLMBytes(unmute, 3)];
-        [expected addObject:QLMBlockFrames(blocks[(NSUInteger)i], sessions[i]).lastObject];
-    }
-    const uint8_t keepAlive[] = {QLMAddressBroadcast, 0x04};
-    for (int i = 0; i < 2; i++) {
-        [expected addObject:QLMBytes(keepAlive, 2)];
-        NSArray<NSData *> *frames = QLMBlockFrames(blocks[(NSUInteger)i], sessions[i]);
-        XCTAssertEqual(frames.count, 27u);
-        const uint8_t prepare[] = {sessions[i], 0x17, 0x01};
-        XCTAssertEqualObjects(frames.firstObject, QLMBytes(prepare, 3));
-        XCTAssertEqual(((const uint8_t *)frames.lastObject.bytes)[1], 0x40);
-        [expected addObjectsFromArray:frames];
-    }
-    const uint8_t volume[] = {QLMAddressBroadcast, 0x1F, 0x28, 0x7A, 0x26};
-    for (int i = 0; i < 5; i++) {
-        [expected addObject:QLMBytes(volume, 5)];
-    }
-    const uint8_t restoreFirst[] = {first, 0x2B, QLMMuteValueUnmuted};
-    const uint8_t restoreSecond[] = {second, 0x2B, QLMMuteValueMuted};
-    const uint8_t syncFirst[] = {first, 0x3D, 0x00, 0x00};
-    const uint8_t syncSecond[] = {second, 0x3D, 0x00, 0x00};
-    [expected addObject:QLMBytes(restoreFirst, 3)];
-    [expected addObject:QLMBytes(syncFirst, 4)];
-    [expected addObject:QLMBytes(restoreSecond, 3)];
-    [expected addObject:QLMBytes(syncSecond, 4)];
-
-    NSArray<NSData *> *sent = _bus.sentMessages;
-    XCTAssertGreaterThanOrEqual(sent.count, before + expected.count);
-    if (sent.count >= before + expected.count) {
-        XCTAssertEqualObjects([sent subarrayWithRange:NSMakeRange(before, expected.count)], expected);
-    }
+    QLMApplySequence *switching = [self sequenceFor:sub snapshot:applied];
+    expected = [[switching switchWithBlocks:[self blocksOf:sub] volume:QLMCommandVolume(-10, 0)] mutableCopy];
+    before = _bus.sentMessages.count;
+    XCTAssertNil([self applyGroup:sub]);
+    NSArray<NSData *> *sent = [self waitForApplyFrames:expected.count from:before];
+    XCTAssertEqualObjects(sent, expected);
+    XCTAssertEqual([self sentWithOpcode:0x05 from:0].count, 0u);
     [_bus perform:^{
-        XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted);
+        XCTAssertEqual(self->_right.muteValue, QLMMuteValueOutside);
     }];
+
+    // Outside the group, a monitor gets 07 in the first round of two, and
+    // 05 then 07 in the second (captures/knob-sweep, 19.135 s).
+    uint8_t left = QLMFindMonitor(applied, _left.hardwareID).session;
+    uint8_t right = QLMFindMonitor(applied, _right.hardwareID).session;
+    NSData *subID = _bus.monitors[2].hardwareID;
+    uint8_t subwoofer = QLMFindMonitor(applied, subID).session;
+    before = _bus.sentMessages.count;
+    [_system setMuted:YES forMonitorWithHardwareID:subID];
+    const uint8_t rounds[][3] = {
+        {left, 0x2B, 0x07}, {right, 0x2B, 0x07}, {subwoofer, 0x2B, 0x03},
+        {left, 0x2B, 0x05}, {left, 0x2B, 0x07}, {right, 0x2B, 0x05}, {right, 0x2B, 0x07}, {subwoofer, 0x2B, 0x03},
+    };
+    NSMutableArray<NSData *> *roundFrames = [NSMutableArray array];
+    for (size_t i = 0; i < sizeof rounds / sizeof rounds[0]; i++) {
+        [roundFrames addObject:QLMBytes(rounds[i], 3)];
+    }
+    XCTAssertEqualObjects([self waitForApplyFrames:roundFrames.count from:before], roundFrames);
+}
+
+// A monitor leased while a group is active gets its block once the probe
+// finds no more, then a round to the others and the pair, then its state
+// after its next poll, as GLM's do after a wake
+// (captures/group-switch-main-2x2-main-4x2, 11.996 to 12.808 s).
+- (void)testAMonitorLeasedLaterGetsTheActiveGroupsBlock {
+    _settings.cycleInterval = 0.3;
+    _settings.ceilingDecibels = 0;
+    [self useMainsAndSub];
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 3 && snapshot.allIdentified && snapshot.idle;
+    }];
+    [_system setVolumeDecibels:-10];
+    QLMSetupGroup *mains = [self mainsAndSubOf:0 named:@"Mains"];
+    XCTAssertNil([self applyGroup:mains]);
+    // Each monitor's state goes out after its next poll.
+    [self waitUntil:^BOOL{
+        __block BOOL stated = YES;
+        [self->_bus perform:^{
+            for (QLMFakeMonitor *monitor in self->_bus.monitors) {
+                stated = stated && monitor.muteValue == QLMMuteValueUnmuted;
+            }
+        }];
+        return stated;
+    }];
+    QLMSnapshot *applied = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle;
+    }];
+
+    NSData *leftID = _left.hardwareID;
+    uint8_t oldSession = QLMFindMonitor(applied, leftID).session;
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_left.session = 0;
+    }];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *left = QLMFindMonitor(snapshot, leftID);
+        return left.session != oldSession && left.status == QLMMonitorStatusOn && snapshot.monitors.count == 3;
+    }];
+    QLMApplySequence *sequence = [self sequenceFor:mains snapshot:again];
+    QLMApplyMonitor *fresh = nil;
+    for (QLMApplyMonitor *monitor in sequence.monitors) {
+        if ([monitor.hardwareID isEqualToData:leftID]) {
+            fresh = monitor;
+        }
+    }
+    fresh.on = NO;
+    NSMutableArray<NSData *> *expected = [[sequence enumerationOf:@[fresh] blocks:[self blocksOf:mains]] mutableCopy];
+    [expected addObjectsFromArray:[sequence stateOf:fresh firstOfTwo:NO]];
+    NSArray<NSData *> *sent = [self waitForApplyFrames:expected.count from:before];
+    XCTAssertEqualObjects(sent, expected);
 }
 
 // A second apply while one runs is refused.
@@ -1292,8 +1386,10 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
     XCTAssertEqual(secondError.code, QLMSystemErrorAlreadyApplying);
 }
 
-// An apply for a group whose nodes are all off has no per-monitor frames.
-// The duck, the wake, and the volume restore still go out, and it finishes.
+// A group whose nodes are all off. The first apply, as GLM's at launch,
+// still sends each node its block (captures/startup-idle: Main 2x1's off
+// nodes, 8.534 s). The switch after it ducks, wakes, tells each monitor to
+// prepare for standby, routes it, and sends no block.
 - (void)testApplyOfAGroupWithEveryNodeOffFinishes {
     _settings.cycleInterval = 10;
     [self useMainsMonitors];
@@ -1310,12 +1406,15 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
 
     NSUInteger before = _bus.sentMessages.count;
     XCTAssertNil([self applyGroup:group]);
-    XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 7u);  // two duck frames, five restores
-    XCTAssertEqual([self sentWithOpcode:0x3A from:before].count, 3u);
-    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 0u);
-    XCTAssertEqual([self sentWithOpcode:0x10 from:before].count, 0u);
+    XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 2u);
+    XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
 
+    before = _bus.sentMessages.count;
     XCTAssertNil([self applyGroup:group]);
+    XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 5u);  // two duck frames, three restores
+    XCTAssertEqual([self sentWithOpcode:0x3A from:before].count, 4u);  // the wake twice, and 03 02 to each
+    XCTAssertEqual([self sentWithOpcode:0x10 from:before].count, 0u);
+    XCTAssertEqual([self sentWithOpcode:0x04 from:before].count, 2u);
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
         return !received.applying && [received.activeGroupName isEqualToString:@"Off"];
     }];

@@ -1,5 +1,6 @@
 #import "QLMSystem.h"
 
+#import "QLMApplySequence.h"
 #include "QLMCommands.h"
 #include "QLMReplies.h"
 #import "QLMDSPBlock.h"
@@ -68,9 +69,20 @@ static const NSTimeInterval QLMWakePairSpacing = 0.2;
 @property (nonatomic) NSUInteger missedPolls;
 @property (nonatomic) NSDate *lastReply;
 @property (nonatomic) BOOL retrying;
+// Holds the active group's block for this lease, or needs none.
+@property (nonatomic) BOOL configured;
+// Hears its state of 2B after its next poll that says on.
+@property (nonatomic) BOOL needsState;
+@property (nonatomic, readonly) BOOL isOn;  // its last telemetry says on
 @end
 
 @implementation QLMMonitorRecord
+
+- (BOOL)isOn {
+    QLMTelemetry telemetry = self.telemetry;
+    return self.hasTelemetry && telemetry.status == QLMTelemetryStatusOn;
+}
+
 @end
 
 // The adapter itself, at 01. Touched only on the queue.
@@ -146,6 +158,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableSet<NSData *> *_mutedIDs;
     BOOL _adapterMuted;
     NSString *_activeGroupName;
+    // Set by the first apply. It decides membership, and the block each new
+    // lease gets. It outlives stop, so the next start applies it in full.
+    QLMSetupGroup *_activeGroup;
     void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
     QLMSnapshotHandler _snapshotHandler;
     dispatch_queue_t _snapshotQueue;
@@ -280,9 +295,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self pump];
 }
 
-- (void)send:(QLMMessage)message then:(nullable QLMSendCompletion)completion {
+- (dispatch_block_t)itemSending:(QLMMessage)message then:(nullable QLMSendCompletion)completion {
     __weak QLMSystem *weakSelf = self;
-    [self enqueue:^{
+    return ^{
         QLMSystem *strongSelf = weakSelf;
         if (strongSelf == nil) {
             return;
@@ -293,7 +308,31 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
                 completion(reply, error);
             }];
         }];
-    }];
+    };
+}
+
+- (void)send:(QLMMessage)message then:(nullable QLMSendCompletion)completion {
+    [self enqueue:[self itemSending:message then:completion]];
+}
+
+static QLMMessage QLMMessageFromRecord(NSData *record) {
+    const uint8_t *bytes = record.bytes;
+    return QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
+}
+
+- (void)sendRecords:(NSArray<NSData *> *)records {
+    for (NSData *record in records) {
+        [self send:QLMMessageFromRecord(record) then:nil];
+    }
+}
+
+// Ahead of everything queued, in order. Call it only from an item's
+// completion, which runs before the next item goes out.
+- (void)sendRecordsNext:(NSArray<NSData *> *)records {
+    NSUInteger index = 0;
+    for (NSData *record in records) {
+        [_sends insertObject:[self itemSending:QLMMessageFromRecord(record) then:nil] atIndex:index++];
+    }
 }
 
 // A busy or missing adapter shows in the snapshot until a send goes out.
@@ -430,11 +469,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // A probe is answered by one monitor without a lease. It gets the next
 // session ID, then its identity is read, and the probe repeats for the next.
+// Once no monitor answers, the new ones get the active group's blocks.
 - (void)probe {
     [self send:QLMCommandProbe() then:^(const QLMMessage *reply, NSError *error) {
         uint8_t hardwareID[3];
         if (reply != NULL && QLMReplyHardwareID(reply, hardwareID)) {
             [self assignSessionTo:hardwareID];
+        } else {
+            [self applyToNewMonitors];
         }
     }];
 }
@@ -469,13 +511,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         monitor.lastReply = [NSDate date];
         [self->_monitors addObject:monitor];
         self->_dirty = YES;
-        // A monitor the user muted may come back unmuted, so it hears its
-        // mute first, twice, as every state change goes out.
-        if ([self->_mutedIDs containsObject:identity]) {
-            for (int i = 0; i < 2; i++) {
-                [self send:QLMCommandMute(session, QLMMuteValueMuted) then:nil];
-            }
-        }
+        // A monitor may come back unmuted, so a muted one hears its state
+        // after its first poll, as GLM sends it. One that gets a block
+        // hears it after the block instead.
+        monitor.configured = self->_activeGroup == nil;
+        monitor.needsState = monitor.configured && [self->_mutedIDs containsObject:identity];
         [self identify:monitor];
         [self pollMonitor:monitor];
         [self probe];
@@ -645,6 +685,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     // A bare ack or a busy marker carries no data this round.
     _dirty = YES;
+    // GLM sends the state right after the poll (captures/startup-idle,
+    // 9.861 s).
+    if (monitor.needsState && monitor.isOn) {
+        monitor.needsState = NO;
+        QLMApplySequence *sequence = [self sequenceFor:_activeGroup];
+        [self sendRecordsNext:[sequence stateOf:[self applyMonitorFor:monitor in:sequence] firstOfTwo:NO]];
+    }
 }
 
 // After the limit of missed polls, a burst of polls to the dead address.
@@ -755,7 +802,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [self->_mutedIDs removeObject:identity];
         }
         self->_dirty = YES;
-        if ([self monitorWithHardwareID:identity] != nil) {
+        QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
+        if (monitor != nil) {
+            // A round reaches only a monitor that is on.
+            monitor.needsState = monitor.needsState || !monitor.isOn;
             [self sendMuteRounds:2];
         }
     }];
@@ -773,6 +823,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         } else {
             [self->_mutedIDs removeAllObjects];
         }
+        for (QLMMonitorRecord *monitor in self->_monitors) {
+            monitor.needsState = monitor.needsState || !monitor.isOn;
+        }
         self->_adapterMuted = muted;
         if (self->_volumeDecibels != nil) {
             // Part of the sequence, so it skips the coalescing timer.
@@ -785,27 +838,114 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // The adapter's own mute at 01, then two rounds to the monitors
 // (captures/mute-dim, 46.19 s). Only mute all changes the adapter's.
 - (void)sendMuteState {
-    uint8_t value = _adapterMuted ? QLMMuteValueAdapterMuted : QLMMuteValueAdapterUnmuted;
-    [self send:QLMCommandMute(QLMAddressAdapter, value) then:nil];
-    [self sendMuteRounds:2];
-}
-
-- (uint8_t)muteValueFor:(QLMMonitorRecord *)monitor {
-    return [_mutedIDs containsObject:monitor.hardwareID] ? QLMMuteValueMuted : QLMMuteValueUnmuted;
-}
-
-// Each round restates every monitor's mute state. A 2B reply is a bare ack,
-// and a missed one is a lost send, not a missed poll.
-- (void)sendMuteRounds:(NSUInteger)rounds {
-    NSArray<QLMMonitorRecord *> *monitors = [_monitors copy];
-    for (NSUInteger round = 0; round < rounds; round++) {
-        for (QLMMonitorRecord *monitor in monitors) {
-            [self send:QLMCommandMute(monitor.session, [self muteValueFor:monitor]) then:nil];
-        }
-    }
+    [self sendRecords:[[self sequenceFor:_activeGroup] muteState]];
     [self afterSends:^{
         self->_dirty = YES;
     }];
+}
+
+// Each round restates the state of every monitor that is on, as
+// QLMApplySequence says. A 2B reply is a bare ack, and a missed one is a
+// lost send, not a missed poll.
+- (void)sendMuteRounds:(NSUInteger)rounds {
+    [self sendRecords:[[self sequenceFor:_activeGroup] rounds:rounds]];
+    [self afterSends:^{
+        self->_dirty = YES;
+    }];
+}
+
+#pragma mark - Sequences
+
+// The monitors as GLM's sequences see them, in lease order.
+- (QLMApplySequence *)sequenceFor:(nullable QLMSetupGroup *)group {
+    NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray arrayWithCapacity:_monitors.count];
+    for (QLMMonitorRecord *record in _monitors) {
+        QLMApplyMonitor *monitor = [[QLMApplyMonitor alloc] initWithHardwareID:record.hardwareID session:record.session];
+        monitor.on = record.isOn;
+        monitor.muted = [_mutedIDs containsObject:record.hardwareID];
+        [monitors addObject:monitor];
+    }
+    return [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:_adapterMuted];
+}
+
+- (QLMApplyMonitor *)applyMonitorFor:(QLMMonitorRecord *)record in:(QLMApplySequence *)sequence {
+    for (QLMApplyMonitor *monitor in sequence.monitors) {
+        if (monitor.session == record.session) {
+            return monitor;
+        }
+    }
+    return [[QLMApplyMonitor alloc] initWithHardwareID:record.hardwareID session:record.session];
+}
+
+// Blocks for the nodes of `group` with a monitor among `monitors`, or for
+// every node when `monitors` is nil, keyed by hardware ID. A node whose
+// block fails, or whose rate is unverified, gets none, and the error says
+// why.
+- (NSDictionary<NSData *, QLMDSPBlock *> *)blocksFor:(QLMSetupGroup *)group
+                                            monitors:(nullable NSArray<QLMMonitorRecord *> *)monitors
+                                               error:(NSError **)error {
+    NSMutableDictionary<NSData *, QLMDSPBlock *> *blocks = [NSMutableDictionary dictionary];
+    for (QLMSetupNode *node in group.nodes) {
+        NSData *hardwareID = node.hardwareID;
+        BOOL leased = monitors == nil;
+        for (QLMMonitorRecord *monitor in monitors) {
+            leased = leased || (hardwareID != nil && [monitor.hardwareID isEqualToData:hardwareID]);
+        }
+        if (!leased) {
+            continue;
+        }
+        NSError *underlying = nil;
+        QLMDSPBlock *block = [QLMDSPBlock blockForNode:node inGroup:group error:&underlying];
+        if (block == nil) {
+            *error = QLMSystemErrorMake(QLMSystemErrorBlocksFailed, @"The DSP blocks could not be built.", underlying);
+            continue;
+        }
+        if (!block.rateVerified) {
+            NSString *description = [NSString stringWithFormat:@"The design rate of node %@ (%@) is unverified.", node.serial, node.className];
+            *error = QLMSystemErrorMake(QLMSystemErrorUnverifiedRate, description, nil);
+            continue;
+        }
+        if (hardwareID != nil) {
+            blocks[hardwareID] = block;
+        }
+    }
+    return blocks;
+}
+
+// GLM's apply to the monitors leased since the active group was set, once
+// the probe finds no more (captures/startup-idle, 8.534 s). A monitor whose
+// block is refused gets none.
+- (void)applyToNewMonitors {
+    QLMSetupGroup *group = _activeGroup;
+    NSMutableArray<QLMMonitorRecord *> *fresh = [NSMutableArray array];
+    for (QLMMonitorRecord *monitor in _monitors) {
+        if (!monitor.configured) {
+            monitor.configured = YES;
+            [fresh addObject:monitor];
+        }
+    }
+    if (group == nil || fresh.count == 0) {
+        return;
+    }
+    NSError *ignored = nil;
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self blocksFor:group monitors:fresh error:&ignored];
+    [self sendRecords:[self enumeration:fresh group:group blocks:blocks]];
+    [self afterSends:^{
+        for (QLMMonitorRecord *monitor in fresh) {
+            monitor.needsState = blocks[monitor.hardwareID] != nil || [self->_mutedIDs containsObject:monitor.hardwareID];
+        }
+    }];
+}
+
+- (NSArray<NSData *> *)enumeration:(NSArray<QLMMonitorRecord *> *)fresh
+                             group:(QLMSetupGroup *)group
+                            blocks:(NSDictionary<NSData *, QLMDSPBlock *> *)blocks {
+    QLMApplySequence *sequence = [self sequenceFor:group];
+    NSMutableArray<QLMApplyMonitor *> *freshMonitors = [NSMutableArray array];
+    for (QLMMonitorRecord *monitor in fresh) {
+        [freshMonitors addObject:[self applyMonitorFor:monitor in:sequence]];
+    }
+    return [sequence enumerationOf:freshMonitors blocks:blocks];
 }
 
 #pragma mark - Power
@@ -853,22 +993,20 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         });
     };
     [self onQueue:^{
-        NSArray<QLMMonitorRecord *> *targets = nil;
         NSError *refusal = nil;
-        NSArray<QLMDSPBlock *> *blocks = [self checkGroup:group targets:&targets error:&refusal];
+        NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self checkGroup:group error:&refusal];
         if (blocks == nil) {
             finish(refusal);
             return;
         }
-        [self sendGroup:group blocks:blocks targets:targets finish:finish];
+        [self sendGroup:group blocks:blocks finish:finish];
     }];
 }
 
-// Every check runs before the first frame. On success, `targets` holds the
-// monitor for each block, in the same order.
-- (nullable NSArray<QLMDSPBlock *> *)checkGroup:(QLMSetupGroup *)group
-                                       targets:(NSArray<QLMMonitorRecord *> *_Nullable *_Nonnull)targets
-                                         error:(NSError **)error {
+// Every check runs before the first frame. Every node's block must build
+// at a verified rate, on or off, leased or not. On success, a block for
+// every node, keyed by hardware ID.
+- (nullable NSDictionary<NSData *, QLMDSPBlock *> *)checkGroup:(QLMSetupGroup *)group error:(NSError **)error {
     if (_applyFinish != nil) {
         *error = QLMSystemErrorMake(QLMSystemErrorAlreadyApplying, @"A group apply is already running.", nil);
         return nil;
@@ -877,95 +1015,90 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         *error = QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System is not running.", nil);
         return nil;
     }
-    NSError *underlying = nil;
-    NSArray<QLMDSPBlock *> *blocks = [QLMDSPBlock blocksForGroup:group error:&underlying];
-    if (blocks == nil) {
-        *error = QLMSystemErrorMake(QLMSystemErrorBlocksFailed, @"The DSP blocks could not be built.", underlying);
+    NSError *refused = nil;
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self blocksFor:group monitors:nil error:&refused];
+    if (refused != nil) {
+        *error = refused;
         return nil;
     }
-    for (QLMDSPBlock *block in blocks) {
-        if (!block.rateVerified) {
-            NSString *description = [NSString stringWithFormat:@"The design rate of node %@ (%@) is unverified.", block.node.serial, block.node.className];
-            *error = QLMSystemErrorMake(QLMSystemErrorUnverifiedRate, description, nil);
-            return nil;
-        }
-    }
-    NSMutableArray<QLMMonitorRecord *> *matched = [NSMutableArray arrayWithCapacity:blocks.count];
-    for (QLMDSPBlock *block in blocks) {
-        NSData *hardwareID = block.node.hardwareID;
-        QLMMonitorRecord *monitor = hardwareID != nil ? [self monitorWithHardwareID:hardwareID] : nil;
-        if (monitor == nil || [matched containsObject:monitor]) {
-            NSString *description = [NSString stringWithFormat:@"Node %@ matches no single leased monitor.", block.node.serial];
+    NSCountedSet<NSData *> *hardwareIDs = [[NSCountedSet alloc] initWithArray:[group.nodes valueForKey:@"hardwareID"]];
+    for (QLMSetupNode *node in group.nodes) {
+        BOOL single = node.hardwareID != nil && [hardwareIDs countForObject:node.hardwareID] == 1;
+        if (node.on && (!single || [self monitorWithHardwareID:node.hardwareID] == nil)) {
+            NSString *description = [NSString stringWithFormat:@"Node %@ matches no single leased monitor.", node.serial];
             *error = QLMSystemErrorMake(QLMSystemErrorUnknownMonitor, description, nil);
             return nil;
         }
-        [matched addObject:monitor];
     }
     if (_volumeDecibels == nil) {
         *error = QLMSystemErrorMake(QLMSystemErrorNoVolume, @"Set a volume before a group apply.", nil);
         return nil;
     }
-    *targets = matched;
     return blocks;
 }
 
-// GLM's apply: duck, wake, unmute and route, the blocks, then restore. Every
-// frame is queued at once, so a cycle or an adapter poll waits behind them,
-// as GLM's polls do (docs/adapter-status.md: its longest gap, 1.70 s).
+// The first apply is GLM's at launch: every monitor's block in turn. Each
+// one after is GLM's group switch. Every frame is queued at once, so a cycle
+// or an adapter poll waits behind them, as GLM's polls do
+// (docs/adapter-status.md: its longest gap, 1.70 s).
 - (void)sendGroup:(QLMSetupGroup *)group
-           blocks:(NSArray<QLMDSPBlock *> *)blocks
-          targets:(NSArray<QLMMonitorRecord *> *)targets
+           blocks:(NSDictionary<NSData *, QLMDSPBlock *> *)blocks
            finish:(void (^)(NSError *_Nullable error))finish {
     _applyFinish = finish;
+    BOOL switching = _activeGroup != nil;
+    _activeGroup = group;
 
+    // A monitor that is on and stays in the group must ack every frame. One
+    // told to prepare for standby, or woken from it, may miss them, as GLM's
+    // do (captures/group-switch-main-4x2-main-2x1, 12.577 s).
+    NSMutableSet<NSNumber *> *mustAck = [NSMutableSet setWithObject:@(QLMAddressAdapter)];
+    for (QLMMonitorRecord *monitor in _monitors) {
+        QLMSetupNode *node = nil;
+        for (QLMSetupNode *candidate in group.nodes) {
+            node = candidate.hardwareID != nil && [candidate.hardwareID isEqualToData:monitor.hardwareID] ? candidate : node;
+        }
+        if (monitor.isOn && (node == nil || node.on || !switching)) {
+            [mustAck addObject:@(monitor.session)];
+        }
+    }
     __block NSError *failure = nil;
-    QLMSendCompletion broadcast = ^(const QLMMessage *reply, NSError *error) {
-        if (error != nil && failure == nil) {
+    QLMSendCompletion check = ^(const QLMMessage *reply, NSError *error) {
+        if (failure != nil) {
+            return;
+        }
+        if (error != nil && !QLMSendWentOut(error)) {
             failure = QLMSystemErrorMake(QLMSystemErrorSendFailed, @"A frame of the apply failed.", error);
         }
     };
-    QLMSendCompletion acked = ^(const QLMMessage *reply, NSError *error) {
-        if ((reply == NULL || error != nil) && failure == nil) {
-            failure = QLMSystemErrorMake(QLMSystemErrorSendFailed, @"A monitor did not ack a frame of the apply.", error);
-        }
-    };
 
-    [self send:QLMCommandVolumeWord(QLMVolumeWordMin, QLMVolumeWordMax) then:broadcast];
-    [self send:QLMCommandDuck() then:broadcast];
-
-    [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:broadcast];
-    [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:broadcast];
-    [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:broadcast];
-
-    // GLM also sends each monitor 05 04 00, the test signal off. 05 is on
-    // the never-send list, so qlm skips it. GLM's 2B here is 04, unmuted; a
-    // monitor the user muted gets 03, so it stays muted.
-    for (NSUInteger i = 0; i < blocks.count; i++) {
-        uint8_t session = targets[i].session;
-        [self send:QLMCommandMute(session, [self muteValueFor:targets[i]]) then:acked];
-        for (NSData *routing in blocks[i].routingPayloads) {
-            [self send:QLMMessageMake(session, routing.bytes, routing.length) then:acked];
-        }
-    }
-
-    for (NSUInteger i = 0; i < blocks.count; i++) {
-        uint8_t session = targets[i].session;
-        [self send:QLMCommandKeepAlive() then:broadcast];
-        for (NSData *payload in blocks[i].payloads) {
-            [self send:QLMMessageMake(session, payload.bytes, payload.length) then:acked];
-        }
-    }
-
-    for (int i = 0; i < 5; i++) {
+    NSArray<QLMMonitorRecord *> *monitors = [_monitors copy];
+    NSArray<NSData *> *records;
+    if (switching) {
         _lastVolumeSend = [NSDate date];
-        [self send:[self volumeMessage] then:broadcast];
+        records = [[self sequenceFor:group] switchWithBlocks:blocks volume:[self volumeMessage]];
+    } else {
+        records = [self enumeration:monitors group:group blocks:blocks];
     }
-    for (QLMMonitorRecord *monitor in targets) {
-        [self send:QLMCommandMute(monitor.session, [self muteValueFor:monitor]) then:acked];
-        [self send:QLMCommandInputSync(monitor.session) then:acked];
+    for (QLMMonitorRecord *monitor in monitors) {
+        monitor.configured = YES;
+    }
+    for (NSData *record in records) {
+        QLMMessage message = QLMMessageFromRecord(record);
+        BOOL acked = [mustAck containsObject:@(message.address)];
+        [self send:message then:^(const QLMMessage *reply, NSError *error) {
+            check(reply, error);
+            if (acked && reply == NULL && failure == nil) {
+                failure = QLMSystemErrorMake(QLMSystemErrorSendFailed, @"A monitor did not ack a frame of the apply.", error);
+            }
+        }];
     }
     NSString *name = [group.name copy];
     [self afterSends:^{
+        if (!switching) {
+            for (QLMMonitorRecord *monitor in monitors) {
+                monitor.needsState = blocks[monitor.hardwareID] != nil || [self->_mutedIDs containsObject:monitor.hardwareID];
+            }
+        }
         [self finishApplyOfGroup:name error:failure];
     }];
 

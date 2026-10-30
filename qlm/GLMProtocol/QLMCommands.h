@@ -26,10 +26,13 @@ uint32_t QLMVolumeWordForDecibels(double decibels);
 double QLMVolumeDecibelsForWord(uint32_t word);
 
 // The values GLM sends on 2B: bit 0 is mute, bits 1 and 2 pick the LED color.
-// Mute all also sends the adapter, at QLMAddressReply, bit 0 alone.
+// A monitor outside the active group gets OutsideLead, then Outside. Mute all
+// also sends the adapter, at QLMAddressReply, bit 0 alone.
 enum {
     QLMMuteValueMuted = 0x03,
     QLMMuteValueUnmuted = 0x04,
+    QLMMuteValueOutsideLead = 0x05,
+    QLMMuteValueOutside = 0x07,
     QLMMuteValueAdapterMuted = 0x01,
     QLMMuteValueAdapterUnmuted = 0x00,
 };
