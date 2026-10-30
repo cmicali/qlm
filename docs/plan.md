@@ -1,22 +1,22 @@
 # qlm: the plan
 
-**Status: 2026-10-29. Phase 0's captures are in, and Phase 1 has begun. The USB report layer, a replay adapter, and golden tests over every captured frame are built. qlm itself has not touched real hardware. The HID adapter is next.**
+**Status: 2026-10-29. Phase 0's captures are in, and Phase 1's code is written. The HID adapter and `qlmctl info`, `discover`, and `poll` over it are built and tested without hardware. qlm itself has not touched real hardware. The first run on the adapter is next.**
 
 ## Where things stand
 
-Built, with 110 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 143 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
-- **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, and the USB report layer: packing an output report and assembling a reply across input reports.
-- **GLMAdapter:** the adapter protocol, a fake bus, a capture reader, and a replay adapter that answers as a capture did. **The adapter over HID is not written.**
-- **System:** discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Over a replay of `startup-idle`, it finds all six monitors with model, serial, firmware, temperature, and power state.
+- **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply.
+- **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and seizes it when IOKit allows. **It has not run on the adapter.**
+- **System:** the adapter's identity and status poll, discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Over a replay of `startup-idle`, it finds all six monitors with model, serial, firmware, temperature, and power state, and sends nothing GLM did not.
 - **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block.
-- **The app and `qlmctl`:** both run over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
+- **The app and `qlmctl`:** `qlmctl info`, `discover`, and `poll` drive the adapter over USB, or the fake bus with `--fake`, or a capture with `--replay`. They send only the adapter's status poll and identity queries, the probe, the leases, and the monitors' identity queries and polls. Everything else, and the app, runs over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
 - **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
 - **The captures:** every scenario in `captures/README.md`, 17 in all, xz-compressed, each with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep. The golden tests read every report in them.
 
 Next:
 
-- The HID adapter, then `qlmctl info`, `discover`, and `poll`.
+- The first run on the adapter: `qlmctl info`, then `discover`, then `poll`, with GLM quit. Compare each with `startup-idle`. It answers whether the adapter takes qlm as a host, and whether IOKit lets qlm seize the adapter.
 - The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 - Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So the encoder refuses a `7D` or `7E` address, and System's leases skip both, and `F0`, the adapter's multicast. The question cannot arise.
 - The volume builder's scale. GLM's levels use `0x7FFFFF`, not `2²³`, and the captures hold every 0.5 dB step ([adapter-status.md](adapter-status.md)).
@@ -25,6 +25,7 @@ Next:
 
 - **Reports.** Every output report is `80` plus the frame's length, the frame, and zeros. Every input report starts with `3F`. A reply spans two reports at most. No report carries more than one frame.
 - **One reply per request.** The adapter answers every probe and unicast with exactly one frame: the monitor's reply, or `01 7E` when none answered. genlc's guess is right. Broadcasts get no reply.
+- **The idle cycle.** About every 0.57 s, GLM sends the probe, then the volume, then one `08` to each monitor (`startup-idle`, from 10 s). It sends no `04` keep-alive while idle. `04` comes only in a DSP pass: the apply at launch, the one after a wake, and a group switch.
 - **The adapter itself is address `01`.** GLM polls it with `01 08` about every 110 ms, in pairs. It also sends it `19 01`, `22`, `39`, `51 82`, and `2B 00` or `2B 01` for mute-all. Its system info is 74 bytes, across two reports.
 - **The knob rides the adapter's reply to `01 08`.** The reply is `09`, a byte that is `33` without the mic and `32` with it, and then the fields. With the mic, `34` and two values tagged `DE` and `DD` follow. With the knob, `30 36 DF` and a signed 32-bit position in tenths of a dB follow: −1004 at the bottom, near 0 at the top. Without it, `31` follows. GLM turns each change into a volume frame (`knob-sweep`). Unplugging the knob drops the field (`volume-sweep`). [adapter-status.md](adapter-status.md) decodes the reply.
 - **Leases.** GLM counts session IDs up from `02` at each launch. A monitor that wakes from standby, or that joins a group from standby, loses its lease and gets the next ID. An 8351B in standby still answers probes, and GLM leases it again every 3 s. The 3-byte hardware ID maps one-to-one to the serial in every capture, so match monitors by hardware ID.
@@ -123,8 +124,8 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 Four layers. Each meets the next through values and blocks.
 
 1. **GLMProtocol (C, pure).** Framing, escaping, CRC, report packing and reassembly, command builders, and reply parsers: ack, hardware ID, telemetry TLVs, and ASCII strings. No I/O. Golden tests: every captured frame decodes and re-encodes byte for byte.
-2. **GLMAdapter.** `IOHIDManager` matches the adapter. `IOHIDDeviceSetDispatchQueue` delivers input reports to System's queue. It keeps one request in flight, with a timeout, and handles hot plug. Two stand-ins share its interface: a replay adapter that plays a capture, and a fake bus that simulates monitors, lease loss, and dropped replies.
-3. **System.** One serial queue owns the bus. It runs the lease registry (hardware ID to session ID) and the cycle GLM runs: volume, `04`, a `08` round, and `FE`, every 1.2 to 1.8 s. Between rounds, it polls the adapter with `01 08` about every 110 ms, for the knob. It coalesces volume to at most one frame per 50 ms. It tracks mute in software. It runs a group apply as one transaction. It publishes an immutable snapshot of the monitors after each change.
+2. **GLMAdapter.** An IOKit matching notification finds the adapter, and handles hot plug. `IOHIDDeviceSetDispatchQueue` delivers input reports to System's queue. A report link keeps one request in flight, with a timeout. The adapter is refused while GLM runs or another process holds it, and seized when IOKit allows. Two stand-ins share its interface: a replay adapter that plays a capture, and a fake bus that simulates monitors, lease loss, and dropped replies.
+3. **System.** One serial queue owns the bus. It runs the lease registry (hardware ID to session ID) and the cycle GLM runs: `FE`, the volume, and a `08` round, about every 0.57 s. Between rounds, it polls the adapter with `01 08` about every 110 ms, for the knob. It coalesces volume to at most one frame per 50 ms. It tracks mute in software. It runs a group apply as one transaction. It publishes an immutable snapshot of the monitors after each change.
 4. **Setups.** It reads `.sam` files into groups. It designs the biquads at each device's rate and checks that each filter is stable. It builds each monitor's DSP block as values. It reports every field it cannot carry, never dropping one silently. It watches the file and offers a re-import when GLM saves.
 
 The app reads snapshots on the main queue. Nothing in the UI touches GLMAdapter.
@@ -137,7 +138,7 @@ qlm/
 ├── docs/plan.md  docs/adapter-status.md
 ├── qlm/            all the code, one directory per layer
 │   ├── GLMProtocol/  C, no Apple dependency
-│   ├── GLMAdapter/   the adapter protocol, the fake bus, and the replay; HID to come
+│   ├── GLMAdapter/   the adapter protocol, HID, the fake bus, and the replay
 │   ├── Setups/       the setup file reader; filter design and the DSP block to come
 │   ├── System/       the engine and its snapshots
 │   ├── App/          the menu bar app: AppKit, Objective-C
