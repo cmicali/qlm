@@ -5,7 +5,7 @@ GLM polls the adapter with `01 08`. This is what the reply carries, and what it 
 ## Short answers
 
 1. **The fields.** The reply is `01 09`, then tag-value fields, then the CRC. The fields say whether the knob and the mic are plugged in, and carry the knob's position and two mic readings. There is no status field.
-2. **The knob.** The knob's position rides in tag `DF`, in tenths of a dB. GLM reads it on each poll and broadcasts the level itself as `FF 1F`. It rounds the knob to the nearest 0.5 dB.
+2. **The knob.** The knob's position rides in tag `DF`, in tenths of a dB. GLM reads it on each poll and broadcasts the level itself as `FF 1F`. It rounds the knob to the nearest 0.5 dB. It moves the level once the knob has moved more than a whole dB from the reading it last followed, then follows every change for about 2.5 s.
 3. **The host.** Nothing in the reply speaks of the host, and GLM sends no hello or goodbye. **Guess:** the adapter takes the host's steady polling as presence, and silence as its departure.
 4. **Unplugging the knob.** The knob's fields give way to one byte, `31`. As the plug comes out, the knob's reading jumps first, and GLM follows it.
 
@@ -91,12 +91,28 @@ GLM resends the level several times in every cycle, changed or not (`startup-idl
 
 ### What GLM does with the knob
 
-- **GLM ignores the knob's position when it opens.** It opens at its own level, `00 31 07` (−56.5 dB): in `startup-idle` with `DF` at −1004 (7.99 s), and in `startup-idle-mic` with −775 (7.99 s).
-- **At the knob's first move, GLM jumps to the knob's position.** In `knob-sweep` at 18.95 s, it went from −56.5 dB to −73.0 dB. In `startup-idle` at 38.48 s, it went from −56.5 dB to `00 00 08`. The jump can go up as far as 0 dB if the knob sits at the top. qlm's ceiling still clamps it.
-- **GLM ignores small jitter at rest.** In `sleep-wake-no-sleep`, `DF` wanders from −647 to −637 for 130 s. The level stays at `00 13 84` (−64.5 dB), though −637 rounds to −63.5 dB.
-- **But GLM follows a slow wander.** In `sleep-wake-darkwake`, `DF` ranges from −734 to −665 over 600 s, mostly a tenth at a time. GLM makes 37 level changes between −73.0 and −66.5 dB. The notes do not say whether anyone touched the knob. **Guess:** a larger move opens a window of a few seconds in which GLM follows every change. In `standby-wake`, GLM follows from 0.8 to 4.3 s and from 19.1 to 21.5 s, then ignores changes of the same size.
-- **Each knob-driven change brings a burst of `2B` frames,** to every monitor and as `01 2B 00` to address `01`. In `knob-sweep`, 168 of the 169 `01 2B` frames come within 150 ms of a `DF` change. The other comes as GLM opens (7.20 s). **Guess:** GLM refreshes the mute and LED state on every knob move.
-- **For qlm, a suggestion:** send a new level only when the rounded level changes, with a few tenths of hysteresis. Then jitter at rest sends no level and no `2B` burst.
+GLM opens at its own level, not the knob's: `00 31 07`, −56.5 dB. It did so with the knob at −1004 in `startup-idle`, and at −775 in `startup-idle-mic`.[^opens] From then on, it follows the knob by one rule. GLM keeps the last reading it followed. A reading more than a whole dB from it, 11 tenths or more, moves the level to that reading's nearest step, however slowly the knob got there. For about 2.5 s after, GLM follows every change, even a single tenth, and each further move of more than a whole dB starts the 2.5 s again. Outside that time, a change of a whole dB or less moves nothing. When GLM opens, the knob's first reading is where it rests. In `startup-idle`, a move of 6 tenths from the bottom moved nothing, and the next reading, 17 tenths up, did.[^first-move] The jump can go as high as 0 dB, if the knob sits at the top. qlm's ceiling still clamps it.
+
+The rule explains three captures that looked different. In `knob-sweep`, a turn moves the reading more than a whole dB a poll, again and again, so GLM follows every step. It jumps from −56.5 dB to −73.0 dB at the first one, at 18.95 s.[^sweep] In `sleep-wake-no-sleep`, `DF` wanders between −647 and −637 for 130 s, a span of a whole dB at most. The level stays at `00 13 84`, −64.5 dB, though −637 rounds to −63.5 dB.[^no-sleep] In `sleep-wake-darkwake`, `DF` creeps from −734 to −665 over 600 s, mostly a tenth at a time. GLM follows it in 2.5 s spells. Each starts when the reading has crept 11 tenths from the one GLM followed last. That makes 37 level changes between −73.0 and −66.5 dB.[^darkwake] The notes don't say whether anyone touched the knob.
+
+The 2.5 s is tight. A change 2.53 s after the move that started a spell still moved GLM, and from 2.55 s, none did.[^spell]
+
+Each change GLM follows brings a burst of `2B` frames, to every monitor and as `01 2B 00` to address `01`, even when the level stays. Changes it doesn't follow bring none.[^bursts] **Guess:** GLM refreshes the mute and LED state on every change it follows.
+
+A few things don't fit cleanly. Now and then, GLM's burst carries the level of the change before, and GLM catches up at its next change.[^lag] After a reconnect, GLM can be slow: in `unplug-proxy-hang`, it followed the knob's 55 dB move 0.7 s after the adapter came back.[^reconnect] And in `standby-wake`, which starts with the knob just plugged in, GLM sends a burst for a change of a single tenth, without moving its level. Nothing else in that capture breaks the rule.[^plugged]
+
+qlm follows the same rule ([protocol.md](protocol.md#volume-and-the-knob)).
+
+[^opens]: `startup-idle`, 7.99 s; `startup-idle-mic`, 7.99 s.
+[^first-move]: `startup-idle`: −998 at 38.48 s, then −987 at 38.59 s, from −1004. GLM's first level there is `00 00 08`, the level of the change before, as below.
+[^sweep]: `knob-sweep`, 18.95 to 20.17 s, and 26.5 to 30.5 s.
+[^no-sleep]: `sleep-wake-no-sleep`, the whole capture.
+[^darkwake]: `sleep-wake-darkwake`. Spells start at 26.33, 29.82, 37.33, and 53.99 s, among others. The capture starts with GLM already running, so the reading GLM last followed before it is inferred: −731, the only value that fits the first spell and GLM's −73.0 dB level.
+[^spell]: `sleep-wake-darkwake`, 132.02 s, followed, and 28.88 s, not.
+[^bursts]: `knob-sweep`, where 168 of the 169 `01 2B` frames come within 150 ms of a `DF` change, and the other as GLM opens (7.20 s); `sleep-wake-darkwake`, where the changes outside a spell bring none.
+[^lag]: `sleep-wake-darkwake`, 138.96 s, where GLM followed −665 but sent −67.5 dB, then −66.5 dB at 141.36 s. Also at 181.59, 196.11, and 461.49 s.
+[^reconnect]: `unplug-proxy-hang`, 106.24 and 106.94 s.
+[^plugged]: `standby-wake`, 0.98 s.
 
 ## How the adapter knows a host is present
 
@@ -135,7 +151,7 @@ GLM resends the level several times in every cycle, changed or not (`startup-idl
 
 ## Open
 
-- The rule GLM uses to tell a knob turn from jitter.
+- Why GLM's level sometimes lags a change it followed, and why a knob just plugged in brings a burst for a single tenth (`standby-wake`, 0.98 s). The rule itself is in [What GLM does with the knob](#what-glm-does-with-the-knob).
 - What `DE` and `DD` measure, and their scale. Nobody recorded GLM's displayed readings.
 - The adapter's host timeout, and which frames reset it: any report, or only `01 08`. The takeover happens on the monitor bus, which USB cannot see. The bus tap can.
 - Whether one poll per cycle holds the adapter as well as GLM's pairs.
