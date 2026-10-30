@@ -69,9 +69,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // on: its mute in the active group, and GLM's 05 and 07 outside it. Mute all
 // also re-sends the volume and sets the adapter's own mute, as GLM does. A
 // mute holds by hardware ID until the user lifts it or System stops, across
-// a lease that lapses. A muted monitor leased again, or one that was not
-// on, hears its state after its next poll that says on. No 2B System sends
-// unmutes it.
+// a lease that lapses, and for a monitor that first appears while all are
+// muted. A muted monitor leased again, or one that was not on, hears its
+// state after its next poll that says on. No 2B System sends unmutes it.
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
 

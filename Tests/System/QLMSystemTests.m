@@ -1361,6 +1361,49 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(sent, expected);
 }
 
+// Mute all holds for a monitor that first appears after it: it hears 2B 03
+// after its first poll, and every 2B after says muted, while the other
+// monitor's mute is lifted and set again.
+- (void)testMuteAllHoldsForAMonitorThatAppearsLater {
+    _settings.adapterPollInterval = 0.01;
+    [_bus perform:^{
+        self->_left.present = NO;
+    }];
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 1 && snapshot.allIdentified;
+    }];
+    [_system setVolumeDecibels:-30];
+    [_system setAllMuted:YES];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.allMuted && snapshot.idle;
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_left.present = YES;
+    }];
+    NSData *leftID = _left.hardwareID;
+    QLMSnapshot *joined = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *left = QLMFindMonitor(snapshot, leftID);
+        return left.identified && left.muted && snapshot.allMuted;
+    }];
+    uint8_t session = QLMFindMonitor(joined, leftID).session;
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle;
+    } after:^{
+        [self sendEveryMuteRound];
+    }];
+    NSArray<NSData *> *mutes = [self mutesFrom:before to:[NSIndexSet indexSetWithIndex:session]];
+    XCTAssertGreaterThan(mutes.count, 6u);
+    for (NSData *mute in mutes) {
+        XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
+    [_bus perform:^{
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+    }];
+}
+
 // A second apply while one runs is refused.
 - (void)testASecondApplyIsRefusedWhileOneRuns {
     _settings.cycleInterval = 10;

@@ -511,6 +511,10 @@ static QLMMessage QLMMessageFromRecord(NSData *record) {
         monitor.lastReply = [NSDate date];
         [self->_monitors addObject:monitor];
         self->_dirty = YES;
+        // Mute all holds for a monitor that first appears after it.
+        if (self->_adapterMuted) {
+            [self->_mutedIDs addObject:identity];
+        }
         // A monitor may come back unmuted, so a muted one hears its state
         // after its first poll, as GLM sends it. One that gets a block
         // hears it after the block instead.
