@@ -20,7 +20,7 @@ What the captures show, at a first look. Phase 1 verifies each against `reports.
 - **Volume** is broadcast `FF 1F` with a 3-byte linear level. `7F FF FF` is 0 dB, and −20 dB is `0C CC CC` (`quit-glm`). **Dim** is −20 dB on that level (`mute-dim`).
 - **Mute** is `2B`, sent to every monitor: `03` to a muted one, and `04` to the rest (`mute-dim`). **Standby** is broadcast `3A 03` (`standby-wake`).
 - **GLM re-addresses the monitors** on a group switch, a wake, and an unplug. A monitor's bus address is not stable, so System must match monitors by serial.
-- **The adapter speaks only when polled.** GLM polls it with `01 08` about 17 times a second. The calibration mic's readings ride in the reply (`startup-idle` against `startup-idle-mic`). The knob's position likely does too (`knob-sweep`). That reply is not decoded yet.
+- **The adapter speaks only when polled.** GLM polls it with `01 08` about 17 times a second. The reply carries the knob's position and the calibration mic's readings. GLM reads the knob from it and broadcasts the level itself. [adapter-status.md](adapter-status.md) decodes the reply.
 - **GLM sends nothing on quit.** It stops polling (`quit-glm`). What level the adapter then applies happens on the monitor bus only, so USB cannot show it. It needs a listening test or the bus tap.
 
 Waiting on Phase 1:
@@ -28,6 +28,7 @@ Waiting on Phase 1:
 - The USB report layer, the HID adapter, the replay adapter, and golden tests over every captured frame.
 - Three readings marked unverified in code: a monitor's delay taken from `Time-of-flight_Compensation` as milliseconds, the analog routing frame, and matching a setup node to a monitor by the bus serial's suffix.
 - Whether the address byte is escaped. The code sends it bare.
+- The volume builder's scale. GLM's levels use `0x7FFFFF`, not `2²³`, and the captures hold every 0.5 dB step ([adapter-status.md](adapter-status.md)).
 
 The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. The 8351B rate is unverified on the wire, so a group apply that includes one is refused.
 
@@ -64,15 +65,15 @@ While a host is connected, the adapter only bridges. The host runs discovery, ad
 | Find monitors | `FF FE` probe, `F0 02` lease, `09` ack; re-discover after 4 missed polls | High, both projects |
 | Identify | `19 01` serial; `39` model, firmware, hardware | Medium to high |
 | Status | `08` poll returns `41` TLVs: temperature, power state (`47`), device class (`84`), input and output meters | High for state and temperature; meter scale is approximate |
-| Volume | `FF 1F` + 24-bit linear gain, `floor(10^(dB/20) × 2²³)`; fire and forget, sent at once on change | High |
+| Volume | `FF 1F` + 24-bit linear gain, `floor(10^(dB/20) × 0x7FFFFF)` within one count ([adapter-status.md](adapter-status.md)); fire and forget, sent at once on change | High |
 | Dim | A plain volume frame 20 dB down; there is no dim command | High |
 | Mute | `2B` bitfield per monitor; bit 0 is mute, other bits drive the LED | High. Telemetry does not show mute, so the app tracks it. |
 | Power | `3A 03 02` ×2 then `3A 03 00` ×2 to sleep; `3A 03 7F` / `3A 03 01` ×3 to wake | High |
 | Group switch | duck, wake, routing pass, DSP pass (`17 01`, `10 02` delay, `10 01 00` level, `10 01 09`, `10 0E` PEQ ×20, `3B` crossover, `3D`, `40` routing), tail, restore | High for two-way monitors; medium for subwoofers (from captures, not measured); unknown for 83x1 and three-way models |
-| The knob, while a host owns the bus | **Unknown** | — |
-| How the adapter decides a host is present | **Unknown** | — |
+| The knob, while a host owns the bus | The adapter's reply to `01 08` carries it in tenths of a dB; GLM broadcasts the level ([adapter-status.md](adapter-status.md)) | High, from captures |
+| How the adapter decides a host is present | No signal on USB; likely the host's steady polling, with a timeout ([adapter-status.md](adapter-status.md)) | A guess; the timeout needs the bus tap |
 
-The 9310 knob plugs into the adapter's 3.5 mm jack. Standalone, the adapter reads it and broadcasts the volume itself. Nobody has published how its turns reach GLM when GLM is connected.
+The 9310 knob plugs into the adapter's 3.5 mm jack. Standalone, the adapter reads it and broadcasts the volume itself. The adapter's own knob reaches GLM in the reply to `01 08`.
 
 ### The setup file
 
@@ -99,7 +100,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Open, for you to decide
 
-1. **The knob.** Decided: no 9310. The adapter has its own optional volume knob. While it is attached, GLM locks its on-screen volume. Its path to the host is likely the adapter's reply to `01 08`.
+1. **The knob.** Decided: no 9310. The adapter has its own optional volume knob. While it is attached, GLM locks its on-screen volume. Its path to the host is the adapter's reply to `01 08` ([adapter-status.md](adapter-status.md)).
 2. **Capture machine.** Decided: a Raspberry Pi 5 inline between the Mac and the adapter. [captures/README.md](../captures/README.md) has the steps.
 
 ## Architecture
@@ -108,7 +109,7 @@ Four layers. Each meets the next through values and blocks.
 
 1. **GLMProtocol (C, pure).** Framing, escaping, CRC, report packing and reassembly, command builders, and reply parsers: ack, hardware ID, telemetry TLVs, and ASCII strings. No I/O. Golden tests: every captured frame decodes and re-encodes byte for byte.
 2. **GLMAdapter.** `IOHIDManager` matches the adapter. `IOHIDDeviceSetDispatchQueue` delivers input reports to System's queue. It keeps one request in flight, with a timeout, and handles hot plug. Two stand-ins share its interface: a replay adapter that plays a capture, and a fake bus that simulates monitors, lease loss, and dropped replies.
-3. **System.** One serial queue owns the bus. It runs the lease registry (hardware ID to session ID) and the cycle GLM runs: volume, `04`, a `08` round, and `FE`, every 1.2 to 1.8 s. It coalesces volume to at most one frame per 50 ms. It tracks mute in software. It runs a group apply as one transaction. It publishes an immutable snapshot of the monitors after each change.
+3. **System.** One serial queue owns the bus. It runs the lease registry (hardware ID to session ID) and the cycle GLM runs: volume, `04`, a `08` round, and `FE`, every 1.2 to 1.8 s. Between rounds, it polls the adapter with `01 08` about every 107 ms, for the knob. It coalesces volume to at most one frame per 50 ms. It tracks mute in software. It runs a group apply as one transaction. It publishes an immutable snapshot of the monitors after each change.
 4. **Setups.** It reads `.sam` files into groups. It designs the biquads at each device's rate and checks that each filter is stable. It builds each monitor's DSP block as values. It reports every field it cannot carry, never dropping one silently. It watches the file and offers a re-import when GLM saves.
 
 The app reads snapshots on the main queue. Nothing in the UI touches GLMAdapter.
@@ -118,7 +119,7 @@ The app reads snapshots on the main queue. Nothing in the UI touches GLMAdapter.
 ```
 qlm/
 ├── AGENTS.md  README.md  Makefile  Brewfile  project.yml
-├── docs/plan.md
+├── docs/plan.md  docs/adapter-status.md
 ├── qlm/            all the code, one directory per layer
 │   ├── GLMProtocol/  C, no Apple dependency
 │   ├── GLMAdapter/   the adapter protocol and the fake bus; HID and replay to come
@@ -141,6 +142,8 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 - **A group apply ducks first and restores after.** Expect a short silence, as with GLM.
 - **On a group switch, send only the bands that changed**, as GLM does. A full apply sends all of them.
 - **Volume changes go out at once**, out of cadence. State changes are sent twice.
+- **Poll the adapter with `01 08` about every 107 ms, and never pause longer than 1.7 s.** The reply is the knob's only path. GLM's polling is likely what tells the adapter a host is present.
+- **At connect, keep the app's own level. At the knob's first move, jump to the knob's position**, under the ceiling. After that, follow the knob, but not its jitter at rest. [adapter-status.md](adapter-status.md) has what GLM does.
 - **TRAP: when the app quits, sleeps, or loses USB, the adapter takes over with its own level about 2.6 s later.** If that level differs from the app's, the volume jumps. Phase 0 must find which level the adapter uses.
 
 ### The UI
@@ -229,7 +232,7 @@ One group switch must also decode to the sequence espgensam documents, for your 
 ### Phase 2: control from the CLI
 
 - Volume with the ceiling, dim, mute per monitor and for all, sleep and wake.
-- The knob, if Phase 0 found its path.
+- The knob, read from the adapter's reply to `01 08`.
 
 **Done when** each action's frames match GLM's captured frames byte for byte, apart from session IDs. The knob must move the volume through System in the CLI. Quitting the CLI must hand the bus back to the adapter without an unplanned level jump.
 

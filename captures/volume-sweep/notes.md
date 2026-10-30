@@ -9,8 +9,8 @@ Recorded 2026-10-29 through the Raspberry Pi 5 inline proxy (usb-proxy with `too
 | Seconds | What happened |
 | --- | --- |
 | 0 | Capture started, 21:18:48 EDT. |
-| 25.1 to 25.4 | The adapter's reply to `01 08` changes, then drops a field. This is likely the knob being unplugged. |
-| 25.2 to 28.4 | Volume dragged from its level (`00 31 07`) to the bottom (`00 00 08`). |
+| 25.1 to 25.4 | The knob unplugged. Its reading in the adapter's reply to `01 08` jumps, then drops out. GLM follows the jump, from `00 31 07` to `00 00 6F`. [adapter-status.md](../../docs/adapter-status.md) has the detail. |
+| 28.0 to 28.4 | Volume dragged from `00 00 6F` to the bottom (`00 00 08`). |
 | 28.4 to 34.1 | Dragged to the top (`7F FF FF`). |
 | 34.1 to 39.2 | Dragged back to the bottom. |
 | 71.8 | Capture stopped, 21:20:00 EDT. The volume was left at the bottom. |

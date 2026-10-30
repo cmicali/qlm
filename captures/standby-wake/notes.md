@@ -9,7 +9,7 @@ The whole system was put in standby from GLM. After about ten seconds it was wok
 | Seconds | What happened |
 | --- | --- |
 | 0 | Capture started, 21:21:19 EDT. |
-| 1.0 to 4.3, 19.6, 25.5 | Bursts of `2B` mute state to every monitor. The cause is not known. Perhaps GLM reacting to the knob. |
+| 1.0 to 4.3, 19.6, 25.5 | Bursts of `2B` mute state to every monitor. Each follows a change in the knob's reading. [adapter-status.md](../../docs/adapter-status.md) has the detail. |
 | 34.9 | Standby: broadcast `3A 03 02`, then `3A 03 00`. |
 | 37.4, 40.2, 43.1 | One `02 11` probe every 3 s during standby. |
 | 46.0 to 49.1 | Wake: a full re-init burst (`39`, `FF 04`, `3B`, `40`, `17`, and more). |
