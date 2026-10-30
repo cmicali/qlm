@@ -98,14 +98,26 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 // Waits for the work started so far, with time still. NO if it is not done
 // within a generous deadline, which only a hang would reach.
 - (BOOL)settle;
+// Runs the next timer due, with now at its time, and waits for the work it
+// starts. NO when no timer is pending.
+- (BOOL)advanceToNext;
+// Moves now on by `seconds` with no timer run, as when the queues stall.
+// Then each timer that came due runs once, in order, as GCD runs a missed
+// timer once when its queue frees up. A repeating one keeps its beat.
+- (void)stallFor:(NSTimeInterval)seconds;
 
 @end
 
 @interface XCTestCase (QLMAdapter)
 
-// Sends on the adapter's queue and waits for the handler, failing the test
-// if it never comes. Returns whether a monitor answered.
-- (BOOL)qlm_send:(QLMMessage)message to:(id<QLMAdapter>)adapter queue:(dispatch_queue_t)queue reply:(nullable QLMMessage *)reply
+// Sends on the adapter's queue, then moves the clock one timer at a time
+// until the handler comes, so the test's next step comes at that moment.
+// Fails the test if it never comes. Returns whether a monitor answered.
+- (BOOL)qlm_send:(QLMMessage)message
+              to:(id<QLMAdapter>)adapter
+           queue:(dispatch_queue_t)queue
+           clock:(QLMVirtualClock *)clock
+           reply:(nullable QLMMessage *)reply
            error:(NSError **)error;
 
 @end

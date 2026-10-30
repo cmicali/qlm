@@ -164,12 +164,16 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
 
 @implementation XCTestCase (QLMAdapter)
 
-- (BOOL)qlm_send:(QLMMessage)message to:(id<QLMAdapter>)adapter queue:(dispatch_queue_t)queue reply:(QLMMessage *)reply
+- (BOOL)qlm_send:(QLMMessage)message
+              to:(id<QLMAdapter>)adapter
+           queue:(dispatch_queue_t)queue
+           clock:(QLMVirtualClock *)clock
+           reply:(QLMMessage *)reply
            error:(NSError **)error {
-    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    __block BOOL finished = NO;
     __block BOOL answered = NO;
     __block NSError *failure = nil;
-    dispatch_async(queue, ^{
+    [clock async:queue run:^{
         [adapter sendMessage:message replyHandler:^(const QLMMessage *received, NSError *sendError) {
             if (received != NULL) {
                 answered = YES;
@@ -178,10 +182,13 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
                 }
             }
             failure = sendError;
-            dispatch_semaphore_signal(done);
+            finished = YES;
         }];
-    });
-    XCTAssertEqual(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)), 0);
+    }];
+    [clock settle];
+    while (!finished && [clock advanceToNext]) {
+    }
+    XCTAssertTrue(finished);
     if (error != NULL) {
         *error = failure;
     }
@@ -312,6 +319,12 @@ QLMSetup *QLMReadFixtureSetup(void) {
     return dispatch_group_wait(_group, dispatch_time(DISPATCH_TIME_NOW, 30 * (int64_t)NSEC_PER_SEC)) == 0;
 }
 
+- (void)settleOrRaise {
+    if (![self settle]) {
+        [NSException raise:NSInternalInconsistencyException format:@"the clock's work did not settle"];
+    }
+}
+
 // The next timer due by `limit`, taken off or moved on, with now at its time.
 - (nullable QLMVirtualTimer *)takeDueBy:(NSTimeInterval)limit {
     @synchronized(self) {
@@ -338,12 +351,63 @@ QLMSetup *QLMReadFixtureSetup(void) {
     }
 }
 
+- (BOOL)advanceToNext {
+    [self settleOrRaise];
+    QLMVirtualTimer *timer = [self takeDueBy:INFINITY];
+    if (timer == nil) {
+        return NO;
+    }
+    dispatch_group_async(_group, timer.queue, ^{
+        if (!timer.cancelled) {
+            timer.block();
+        }
+    });
+    [self settleOrRaise];
+    return YES;
+}
+
+- (void)stallFor:(NSTimeInterval)seconds {
+    [self settleOrRaise];
+    NSArray<QLMVirtualTimer *> *due;
+    @synchronized(self) {
+        _now += seconds;
+        NSPredicate *isDue = [NSPredicate predicateWithBlock:^BOOL(QLMVirtualTimer *timer, NSDictionary *bindings) {
+            return !timer.cancelled && timer.due <= self->_now;
+        }];
+        due = [[_timers filteredArrayUsingPredicate:isDue]
+            sortedArrayUsingComparator:^NSComparisonResult(QLMVirtualTimer *a, QLMVirtualTimer *b) {
+                if (a.due != b.due) {
+                    return a.due < b.due ? NSOrderedAscending : NSOrderedDescending;
+                }
+                return a.order < b.order ? NSOrderedAscending : NSOrderedDescending;
+            }];
+        for (QLMVirtualTimer *timer in due) {
+            if (timer.period > 0) {
+                while (timer.due <= _now) {
+                    timer.due += timer.period;
+                }
+                timer.order = _order++;
+            } else {
+                [_timers removeObject:timer];
+            }
+        }
+    }
+    for (QLMVirtualTimer *timer in due) {
+        dispatch_group_async(_group, timer.queue, ^{
+            if (!timer.cancelled) {
+                timer.block();
+            }
+        });
+        [self settleOrRaise];
+    }
+}
+
 - (void)advanceBy:(NSTimeInterval)seconds {
     NSTimeInterval limit;
     @synchronized(self) {
         limit = _now + seconds;
     }
-    NSAssert([self settle], @"work did not settle");
+    [self settleOrRaise];
     QLMVirtualTimer *timer = nil;
     while ((timer = [self takeDueBy:limit]) != nil) {
         QLMVirtualTimer *fired = timer;
@@ -352,7 +416,7 @@ QLMSetup *QLMReadFixtureSetup(void) {
                 fired.block();
             }
         });
-        NSAssert([self settle], @"work did not settle");
+        [self settleOrRaise];
     }
     @synchronized(self) {
         _now = MAX(_now, limit);
