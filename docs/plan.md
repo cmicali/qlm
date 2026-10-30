@@ -4,7 +4,7 @@
 
 ## Where things stand
 
-Built, with 105 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 110 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
 - **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, and the USB report layer: packing an output report and assembling a reply across input reports.
 - **GLMAdapter:** the adapter protocol, a fake bus, a capture reader, and a replay adapter that answers as a capture did. **The adapter over HID is not written.**
@@ -17,7 +17,7 @@ Built, with 105 tests, every protocol fact named by its section of hlm's spec or
 Next:
 
 - The HID adapter, then `qlmctl info`, `discover`, and `poll`.
-- Three readings marked unverified in code: a monitor's delay taken from `Time-of-flight_Compensation` as milliseconds, the analog routing frame, and matching a setup node to a monitor by the bus serial's suffix.
+- The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 - Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So the encoder refuses a `7D` or `7E` address, and System's leases skip both, and `F0`, the adapter's multicast. The question cannot arise.
 
 ### What the captures showed
@@ -27,6 +27,9 @@ Next:
 - **The adapter itself is address `01`.** GLM polls it with `01 08` about every 110 ms, in pairs. It also sends it `19 01`, `22`, `39`, `51 82`, and `2B 00` or `2B 01` for mute-all. Its system info is 74 bytes, across two reports.
 - **The knob rides the adapter's reply to `01 08`.** The reply is `09`, a byte that is `33` without the mic and `32` with it, and then the fields. With the mic, `34` and two values tagged `DE` and `DD` follow. With the knob, `30 36 DF` and a signed 32-bit position in tenths of a dB follow: −1004 at the bottom, near 0 at the top. Without it, `31` follows. GLM turns each change into a volume frame (`knob-sweep`). Unplugging the knob drops the field (`volume-sweep`).
 - **Leases.** GLM counts session IDs up from `02` at each launch. A monitor that wakes from standby, or that joins a group from standby, loses its lease and gets the next ID. An 8351B in standby still answers probes, and GLM leases it again every 3 s. The 3-byte hardware ID maps one-to-one to the serial in every capture, so match monitors by hardware ID.
+- **A setup node's `Serial` is its monitor's hardware ID**: the three bytes of its discovery reply and its `F0 02` lease, read big-endian, in decimal (`startup-idle`). The serial from `19 01` does not end in it. The setup reader decodes it, and System matches nodes to monitors by it.
+- **A monitor's delay is `Time-of-flight_Compensation` in milliseconds**, at 48 kHz: 6 is 288 samples, and 1.23 is 59 (`group-switch-main-2x1-main-4x2`). A subwoofer's is its phase at the crossover, rounded (the same capture, and `startup-idle`).
+- **Inputs 1 to 3 route as AES3**, `40 00 02 00` and the channel (`group-switch-main-2x1-main-4x2`).
 - **Telemetry.** Real replies carry tags the spec does not list: `49` (one byte, counting up with each reply), and `82`, `88`, `89`, and `8A` (two bytes). The 8351B sends `82`, `88`, and `89`. A poll often gets a bare `09`. About 20 replies in 17,000 lack the leading `41` and temperature.
 - **Serials** are 14 or 15 characters.
 - **Opcodes GLM sends that qlm refuses:** `05 04 …` (generator stop) to every monitor in a group apply, `3C`, `3E`, and `42` to subwoofers, `43 00 02` and `4B 00 00 00 01` to the 8351B, broadcast `2D 00`, and `22` and `51 82` to the adapter. The golden tests pin this set.

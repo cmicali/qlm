@@ -563,15 +563,24 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     return [self groupNamed:@"Mains" from:source nodes:@[source.nodes[0], source.nodes[2]]];
 }
 
-// Two 8330A whose bus serials end in the fixture's 1000005 and 1000004.
-- (void)useMainsMonitors {
-    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
-    const uint8_t rightID[3] = {0x44, 0x55, 0x66};
-    _left = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:leftID length:3] serialNumber:@"8330apm21000005"
-                                            systemInfo:@"c-1;model-8330A" deviceClass:QLMTelemetryClassTwoWay];
-    _right = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:rightID length:3] serialNumber:@"8330apm21000004"
-                                             systemInfo:@"c-1;model-8330A" deviceClass:QLMTelemetryClassTwoWay];
+// Two 8330A, with these hardware IDs and 19 01 serials.
+- (void)useMainsMonitorsWithLeftID:(NSData *)leftID
+                        leftSerial:(NSString *)leftSerial
+                           rightID:(NSData *)rightID
+                       rightSerial:(NSString *)rightSerial {
+    _left = [[QLMFakeMonitor alloc] initWithHardwareID:leftID serialNumber:leftSerial systemInfo:@"c-1;model-8330A"
+                                           deviceClass:QLMTelemetryClassTwoWay];
+    _right = [[QLMFakeMonitor alloc] initWithHardwareID:rightID serialNumber:rightSerial systemInfo:@"c-1;model-8330A"
+                                            deviceClass:QLMTelemetryClassTwoWay];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
+}
+
+// Two 8330A whose hardware IDs are the fixture's 1000005 and 1000004.
+- (void)useMainsMonitors {
+    const uint8_t leftID[3] = {0x0F, 0x42, 0x45};
+    const uint8_t rightID[3] = {0x0F, 0x42, 0x44};
+    [self useMainsMonitorsWithLeftID:QLMBytes(leftID, 3) leftSerial:@"8330AP21001234"
+                             rightID:QLMBytes(rightID, 3) rightSerial:@"8330AP21005678"];
 }
 
 - (NSError *)applyGroup:(QLMSetupGroup *)group {
@@ -605,10 +614,15 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     XCTAssertNil(_system.snapshot.activeGroupName);
 }
 
-// The plan's matching rule: a node matches the monitor whose serial ends in
-// the node's. These monitors' serials match neither node.
+// A node matches the monitor whose hardware ID is the node's Serial. These
+// monitors' 19 01 serials end in the nodes' Serials, but their IDs match
+// neither node.
 - (void)testApplyRefusesANodeWithNoMonitor {
     _settings.cycleInterval = 10;
+    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
+    const uint8_t rightID[3] = {0x44, 0x55, 0x66};
+    [self useMainsMonitorsWithLeftID:QLMBytes(leftID, 3) leftSerial:@"8330AP21000005"
+                             rightID:QLMBytes(rightID, 3) rightSerial:@"8330AP21000004"];
     [self startSystem];
     [self waitForDiscovery];
     [_system setVolumeDecibels:-30];

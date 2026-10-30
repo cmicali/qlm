@@ -17,6 +17,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) NSString *className;
 @property (nonatomic, readwrite) QLMSetupNodeClass nodeClass;
 @property (nonatomic, readwrite) NSString *serial;
+@property (nonatomic, readwrite, nullable) NSData *hardwareID;
 @property (nonatomic, readwrite) BOOL on;
 @property (nonatomic, readwrite) double levelSensitivity;
 @property (nonatomic, readwrite) double calibrationLevel;

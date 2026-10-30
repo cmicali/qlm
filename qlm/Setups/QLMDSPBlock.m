@@ -94,7 +94,7 @@ static QLMBiquad QLMDesign(QLMSetupBand *band) {
     }
 
     // Delay. A subwoofer's is its AutoPhase angle as a delay at the crossover.
-    // A monitor's comes from Time-of-flight_Compensation, taken as milliseconds.
+    // A monitor's is Time-of-flight_Compensation, in milliseconds.
     uint32_t delay;
     if (node.nodeClass == QLMSetupNodeClassSubwoofer) {
         double phase = fmod(fmod(node.phaseDegrees.doubleValue, 360) + 360, 360);
@@ -102,9 +102,6 @@ static QLMBiquad QLMDesign(QLMSetupBand *band) {
         delay = crossover > 0 ? (uint32_t)round(phase / 360 / crossover * QLMDelayRate) : 0;
     } else {
         delay = (uint32_t)round(node.timeOfFlightCompensation / 1000 * QLMDelayRate);
-        if (delay != 0) {
-            [warnings addObject:@"the delay takes Time-of-flight_Compensation as milliseconds, unverified"];
-        }
     }
 
     // Routing. The setup's Input: 1 AES3 A, 2 AES3 B, 3 AES3 A+B, 4 analog.

@@ -609,7 +609,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     NSMutableArray<QLMMonitorRecord *> *matched = [NSMutableArray arrayWithCapacity:blocks.count];
     for (QLMDSPBlock *block in blocks) {
-        QLMMonitorRecord *monitor = [self monitorForNodeSerial:block.node.serial];
+        NSData *hardwareID = block.node.hardwareID;
+        QLMMonitorRecord *monitor = hardwareID != nil ? [self monitorWithHardwareID:hardwareID] : nil;
         if (monitor == nil || [matched containsObject:monitor]) {
             NSString *description = [NSString stringWithFormat:@"Node %@ matches no single leased monitor.", block.node.serial];
             *error = QLMSystemErrorMake(QLMSystemErrorUnknownMonitor, description, nil);
@@ -623,25 +624,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     *targets = matched;
     return blocks;
-}
-
-// TRAP: unverified. The setup file's Serial is digits, and the bus gives an
-// ASCII serial with a model prefix. They are taken to match when the bus's
-// ends with the file's. A capture will settle it. Two matches is no match.
-- (nullable QLMMonitorRecord *)monitorForNodeSerial:(NSString *)serial {
-    if (serial.length == 0) {
-        return nil;
-    }
-    QLMMonitorRecord *found = nil;
-    for (QLMMonitorRecord *monitor in _monitors) {
-        if ([monitor.serialNumber hasSuffix:serial]) {
-            if (found != nil) {
-                return nil;
-            }
-            found = monitor;
-        }
-    }
-    return found;
 }
 
 // GLM's apply: duck, wake, unmute and route, the blocks, then restore. Every
