@@ -54,7 +54,7 @@ These rules protect the monitors and the listener. They outrank any feature.
 - `vibe-libs/` is the [vibe-libs](https://github.com/cmicali/vibe-libs) submodule. Read `vibe-libs/AGENTS.md`, and the `AGENTS.md` of every piece you touch, before changing one.
 - **A change to a piece lands in vibe-libs first.** Then qlm bumps the submodule.
 - **The app and the tests take one piece, `dev/DebugChannel`.** A target takes a piece by listing its template under `templates:` in `project.yml`, with `templateAttributes: {excludedPlatform: iOS}`.
-- **The debug channel ships in no Release build.** Its code compiles only under `#if DEBUG`, and every caller in the app sits under it too. `make check-release` checks the Release app, and CI runs it. `.claude/skills/app-hardware-run` drives a Debug build through it on the real monitors.
+- **The debug channel ships in no Release build.** Its code compiles only under `#if DEBUG`, and every caller in the app sits under it too. `make check-release` checks the Release app. Run it after `make test` and `make build`. `.claude/skills/app-hardware-run` drives a Debug build through it on the real monitors.
 - **The protocol stays in qlm.** No other app needs it.
 - vibe-libs serves another app, which is closed source. **Never name it here.**
 

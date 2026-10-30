@@ -209,7 +209,7 @@ Nothing else applies: no decoding, playback, tags, or waveforms.
 
 **The app takes one piece so far, `dev/DebugChannel`, and the tests take it too.** `project.yml` includes `vibe-libs/vibe-libs.yml`, sets `VIBE_LIBS_ROOT`, and lists the piece under each target's `templates:`. The pin moved from `23cf330` to `9fab6e0` for it. The rest of the app still runs on Apple's frameworks.
 
-The channel lets a script drive a running Debug build: `qlm debug <verb>` reads the snapshot, or moves the slider, a Settings value, a mute, dim, power, Quit GLM, or Quit. Each verb is the app's own action, so the ceiling, the allowlist, and the GLM check hold. The skill in `.claude/skills/app-hardware-run` runs a supervised test on the monitors with it, one step at a time, and logs each step's time for the capture's `notes.md`. A Release build has none of it, and `make check-release` checks the Release app in CI.
+The channel lets a script drive a running Debug build: `qlm debug <verb>` reads the snapshot, or moves the slider, a Settings value, a mute, dim, power, Quit GLM, or Quit. Each verb is the app's own action, so the ceiling, the allowlist, and the GLM check hold. The skill in `.claude/skills/app-hardware-run` runs a supervised test on the monitors with it, one step at a time, and logs each step's time for the capture's `notes.md`. A Release build has none of it, and `make check-release` checks the Release app.
 
 **The protocol stays in this app.** No other app needs it, so by vibe-libs's own rule it is not a candidate.
 
