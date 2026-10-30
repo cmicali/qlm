@@ -5,6 +5,8 @@
 #include <sysexits.h>
 
 #import "QLMCapture.h"
+#include "QLMCommands.h"
+#import "QLMControl.h"
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
 #include "QLMFrame.h"
@@ -14,34 +16,54 @@
 #import "QLMSystem.h"
 
 static void QLMPrintUsage(FILE *stream) {
-    fputs("usage: qlmctl <command> [options]\n"
-          "\n"
-          "  info [BUS]                     print the adapter's identity and its knob\n"
-          "  discover [BUS] [--setup FILE.sam] [--seconds N]\n"
-          "                                 list every monitor once all are identified, or after N seconds,\n"
-          "                                 named from the setup file by hardware ID\n"
-          "  poll [BUS] [--seconds N]       print each monitor's telemetry as it arrives, for N seconds\n"
-          "  volume <dB> --fake             set the volume, capped at the ceiling\n"
-          "  mute <on|off> [--serial TEXT] --fake\n"
-          "                                 mute every monitor, or the one whose serial contains TEXT\n"
-          "  dim <on|off> --fake            dim the volume\n"
-          "  sleep --fake                   put every monitor in standby\n"
-          "  wake --fake                    wake every monitor\n"
-          "  setup <file.sam> [--bands]     print a GLM 5 setup file\n"
-          "  apply-group <file.sam> <group> --dry-run | --fake\n"
-          "                                 print each monitor's DSP block frames, or apply the group\n"
-          "\n"
-          "BUS picks what info, discover, and poll drive:\n"
-          "  (none)                         the GLM adapter over USB, opened only seized. Refused while GLM\n"
-          "                                 runs, while another process holds the adapter, or when qlm cannot\n"
-          "                                 seize it. Sends only the adapter's status poll and identity\n"
-          "                                 queries, and, but for info, the probe, the leases, and the\n"
-          "                                 monitors' identity queries and polls.\n"
-          "  --fake                         a simulated bus of two monitors\n"
-          "  --replay FILE                  a capture's reports.txt, answering as the adapter did\n"
-          "\n"
-          "The other bus commands run only with --fake until their frames are checked on the monitors.\n",
-          stream);
+    fprintf(stream,
+            "usage: qlmctl <command> [options]\n"
+            "\n"
+            "  info [BUS]                     print the adapter's identity and its knob\n"
+            "  discover [BUS] [--setup FILE.sam] [--seconds N]\n"
+            "                                 list every monitor once all are identified, or after N seconds,\n"
+            "                                 named from the setup file by hardware ID\n"
+            "  poll [BUS] [--seconds N]       print each monitor's telemetry as it arrives, for N seconds\n"
+            "  volume <dB> [BUS] [CONTROL] [--ceiling dB [--allow-high-ceiling]]\n"
+            "                                 set the volume, at or below the ceiling\n"
+            "  mute <on|off> [BUS] [CONTROL] [--serial TEXT]\n"
+            "                                 mute every monitor, or the one whose serial contains TEXT\n"
+            "  dim <on|off> [BUS] [CONTROL] [--volume dB] [--ceiling dB [--allow-high-ceiling]]\n"
+            "                                 dim the volume by %.0f dB, or restore it\n"
+            "  sleep [BUS] [CONTROL]          put every monitor in standby\n"
+            "  wake [BUS] [CONTROL]           wake every monitor\n"
+            "  setup <file.sam> [--bands]     print a GLM 5 setup file\n"
+            "  apply-group <file.sam> <group> --dry-run | --fake\n"
+            "                                 print each monitor's DSP block frames, or apply the group\n"
+            "\n"
+            "BUS picks what a command drives:\n"
+            "  (none)                         the GLM adapter over USB, opened only seized. Refused, with exit 69,\n"
+            "                                 while GLM runs, while another process holds the adapter, or when qlm\n"
+            "                                 cannot seize it. info, discover, and poll send only the adapter's\n"
+            "                                 status poll and identity queries, and, but for info, the probe, the\n"
+            "                                 leases, and the monitors' identity queries and polls.\n"
+            "  --fake                         a simulated bus of two monitors\n"
+            "  --replay FILE                  a capture's reports.txt, answering as the adapter did\n"
+            "\n"
+            "CONTROL, for volume, mute, dim, sleep, and wake:\n"
+            "  --dry-run                      discover as discover does, then print every frame the command would\n"
+            "                                 send. Nothing more is sent.\n"
+            "  --seconds N                    stay the host for N seconds after the change shows. The volume goes\n"
+            "                                 out again every cycle.\n"
+            "\n"
+            "The controls over USB:\n"
+            "  - volume and dim need --ceiling. GLMProtocol caps every volume frame at it. It may be at most\n"
+            "    %.0f dB, or 0 dB with --allow-high-ceiling. The volume may not be above it.\n"
+            "  - dim needs --volume, the level to dim from. qlm cannot read the level.\n"
+            "  - One monitor first. mute --serial changes one monitor. As GLM does, it also restates every other\n"
+            "    monitor as unmuted. volume, dim, sleep, and wake are broadcasts, and every monitor obeys them.\n"
+            "    To try one on a single monitor, put the others in standby in GLM, then quit GLM. wake wakes\n"
+            "    them all, so try it last.\n"
+            "  - About 2.6 s after qlmctl exits, the adapter takes over with its own level, likely the knob's\n"
+            "    position. That level is not yet measured, so turn the knob down first.\n"
+            "\n"
+            "apply-group runs only with --dry-run or --fake until its frames are checked on the monitors.\n",
+            QLMDimDecibels, QLMCeilingLimit);
 }
 
 static BOOL QLMHasFlag(int argc, const char *argv[], const char *flag) {
@@ -76,64 +98,29 @@ static const NSTimeInterval QLMDiscoveryTimeout = 5;
 // Long enough for the power state to come back in the next poll.
 static const NSTimeInterval QLMEffectTimeout = 5;
 
-// The adapter the options name, handed to System. Only info, discover, and
-// poll may drive the GLM adapter over USB.
-static QLMSystem *_Nullable QLMMakeSystem(int argc, const char *argv[], BOOL overUSB, QLMSystemSettings *settings) {
+// The bus a command names, handed to System: the GLM adapter over USB unless
+// --fake or --replay.
+static QLMSystem *_Nullable QLMMakeSystemOn(BOOL fake, NSString *_Nullable replay, QLMSystemSettings *settings) {
     id<QLMAdapter> adapter = nil;
-    const char *replay = QLMOptionValue(argc, argv, "--replay");
-    if (QLMHasFlag(argc, argv, "--fake")) {
+    if (fake) {
         adapter = [QLMFakeBus demoBusWithSubwoofer:NO];
-    } else if (replay != NULL) {
+    } else if (replay != nil) {
         NSError *error = nil;
-        QLMCapture *capture = [QLMCapture captureWithContentsOfFile:@(replay) error:&error];
+        QLMCapture *capture = [QLMCapture captureWithContentsOfFile:replay error:&error];
         if (capture == nil) {
-            fprintf(stderr, "qlmctl: %s: %s\n", replay, error.localizedDescription.UTF8String);
+            fprintf(stderr, "qlmctl: %s: %s\n", replay.UTF8String, error.localizedDescription.UTF8String);
             return nil;
         }
         adapter = [[QLMReplayAdapter alloc] initWithCapture:capture];
-    } else if (overUSB) {
-        adapter = [[QLMHIDAdapter alloc] init];
     } else {
-        fputs("qlmctl: this command runs only with --fake until its frames are checked on the monitors\n", stderr);
-        return nil;
+        adapter = [[QLMHIDAdapter alloc] init];
     }
     return [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
 }
 
-typedef BOOL (^QLMSnapshotTest)(QLMSnapshot *snapshot);
-
-// The first snapshot that passes, or nil after the timeout.
-static QLMSnapshot *_Nullable QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSnapshotTest test) {
-    dispatch_semaphore_t passed = dispatch_semaphore_create(0);
-    dispatch_queue_t queue = dispatch_queue_create("qlmctl.wait", DISPATCH_QUEUE_SERIAL);
-    __block QLMSnapshot *result = nil;
-    [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
-        if (result == nil && test(snapshot)) {
-            result = snapshot;
-            dispatch_semaphore_signal(passed);
-        }
-    } queue:queue];
-    dispatch_semaphore_wait(passed, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * (double)NSEC_PER_SEC)));
-    [system setSnapshotHandler:nil queue:queue];
-    __block QLMSnapshot *found = nil;
-    dispatch_sync(queue, ^{
-        found = result;
-    });
-    return found;
-}
-
-// TRAP: the snapshot replayed when a handler is installed may predate an
-// action just taken, and a no-op can leave it already passing. This test
-// skips it, so only a snapshot published after the action counts.
-static QLMSnapshotTest QLMAfterReplay(QLMSnapshotTest test) {
-    __block BOOL replayed = NO;
-    return ^BOOL(QLMSnapshot *snapshot) {
-        if (!replayed) {
-            replayed = YES;
-            return NO;
-        }
-        return test(snapshot);
-    };
+static QLMSystem *_Nullable QLMMakeSystem(int argc, const char *argv[], QLMSystemSettings *settings) {
+    const char *replay = QLMOptionValue(argc, argv, "--replay");
+    return QLMMakeSystemOn(QLMHasFlag(argc, argv, "--fake"), replay != NULL ? @(replay) : nil, settings);
 }
 
 // Prints why nothing reached the bus, if so. A busy adapter sent nothing.
@@ -186,7 +173,7 @@ static void QLMPrintKnob(QLMAdapterState *adapter) {
 static int QLMInfo(int argc, const char *argv[]) {
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.discoversMonitors = NO;
-    QLMSystem *system = QLMMakeSystem(argc, argv, YES, settings);
+    QLMSystem *system = QLMMakeSystem(argc, argv, settings);
     if (system == nil) {
         return EX_UNAVAILABLE;
     }
@@ -214,7 +201,11 @@ static int QLMInfo(int argc, const char *argv[]) {
     return 0;
 }
 
-static void QLMPrintMonitors(QLMSnapshot *snapshot, QLMSetup *_Nullable setup) {
+// The adapter, then every monitor, named from the setup file by hardware ID.
+static void QLMPrintDiscovered(QLMSnapshot *snapshot, QLMSetup *_Nullable setup) {
+    QLMAdapterState *adapter = snapshot.adapter;
+    printf("adapter  %s %s, serial %s, through %s\n", adapter.model.UTF8String ?: "?", adapter.firmwareVersion.UTF8String ?: "?",
+           adapter.serialNumber.UTF8String ?: "?", adapter.device.UTF8String);
     printf("session  id        model    serial           firmware      class      status   temp  name\n");
     for (QLMMonitorState *monitor in snapshot.monitors) {
         QLMSetupDevice *device = [setup deviceWithHardwareID:monitor.hardwareID];
@@ -238,7 +229,7 @@ static int QLMDiscover(int argc, const char *argv[]) {
             return EX_DATAERR;
         }
     }
-    QLMSystem *system = QLMMakeSystem(argc, argv, YES, [[QLMSystemSettings alloc] init]);
+    QLMSystem *system = QLMMakeSystem(argc, argv, [[QLMSystemSettings alloc] init]);
     if (system == nil) {
         return EX_UNAVAILABLE;
     }
@@ -262,15 +253,12 @@ static int QLMDiscover(int argc, const char *argv[]) {
         fputs("qlmctl: no monitor answered\n", stderr);
         return EX_UNAVAILABLE;
     }
-    QLMAdapterState *adapter = result.adapter;
-    printf("adapter  %s %s, serial %s, through %s\n", adapter.model.UTF8String ?: "?", adapter.firmwareVersion.UTF8String ?: "?",
-           adapter.serialNumber.UTF8String ?: "?", adapter.device.UTF8String);
-    QLMPrintMonitors(result, setup);
+    QLMPrintDiscovered(result, setup);
     return result.allIdentified ? 0 : EX_TEMPFAIL;
 }
 
 static int QLMPoll(int argc, const char *argv[]) {
-    QLMSystem *system = QLMMakeSystem(argc, argv, YES, [[QLMSystemSettings alloc] init]);
+    QLMSystem *system = QLMMakeSystem(argc, argv, [[QLMSystemSettings alloc] init]);
     if (system == nil) {
         return EX_UNAVAILABLE;
     }
@@ -320,6 +308,8 @@ static int QLMPoll(int argc, const char *argv[]) {
     return early == 0 ? EX_UNAVAILABLE : 0;
 }
 
+#pragma mark - The controls
+
 static const char *QLMDecibelsText(NSNumber *_Nullable decibels, char *buffer, size_t size) {
     if (decibels == nil) {
         return "unset";
@@ -337,99 +327,221 @@ static void QLMPrintControl(QLMSnapshot *snapshot) {
     }
 }
 
-// Starts System, waits for every monitor to be identified, runs the action,
-// waits for its effect to show, prints the result, and stops. The action
-// returns an exit code.
-static int QLMRunControl(int argc, const char *argv[], int (^action)(QLMSystem *system, QLMSnapshot *discovered),
-                         QLMSnapshotTest effect) {
-    QLMSystem *system = QLMMakeSystem(argc, argv, NO, [[QLMSystemSettings alloc] init]);
-    if (system == nil) {
-        return EX_UNAVAILABLE;
+// One message as it goes on the bus, after an optional label and before an
+// optional note. A message the allowlist refuses prints unencoded.
+static void QLMPrintFrame(const QLMMessage *message, const char *_Nullable label, const char *_Nullable note) {
+    uint8_t frame[QLMFrameMax];
+    size_t length = 0;
+    printf("  ");
+    if (label != NULL) {
+        printf("%-17s ", label);
     }
+    if (QLMFrameEncode(message, frame, sizeof frame, &length) != QLMFrameOK) {
+        printf("REFUSED by the allowlist: %02X", message->address);
+        for (size_t i = 0; i < message->length; i++) {
+            printf(" %02X", message->payload[i]);
+        }
+    } else {
+        for (size_t i = 0; i < length; i++) {
+            printf("%s%02X", i == 0 ? "" : " ", frame[i]);
+        }
+    }
+    printf("%s\n", note ?: "");
+}
+
+// TRAP: about 2.6 s after the host goes quiet, the adapter takes over with
+// its own level, and USB does not show which (docs/plan.md).
+static NSString *QLMHandBackText(QLMAdapterState *adapter) {
+    NSString *level = @"That level is likely the knob's position. It is not yet measured.";
+    if (adapter.knobTenths != nil) {
+        level = [NSString stringWithFormat:@"That level is likely the knob's position, %.1f dB. It is not yet measured.",
+                                           adapter.knobTenths.doubleValue / 10.0];
+    } else if (adapter.hasStatus && !adapter.knobPresent) {
+        level = @"No knob is in, so that level is unknown.";
+    }
+    return [NSString stringWithFormat:@"About 2.6 s after qlm stops, the adapter takes over with its own level. %@", level];
+}
+
+static void QLMPrintDryRun(QLMControlOptions *options, QLMSnapshot *discovered, NSArray<NSData *> *records) {
+    printf("\n%s\n", records.count == 0 ? "would send nothing" : "would send, in order:");
+    for (NSData *record in records) {
+        const uint8_t *bytes = record.bytes;
+        QLMMessage message = QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
+        NSString *label = nil;
+        if (message.address == QLMAddressBroadcast) {
+            label = @"every monitor";
+        } else if (message.address == QLMAddressAdapter) {
+            label = @"the adapter";
+        }
+        for (QLMMonitorState *monitor in discovered.monitors) {
+            if (label == nil && monitor.session == message.address) {
+                label = monitor.serialNumber;
+            }
+        }
+        label = label ?: [NSString stringWithFormat:@"session %02X", message.address];
+        char note[48] = "";
+        uint32_t word = 0;
+        if (QLMVolumeFrameWord(&message, &word)) {
+            snprintf(note, sizeof note, "  volume %.1f dB", QLMVolumeDecibelsForWord(word));
+        }
+        QLMPrintFrame(&message, label.UTF8String, note);
+    }
+    printf("\n");
+    if (options.volumeDecibels != nil) {
+        printf("The cycle sends the volume again every %.2f s while qlmctl runs.\n", options.settings.cycleInterval);
+    }
+    if (options.overUSB) {
+        printf("%s\n", QLMHandBackText(discovered.adapter).UTF8String);
+    }
+    printf("Nothing was sent beyond discovery.\n");
+}
+
+// Discovery is done and its bus is stopped. The action runs on a mirror.
+static int QLMDryRunControl(QLMControlOptions *options, QLMSnapshot *discovered, QLMControlAction action, QLMSnapshotTest effect) {
+    QLMPrintDiscovered(discovered, nil);
+    int status = 0;
+    NSArray<NSData *> *records = QLMDryRunRecords(discovered, options.settings, action, effect, &status);
+    if (records == nil) {
+        if (status == EX_SOFTWARE) {
+            fputs("qlmctl: the dry run's fake bus did not find every monitor\n", stderr);
+        }
+        return status;
+    }
+    if (status == EX_TEMPFAIL) {
+        fputs("qlmctl: the change did not show on the dry run's fake bus, so this list may be short\n", stderr);
+    }
+    QLMPrintDryRun(options, discovered, records);
+    return status;
+}
+
+// Runs the action once every monitor is identified, and stops as poll does.
+// A dry run stops the bus after discovery. Nil options, for apply-group's
+// fake bus, mean no dry run, no hold, and no USB.
+static int QLMRunControl(QLMSystem *system, QLMControlOptions *_Nullable options, QLMControlAction action, QLMSnapshotTest effect) {
     [system start];
     QLMSnapshot *discovered = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.allIdentified;
+        return snapshot.adapterError != nil || snapshot.allIdentified;
     });
-    if (discovered == nil) {
+    if (discovered == nil || discovered.adapterError != nil) {
+        NSUInteger found = system.snapshot.monitors.count;
         [system stop];
-        fputs("qlmctl: no monitor answered\n", stderr);
-        return EX_UNAVAILABLE;
+        if (QLMReportAdapterError(discovered)) {
+            return EX_UNAVAILABLE;
+        }
+        if (found == 0) {
+            fputs("qlmctl: no monitor answered\n", stderr);
+            return EX_UNAVAILABLE;
+        }
+        fprintf(stderr, "qlmctl: %lu monitors answered, but not every one was identified in %.0f s\n", (unsigned long)found,
+                QLMDiscoveryTimeout);
+        fputs("qlmctl: the command was not sent\n", stderr);
+        return EX_TEMPFAIL;
     }
+    if (options.dryRun) {
+        [system stop];
+        return QLMDryRunControl(options, discovered, action, effect);
+    }
+
     int status = action(system, discovered);
-    if (status == 0) {
+    BOOL sent = status == 0;
+    if (sent) {
         QLMSnapshot *result = QLMWaitForSnapshot(system, QLMEffectTimeout, effect);
         if (result == nil) {
             fputs("qlmctl: timed out waiting for the change to show\n", stderr);
             status = EX_TEMPFAIL;
         }
         QLMPrintControl(result ?: system.snapshot);
+        if (options.seconds > 0) {
+            QLMWaitForSnapshot(system, options.seconds, ^BOOL(QLMSnapshot *snapshot) {
+                return snapshot.adapterError != nil;
+            });
+        }
+        NSError *lost = system.snapshot.adapterError;
+        if (lost != nil) {
+            fprintf(stderr, "qlmctl: %s\n", lost.localizedDescription.UTF8String);
+            status = EX_UNAVAILABLE;
+        }
     }
+    QLMAdapterState *adapter = system.snapshot.adapter;
     [system stop];
+    if (sent && options.overUSB) {
+        fprintf(stderr, "qlmctl: warning: %s\n", QLMHandBackText(adapter).UTF8String);
+    }
     return status;
 }
 
-static int QLMOnOff(const char *text, BOOL *value) {
-    if (text != NULL && strcmp(text, "on") == 0) {
-        *value = YES;
-        return 0;
+// The options after the command's name, or nil once it has said why not.
+static QLMControlOptions *_Nullable QLMReadControlOptions(QLMControlCommand command, int argc, const char *argv[]) {
+    NSMutableArray<NSString *> *arguments = [NSMutableArray array];
+    NSString *problem = nil;
+    for (int i = 2; i < argc; i++) {
+        NSString *argument = [NSString stringWithUTF8String:argv[i]];
+        if (argument == nil) {
+            problem = @"an argument is not UTF-8";
+            break;
+        }
+        [arguments addObject:argument];
     }
-    if (text != NULL && strcmp(text, "off") == 0) {
-        *value = NO;
-        return 0;
+    QLMControlOptions *options = problem != nil ? nil : [QLMControlOptions optionsForCommand:command arguments:arguments problem:&problem];
+    if (options == nil) {
+        fprintf(stderr, "qlmctl: %s\nqlmctl: nothing was sent. qlmctl help lists the options.\n", problem.UTF8String);
     }
-    QLMPrintUsage(stderr);
-    return EX_USAGE;
+    return options;
+}
+
+static int QLMRunControlCommand(QLMControlOptions *options, QLMControlAction action, QLMSnapshotTest effect) {
+    QLMSystem *system = QLMMakeSystemOn(options.fake, options.replayPath, options.settings);
+    if (system == nil) {
+        return EX_UNAVAILABLE;
+    }
+    return QLMRunControl(system, options, action, effect);
 }
 
 static int QLMVolume(int argc, const char *argv[]) {
-    char *end = NULL;
-    double decibels = argc >= 3 ? strtod(argv[2], &end) : 0;
-    if (argc < 3 || end == argv[2] || *end != '\0') {
-        QLMPrintUsage(stderr);
+    QLMControlOptions *options = QLMReadControlOptions(QLMControlCommandVolume, argc, argv);
+    if (options == nil) {
         return EX_USAGE;
     }
-    return QLMRunControl(argc, argv, ^int(QLMSystem *system, QLMSnapshot *discovered) {
-        [system setVolumeDecibels:decibels];
+    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        [system setVolumeDecibels:options.volumeDecibels.doubleValue];
         return 0;
     }, ^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.idle && [snapshot.volumeDecibels isEqualToNumber:@(decibels)];
+        return snapshot.idle && [snapshot.volumeDecibels isEqualToNumber:options.volumeDecibels];
     });
 }
 
 static int QLMMute(int argc, const char *argv[]) {
-    BOOL muted = NO;
-    int usage = QLMOnOff(argc >= 3 ? argv[2] : NULL, &muted);
-    if (usage != 0) {
-        return usage;
+    QLMControlOptions *options = QLMReadControlOptions(QLMControlCommandMute, argc, argv);
+    if (options == nil) {
+        return EX_USAGE;
     }
-    const char *serial = QLMOptionValue(argc, argv, "--serial");
     __block NSData *target = nil;  // nil for every monitor
-    return QLMRunControl(argc, argv, ^int(QLMSystem *system, QLMSnapshot *discovered) {
-        if (serial == NULL) {
-            [system setAllMuted:muted];
+    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        if (options.serial == nil) {
+            [system setAllMuted:options.on];
             return 0;
         }
         NSArray<QLMMonitorState *> *matches = [discovered.monitors filteredArrayUsingPredicate:
             [NSPredicate predicateWithBlock:^BOOL(QLMMonitorState *monitor, NSDictionary *bindings) {
-                return [monitor.serialNumber containsString:@(serial)];
+                return [monitor.serialNumber containsString:options.serial];
             }]];
         if (matches.count != 1) {
-            fprintf(stderr, "qlmctl: %lu monitors match '%s'\n", (unsigned long)matches.count, serial);
+            fprintf(stderr, "qlmctl: %lu monitors match '%s'\n", (unsigned long)matches.count, options.serial.UTF8String);
             return EX_DATAERR;
         }
         target = matches[0].hardwareID;
-        [system setMuted:muted forMonitorWithHardwareID:target];
+        [system setMuted:options.on forMonitorWithHardwareID:target];
         return 0;
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
         if (!snapshot.idle) {
             return NO;
         }
         if (target == nil) {
-            return snapshot.allMuted == muted;
+            return snapshot.allMuted == options.on;
         }
         for (QLMMonitorState *monitor in snapshot.monitors) {
             if ([monitor.hardwareID isEqualToData:target]) {
-                return monitor.muted == muted;
+                return monitor.muted == options.on;
             }
         }
         return NO;
@@ -437,26 +549,34 @@ static int QLMMute(int argc, const char *argv[]) {
 }
 
 static int QLMDim(int argc, const char *argv[]) {
-    BOOL dimmed = NO;
-    int usage = QLMOnOff(argc >= 3 ? argv[2] : NULL, &dimmed);
-    if (usage != 0) {
-        return usage;
+    QLMControlOptions *options = QLMReadControlOptions(QLMControlCommandDim, argc, argv);
+    if (options == nil) {
+        return EX_USAGE;
     }
-    // No volume is set here, so dim sends nothing and the replay may pass.
-    return QLMRunControl(argc, argv, ^int(QLMSystem *system, QLMSnapshot *discovered) {
-        [system setDimmed:dimmed];
+    NSNumber *volume = options.volumeDecibels;
+    // Without a volume, dim sends nothing, and the replay may pass.
+    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        // TRAP: dim first. A volume set first goes out undimmed.
+        [system setDimmed:options.on];
+        if (volume != nil) {
+            [system setVolumeDecibels:volume.doubleValue];
+        }
         return 0;
     }, ^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.idle && snapshot.dimmed == dimmed;
+        return snapshot.idle && snapshot.dimmed == options.on && (volume == nil || [snapshot.volumeDecibels isEqualToNumber:volume]);
     });
 }
 
 // The power state comes back in telemetry. After a wake the monitors are
 // found again under new sessions, so wait for all of them.
 static int QLMPower(int argc, const char *argv[], BOOL wake) {
+    QLMControlOptions *options = QLMReadControlOptions(wake ? QLMControlCommandWake : QLMControlCommandSleep, argc, argv);
+    if (options == nil) {
+        return EX_USAGE;
+    }
     QLMMonitorStatus wanted = wake ? QLMMonitorStatusOn : QLMMonitorStatusStandby;
     __block NSUInteger count = 0;
-    return QLMRunControl(argc, argv, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
         count = discovered.monitors.count;
         if (wake) {
             [system wake];
@@ -561,8 +681,10 @@ static int QLMPrintSetup(int argc, const char *argv[]) {
 }
 
 // System completes an apply on the main queue, so spin the main run loop.
-static int QLMApplyGroupOnBus(int argc, const char *argv[], QLMSetupGroup *group) {
-    return QLMRunControl(argc, argv, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+static int QLMApplyGroupOnFakeBus(QLMSetupGroup *group) {
+    QLMSystem *fakeSystem = [[QLMSystem alloc] initWithAdapter:[QLMFakeBus demoBusWithSubwoofer:NO]
+                                                      settings:[[QLMSystemSettings alloc] init]];
+    return QLMRunControl(fakeSystem, nil, ^int(QLMSystem *system, QLMSnapshot *discovered) {
         __block BOOL done = NO;
         __block NSError *result = nil;
         [system applyGroup:group completion:^(NSError *error) {
@@ -615,7 +737,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         return EX_DATAERR;
     }
     if (!dryRun) {
-        return QLMApplyGroupOnBus(argc, argv, group);
+        return QLMApplyGroupOnFakeBus(group);
     }
     NSArray<QLMDSPBlock *> *blocks = [QLMDSPBlock blocksForGroup:group error:&error];
     if (blocks == nil) {
@@ -634,16 +756,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         allowed = allowed && block.rateVerified;
         for (NSData *payload in block.payloads) {
             QLMMessage message = QLMMessageMake(session, payload.bytes, payload.length);
-            uint8_t frame[QLMFrameMax];
-            size_t length = 0;
-            if (QLMFrameEncode(&message, frame, sizeof frame, &length) != QLMFrameOK) {
-                printf("  REFUSED by the allowlist:");
-            } else {
-                printf("  ");
-            }
-            for (size_t i = 0; i < length; i++) {
-                printf("%02X%s", frame[i], i + 1 < length ? " " : "\n");
-            }
+            QLMPrintFrame(&message, NULL, NULL);
         }
         session++;
     }
