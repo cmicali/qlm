@@ -1683,12 +1683,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMSnapshot *first = [self waitForDiscovery];
     uint8_t leftSession = QLMFindMonitor(first, _left.hardwareID).session;
     uint8_t rightSession = QLMFindMonitor(first, _right.hardwareID).session;
-    QLMSystem *system = _system;
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    } after:^{
-        [system stop];
-    }];
+    [self stopAndWait];
 
     NSUInteger before = _bus.sentMessages.count;
     [_system start];
@@ -1701,11 +1696,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 
     // The left lets its lease lapse, and the right now holds the left's old
     // session.
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    } after:^{
-        [system stop];
-    }];
+    [self stopAndWait];
     [_bus perform:^{
         self->_left.session = 0;
         self->_right.session = leftSession;
@@ -1730,15 +1721,15 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     };
     NSString *glm = QLMHostCheckClientHolder(@"IOHIDLibUserClient", glmClient, 4242);
     XCTAssertNotNil(glm);
-    NSArray *cases = @[@[glm, @(QLMBusProblemGLM)], @[@"Spotify (pid 7) holds the GLM adapter.", @(QLMBusProblemOtherHost)]];
-    for (NSArray *busy in cases) {
+    NSDictionary<NSString *, NSNumber *> *cases = @{glm: @(QLMBusProblemGLM), @"Spotify (pid 7) holds the GLM adapter.": @(QLMBusProblemOtherHost)};
+    for (NSString *reason in cases) {
         [_bus perform:^{
-            self->_bus.busyReason = busy[0];
+            self->_bus.busyReason = reason;
         }];
         QLMSnapshot *refused = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-            return snapshot.busProblem == [busy[1] integerValue];
+            return snapshot.busProblem == cases[reason].integerValue;
         }];
-        XCTAssertEqualObjects(refused.adapterError.localizedDescription, busy[0]);
+        XCTAssertEqualObjects(refused.adapterError.localizedDescription, reason);
         [_bus perform:^{
             self->_bus.busyReason = nil;
         }];
@@ -1826,10 +1817,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
             XCTAssertEqual(error.code, QLMSystemErrorUnverifiedRate);
             XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 0u);
         }
-        [_system stop];
-        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-            return !snapshot.running;
-        }];
+        [self stopAndWait];
     }
 }
 

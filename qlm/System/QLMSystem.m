@@ -90,6 +90,15 @@ static const NSTimeInterval QLMWakeVolumeDelay = 0.235;
 
 @end
 
+// An identified monitor's last lease, kept across a stop.
+@interface QLMKnownLease : NSObject
+@property (nonatomic) uint8_t session;
+@property (nonatomic, copy) NSString *serial;
+@end
+
+@implementation QLMKnownLease
+@end
+
 // The adapter itself, at 01. Touched only on the queue.
 @interface QLMTrackedAdapter : NSObject
 @property (nonatomic) NSString *serialNumber;
@@ -166,7 +175,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableArray<dispatch_block_t> *_stopCompletions;
     // Each identified monitor's last session and serial, by hardware ID,
     // kept across a stop to take its lease back at the next start.
-    NSMutableDictionary<NSData *, NSArray *> *_knownLeases;
+    NSMutableDictionary<NSData *, QLMKnownLease *> *_knownLeases;
     QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
@@ -556,14 +565,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!QLMAddressIsLeasable(candidate)) {
             continue;
         }
-        BOOL used = NO;
-        for (QLMMonitorRecord *monitor in _monitors) {
-            if (monitor.session == candidate) {
-                used = YES;
-                break;
-            }
-        }
-        if (!used) {
+        if ([self monitorAtSession:candidate] == nil) {
             return candidate;
         }
     }
@@ -628,13 +630,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // at its old session. A reply with the same serial is that monitor, and its
 // lease is taken back at once. The probe finds the rest.
 - (void)takeBackKnownLeases {
-    for (NSData *identity in _knownLeases.allKeys) {
-        NSArray *known = _knownLeases[identity];
-        uint8_t session = [known[0] unsignedCharValue];
-        NSString *serial = known[1];
-        if ([self monitorWithHardwareID:identity] != nil || [self monitorAtSession:session] != nil) {
-            continue;
-        }
+    [_knownLeases enumerateKeysAndObjectsUsingBlock:^(NSData *identity, QLMKnownLease *known, BOOL *stop) {
+        uint8_t session = known.session;
+        NSString *serial = known.serial;
         [self send:QLMCommandSerialNumber(session) then:^(const QLMMessage *reply, NSError *error) {
             char text[QLMPayloadMax];
             BOOL same = reply != NULL && QLMReplyText(reply, text, sizeof text) && [@(text) isEqualToString:serial];
@@ -642,7 +640,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
                 [self track:identity session:session serial:serial];
             }
         }];
-    }
+    }];
 }
 
 - (nullable QLMMonitorRecord *)monitorAtSession:(uint8_t)session {
@@ -702,7 +700,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (monitor.serialNumber == nil) {
         [self ask:QLMCommandSerialNumber(monitor.session) then:^(const char *text) {
             monitor.serialNumber = @(text);
-            self->_knownLeases[monitor.hardwareID] = @[@(monitor.session), monitor.serialNumber];
+            QLMKnownLease *known = [[QLMKnownLease alloc] init];
+            known.session = monitor.session;
+            known.serial = monitor.serialNumber;
+            self->_knownLeases[monitor.hardwareID] = known;
         }];
     }
     [self afterSends:^{
