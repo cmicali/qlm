@@ -56,6 +56,7 @@ const NSInteger QLMMonitorValueAbsent = -1;
         _adapter = [[QLMAdapterState alloc] init];
         _monitors = @[];
         _mutedHardwareIDs = [NSSet set];
+        _liftedHardwareIDs = [NSSet set];
         _knownLeases = @[];
         _handBack = [[QLMHandBack alloc] init];
     }

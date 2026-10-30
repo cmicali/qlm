@@ -1125,6 +1125,90 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// Waits until the left's and the right's last 2B are these.
+- (void)waitForLeftMute:(uint8_t)left rightMute:(uint8_t)right {
+    [self waitUntil:^BOOL {
+        __block BOOL stated = NO;
+        [self->_bus perform:^{
+            stated = self->_left.muteValue == left && self->_right.muteValue == right;
+        }];
+        return stated;
+    }];
+}
+
+// A lift of one mute under mute all lifts the adapter's own mute too, as
+// GLM's unmute all does: the level, 01 2B 00, then two rounds
+// (captures/mute-dim, 48.60 s). No capture shows GLM lift one mute under
+// mute all. Mute all still holds for the rest, here for the right, which
+// appears after it. The lift holds when the left is leased again, and
+// after a relaunch from the snapshot's record.
+- (void)testLiftingOneMuteUnderMuteAllHolds {
+    _settings.cycleInterval = 0.3;
+    [_bus perform:^{
+        self->_right.present = NO;
+    }];
+    [self startSystem];
+    QLMSnapshot *discovered = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 1 && snapshot.allIdentified && snapshot.idle;
+    }];
+    uint8_t left = QLMFindMonitor(discovered, _left.hardwareID).session;
+    [_system setVolumeDecibels:-30];
+    [_system setAllMuted:YES];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.allMuted && snapshot.idle;
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    NSData *leftID = _left.hardwareID;
+    NSData *rightID = _right.hardwareID;
+    QLMSystem *system = _system;
+    QLMSnapshot *lifted = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !QLMFindMonitor(snapshot, leftID).muted && snapshot.idle;
+    } after:^{
+        [system setMuted:NO forMonitorWithHardwareID:leftID];
+    }];
+    XCTAssertTrue(lifted.mutingAll);
+    XCTAssertEqualObjects(lifted.liftedHardwareIDs, [NSSet setWithObject:leftID]);
+    QLMMessage volume = QLMCommandVolume(-30, _settings.ceilingDecibels);
+    NSData *leftUnmuted = QLMBytes((const uint8_t[]){left, 0x2B, QLMMuteValueUnmuted}, 3);
+    NSArray<NSData *> *expected = @[
+        QLMAdapterRecord(&volume), QLMBytes((const uint8_t[]){QLMAddressAdapter, 0x2B, QLMMuteValueAdapterUnmuted}, 3), leftUnmuted, leftUnmuted
+    ];
+    XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
+        return ((const uint8_t *)message.bytes)[1] == 0x1F || ((const uint8_t *)message.bytes)[1] == 0x2B;
+    }], expected);
+
+    [_bus perform:^{
+        self->_right.present = YES;
+        self->_left.session = 0;
+    }];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *state = QLMFindMonitor(snapshot, leftID);
+        return state.session != left && state.identified && QLMFindMonitor(snapshot, rightID).identified && snapshot.idle;
+    }];
+    XCTAssertFalse(QLMFindMonitor(again, leftID).muted);
+    XCTAssertTrue(QLMFindMonitor(again, rightID).muted);
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
+
+    QLMSnapshot *stopped = [self stopAndWait];
+    _settings.mutedHardwareIDs = stopped.mutedHardwareIDs;
+    _settings.mutingAll = stopped.mutingAll;
+    _settings.liftedHardwareIDs = stopped.liftedHardwareIDs;
+    [self lapseLeases];
+    [self startSystem];
+    QLMSnapshot *relaunched = [self waitForDiscovery];
+    XCTAssertFalse(QLMFindMonitor(relaunched, leftID).muted);
+    XCTAssertTrue(QLMFindMonitor(relaunched, rightID).muted);
+    XCTAssertEqualObjects(relaunched.liftedHardwareIDs, [NSSet setWithObject:leftID]);
+    before = _bus.sentMessages.count;
+    [_system setVolumeDecibels:-30];
+    [_system setDimmed:YES];
+    [_system setDimmed:NO];
+    [self waitForIdle];
+    XCTAssertGreaterThan([self sentWithOpcode:0x2B from:before].count, 0u);
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
+}
+
 #pragma mark - Dim
 
 // Section 7, 1F, and section 9, "Mute, Solo & Dim": no dim command, a plain

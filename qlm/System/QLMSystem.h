@@ -35,10 +35,12 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // alone, and sends the volume only once one is set.
 @property (nonatomic) BOOL discoversMonitors;
 // The mute record to start from, as a snapshot gave it: the muted hardware
-// IDs, and whether mute all is on. No reply reports a monitor's mute, so
-// System's record is the truth, and its rounds restate it.
-@property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;  // empty
-@property (nonatomic) BOOL mutingAll;                           // NO
+// IDs, whether mute all is on, and the monitors the user lifted it from. No
+// reply reports a monitor's mute, so System's record is the truth, and its
+// rounds restate it.
+@property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;   // empty
+@property (nonatomic) BOOL mutingAll;                            // NO
+@property (nonatomic, copy) NSSet<NSData *> *liftedHardwareIDs;  // empty
 // The leases to check at start, as a snapshot gave them. A monitor still
 // holds its lease for 23 s or more after a host goes quiet, and never
 // answers a probe meanwhile. So at start System asks each session for its
@@ -101,6 +103,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Each sends two rounds of 2B, restating the state of every monitor that is
 // on: its mute in the active group, and GLM's 05 and 07 outside it. Mute all
 // also re-sends the volume and sets the adapter's own mute, as GLM does. A
+// lift of one mute under mute all lifts the adapter's own mute too, as
+// GLM's unmute all does, but mute all holds for every other monitor. A
 // mute holds by hardware ID until the user lifts it, across a lease that
 // lapses, a stop and a start, and for a monitor that first appears while all
 // are muted. A muted monitor leased again, or one that was not on, hears its

@@ -144,10 +144,13 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // While System runs, what a stop would do to the level now. Once it has
 // stopped, what it did.
 @property (nonatomic, readonly) QLMHandBack *handBack;
-// System's mute record: every muted hardware ID, leased or not, and whether
-// mute all is on. Give both back through QLMSystemSettings to start from it.
+// System's mute record: every muted hardware ID, leased or not, whether
+// mute all is on, and the monitors the user lifted it from. Mute all holds
+// for every other monitor, one that appears later included. Give all three
+// back through QLMSystemSettings to start from it.
 @property (nonatomic, readonly) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readonly) BOOL mutingAll;
+@property (nonatomic, readonly) NSSet<NSData *> *liftedHardwareIDs;
 // The session each monitor System identified last held, in session order,
 // kept across a stop. Give them back through QLMSystemSettings, so a new
 // System checks them before it leases anything.
