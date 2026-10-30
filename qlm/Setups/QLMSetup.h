@@ -34,6 +34,9 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly) NSString *className;
 @property (nonatomic, readonly) QLMSetupNodeClass nodeClass;
 @property (nonatomic, readonly) NSString *serial;
+// The monitor's three-byte hardware ID, which serial gives in decimal. Nil
+// if serial is not one. TRAP: the serial from 19 01 does not end in serial.
+@property (nonatomic, readonly, nullable) NSData *hardwareID;
 @property (nonatomic, readonly) BOOL on;
 @property (nonatomic, readonly) double levelSensitivity;        // dB
 @property (nonatomic, readonly) double calibrationLevel;        // dB

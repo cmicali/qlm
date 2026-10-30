@@ -376,6 +376,26 @@ static QLMSetupNodeClass QLMNodeClassNamed(NSString *name) {
     return QLMSetupNodeClassUnknown;
 }
 
+// Big-endian, from at most 8 decimal digits.
+static NSData *_Nullable QLMHardwareIDForSerial(NSString *serial) {
+    if (serial.length == 0 || serial.length > 8) {
+        return nil;
+    }
+    uint32_t value = 0;
+    for (NSUInteger i = 0; i < serial.length; i++) {
+        unichar digit = [serial characterAtIndex:i];
+        if (digit < '0' || digit > '9') {
+            return nil;
+        }
+        value = value * 10 + (uint32_t)(digit - '0');
+    }
+    if (value > 0xFFFFFF) {
+        return nil;
+    }
+    const uint8_t bytes[3] = {(uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value};
+    return [NSData dataWithBytes:bytes length:3];
+}
+
 // Class, then keys and bands to Data_End.
 - (nullable QLMSetupNode *)parseNodeInGroup:(NSString *)groupName {
     QLMSetupEntry *classEntry = [self expect:@"Class"];
@@ -399,7 +419,8 @@ static QLMSetupNodeClass QLMNodeClassNamed(NSString *name) {
             return node;
         } else if ([key isEqualToString:@"Serial"]) {
             node.serial = entry.value;
-            where = [NSString stringWithFormat:@"group %@ node %@", groupName, entry.value];
+            node.hardwareID = QLMHardwareIDForSerial(entry.value);
+            where =[NSString stringWithFormat:@"group %@ node %@", groupName, entry.value];
         } else if ([key isEqualToString:@"Group_ON"]) {
             node.on = [self flag:entry];
         } else if ([key isEqualToString:@"Level_Sensitivity"]) {
