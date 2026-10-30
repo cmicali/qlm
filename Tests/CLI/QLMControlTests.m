@@ -173,6 +173,21 @@ static NSData *QLMRecord(QLMMessage message) {
     return settings;
 }
 
+// An action that is done before it returns, as when qlmctl's thread is slow
+// to come back from it. The wait's handler is in place first, so it sees the
+// mute land, and the dry run does not run out.
+- (void)testAnActionDoneBeforeItReturnsStillShows {
+    NSData *target = QLMDiscovered().monitors[0].hardwareID;  // at 09
+    NSArray<NSData *> *records = [self recordsOf:^int(QLMSystem *system, QLMSnapshot *found) {
+        [system setMuted:YES forMonitorWithHardwareID:target];
+        [self->_time settle];
+        return 0;
+    } effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && [snapshot.mutedHardwareIDs containsObject:target];
+    })];
+    XCTAssertTrue([records containsObject:QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))], @"%@", records);
+}
+
 - (void)testADryRunAddressesEachMonitorAsDiscoveryFoundIt {
     QLMSnapshot *discovered = QLMDiscovered();
     NSData *target = discovered.monitors[0].hardwareID;
