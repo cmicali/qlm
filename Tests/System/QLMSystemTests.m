@@ -328,6 +328,43 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertNil(freed.adapterError);
 }
 
+// A lost connection takes the adapter's identity with it, since another
+// adapter may answer the reconnect. The new one's identity is read afresh.
+- (void)testAReconnectReadsTheNewAdaptersIdentity {
+    _settings.discoversMonitors = NO;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.identified;
+    }];
+    XCTAssertEqualObjects(first.adapter.serialNumber, @"H00000F001");
+
+    [_bus perform:^{
+        self->_bus.disconnected = YES;
+    }];
+    QLMSnapshot *lost = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    XCTAssertEqual(lost.adapterError.code, QLMAdapterErrorDisconnected);
+    XCTAssertFalse(lost.adapter.identified);
+    XCTAssertNil(lost.adapter.serialNumber);
+    XCTAssertNil(lost.adapter.model);
+    XCTAssertNil(lost.adapter.firmwareVersion);
+
+    [_bus perform:^{
+        self->_bus.adapterSystemInfo = @"c-0;model-GLM Adapter B;ver-1.5.2.7001;hw-0.0.203;build-2026.01.10.s  ";
+        self->_bus.adapterSerialNumber = @"H00000F002";
+        self->_bus.disconnected = NO;
+    }];
+    QLMSnapshot *second = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.identified;
+    }];
+    XCTAssertNil(second.adapterError);
+    XCTAssertEqualObjects(second.adapter.serialNumber, @"H00000F002");
+    XCTAssertEqualObjects(second.adapter.model, @"GLM Adapter B");
+    XCTAssertEqualObjects(second.adapter.firmwareVersion, @"1.5.2.7001");
+}
+
 #pragma mark - Phase 1: lost replies
 
 // A lost lease ack: the monitor holds the lease but never said so, so it

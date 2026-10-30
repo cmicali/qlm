@@ -291,6 +291,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     BOOL noBus = [error.domain isEqualToString:QLMAdapterErrorDomain] &&
                  (error.code == QLMAdapterErrorBusy || error.code == QLMAdapterErrorDisconnected);
+    if (noBus) {
+        [self forgetAdapter];
+    }
     if (noBus && ![_adapterError isEqual:error]) {
         _adapterError = error;
         _dirty = YES;
@@ -481,6 +484,22 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 #pragma mark - The adapter
+
+// The connection is lost, and the adapter that answers next may be another.
+// Its identity and status are asked again. Queries already queued fill them
+// from whichever adapter answers.
+- (void)forgetAdapter {
+    QLMTrackedAdapter *adapter = _adapterRecord;
+    if (adapter.systemInfo == nil && adapter.serialNumber == nil && !adapter.hasStatus) {
+        return;
+    }
+    adapter.systemInfo = nil;
+    adapter.serialNumber = nil;
+    adapter.model = nil;
+    adapter.firmwareVersion = nil;
+    adapter.hasStatus = NO;
+    _dirty = YES;
+}
 
 - (void)identifyAdapter {
     QLMTrackedAdapter *adapter = _adapterRecord;

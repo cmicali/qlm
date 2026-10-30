@@ -4,7 +4,7 @@
 
 ## Where things stand
 
-Built, with 149 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 150 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
 - **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply.
 - **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. A failed seize is a refusal. **It has not run on the adapter.**
