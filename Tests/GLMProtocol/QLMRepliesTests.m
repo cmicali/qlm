@@ -171,4 +171,53 @@
     XCTAssertFalse(QLMSystemInfoParse("c-1;model-7350A", tiny, sizeof tiny, firmware, sizeof firmware));
 }
 
+// docs/adapter-status.md, "The reply's layout": startup-idle's first reply,
+// the knob at -100.4 dB and no mic (7.29 s).
+- (void)testAdapterStatusWithTheKnob {
+    QLMMessage message = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x30, 0x36, 0xDF, 0xFF, 0xFF, 0xFC, 0x14);
+    QLMAdapterStatus status;
+    XCTAssertEqual(QLMReplyAdapterStatus(&message, &status), QLMAdapterStatusOK);
+    XCTAssertTrue(status.knob);
+    XCTAssertFalse(status.mic);
+    XCTAssertTrue(status.hasKnobPosition);
+    XCTAssertEqual(status.knobTenths, -1004);
+    XCTAssertEqual(status.unknownTag, 0);
+}
+
+// The same, with the knob at the top stop and the mic in (knob-sweep,
+// 20.17 s), and with neither (volume-sweep, from 25.44 s).
+- (void)testAdapterStatusWithTheMicAndWithNeither {
+    QLMMessage withMic = QLMMakeMessage(QLMAddressReply, 0x09, 0x32, 0x34, 0xDE, 0x00, 0x23, 0x10, 0x00, 0xDD, 0x00, 0x22, 0x00,
+                                        0x01, 0x30, 0x36, 0xDF, 0x00, 0x00, 0x00, 0x00);
+    QLMAdapterStatus status;
+    XCTAssertEqual(QLMReplyAdapterStatus(&withMic, &status), QLMAdapterStatusOK);
+    XCTAssertTrue(status.mic);
+    XCTAssertTrue(status.knob);
+    XCTAssertEqual(status.knobTenths, 0);
+    XCTAssertEqual(status.micDE, 0x00231000u);
+    XCTAssertEqual(status.micDD, 0x00220001u);
+
+    QLMMessage neither = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x31);
+    XCTAssertEqual(QLMReplyAdapterStatus(&neither, &status), QLMAdapterStatusOK);
+    XCTAssertFalse(status.knob);
+    XCTAssertFalse(status.hasKnobPosition);
+    XCTAssertFalse(status.mic);
+}
+
+// The tag rule steps over a tag it does not know, by its top two bits.
+- (void)testAdapterStatusStepsOverAnUnknownTag {
+    QLMMessage message = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x75, 0xDF, 0x30, 0x36, 0xDF, 0xFF, 0xFF, 0xFF, 0x9C);
+    QLMAdapterStatus status;
+    XCTAssertEqual(QLMReplyAdapterStatus(&message, &status), QLMAdapterStatusOK);
+    XCTAssertEqual(status.unknownTag, 0x75);
+    XCTAssertEqual(status.knobTenths, -100);
+
+    QLMMessage truncated = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x30, 0x36, 0xDF, 0xFF, 0xFF);
+    XCTAssertEqual(QLMReplyAdapterStatus(&truncated, &status), QLMAdapterStatusErrorTruncated);
+    QLMMessage ack = QLMMakeMessage(QLMAddressReply, 0x09);
+    XCTAssertEqual(QLMReplyAdapterStatus(&ack, &status), QLMAdapterStatusErrorNotStatus);
+    QLMMessage fromMonitor = QLMMakeMessage(0x02, 0x09, 0x33, 0x31);
+    XCTAssertEqual(QLMReplyAdapterStatus(&fromMonitor, &status), QLMAdapterStatusErrorNotStatus);
+}
+
 @end

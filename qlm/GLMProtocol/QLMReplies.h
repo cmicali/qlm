@@ -76,4 +76,28 @@ typedef enum {
 // before it are valid and unknownTag names it.
 QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *telemetry);
 
+// The adapter's reply to 01 08: 09, then fields with no length byte. The top
+// two bits of a tag give its value's length: 00 none, 01 one byte, 10 two,
+// and 11 four. 30 or 31 says whether the knob is in, and 32 or 33 the mic.
+// The knob's position, DF, is a signed big-endian count of tenths of a dB.
+// The mic's readings, DE and DD, have no known scale.
+typedef struct {
+    bool knob;
+    bool mic;
+    bool hasKnobPosition;
+    int32_t knobTenths;
+    uint32_t micDE;
+    uint32_t micDD;
+    uint8_t unknownTag;  // the first tag the walk stepped over, or 0
+} QLMAdapterStatus;
+
+typedef enum {
+    QLMAdapterStatusOK = 0,
+    QLMAdapterStatusErrorNotStatus,
+    QLMAdapterStatusErrorTruncated,
+} QLMAdapterStatusResult;
+
+// The tag rule lets the walk step over a tag it does not know.
+QLMAdapterStatusResult QLMReplyAdapterStatus(const QLMMessage *message, QLMAdapterStatus *status);
+
 #endif

@@ -7,8 +7,10 @@
 
 // The bus addresses. The host broadcasts on FF, the adapter alone multicasts
 // on F0, every monitor replies from 01, and a leased session ID runs 02 to FE.
+// The host reaches the adapter itself at 01.
 enum {
     QLMAddressReply = 0x01,
+    QLMAddressAdapter = 0x01,
     QLMAddressSessionFirst = 0x02,
     QLMAddressSessionLast = 0xFE,
     QLMAddressMulticast = 0xF0,

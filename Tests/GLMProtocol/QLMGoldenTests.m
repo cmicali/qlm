@@ -158,7 +158,7 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
             NSString * (^what)(void) = ^{
                 return QLMDescribeExchange(exchange);
             };
-            if (message.address == QLMAddressBroadcast && opcode != 0xFE) {
+            if (!QLMReportExpectsReply(&message)) {
                 XCTAssertNil(exchange.replyFrame, @"%@", what());
                 continue;
             }
@@ -213,6 +213,57 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
     XCTAssertGreaterThan(noAnswers, 0u);
     XCTAssertGreaterThan(telemetry, 5000u);
     XCTAssertGreaterThan(identities, 0u);
+}
+
+// docs/adapter-status.md: every reply to 01 08 reads with the tag rule and
+// no unknown tag. startup-idle opens with the knob at its bottom stop and no
+// mic, startup-idle-mic has the mic in, knob-sweep reaches the top stop, and
+// volume-sweep loses the knob at 25.44 s.
+- (void)testEveryAdapterStatusReplyReads {
+    NSUInteger replies = 0;
+    NSMutableDictionary<NSString *, NSMutableSet<NSString *> *> *shapes = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSString *, NSNumber *> *highest = [NSMutableDictionary dictionary];
+    for (NSString *scenario in QLMCaptureScenarios()) {
+        NSMutableSet<NSString *> *seen = [NSMutableSet set];
+        shapes[scenario] = seen;
+        int32_t top = INT32_MIN;
+        for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+            QLMMessage message = exchange.message;
+            if (message.address != QLMAddressAdapter || message.payload[0] != 0x08 || !exchange.answered) {
+                continue;
+            }
+            QLMMessage reply = exchange.reply;
+            QLMAdapterStatus status;
+            XCTAssertEqual(QLMReplyAdapterStatus(&reply, &status), QLMAdapterStatusOK, @"%@", QLMDescribeExchange(exchange));
+            XCTAssertEqual(status.unknownTag, 0, @"%@", QLMDescribeExchange(exchange));
+            XCTAssertEqual(status.knob, status.hasKnobPosition, @"%@", QLMDescribeExchange(exchange));
+            [seen addObject:[NSString stringWithFormat:@"%@%@", status.mic ? @"mic" : @"", status.knob ? @"knob" : @""]];
+            if (status.knob && status.knobTenths > top) {
+                top = status.knobTenths;
+            }
+            replies += 1;
+        }
+        highest[scenario] = @(top);
+    }
+    XCTAssertGreaterThan(replies, 28000u);
+    XCTAssertEqualObjects(shapes[@"startup-idle"], [NSSet setWithObject:@"knob"]);
+    XCTAssertEqualObjects(shapes[@"startup-idle-mic"], [NSSet setWithObject:@"micknob"]);
+    XCTAssertEqualObjects(shapes[@"volume-sweep"], ([NSSet setWithObjects:@"knob", @"", nil]));
+    XCTAssertEqualObjects(highest[@"knob-sweep"], @0);
+
+    QLMMessage first = QLMReadCapture(@"startup-idle", NULL).exchanges.firstObject.reply;
+    QLMAdapterStatus status;
+    XCTAssertEqual(QLMReplyAdapterStatus(&first, &status), QLMAdapterStatusOK);
+    XCTAssertEqual(status.knobTenths, -1004);
+
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"volume-sweep", NULL).exchanges) {
+        QLMMessage message = exchange.message;
+        if (exchange.time > 25.45 && message.address == QLMAddressAdapter && message.payload[0] == 0x08 && exchange.answered) {
+            QLMMessage reply = exchange.reply;
+            QLMReplyAdapterStatus(&reply, &status);
+            XCTAssertFalse(status.knob, @"%@", QLMDescribeExchange(exchange));
+        }
+    }
 }
 
 static NSData *QLMDataFromHex(NSString *hex) {
