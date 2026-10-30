@@ -239,7 +239,7 @@ A monitor that holds a lease doesn't answer the probe. Once every monitor holds 
 
 > **TRAP:** so a host finds only monitors without a lease. A monitor still holding an earlier host's lease stays hidden. A host that leases from `02` again may give that session to a second monitor, and then two monitors take one monitor's frames.[^trap-lease]
 
-#32 (open) handles it. Before its first probe, qlm asks each monitor it knew for its serial, at its old session. The same serial means the monitor still holds that lease, and qlm takes it back.
+#32 handles it. Before its first probe, qlm asks each monitor it knew for its serial, at its old session. The same serial means the monitor still holds that lease, and qlm takes it back.
 
 The hardware ID is how qlm knows a monitor. It maps one to one to the serial in every capture, so qlm matches monitors by hardware ID.[^hwid] It also ties a monitor to the setup file: a setup node's `Serial` is its monitor's hardware ID, read big-endian, in decimal.[^setup-serial] The serial from `19 01` is something else. It's a model prefix and eight digits, and it never ends in the setup's `Serial`.[^serial-digits] Serials are 14 or 15 characters.[^serial-length]
 
@@ -667,13 +667,13 @@ sequenceDiagram
     Q->>A: the open's sync, 01 39 then 01 08
     A-->>Q: replies that answer no request
     Q->>A: System's opening, 01 08 twice, 01 39, and 01 19 01
-    opt with PR 32, open
+    opt since PR 32
         Q->>M: 19 01 to each monitor's old session
     end
     Note over Q,M: discovery, then the cycle
 ```
 
-The sync's replies answer no request.[^open-sync] System's opening is from `qlm-first-discover`, at 24.940 to 24.947 s, before #33 added the sync. #32 (open) adds the `19 01` to each monitor's old session, before the first probe.
+The sync's replies answer no request.[^open-sync] System's opening is from `qlm-first-discover`, at 24.940 to 24.947 s, before #33 added the sync. #32 adds the `19 01` to each monitor's old session, before the first probe.
 
 qlm leaves out `01 22`, `01 51 82`, the wake, the pair, and `01 2B 00` at connect. It sends no volume until one is set. The adapter bridged qlm without them.[^qlm-leaves-out]
 
@@ -775,7 +775,7 @@ For one monitor, the rounds go to every monitor that is on, in the setup's devic
 
 Mute all sends the level once, `01 2B 01`, then two rounds of `2B 03`. Unmute all sends the level, `01 2B 00`, then two rounds of `2B 04`.[^mute-all] Every answered `2B`, to a monitor or the adapter, got a bare `09`: 5,569 in the captures.[^mute-acks]
 
-Because every round restates every monitor that is on, a round from any host unmutes a monitor muted elsewhere. In `qlm-control-first`, the knob's burst unmuted the 7370A, which GLM had muted.[^unmuted-7370a] And since no reply reports mute, qlm keeps the user's mutes itself, by hardware ID, across a lapsed lease (#20). #29 (open) keeps them across a stop too.
+Because every round restates every monitor that is on, a round from any host unmutes a monitor muted elsewhere. In `qlm-control-first`, the knob's burst unmuted the 7370A, which GLM had muted.[^unmuted-7370a] And since no reply reports mute, qlm keeps the user's mutes itself, by hardware ID, across a lapsed lease (#20). #29 keeps them across a stop too.
 
 If you read `mute-dim`, session `05` is the 7370A and `0B` the 7350A. Its notes call `0B` the big sub, so their sub labels look swapped.[^mute-dim-sessions]
 
@@ -802,7 +802,7 @@ GLM's standby is `FF 3A 03 02` twice, then `FF 3A 03 00` twice.[^standby] hlm sa
 
 The wake is three pairs of `FF 3A 03 7F` and `FF 3A 03 01`, then the level, `FF 2D 00`, and `FF 3D 00 00`.[^wake] Every monitor that wakes loses its lease and answers the next probe. GLM then sends its apply at wake to each, and each gets its state after its first poll.[^wake-apply] [Timing](#timing) has the spacing.
 
-qlm's wake sends the three pairs. Once a volume is set, it ends with the level and the pair, as GLM's does.[^qlm-wake] With #29 (open), every wake ends with a level: the volume, else the knob's position under the ceiling, else `00 00 08`.
+qlm's wake sends the three pairs. Once a volume is set, it ends with the level and the pair, as GLM's does.[^qlm-wake] Since #29, every wake ends with a level: the volume, else the knob's position under the ceiling, else `00 00 08`.
 
 GLM sends `3A 03` to one monitor only in a group switch. Its own standby is a broadcast.[^unicast-power] A single `3A 03 02` puts a monitor outside the new group in standby.[^single-standby]
 
@@ -898,7 +898,7 @@ The subwoofers, the 7370A and the 7350A, send a longer block, with repeats. Thei
 
 #### What qlm leaves out
 
-qlm leaves out `05 04`, and the 8351B's `43` and `4B`. Any real apply with an 8351B is refused until its rate is verified. #31 (open) allows one behind a flag, as a supervised test, still without `43` and `4B` ([measurement.md](measurement.md)).
+qlm leaves out `05 04`, and the 8351B's `43` and `4B`. Any real apply with an 8351B is refused until its rate is verified. #31, which went in with #32, allows one behind a flag, as a supervised test, still without `43` and `4B` ([measurement.md](measurement.md)).
 
 No apply by qlm has run on the monitors or been measured yet. [measurement.md](measurement.md) is the procedure.
 
@@ -953,7 +953,7 @@ Not everything on the bus happens because a host asked. The adapter and the moni
 
 About 2.6 s after the host goes quiet, the adapter takes over at the knob's position ([The hand-back](#the-hand-back)). When qlm stopped at the knob's level, no one heard a change. With qlm stopped, turning the knob moved the level.[^no-host-knob]
 
-qlm's ceiling doesn't reach the adapter. A knob above qlm's level makes the take-over louder.[^ceiling-take-over] With no knob in, we don't know what level the adapter applies (#30, open).
+qlm's ceiling doesn't reach the adapter. A knob above qlm's level makes the take-over louder.[^ceiling-take-over] With no knob in, we don't know what level the adapter applies (#30, which went in with #32).
 
 Nothing tells the adapter the host left. GLM's last frame is an ordinary poll.[^quit-last-frame] At that quit, the knob read −19.8 dB and GLM's level was −20 dB, so the capture can't tell the two apart.[^quit-levels] **Guess:** the adapter takes steady polling as a host's presence.[^presence]
 
@@ -973,7 +973,7 @@ On or in standby, monitors drop a quiet host's leases, within 23 s to 210 s ([Wh
 
 [^loud]: `qlm-control-first`'s notes, after the capture.
 [^no-host-knob]: `qlm-control-first`, 393.7 s, and its notes.
-[^ceiling-take-over]: #28; #30, open.
+[^ceiling-take-over]: #28; #30, which went in with #32.
 [^quit-last-frame]: `quit-glm`, 9.2 s.
 [^quit-levels]: `quit-glm`, 0.3 and 9.215 s.
 [^presence]: [adapter-status.md](adapter-status.md#how-the-adapter-knows-a-host-is-present).
@@ -992,7 +992,7 @@ On or in standby, monitors drop a quiet host's leases, within 23 s to 210 s ([Wh
 | 1 | Does the adapter escape a `7D` or `7E` address? | No capture has an address above `19`. qlm never leases either ([Framing](#framing)). |
 | 2 | Does the adapter answer in order with more than one request in flight? | GLM and qlm keep one in flight, so no capture shows it. qlm's sync assumes it (`QLMReportLink.h`). |
 | 3 | What is the adapter's host timeout, and what resets it: any report, or only `01 08`? Does one poll a cycle hold it as well as GLM's pairs? | [adapter-status.md](adapter-status.md#open) |
-| 4 | What level does the adapter apply with no knob in? | #30, open |
+| 4 | What level does the adapter apply with no knob in? | #30, which went in with #32 |
 | 5 | Why do monitors drop a quiet host's leases, and why within 9 s across an unplug? | `unplug` |
 | 6 | Does `01 22` or `01 51 82` change what the adapter does on the bus, such as its defer broadcast? | [refused-frames.md](refused-frames.md#open) |
 | 7 | What does the `2D 00` and `3D 00 00` pair do to the subwoofers, and what does their busy marker after it mean? | [refused-frames.md](refused-frames.md#open) |
@@ -1016,5 +1016,5 @@ The footnotes name each fact's source. Together, they draw on:
 - hlm's spec, revision 13, at robcazzaro/hlm commit `c08ced9`: §1 to §9, and Appendix B. Facts only. No text was copied.
 - genlc's `transport.py`, for the report-ID byte. Facts only. No code was ported.
 - espgensam's `docs/glm-group-apply.md`, for the group switch. Facts only.
-- Pull requests #8 to #35 in cmicali/qlm. #29 to #32 are open.
+- Pull requests #8 to #35 in cmicali/qlm. #30 and #31 went in as part of #32.
 - [adapter-status.md](adapter-status.md), [refused-frames.md](refused-frames.md), [telemetry.md](telemetry.md), and [measurement.md](measurement.md).
