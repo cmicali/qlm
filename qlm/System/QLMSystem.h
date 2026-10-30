@@ -58,6 +58,10 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)setSnapshotHandler:(nullable QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue;
 
 - (void)start;
+// Before it lets go, sends the knob's level when the knob is at or below the
+// level System sends, so the adapter's take-over changes nothing. The
+// snapshot's handBack says what it did. A start while that goes out runs
+// once the stop is done.
 - (void)stop;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every

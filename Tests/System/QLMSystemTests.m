@@ -1485,6 +1485,102 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// Starts System with the knob at `tenths`, or none when nil, at `volume`,
+// or none when nil, and returns the snapshot once all is settled.
+- (QLMSnapshot *)startWithKnob:(nullable NSNumber *)tenths volume:(nullable NSNumber *)volume {
+    _settings.cycleInterval = 10;
+    [_bus perform:^{
+        self->_bus.knobTenths = tenths;
+    }];
+    [self startSystem];
+    [self waitForDiscovery];
+    if (volume != nil) {
+        [_system setVolumeDecibels:volume.doubleValue];
+    }
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && (volume == nil || snapshot.volumeDecibels != nil);
+    }];
+}
+
+// Stops System, waits until it has, and returns what it sent meanwhile.
+- (NSArray<NSData *> *)stopAndCollect:(QLMSnapshot *_Nullable *_Nonnull)stopped {
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSystem *system = _system;
+    *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stop];
+    }];
+    return [self sentFrom:before matching:^BOOL(NSData *message) {
+        return YES;
+    }];
+}
+
+// The adapter takes over at the knob's position (captures/qlm-control-first,
+// 289.7 and 393.7 s). With the knob at or below the level qlm sends, qlm
+// sends the knob's level as it stops, so the take-over changes nothing.
+- (void)testAStopSendsTheKnobsLevelWhenItIsNoLouder {
+    QLMSnapshot *running = [self startWithKnob:@(-600) volume:@(-40)];
+    XCTAssertEqual(running.handBack.kind, QLMHandBackKnobLevel);
+    QLMSnapshot *stopped = nil;
+    NSArray<NSData *> *sent = [self stopAndCollect:&stopped];
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    XCTAssertEqualObjects(sent, @[QLMAdapterRecord(&knob)]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackKnobLevel);
+    XCTAssertEqualObjects(stopped.handBack.knobDecibels, @(-60));
+    XCTAssertEqualWithAccuracy(stopped.handBack.volumeDecibels.doubleValue, -40, 0.01);
+}
+
+// With the knob above the level qlm sends, the take-over makes it louder.
+// qlm sends nothing extra, and its snapshot says so, with both levels.
+- (void)testAStopSendsNothingWhenTheKnobIsLouder {
+    [self startWithKnob:@(-300) volume:@(-40)];
+    QLMSnapshot *stopped = nil;
+    XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackLouder);
+    XCTAssertEqualObjects(stopped.handBack.knobDecibels, @(-30));
+    XCTAssertEqualWithAccuracy(stopped.handBack.volumeDecibels.doubleValue, -40, 0.01);
+}
+
+// With no knob, or no volume set, the level at the take-over is unknown.
+- (void)testAStopWithNoKnobOrNoVolumeLeavesTheLevelUnknown {
+    [self startWithKnob:nil volume:@(-40)];
+    QLMSnapshot *stopped = nil;
+    XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
+    XCTAssertNil(stopped.handBack.knobDecibels);
+
+    [_bus perform:^{
+        self->_left.session = 0;
+        self->_right.session = 0;
+    }];
+    [self startWithKnob:@(-600) volume:nil];
+    XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
+    XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
+    XCTAssertNil(stopped.handBack.volumeDecibels);
+}
+
+// A start while the stop sends the knob's level runs once the stop is done.
+- (void)testAStartDuringTheHandBackRunsAfterIt {
+    [self startWithKnob:@(-600) volume:@(-40)];
+    [_bus perform:^{
+        self->_left.session = 0;
+        self->_right.session = 0;
+    }];
+    QLMSystem *system = _system;
+    __block BOOL stopped = NO;
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        stopped = stopped || !snapshot.running;
+        return stopped && snapshot.running && snapshot.monitors.count == 2 && snapshot.allIdentified;
+    } after:^{
+        [system stop];
+        [system start];
+    }];
+    XCTAssertTrue(again.running);
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    XCTAssertTrue([_bus.sentMessages containsObject:QLMAdapterRecord(&knob)]);
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.

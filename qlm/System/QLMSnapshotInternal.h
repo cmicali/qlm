@@ -43,6 +43,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+@interface QLMHandBack ()
+@property (nonatomic, readwrite) QLMHandBackKind kind;
+@property (nonatomic, readwrite, nullable) NSNumber *knobDecibels;
+@property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
+@end
+
 @interface QLMSnapshot ()
 
 @property (nonatomic, readwrite) BOOL running;
@@ -58,6 +64,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) BOOL allMuted;
 @property (nonatomic, readwrite) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readwrite) BOOL mutingAll;
+@property (nonatomic, readwrite) QLMHandBack *handBack;
 @property (nonatomic, readwrite) BOOL anyOn;
 
 @end

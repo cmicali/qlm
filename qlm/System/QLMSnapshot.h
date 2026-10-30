@@ -64,6 +64,28 @@ extern const NSInteger QLMMonitorValueAbsent;
 
 @end
 
+// What the adapter's take-over does to the level. About 2.6 s after the
+// host goes quiet, the adapter applies the knob's position
+// (captures/qlm-control-first/notes.md).
+typedef NS_ENUM(NSInteger, QLMHandBackKind) {
+    // No knob, or no volume set, so the level at the take-over is unknown.
+    QLMHandBackUnknown = 0,
+    // The knob is at or below the level System sends. System sends the
+    // knob's level just before it lets go, so the take-over changes nothing.
+    QLMHandBackKnobLevel,
+    // The knob is above the level System sends, so the take-over makes it
+    // louder. System sends nothing extra.
+    QLMHandBackLouder,
+};
+
+// Immutable.
+@interface QLMHandBack : NSObject
+@property (nonatomic, readonly) QLMHandBackKind kind;
+@property (nonatomic, readonly, nullable) NSNumber *knobDecibels;  // nil with no knob
+// The level System sends, dimmed and under the ceiling. Nil with none set.
+@property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;
+@end
+
 // The whole system at one moment. Immutable.
 @interface QLMSnapshot : NSObject
 
@@ -79,6 +101,9 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly, nullable) NSString *activeGroupName;  // the last group applied in full
 // Nothing was queued for the bus or in flight when this was published.
 @property (nonatomic, readonly) BOOL idle;
+// While System runs, what a stop would do to the level now. Once it has
+// stopped, what it did.
+@property (nonatomic, readonly) QLMHandBack *handBack;
 // System's mute record: every muted hardware ID, leased or not, and whether
 // mute all is on. Give both back through QLMSystemSettings to start from it.
 @property (nonatomic, readonly) NSSet<NSData *> *mutedHardwareIDs;

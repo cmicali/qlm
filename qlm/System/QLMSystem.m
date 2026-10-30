@@ -144,6 +144,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableArray<dispatch_block_t> *_sends;
     BOOL _inFlight;
     BOOL _running;
+    BOOL _stopping;        // sending the hand-back level before it lets go
+    BOOL _startAfterStop;  // a start that came while stopping
+    QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
     dispatch_source_t _cycleTimer;
@@ -226,29 +229,37 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)start {
     [self onQueue:^{
-        if (self->_running) {
+        if (self->_stopping) {
+            self->_startAfterStop = YES;
             return;
         }
-        self->_running = YES;
-        [self->_adapter startOnQueue:self->_queue];
-        self->_dirty = YES;
-        // GLM's opening, less what qlm never sends: the adapter's status,
-        // its system info, its serial, then the cycle (captures/startup-idle,
-        // 7.29 s). GLM's 01 22, 01 51 82, and wake are left out.
-        [self pollAdapter];
-        [self identifyAdapter];
-        [self runCycle];
-
-        __weak QLMSystem *weakSelf = self;
-        self->_cycleTimer = [self timerEvery:self.settings.cycleInterval run:^{
-            [weakSelf runCycle];
-        }];
-        if (self.settings.adapterPollInterval > 0) {
-            self->_adapterTimer = [self timerEvery:self.settings.adapterPollInterval run:^{
-                [weakSelf pollAdapter];
-            }];
+        if (!self->_running) {
+            [self beginRunning];
         }
     }];
+}
+
+- (void)beginRunning {
+    self->_running = YES;
+    self->_stoppedHandBack = nil;
+    [self->_adapter startOnQueue:self->_queue];
+    self->_dirty = YES;
+    // GLM's opening, less what qlm never sends: the adapter's status, its
+    // system info, its serial, then the cycle (captures/startup-idle,
+    // 7.29 s). GLM's 01 22, 01 51 82, and wake are left out.
+    [self pollAdapter];
+    [self identifyAdapter];
+    [self runCycle];
+
+    __weak QLMSystem *weakSelf = self;
+    self->_cycleTimer = [self timerEvery:self.settings.cycleInterval run:^{
+        [weakSelf runCycle];
+    }];
+    if (self.settings.adapterPollInterval > 0) {
+        self->_adapterTimer = [self timerEvery:self.settings.adapterPollInterval run:^{
+            [weakSelf pollAdapter];
+        }];
+    }
 }
 
 - (dispatch_source_t)timerEvery:(NSTimeInterval)seconds run:(dispatch_block_t)block {
@@ -262,34 +273,87 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)stop {
     [self onQueue:^{
-        if (!self->_running) {
+        self->_startAfterStop = NO;
+        if (!self->_running || self->_stopping) {
             return;
         }
-        self->_running = NO;
-        self->_run += 1;
-        if (self->_cycleTimer != NULL) {
-            dispatch_source_cancel(self->_cycleTimer);
-            self->_cycleTimer = NULL;
+        QLMHandBack *handBack = [self handBack];
+        self->_stoppedHandBack = handBack;
+        if (handBack.kind != QLMHandBackKnobLevel) {
+            [self finishStop];
+            return;
         }
-        if (self->_adapterTimer != NULL) {
-            dispatch_source_cancel(self->_adapterTimer);
-            self->_adapterTimer = NULL;
-        }
+        // TRAP: the adapter takes over at the knob's position about 2.6 s
+        // after the host goes quiet (captures/qlm-control-first/notes.md).
+        // The knob is at or below the level qlm sends, so qlm sends the
+        // knob's level first, and the take-over changes nothing.
+        self->_stopping = YES;
+        [self cancelTimers];
         [self->_sends removeAllObjects];
-        // A reply that never comes must not stall the next start.
-        self->_inFlight = NO;
-        self->_cycleQueued = NO;
-        self->_adapterPollsQueued = 0;
-        [self->_adapter stop];
-        [self->_monitors removeAllObjects];
-        [self->_knob reset];
-        self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
-        self->_adapterError = nil;
-        if (self->_applyFinish != nil) {
-            [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System stopped during the apply.", nil)];
-        }
-        [self publish];
+        [self send:QLMCommandVolume(handBack.knobDecibels.doubleValue, self.settings.ceilingDecibels) then:nil];
+        [self afterSends:^{
+            [self finishStop];
+        }];
     }];
+}
+
+- (void)cancelTimers {
+    if (_cycleTimer != NULL) {
+        dispatch_source_cancel(_cycleTimer);
+        _cycleTimer = NULL;
+    }
+    if (_adapterTimer != NULL) {
+        dispatch_source_cancel(_adapterTimer);
+        _adapterTimer = NULL;
+    }
+}
+
+- (void)finishStop {
+    _running = NO;
+    _stopping = NO;
+    _run += 1;
+    [self cancelTimers];
+    [_sends removeAllObjects];
+    // A reply that never comes must not stall the next start.
+    _inFlight = NO;
+    _cycleQueued = NO;
+    _adapterPollsQueued = 0;
+    [_adapter stop];
+    [_monitors removeAllObjects];
+    [_knob reset];
+    _adapterRecord = [[QLMTrackedAdapter alloc] init];
+    _adapterError = nil;
+    if (_applyFinish != nil) {
+        [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System stopped during the apply.", nil)];
+    }
+    [self publish];
+    if (_startAfterStop) {
+        _startAfterStop = NO;
+        [self beginRunning];
+    }
+}
+
+// What a stop would do to the level now: the knob's position against the
+// level System sends.
+- (QLMHandBack *)handBack {
+    QLMHandBack *handBack = [[QLMHandBack alloc] init];
+    QLMTrackedAdapter *adapter = _adapterRecord;
+    QLMAdapterStatus status = adapter.status;
+    BOOL knob = adapter.hasStatus && status.knob && status.hasKnobPosition;
+    if (knob) {
+        handBack.knobDecibels = @(status.knobTenths / 10.0);
+    }
+    if (_volumeDecibels == nil) {
+        return handBack;
+    }
+    QLMMessage sent = [self volumeMessage];
+    uint32_t word = (uint32_t)sent.payload[1] << 16 | (uint32_t)sent.payload[2] << 8 | sent.payload[3];
+    handBack.volumeDecibels = @(QLMVolumeDecibelsForWord(word));
+    if (knob) {
+        BOOL atOrBelow = QLMVolumeWordForDecibels(handBack.knobDecibels.doubleValue) <= word;
+        handBack.kind = atOrBelow ? QLMHandBackKnobLevel : QLMHandBackLouder;
+    }
+    return handBack;
 }
 
 #pragma mark - Sending
@@ -1202,6 +1266,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.idle = [self isIdle];
     snapshot.allIdentified = allIdentified;
     snapshot.allMuted = allMuted;
+    snapshot.handBack = _running && !_stopping ? [self handBack] : (_stoppedHandBack ?: [[QLMHandBack alloc] init]);
     snapshot.mutedHardwareIDs = [_mutedIDs copy];
     snapshot.mutingAll = _adapterMuted;
     snapshot.anyOn = anyOn;
