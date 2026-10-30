@@ -8,6 +8,13 @@ NSTextField *QLMNoteLabel(NSString *text, CGFloat width) {
     return label;
 }
 
+NSButton *QLMSmallButton(NSString *title, id target, SEL action) {
+    NSButton *button = [NSButton buttonWithTitle:title target:target action:action];
+    button.controlSize = NSControlSizeSmall;
+    button.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    return button;
+}
+
 NSImageView *QLMDotView(void) {
     NSImageView *dot = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:nil]];
     dot.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:8 weight:NSFontWeightRegular];

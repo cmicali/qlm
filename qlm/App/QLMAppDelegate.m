@@ -3,15 +3,18 @@
 #include <math.h>
 
 #include "QLMCommands.h"
+#import "QLMAlerts.h"
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
+#import "QLMHIDAdapter.h"
 #import "QLMMonitorList.h"
 #import "QLMMonitorsWindowController.h"
 #import "QLMPopoverController.h"
 #import "QLMPreferences.h"
 #import "QLMSettingsWindowController.h"
 #import "QLMSetupReader.h"
+#import "QLMSetupWatcher.h"
 #import "QLMSystem.h"
 
 // A ceiling change restarts System. Steps closer together than this make one.
@@ -20,6 +23,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 @interface QLMAppDelegate () <QLMPopoverControllerDelegate, QLMSettingsWindowControllerDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
+@property (nonatomic) QLMMonitorAlerts *alerts;
 @property (nonatomic) NSStatusItem *statusItem;
 @property (nonatomic) NSPopover *popover;
 @property (nonatomic) QLMPopoverController *popoverController;
@@ -31,6 +35,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
+@property (nonatomic, nullable) QLMSetupWatcher *setupWatcher;
 // What the status item shows, so an unchanged snapshot does not redraw it.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
@@ -41,6 +46,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
+    self.alerts = [[QLMMonitorAlerts alloc] initWithNotifier:[[QLMNotifier alloc] init]];
 
     self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
@@ -58,6 +64,10 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
         [self.system wake];
     }
     [self loadSetup];
+
+    NSNotificationCenter *workspace = NSWorkspace.sharedWorkspace.notificationCenter;
+    [workspace addObserver:self selector:@selector(macWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
+    [workspace addObserver:self selector:@selector(macDidWake:) name:NSWorkspaceDidWakeNotification object:nil];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
@@ -66,18 +76,29 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 #pragma mark - System
 
-// TRAP: the app runs on the fake bus. The controls are not yet checked on
-// real monitors, so it never makes a QLMHIDAdapter.
+// TRAP: a QLMHIDAdapter drives the real monitors. Only the user's setting
+// makes one. Tests and harnesses leave it off.
 - (void)startSystem {
-    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:YES];
-    bus.recordsSentMessages = NO;
+    id<QLMAdapter> adapter = nil;
+    QLMFakeBus *bus = nil;
+    if (self.preferences.usesAdapter) {
+        adapter = [[QLMHIDAdapter alloc] init];
+    } else {
+        bus = [QLMFakeBus demoBusWithSubwoofer:YES];
+        bus.recordsSentMessages = NO;
+        adapter = bus;
+    }
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.preferences.ceilingDecibels;
-    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
     self.bus = bus;
     self.system = system;
     self.popoverController.system = system;
+    self.popoverController.showsFakeBus = bus != nil;
     self.fakeBusController.bus = bus;
+    if (bus == nil) {
+        [self.fakeBusController close];
+    }
 
     __weak QLMAppDelegate *weakSelf = self;
     __weak QLMSystem *weakSystem = system;
@@ -94,10 +115,28 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     [system setVolumeDecibels:self.preferences.volumeDecibels];
 }
 
-// System copies its settings when made, so a new ceiling takes a new System.
-// It takes a new fake bus too: a stopped adapter is not handed to another.
-// Dim carries over. Mutes, the active group, and the fake bus's state do
-// not: the new System has leased no monitor, and the bus is new.
+// System lets go of the adapter before the Mac sleeps. As at quit, the
+// adapter takes over at the knob's level about 2.6 s after the last report
+// (qlm-control-first).
+- (void)macWillSleep:(NSNotification *)notification {
+    [self.system stop];
+}
+
+// The same System starts again. It keeps the volume, dim, and the active
+// group across a stop, and leases the monitors anew.
+- (void)macDidWake:(NSNotification *)notification {
+    QLMFakeBus *bus = self.bus;
+    [bus perform:^{
+        QLMFakeBusDropLeases(bus);
+    }];
+    [self.system start];
+}
+
+// System copies its settings when made, so a new ceiling or adapter setting
+// takes a new System. It takes a new adapter too: a stopped one is not
+// handed to another. Dim carries over. Mutes, the active group, and the fake
+// bus's state do not: the new System has leased no monitor, and the bus is
+// new.
 - (void)restartSystem {
     QLMSystem *old = self.system;
     BOOL dimmed = self.monitorList.snapshot.dimmed;
@@ -111,8 +150,10 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
     [self.monitorList updateWithSnapshot:snapshot];
+    [self.alerts updateWithMonitorList:self.monitorList];
     [self.popoverController refresh];
     [self.monitorsController refresh];
+    [self.settingsController refresh];
     if (self.fakeBusController.window.visible) {
         [self.fakeBusController refresh];
     }
@@ -154,16 +195,20 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 #pragma mark - The setup file
 
+// The watch starts before the read, so a save during the read still
+// offers to read again.
 - (void)loadSetup {
     NSUInteger load = ++self.setupLoads;
     NSString *chosen = self.preferences.setupFileName;
+    NSArray<NSString *> *names = QLMSetupFileNames();
+    NSString *name = chosen != nil && [names containsObject:chosen] ? chosen : names.firstObject;
+    NSString *path = name == nil ? nil : [QLMSetupDirectory() stringByAppendingPathComponent:name];
+    self.popoverController.changedSetupName = nil;
+    [self watchSetupAtPath:path];
     __weak QLMAppDelegate *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSArray<NSString *> *names = QLMSetupFileNames();
-        NSString *name = chosen != nil && [names containsObject:chosen] ? chosen : names.firstObject;
         NSError *error = nil;
-        QLMSetup *setup = name == nil ? nil : [QLMSetupReader readFileAtPath:[QLMSetupDirectory() stringByAppendingPathComponent:name]
-                                                                       error:&error];
+        QLMSetup *setup = path == nil ? nil : [QLMSetupReader readFileAtPath:path error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
             QLMAppDelegate *strongSelf = weakSelf;
             if (strongSelf == nil || load != strongSelf.setupLoads) {
@@ -175,6 +220,27 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
             [strongSelf.settingsController showSetup:setup error:strongSelf.setupError];
         });
     });
+}
+
+// When GLM saves the file in use, the popover offers to read it again.
+- (void)watchSetupAtPath:(nullable NSString *)path {
+    if (path != nil && [path isEqualToString:self.setupWatcher.path]) {
+        return;
+    }
+    [self.setupWatcher stop];
+    self.setupWatcher = nil;
+    if (path == nil) {
+        return;
+    }
+    __weak QLMAppDelegate *weakSelf = self;
+    self.setupWatcher = [[QLMSetupWatcher alloc] initWithPath:path queue:dispatch_get_main_queue() handler:^{
+        weakSelf.popoverController.changedSetupName = path.lastPathComponent;
+    }];
+    [self.setupWatcher start];
+}
+
+- (void)popoverControllerReadSetupAgain:(QLMPopoverController *)controller {
+    [self loadSetup];
 }
 
 #pragma mark - Windows
@@ -207,7 +273,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 - (void)popoverControllerShowSettings:(QLMPopoverController *)controller {
     if (self.settingsController == nil) {
-        self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences];
+        self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
         self.settingsController.delegate = self;
         [self.settingsController showSetup:self.setup error:self.setupError];
     }
@@ -215,6 +281,9 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 }
 
 - (void)popoverControllerShowFakeBus:(QLMPopoverController *)controller {
+    if (self.bus == nil) {
+        return;
+    }
     if (self.fakeBusController == nil) {
         self.fakeBusController = [[QLMFakeBusWindowController alloc] init];
         self.fakeBusController.bus = self.bus;
@@ -242,6 +311,11 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 - (void)settingsDidChooseSetupFile:(QLMSettingsWindowController *)controller {
     [self loadSetup];
+}
+
+- (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
+    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(restartSystem) object:nil];
+    [self restartSystem];
 }
 
 @end
