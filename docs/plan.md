@@ -1,26 +1,37 @@
 # qlm: the plan
 
-**Status: 2026-10-30. Phase 0's captures are in, and Phase 1 is done. qlm has run on the adapter: `qlmctl info`, `discover`, and `poll` seized it, found all six monitors, and sent only frames GLM sends. Phase 2, control from the CLI, is next.**
+**Status: 2026-10-30. Phase 0's captures are in, Phase 1 is done, and Phase 2's code is in. The controls run over USB behind safety gates, but have not run on the monitors. The first control run is next.**
 
 ## Where things stand
 
-Built, with 172 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 205 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
-- **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply. The volume word comes from GLM's own 200 levels. The control builders match GLM's frames byte for byte.
-- **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. A failed seize is a refusal. It has run on the adapter (`qlm-first-discover`).
-- **System:** the adapter's identity and status poll, discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Over a replay of `startup-idle`, it finds all six monitors with model, serial, firmware, temperature, and power state, and sends nothing GLM did not. On the adapter, it found the same six, and its cycle matched GLM's.
+- **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply. The volume word comes from GLM's own 200 levels, and the DSP block's level word floors, as GLM's does. The control builders match GLM's frames byte for byte.
+- **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. A failed seize is a refusal. It has run on the adapter (`qlm-first-discover`, `qlm-standby-discover`).
+- **System:** the adapter's identity and status poll, discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Dim, mute all, and the power steps go out as GLM sends them, but for `2D 00` in dim. System follows the knob: its first turn jumps the volume to the knob's position, under the ceiling, and the volume follows after. A gap in polling leads to new leases. On the adapter, System found all six monitors, on and in standby, and its cycle matched GLM's.
 - **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block. Every DSP block is checked against GLM's captured passes.
-- **The app and `qlmctl`:** `qlmctl info`, `discover`, and `poll` drive the adapter over USB, or the fake bus with `--fake`, or a capture with `--replay`. They send only the adapter's status poll and identity queries, the probe, the leases, and the monitors' identity queries and polls. Everything else, and the app, runs over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
+- **`qlmctl`:** `info`, `discover`, and `poll` have run on the adapter. `volume`, `mute`, `dim`, `sleep`, and `wake` run over USB too, behind gates: a ceiling the user states, at most −30 dB without `--allow-high-ceiling`, a `--dry-run` that sends only discovery, and a warning about the hand-back at exit. They have not run on the monitors. Each also runs on the fake bus with `--fake`, or a capture with `--replay`. `qlmctl setup` and `apply-group --dry-run` run on a real setup file, and `apply-group` never reaches USB.
+- **The app:** a menu bar item and a popover, on the fake bus only.
 - **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
-- **The captures:** every scenario in `captures/README.md`, 17 in all, and `qlm-first-discover`, qlm's own first run. Each is xz-compressed, with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep. The golden tests read every report in them.
+- **The captures:** every scenario in `captures/README.md`, 17 in all, and qlm's own runs, `qlm-first-discover` and `qlm-standby-discover`. Each is xz-compressed, with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep. The golden tests read every report in them.
+- **The frames qlm does not send:** [refused-frames.md](refused-frames.md) says what each one does, and whether qlm needs it.
+
+Decided since Phase 1:
+
+- **qlm matches GLM byte for byte.** So the allowlist takes exactly `2D 00`, as a broadcast right before `FF 3D 00 00`, and dim sends it.
+- **qlm refuses the adapter only for GLM, or for a process that holds it the way GLM does.** A process that only enumerates it does not count. Spotify's client on the adapter made qlm refuse in `qlm-standby-discover`, though GLM runs alongside it.
 
 Next:
 
-- The control commands over USB. `qlmctl` sends volume, mute, dim, and power only with `--fake`. The first run of each is at a low level, one monitor first.
-- System's sequences against GLM's. The builders match GLM, but System does not yet send dim's full sequence, mute all through the adapter (`2B` to `01`), or the power steps with GLM's spacing.
-- The knob in System. The snapshot carries its position, but nothing turns a move into volume yet.
-- Monitors in standby. All six were on in the first run, so whether one in standby answers without GLM's wake is open.
-- The level the adapter applies when the host leaves. USB does not show it. It needs a listening test or the bus tap, and Phase 2's hand-back depends on it.
+- The first control run, in Phase 2 below. Three changes come first:
+  - Keep each monitor's mute by hardware ID, so a monitor leased again stays muted.
+  - Send `2D 00` in dim.
+  - The host check, as decided.
+- The level the adapter applies when the host leaves. The user reports that the knob sets the active monitors' volume with GLM closed, so it is likely the knob's position. USB does not show it. The control run checks it by ear.
+- A monitor that first appears while all are muted joins unmuted. Mute all mutes only the monitors leased at that moment.
+- Group membership. GLM sends `2B 05` and `2B 07` to monitors outside the active group. System does not track membership, so it sends each its own mute.
+- The knob's slow drift. In `sleep-wake-darkwake`, GLM follows a 7 dB drift that qlm ignores until the knob's first turn.
+- For Phase 3, the frames GLM sends in a group apply that qlm does not: `3C 00 00`, `3E 00 00`, and `42 00 00` to subwoofers, and the broadcast `2D 00` and `3D 00 00` after a round of `2B` ([refused-frames.md](refused-frames.md)).
 - The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 - Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So the encoder refuses a `7D` or `7E` address, and System's leases skip both, and `F0`, the adapter's multicast. The question cannot arise.
 
@@ -50,7 +61,15 @@ Next:
 - **qlm sent only frames GLM sends.** It leaves out the wake, the volume, `01 22`, `01 51 82`, `FF 2D 00`, `FF 3D 00`, and `01 2B 00`.
 - **Leases lapse when the host goes quiet.** The monitors dropped GLM's leases within 42 s of its last report, and qlm's within 23 s. USB cannot show why. The adapter's takeover, about 2.6 s after the host goes quiet, is a likely cause.
 
-The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. The 8351B rate is unverified on the wire, so a group apply that includes one is refused.
+### What the standby run showed
+
+`captures/qlm-standby-discover` is qlm's discovery with all six monitors in standby, put there by GLM before it quit.
+
+- **Monitors in standby answer qlm without a wake.** All six answered the probe, the lease, `39`, `19 01`, and `08`, and stayed in standby. The 8351B answered as the others did. `discover` printed each as in standby, with its temperature.
+- **A monitor in standby misses a request at times.** Six times the adapter answered `01 7E`, and the monitor answered the next try. GLM's polls in standby get the same reply.
+- **Leases in standby last longer.** The monitors dropped GLM's within 210 s, and qlm's within 88 s and 68 s.
+
+The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. On the wire, every 8351B band GLM sends matches qlm's 96 kHz design to the bit (`QLMDSPBlockGoldenTests`). No measurement confirms the rate yet, so a group apply that includes an 8351B is still refused.
 
 qlm is a native Mac controller for Genelec SAM monitors. It replaces GLM for daily use on the Mac. It shows the system's status. It sets volume, mute, dim, and power. It switches groups. GLM stays installed for calibration and setup. The app never measures, calibrates, or edits a setup.
 
@@ -168,13 +187,14 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 ### Behavior System must copy from GLM
 
 - **On every connect and wake, apply the active group in full**, as GLM does. Monitors may have rebooted to their flash settings, and leases are reassigned.
-- **After any gap in polling, lease again.** Monitors drop their leases within 23 to 42 s of the host going quiet (`qlm-first-discover`).
+- **After any gap in polling, lease again.** Monitors drop their leases within 23 to 42 s of the host going quiet (`qlm-first-discover`), and within 68 to 210 s in standby (`qlm-standby-discover`).
+- **Keep the user's mutes by hardware ID.** A monitor leased again comes back muted, if the user muted it.
 - **A group apply ducks first and restores after.** Expect a short silence, as with GLM.
 - **On a group switch, send only the bands that changed**, as GLM does. A full apply sends all of them.
 - **Volume changes go out at once**, out of cadence. State changes are sent twice.
 - **Poll the adapter with `01 08` about every 110 ms, and never pause longer than 1.7 s.** The reply is the knob's only path. GLM's polling is likely what tells the adapter a host is present.
 - **At connect, keep the app's own level. At the knob's first move, jump to the knob's position**, under the ceiling. After that, follow the knob, but not its jitter at rest. [adapter-status.md](adapter-status.md) has what GLM does.
-- **TRAP: when the app quits, sleeps, or loses USB, the adapter takes over with its own level about 2.6 s later.** If that level differs from the app's, the volume jumps. USB does not show which level the adapter uses, so a listening test or the bus tap must find it.
+- **TRAP: when the app quits, sleeps, or loses USB, the adapter takes over with its own level about 2.6 s later.** If that level differs from the app's, the volume jumps. USB does not show which level the adapter uses. The user reports that the knob sets the level with no host, so it is likely the knob's position, and the ceiling does not hold it. The first control run checks it by ear.
 
 ### The UI
 
@@ -265,6 +285,33 @@ One group switch must also decode to the sequence espgensam documents, for your 
 - The knob, read from the adapter's reply to `01 08`.
 
 **Done when** each action's frames match GLM's captured frames byte for byte, apart from session IDs. The knob must move the volume through System in the CLI. Quitting the CLI must hand the bus back to the adapter without an unplanned level jump.
+
+#### The first control run
+
+It runs from main once the three changes in Next are in, with the Pi recording it as `qlm-control-first`. The user approves each step and listens. The levels are chosen so that every expected change is a few dB, and nothing can pass −35 dB while qlm is the host.
+
+Before the first step:
+
+- Build `qlmctl` from main.
+- Play music quietly through the monitors.
+- Set the knob to −40 dB.
+- Leave one monitor playing. Switch the others off, or put them in standby from GLM.
+
+The steps:
+
+1. With GLM open, check that its volume shows the knob's −40 dB. Quit GLM, and listen: the level should not change.
+2. `qlmctl info`. The knob reads about −40 dB.
+3. `qlmctl volume -45 --ceiling -35 --dry-run`. Beyond discovery, it prints only volume frames, each carrying GLM's word for −45 dB (`volume-sweep`).
+4. `qlmctl volume -45 --ceiling -35 --seconds 15`. The level drops 5 dB. After the exit, listen for 10 s, and note when the level changes. A 5 dB rise about 2.6 s after the exit means the adapter hands back at the knob's position.
+5. `qlmctl volume -45 --ceiling -35 --seconds 30`. During the hold, turn the knob down 2 dB, then back to −40 dB. At the first turn, the volume jumps to the knob, and then it follows. Never turn the knob above −35 dB: the adapter applies it after the exit, with no ceiling.
+6. `qlmctl dim on --volume -45 --ceiling -35 --seconds 10`, then `qlmctl dim off --volume -45 --ceiling -35 --seconds 5`. Dim drops the level 20 dB.
+7. `qlmctl mute on --serial <the playing monitor's> --seconds 10`, then `qlmctl mute off --serial <the same> --seconds 5`. After the first exit, listen: does the mute outlast qlm?
+8. `qlmctl sleep`, then `qlmctl wake --seconds 10`, last. Wake wakes every monitor, and each comes back on its stored settings, at the knob's level.
+9. Stop the capture, and relaunch GLM. Its launch applies the group again.
+
+Stop at once on anything unexpected: a level above what the step says, a click, or a monitor that changes state on its own. Turn the knob down, or switch the monitor off.
+
+Afterwards, `captures/qlm-control-first/notes.md` records each step's time and what the user heard. A test checks each control frame qlm sent against GLM's: the volume words against `volume-sweep`, dim and mute against `mute-dim`, and the power steps against `standby-wake`. If the hand-back is the knob's position, quitting without a jump means the volume must equal the knob's when qlm stops. That decides how the CLI and the app hand the bus back.
 
 ### Phase 3: groups
 
