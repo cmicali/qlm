@@ -84,9 +84,10 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs;
 
 // Broadcasts the power sequences, with GLM's spacing between the steps.
-// Nothing else goes out between them. Once a volume is set, the wake ends
-// with it, as GLM's does. The monitors' power state comes back in their
-// telemetry.
+// Nothing else goes out between them. The wake ends with a level, as GLM's
+// does: the volume once one is set, else the knob's position under the
+// ceiling, else the bottom level. The monitors' power state comes back in
+// their telemetry.
 - (void)sleep;
 - (void)wake;
 

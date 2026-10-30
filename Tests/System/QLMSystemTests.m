@@ -1386,6 +1386,47 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(sent[leased + 1], QLMAdapterRecord(&volume));
 }
 
+// The broadcasts that end a wake from `start` on: the level, then 2D 00 and
+// 3D 00 00.
+- (NSArray<NSData *> *)wakeEndFrom:(NSUInteger)start {
+    [self waitUntil:^BOOL {
+        return [self sentWithOpcode:0x3D from:start].count > 0;
+    }];
+    XCTAssertEqual([self sentWithOpcode:0x3A from:start].count, 6u);
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return bytes[0] == QLMAddressBroadcast && bytes[1] != 0x3A;
+    }];
+}
+
+// A wake with no volume set ends with a level all the same, since a woken
+// monitor keeps its own level until a host sends one: the knob's position
+// under the ceiling, or with no knob the bottom level.
+- (void)testAWakeWithNoVolumeSendsTheKnobsLevelOrTheBottom {
+    _settings.cycleInterval = 10;
+    NSArray<NSData *> *pair = @[QLMBytes((const uint8_t[]){QLMAddressBroadcast, 0x2D, 0x00}, 3),
+                                QLMBytes((const uint8_t[]){QLMAddressBroadcast, 0x3D, 0x00, 0x00}, 4)];
+    NSArray<NSNumber *> *knobs = @[@(-450), @(-150), @(1)];  // -45 dB, -15 dB above the -20 dB ceiling, and no knob
+    NSArray<NSNumber *> *levels = @[@(-45), @(-20), @(QLMVolumeDecibelsMin)];
+    for (NSUInteger i = 0; i < knobs.count; i++) {
+        NSNumber *knob = knobs[i].integerValue > 0 ? nil : knobs[i];
+        [_bus perform:^{
+            self->_bus.knobTenths = knob;
+            self->_left.session = 0;  // the last pass's leases lapse
+            self->_right.session = 0;
+        }];
+        [self startSystem];
+        [self waitForDiscovery];
+        NSUInteger before = _bus.sentMessages.count;
+        [_system wake];
+        QLMMessage level = QLMCommandVolume(levels[i].doubleValue, _settings.ceilingDecibels);
+        NSArray<NSData *> *expected = [@[QLMAdapterRecord(&level)] arrayByAddingObjectsFromArray:pair];
+        XCTAssertEqualObjects([self wakeEndFrom:before], expected, @"knob %@", knob);
+        XCTAssertNil(_system.snapshot.volumeDecibels);
+        [_system stop];
+    }
+}
+
 // The mute record outlives a stop. The next start knows every mute, and a
 // monitor leased again hears its mute after its first poll.
 - (void)testTheMuteRecordOutlivesAStop {

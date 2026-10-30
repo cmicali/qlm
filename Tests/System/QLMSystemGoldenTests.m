@@ -263,14 +263,15 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
     [self assertSpacingFrom:clocked + 5 matches:[self frames:2 of:@"standby-wake" from:47.0087]];
 }
 
-// A wake with no volume set sends the pairs alone.
-- (void)testWakeWithNoVolumeSendsThePairsAlone {
+// A wake with no volume set ends with the knob's level. The fake bus's knob
+// sits at its bottom stop, as standby-wake's did, so the frames are GLM's.
+- (void)testWakeWithNoVolumeEndsWithTheKnobsLevel {
     [self startSystemAt:nil];
     NSUInteger before = _bus.sentMessages.count;
     [_system wake];
-    [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6];
-    [NSThread sleepForTimeInterval:0.3];
-    XCTAssertEqual([self sentFrom:before].count, 6u);
+    NSArray<QLMCaptureExchange *> *pairs = [self frames:6 of:@"startup-idle" from:7.331654];
+    NSArray<QLMCaptureExchange *> *level = [self frames:3 of:@"standby-wake" from:47.243052];
+    [self assertSentFrom:before are:[pairs arrayByAddingObjectsFromArray:level]];
 }
 
 #pragma mark - The knob
