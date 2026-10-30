@@ -59,6 +59,10 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
         [self.system wake];
     }
     [self loadSetup];
+
+    NSNotificationCenter *workspace = NSWorkspace.sharedWorkspace.notificationCenter;
+    [workspace addObserver:self selector:@selector(macWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
+    [workspace addObserver:self selector:@selector(macDidWake:) name:NSWorkspaceDidWakeNotification object:nil];
 }
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
@@ -104,6 +108,23 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     // At connect, keep the app's own level. The knob moves nothing until a
     // volume is set.
     [system setVolumeDecibels:self.preferences.volumeDecibels];
+}
+
+// System lets go of the adapter before the Mac sleeps. As at quit, the
+// adapter takes over at the knob's level about 2.6 s after the last report
+// (qlm-control-first).
+- (void)macWillSleep:(NSNotification *)notification {
+    [self.system stop];
+}
+
+// The same System starts again. It keeps the volume, dim, and the active
+// group across a stop, and leases the monitors anew.
+- (void)macDidWake:(NSNotification *)notification {
+    QLMFakeBus *bus = self.bus;
+    [bus perform:^{
+        QLMFakeBusDropLeases(bus);
+    }];
+    [self.system start];
 }
 
 // System copies its settings when made, so a new ceiling or adapter setting
