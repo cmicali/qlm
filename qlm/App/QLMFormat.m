@@ -1,7 +1,5 @@
 #import "QLMFormat.h"
 
-#import "QLMAdapter.h"
-#import "QLMSnapshot.h"
 
 NSString *const QLMEmDash = @"—";
 
@@ -46,10 +44,6 @@ NSString *QLMReplyAgeText(NSDate *date) {
     return [formatter stringFromDate:date];
 }
 
-BOOL QLMAdapterErrorIsBusy(NSError *error) {
-    return [error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorBusy;
-}
-
 NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
     QLMHandBack *handBack = snapshot.handBack;
     switch (handBack.kind) {
@@ -76,23 +70,23 @@ NSString *QLMHandBackRiseText(QLMHandBack *handBack) {
                                       QLMDecibelsText(knob), QLMDecibelsText(volume), QLMDecibelsText(knob - volume)];
 }
 
-NSString *QLMAdapterErrorTitle(NSError *error) {
-    if (QLMAdapterErrorIsBusy(error)) {
-        return @"Another host has the adapter";
+NSString *QLMBusProblemTitle(QLMBusProblem problem) {
+    switch (problem) {
+    case QLMBusProblemNoAdapter: return @"No adapter";
+    case QLMBusProblemGLM: return @"GLM has the adapter";
+    case QLMBusProblemOtherHost: return @"Another app has the adapter";
+    case QLMBusProblemNone: break;
     }
-    if ([error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorDisconnected) {
-        return @"No adapter";
-    }
-    return @"The adapter failed";
+    return nil;
 }
 
-NSString *QLMAdapterErrorDetail(NSError *error) {
-    NSString *description = error.userInfo[NSLocalizedDescriptionKey];
-    if (description != nil) {
-        return description;
+// The error's sentence only names the other host. Nothing decides by it.
+NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
+    switch (snapshot.busProblem) {
+    case QLMBusProblemNoAdapter: return @"Connect the GLM adapter by USB.";
+    case QLMBusProblemGLM: return @"qlm drives nothing while GLM runs. Quit GLM to hand the monitors to qlm.";
+    case QLMBusProblemOtherHost:
+    case QLMBusProblemNone: break;
     }
-    if ([error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorDisconnected) {
-        return @"No GLM adapter is connected.";
-    }
-    return error.localizedDescription;
+    return snapshot.adapterError.localizedDescription ?: @"Another process holds the GLM adapter.";
 }

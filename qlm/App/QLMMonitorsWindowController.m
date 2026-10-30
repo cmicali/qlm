@@ -248,7 +248,7 @@ static const double QLMMeterBarCounts = 48;
 - (void)render {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
     QLMAdapterState *adapter = snapshot.adapter;
-    [self.banner showError:snapshot.adapterError];
+    [self.banner showBusProblemOf:snapshot];
 
     NSMutableArray<NSString *> *identity = [NSMutableArray array];
     [identity addObject:adapter.model ?: @"Not identified"];

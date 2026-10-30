@@ -68,8 +68,9 @@
     }
 }
 
-- (void)showError:(NSError *)error {
-    [self showTitle:error == nil ? nil : QLMAdapterErrorTitle(error) detail:error == nil ? nil : QLMAdapterErrorDetail(error)];
+- (void)showBusProblemOf:(QLMSnapshot *)snapshot {
+    NSString *title = snapshot == nil ? nil : QLMBusProblemTitle(snapshot.busProblem);
+    [self showTitle:title detail:title == nil ? nil : QLMBusProblemDetail(snapshot)];
 }
 
 @end

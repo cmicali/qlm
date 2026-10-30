@@ -259,9 +259,10 @@ static const NSTimeInterval QLMStopAllowance = 3;
     QLMSnapshot *snapshot = self.monitorList.snapshot;
     NSString *symbol = @"hifispeaker.2";
     NSString *tip = @"qlm";
-    if (snapshot.adapterError != nil) {
+    NSString *problem = snapshot == nil ? nil : QLMBusProblemTitle(snapshot.busProblem);
+    if (problem != nil) {
         symbol = @"exclamationmark.triangle";
-        tip = [NSString stringWithFormat:@"qlm: %@", QLMAdapterErrorTitle(snapshot.adapterError)];
+        tip = [NSString stringWithFormat:@"qlm: %@", problem];
     } else if (snapshot.allMuted) {
         symbol = @"speaker.slash";
         tip = @"qlm: muted";

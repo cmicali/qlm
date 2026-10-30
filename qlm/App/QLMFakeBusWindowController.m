@@ -5,7 +5,8 @@
 #import "QLMFormat.h"
 #import "QLMViews.h"
 
-// The shape of QLMHostCheck's description, so the banner reads as it will.
+// The shape of QLMHostCheck's sentence for GLM, so System reads it as GLM
+// holding the adapter.
 static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applications/GLMv5.app/Contents/MacOS/GLMv5). Quit GLM first.";
 static const NSInteger QLMKnobBottomTenths = -1004;
 
