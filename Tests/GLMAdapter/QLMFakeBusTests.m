@@ -1,4 +1,4 @@
-#import <XCTest/XCTest.h>
+#import "QLMTestSupport.h"
 
 #import "QLMFakeBus.h"
 #include "QLMCommands.h"
@@ -30,28 +30,8 @@
     [_bus startOnQueue:_queue];
 }
 
-// Sends on the bus's queue and waits. Returns whether a monitor answered.
 - (BOOL)send:(QLMMessage)message reply:(QLMMessage *)reply error:(NSError **)error {
-    dispatch_semaphore_t done = dispatch_semaphore_create(0);
-    __block BOOL answered = NO;
-    __block NSError *failure = nil;
-    dispatch_async(_queue, ^{
-        [self->_bus sendMessage:message replyHandler:^(const QLMMessage *received, NSError *sendError) {
-            if (received != NULL) {
-                answered = YES;
-                if (reply != NULL) {
-                    *reply = *received;
-                }
-            }
-            failure = sendError;
-            dispatch_semaphore_signal(done);
-        }];
-    });
-    XCTAssertEqual(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)), 0);
-    if (error != NULL) {
-        *error = failure;
-    }
-    return answered;
+    return [self qlm_send:message to:_bus queue:_queue reply:reply error:error];
 }
 
 - (void)testDiscoveryFollowsSection9 {

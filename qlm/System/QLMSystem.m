@@ -276,6 +276,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     for (unsigned attempt = 0; attempt < 256; attempt++) {
         uint8_t candidate = _nextSession;
         _nextSession = (uint8_t)(candidate >= QLMAddressSessionLast ? QLMAddressSessionFirst : candidate + 1);
+        if (!QLMAddressIsLeasable(candidate)) {
+            continue;
+        }
         BOOL used = NO;
         for (QLMMonitorRecord *monitor in _monitors) {
             if (monitor.session == candidate) {
