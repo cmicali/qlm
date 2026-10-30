@@ -64,9 +64,8 @@
 }
 
 + (NSData *)recordForSession:(uint8_t)session payload:(NSData *)payload {
-    NSMutableData *record = [NSMutableData dataWithBytes:&session length:1];
-    [record appendData:payload];
-    return record;
+    QLMMessage message = QLMMessageMake(session, payload.bytes, payload.length);
+    return QLMAdapterRecord(&message);
 }
 
 - (NSArray<NSData *> *)sentMessages {
@@ -98,33 +97,25 @@
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
 
-    uint8_t frame[QLMFrameMax];
-    size_t length = 0;
-    QLMFrameStatus status = QLMFrameEncode(&message, frame, sizeof frame, &length);
-    if (status != QLMFrameOK) {
-        NSError *error = [NSError errorWithDomain:QLMAdapterErrorDomain code:QLMAdapterErrorForbidden userInfo:nil];
+    uint8_t report[QLMReportLength];
+    NSError *refusal = nil;
+    if (!QLMAdapterPackReport(&message, report, &refusal)) {
         dispatch_async(queue, ^{
-            handler(NULL, error);
+            handler(NULL, refusal);
         });
         return;
     }
-    QLMMessage decoded;
-    memset(&decoded, 0, sizeof decoded);
-    QLMFrameStatus decodeStatus = QLMFrameDecode(frame, length, &decoded);
-    NSAssert(decodeStatus == QLMFrameOK, @"the codec does not round-trip");
-    (void)decodeStatus;
 
     dispatch_async(queue, ^{
         if (self.recordsSentMessages) {
-            NSData *payload = [NSData dataWithBytes:decoded.payload length:decoded.length];
-            [self->_sent addObject:[QLMFakeBus recordForSession:decoded.address payload:payload]];
+            [self->_sent addObject:QLMAdapterRecord(&message)];
         }
         if (self.disconnected) {
             handler(NULL, [NSError errorWithDomain:QLMAdapterErrorDomain code:QLMAdapterErrorDisconnected userInfo:nil]);
             return;
         }
         QLMMessage reply;
-        BOOL answered = [self replyTo:&decoded into:&reply];
+        BOOL answered = [self replyTo:&message into:&reply];
         handler(answered ? &reply : NULL, nil);
     });
 }

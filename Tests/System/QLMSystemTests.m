@@ -2,6 +2,7 @@
 
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
+#import "QLMReplayAdapter.h"
 #import "QLMSetupInternal.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
@@ -48,7 +49,11 @@
 }
 
 - (void)startSystem {
-    _system = [[QLMSystem alloc] initWithAdapter:_bus settings:_settings];
+    [self startSystemWithAdapter:_bus];
+}
+
+- (void)startSystemWithAdapter:(id<QLMAdapter>)adapter {
+    _system = [[QLMSystem alloc] initWithAdapter:adapter settings:_settings];
     NSMutableArray<QLMSnapshot *> *received = _received;
     [_system setSnapshotHandler:^(QLMSnapshot *snapshot) {
         [received addObject:snapshot];
@@ -213,6 +218,72 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     }];
     XCTAssertEqual(snapshot.monitors.count, 2u);
     XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
+}
+
+// A crowded bus runs the leases past 7C in one discovery. They skip 7D and
+// 7E, which no capture shows as an address, and F0, the adapter's multicast.
+- (void)testLeasesSkipAddressesThatNeedEscapingAndTheMulticast {
+    NSMutableArray<QLMFakeMonitor *> *monitors = [NSMutableArray array];
+    for (NSUInteger i = 0; i < 240; i++) {
+        const uint8_t hardwareID[3] = {0xA0, (uint8_t)(i >> 8), (uint8_t)i};
+        NSString *serial = [NSString stringWithFormat:@"8320apm2100%04lu", (unsigned long)i];
+        [monitors addObject:[[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:hardwareID length:3] serialNumber:serial
+                                                            systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay]];
+    }
+    _bus = [[QLMFakeBus alloc] initWithMonitors:monitors];
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.monitors.count == 240 && received.allIdentified;
+    }];
+    NSMutableIndexSet *sessions = [NSMutableIndexSet indexSet];
+    for (QLMMonitorState *monitor in snapshot.monitors) {
+        XCTAssertTrue(QLMAddressIsLeasable(monitor.session), @"%02X", monitor.session);
+        [sessions addIndex:monitor.session];
+    }
+    XCTAssertEqual(sessions.count, 240u);
+    XCTAssertTrue([sessions containsIndex:0x7C] && [sessions containsIndex:0x7F]);
+    XCTAssertTrue([sessions containsIndex:0xEF] && [sessions containsIndex:0xF1]);
+}
+
+// captures/startup-idle, where GLM finds the user's six monitors: two 8330A,
+// two 8351B, a 7370A, and a 7350A, all on. System's discovery sends what GLM
+// sent, in GLM's lease order, so the replay answers it.
+- (void)testDiscoversEveryMonitorInAReplayOfStartupIdle {
+    NSError *error = nil;
+    QLMCapture *capture = QLMReadCapture(@"startup-idle", &error);
+    XCTAssertNotNil(capture, @"%@", error);
+    _settings.cycleInterval = 0.05;
+    [self startSystemWithAdapter:[[QLMReplayAdapter alloc] initWithCapture:capture]];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        BOOL known = received.monitors.count == 6 && received.allIdentified;
+        for (QLMMonitorState *monitor in received.monitors) {
+            known = known && monitor.deviceClass != QLMMonitorClassUnknown;
+        }
+        return known;
+    }];
+
+    NSDictionary<NSString *, NSArray *> *expected = @{
+        @"8330A": @[@"1.14.7.6281", @(QLMMonitorClassTwoWay)],
+        @"8351B": @[@"1.24.07.6470", @(QLMMonitorClassTwoWay)],
+        @"7370A": @[@"1.14.7.6281", @(QLMMonitorClassSubwoofer)],
+        @"7350A": @[@"1.14.7.6281", @(QLMMonitorClassSubwoofer)],
+    };
+    NSCountedSet<NSString *> *models = [NSCountedSet set];
+    for (QLMMonitorState *monitor in snapshot.monitors) {
+        NSArray *facts = expected[monitor.model];
+        XCTAssertNotNil(facts, @"%@", monitor.model);
+        [models addObject:monitor.model ?: @""];
+        XCTAssertEqualObjects(monitor.firmwareVersion, facts[0]);
+        XCTAssertEqual(monitor.deviceClass, [facts[1] integerValue]);
+        XCTAssertTrue([monitor.serialNumber hasPrefix:monitor.model], @"%@", monitor.serialNumber);
+        XCTAssertEqual(monitor.status, QLMMonitorStatusOn);
+        XCTAssertGreaterThan(monitor.temperature, 0);
+    }
+    XCTAssertEqual([models countForObject:@"8330A"], 2u);
+    XCTAssertEqual([models countForObject:@"8351B"], 2u);
+    XCTAssertEqual([models countForObject:@"7370A"], 1u);
+    XCTAssertEqual([models countForObject:@"7350A"], 1u);
 }
 
 // Section 3: four unanswered polls, then a burst to the dead address, then
@@ -492,15 +563,24 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     return [self groupNamed:@"Mains" from:source nodes:@[source.nodes[0], source.nodes[2]]];
 }
 
-// Two 8330A whose bus serials end in the fixture's 1000005 and 1000004.
-- (void)useMainsMonitors {
-    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
-    const uint8_t rightID[3] = {0x44, 0x55, 0x66};
-    _left = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:leftID length:3] serialNumber:@"8330apm21000005"
-                                            systemInfo:@"c-1;model-8330A" deviceClass:QLMTelemetryClassTwoWay];
-    _right = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:rightID length:3] serialNumber:@"8330apm21000004"
-                                             systemInfo:@"c-1;model-8330A" deviceClass:QLMTelemetryClassTwoWay];
+// Two 8330A, with these hardware IDs and 19 01 serials.
+- (void)useMainsMonitorsWithLeftID:(NSData *)leftID
+                        leftSerial:(NSString *)leftSerial
+                           rightID:(NSData *)rightID
+                       rightSerial:(NSString *)rightSerial {
+    _left = [[QLMFakeMonitor alloc] initWithHardwareID:leftID serialNumber:leftSerial systemInfo:@"c-1;model-8330A"
+                                           deviceClass:QLMTelemetryClassTwoWay];
+    _right = [[QLMFakeMonitor alloc] initWithHardwareID:rightID serialNumber:rightSerial systemInfo:@"c-1;model-8330A"
+                                            deviceClass:QLMTelemetryClassTwoWay];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
+}
+
+// Two 8330A whose hardware IDs are the fixture's 1000005 and 1000004.
+- (void)useMainsMonitors {
+    const uint8_t leftID[3] = {0x0F, 0x42, 0x45};
+    const uint8_t rightID[3] = {0x0F, 0x42, 0x44};
+    [self useMainsMonitorsWithLeftID:QLMBytes(leftID, 3) leftSerial:@"8330AP21001234"
+                             rightID:QLMBytes(rightID, 3) rightSerial:@"8330AP21005678"];
 }
 
 - (NSError *)applyGroup:(QLMSetupGroup *)group {
@@ -534,10 +614,15 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     XCTAssertNil(_system.snapshot.activeGroupName);
 }
 
-// The plan's matching rule: a node matches the monitor whose serial ends in
-// the node's. These monitors' serials match neither node.
+// A node matches the monitor whose hardware ID is the node's Serial. These
+// monitors' 19 01 serials end in the nodes' Serials, but their IDs match
+// neither node.
 - (void)testApplyRefusesANodeWithNoMonitor {
     _settings.cycleInterval = 10;
+    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
+    const uint8_t rightID[3] = {0x44, 0x55, 0x66};
+    [self useMainsMonitorsWithLeftID:QLMBytes(leftID, 3) leftSerial:@"8330AP21000005"
+                             rightID:QLMBytes(rightID, 3) rightSerial:@"8330AP21000004"];
     [self startSystem];
     [self waitForDiscovery];
     [_system setVolumeDecibels:-30];

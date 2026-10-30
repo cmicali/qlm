@@ -25,7 +25,7 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 // A bus of simulated monitors, behaving as the spec's section 9 describes.
-// Every message goes through the frame encoder, so the allowlist applies.
+// Every message is packed as an output report, so the allowlist applies.
 @interface QLMFakeBus : NSObject <QLMAdapter>
 
 - (instancetype)initWithMonitors:(NSArray<QLMFakeMonitor *> *)monitors;

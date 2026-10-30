@@ -79,6 +79,34 @@
     XCTAssertEqual(QLMFrameDecode(tooShort, sizeof tooShort, &message), QLMFrameErrorLength);
 }
 
+// Section 3 gives sessions 02 to FE and the adapter's multicast F0. No
+// capture has an address above 19, so whether the adapter escapes an address
+// of 7D or 7E is unknown. qlm leases neither.
+- (void)testLeasesNoAddressThatNeedsEscapingOrIsTheMulticast {
+    NSUInteger leasable = 0;
+    for (unsigned address = 0; address <= 0xFF; address++) {
+        BOOL expected = address >= 0x02 && address <= 0xFE && address != 0x7D && address != 0x7E && address != 0xF0;
+        XCTAssertEqual(QLMAddressIsLeasable((uint8_t)address), expected, @"%02X", address);
+        leasable += expected ? 1 : 0;
+    }
+    XCTAssertEqual(leasable, 250u);
+
+    // No caller can lease one, or send to 7D or 7E.
+    const uint8_t sessions[] = {0x7D, 0x7E, 0xF0};
+    for (size_t i = 0; i < sizeof sessions; i++) {
+        const uint8_t lease[] = {0x02, 0x11, 0x22, 0x33, sessions[i]};
+        XCTAssertFalse(QLMFrameAllows(lease, sizeof lease), @"%02X", sessions[i]);
+    }
+    const uint8_t shortLease[] = {0x02, 0x11, 0x22, 0x33};
+    XCTAssertFalse(QLMFrameAllows(shortLease, sizeof shortLease));
+    uint8_t out[QLMFrameMax];
+    size_t length = 0;
+    QLMMessage toFlag = QLMMakeMessage(QLMFrameFlag, 0x08);
+    XCTAssertEqual(QLMFrameEncode(&toFlag, out, sizeof out, &length), QLMFrameErrorForbidden);
+    QLMMessage toEscape = QLMMakeMessage(QLMFrameEscape, 0x08);
+    XCTAssertEqual(QLMFrameEncode(&toEscape, out, sizeof out, &length), QLMFrameErrorForbidden);
+}
+
 - (void)testRefusesABufferThatIsTooSmall {
     QLMMessage message = QLMMakeMessage(QLMAddressBroadcast, 0x04);
     uint8_t out[4];
@@ -118,13 +146,13 @@
 
 // Section 7 and section 9's group apply: what qlm does send.
 - (void)testTheAllowlistAcceptsWhatQLMSends {
-    const uint8_t allowed[][4] = {
-        {0x02, 0x11, 0x22, 0x33}, {0x04}, {0x08}, {0x17, 0x01}, {0x19, 0x01}, {0x1F, 0x7F, 0xFF, 0xFF},
+    const uint8_t allowed[][5] = {
+        {0x02, 0x11, 0x22, 0x33, 0x02}, {0x04}, {0x08}, {0x17, 0x01}, {0x19, 0x01}, {0x1F, 0x7F, 0xFF, 0xFF},
         {0x2B, 0x03}, {0x39}, {0x3A, 0x03, 0x02}, {0x3A, 0x03, 0x7F}, {0x3B, 0x00, 0x5A}, {0x3D, 0x00, 0x00},
         {0x40, 0x00, 0x01, 0x02}, {0xFE}, {0x10, 0x02, 0x00, 0x00}, {0x10, 0x01, 0x00, 0x7F}, {0x10, 0x01, 0x09, 0x00},
         {0x10, 0x0E, 0x00, 0x00},
     };
-    const size_t lengths[] = {4, 1, 1, 2, 2, 4, 2, 1, 3, 3, 3, 3, 4, 1, 4, 4, 4, 4};
+    const size_t lengths[] = {5, 1, 1, 2, 2, 4, 2, 1, 3, 3, 3, 3, 4, 1, 4, 4, 4, 4};
     for (size_t i = 0; i < sizeof lengths / sizeof lengths[0]; i++) {
         XCTAssertTrue(QLMFrameAllows(allowed[i], lengths[i]), @"entry %zu", i);
     }

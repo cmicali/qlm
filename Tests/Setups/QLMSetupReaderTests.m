@@ -180,6 +180,24 @@
     XCTAssertEqual([QLMReadFixtureSetup().groups[0] nodeWithSerial:@"1000006"].nodeClass, QLMSetupNodeClassSubwoofer);
 }
 
+// Source: captures/startup-idle, the F0 02 leases from 8.432 s to 8.481 s.
+// Each lease's three-byte hardware ID, read big-endian in decimal, is the
+// Serial of the node of the same model in the user's setup file. No serial
+// from 19 01 ends in a node's Serial.
+- (void)testANodesSerialIsItsMonitorsHardwareID {
+    const uint8_t rearRight[] = {0x0F, 0x42, 0x45};  // the fixture's 1000005
+    QLMSetupNode *node = [QLMReadFixtureSetup().groups[0] nodeWithSerial:@"1000005"];
+    XCTAssertEqualObjects(node.hardwareID, QLMBytes(rearRight, sizeof rearRight));
+
+    NSMutableString *text = [[NSMutableString alloc] initWithData:[self fixture] encoding:NSUTF8StringEncoding];
+    NSRange serial = [text rangeOfString:@"Serial:1000005\r\nGroup_ON:1\r\n"];
+    [text replaceCharactersInRange:serial withString:@"Serial:16777216\r\nGroup_ON:1\r\n"];
+    NSError *error = nil;
+    QLMSetup *setup = [QLMSetupReader readData:[text dataUsingEncoding:NSUTF8StringEncoding] error:&error];
+    XCTAssertNotNil(setup, @"%@", error);
+    XCTAssertNil([setup.groups[0] nodeWithSerial:@"16777216"].hardwareID);  // more than three bytes
+}
+
 - (void)testEveryKeyInTheFixtureIsKnown {
     XCTAssertEqualObjects(QLMReadFixtureSetup().unknownKeys, @[]);
 }
