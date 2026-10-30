@@ -18,21 +18,6 @@
 static const NSTimeInterval QLMRunStart = 30;
 static const double QLMRunCeiling = -35;
 
-static BOOL QLMIsControl(QLMMessage message) {
-    if (message.address == QLMAddressMulticast || message.length == 0) {
-        return NO;
-    }
-    switch (message.payload[0]) {
-    case 0x08:  // a poll
-    case 0x19:  // a serial
-    case 0x39:  // system info
-    case 0xFE:  // the probe
-        return NO;
-    default:
-        return YES;
-    }
-}
-
 // The control frames qlm sent, in order.
 static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
     NSMutableArray<QLMCaptureExchange *> *controls = [NSMutableArray array];
@@ -72,17 +57,6 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
 
 - (void)assertExchange:(QLMCaptureExchange *)exchange isExchange:(QLMCaptureExchange *)glm {
     XCTAssertEqualObjects(exchange.outputReport, glm.outputReport, @"%.6f s against GLM's at %.6f s", exchange.time, glm.time);
-}
-
-static NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
-    NSMutableSet<NSData *> *reports = [NSMutableSet set];
-    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
-        QLMMessage message = exchange.message;
-        if (message.length > 0 && message.payload[0] == opcode) {
-            [reports addObject:exchange.outputReport];
-        }
-    }
-    return reports;
 }
 
 // Every opcode qlm sent beyond discovery is a level, a mute, or a power step.

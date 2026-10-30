@@ -144,9 +144,14 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
 // or the no-answer frame. Broadcasts get none. Only a capture's last
 // exchange may lack its reply, cut off when the capture stopped. Each reply
 // reads with the parser for its request.
+//
+// A telemetry reply may hold an unknown tag only after its 84, where the
+// frame is whole, so System loses nothing. Two do: in qlm-control-all, at
+// 381.15 and 381.17 s, both 8330As end a frame with a bare 04 after 8A.
 - (void)testEveryReplyAnswersItsRequest {
     NSUInteger noAnswers = 0;
     NSUInteger telemetry = 0;
+    NSUInteger lateTags = 0;
     NSUInteger identities = 0;
     for (QLMCapture *capture in [self captures]) {
         QLMCaptureExchange *last = capture.exchanges.lastObject;
@@ -192,7 +197,9 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
             } else if (opcode == 0x08) {
                 QLMTelemetry values;
                 QLMTelemetryStatus status = QLMReplyTelemetry(&reply, &values);
-                XCTAssertNotEqual(status, QLMTelemetryErrorUnknownTag, @"%@: tag %02X", what(), values.unknownTag);
+                BOOL late = status == QLMTelemetryErrorUnknownTag && values.deviceClass != QLMTelemetryAbsent;
+                lateTags += late ? 1 : 0;
+                XCTAssertTrue(status != QLMTelemetryErrorUnknownTag || late, @"%@: tag %02X", what(), values.unknownTag);
                 XCTAssertNotEqual(status, QLMTelemetryErrorTruncated, @"%@", what());
                 telemetry += status == QLMTelemetryOK ? 1 : 0;
             } else if (opcode == 0x19) {
@@ -212,6 +219,7 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
     }
     XCTAssertGreaterThan(noAnswers, 0u);
     XCTAssertGreaterThan(telemetry, 5000u);
+    XCTAssertEqual(lateTags, 2u);
     XCTAssertGreaterThan(identities, 0u);
 }
 
