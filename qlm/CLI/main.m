@@ -477,9 +477,9 @@ static int QLMRunControl(QLMSystem *system, QLMControlOptions *_Nullable options
         return !snapshot.running;
     });
     if (sent && options.overUSB) {
-        BOOL warning = YES;
-        NSString *text = QLMHandBackText((stopped ?: system.snapshot).handBack, &warning);
-        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", text.UTF8String);
+        QLMHandBack *handBack = (stopped ?: system.snapshot).handBack;
+        BOOL warning = handBack.kind != QLMHandBackKnobLevel;
+        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", QLMHandBackText(handBack).UTF8String);
     }
     return status;
 }

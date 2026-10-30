@@ -89,8 +89,8 @@ NSSet<NSData *> *_Nullable QLMHardwareIDsForSerials(NSArray<NSString *> *serials
 QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction action);
 
 // What System's stop did about the adapter's take-over, for qlmctl to print
-// at exit. `warning` is NO only when the take-over changes nothing.
-NSString *QLMHandBackText(QLMHandBack *handBack, BOOL *warning);
+// at exit. It is a warning but for QLMHandBackKnobLevel.
+NSString *QLMHandBackText(QLMHandBack *handBack);
 
 // The word a volume frame carries. The frame is rebuilt from it, so only a
 // true volume frame passes.

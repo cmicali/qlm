@@ -304,11 +304,7 @@ QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction act
     };
 }
 
-// About 2.6 s after the host goes quiet, the adapter takes over at the
-// knob's position (captures/qlm-control-first/notes.md). What System's stop
-// did about it, and whether that is a warning.
-NSString *QLMHandBackText(QLMHandBack *handBack, BOOL *warning) {
-    *warning = handBack.kind != QLMHandBackKnobLevel;
+NSString *QLMHandBackText(QLMHandBack *handBack) {
     switch (handBack.kind) {
     case QLMHandBackKnobLevel:
         return [NSString stringWithFormat:@"qlm sent the knob's level, %.1f dB, as it stopped, so the adapter's take-over "
