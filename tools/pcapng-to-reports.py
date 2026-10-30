@@ -6,16 +6,20 @@ Reads a pcap or pcapng file whose link type is USBPcap (249) or Linux usbmon
 seconds from the first packet, `out` or `in`, then the bytes in hex. Reports
 come from interrupt transfers, HID SET_REPORT Output, and HID GET_REPORT
 Input. Every other control transfer becomes a `#` line with its setup packet
-and data. Everything else is skipped.
+and data. Everything else is skipped. A capture may be xz-compressed, as the
+repository stores them.
 
-    python3 -I tools/pcapng-to-reports.py capture.pcapng > reports.txt
+    python3 -I tools/pcapng-to-reports.py capture.pcapng.xz > reports.txt
     python3 -I tools/pcapng-to-reports.py --device 1:5 capture.pcap > reports.txt
     python3 -I tools/pcapng-to-reports.py --self-test
 
 --device BUS:DEV keeps one device's traffic, in decimal as lsusb prints it.
-Without it, a capture of more than one device converts with a warning.
+Repeat it to keep more than one, as when an unplugged adapter comes back at
+a new number. Without it, a capture of more than one device converts with a
+warning.
 """
 import argparse
+import lzma
 import struct
 import sys
 
@@ -26,6 +30,8 @@ LINKTYPES = (LINKTYPE_USB_LINUX, LINKTYPE_USB_LINUX_MMAPPED, LINKTYPE_USBPCAP)
 
 INTERRUPT = 1
 CONTROL = 2
+
+XZ_MAGIC = b"\xfd7zXZ\x00"
 
 # USBPcap's packet header, packed. The direction is bit 0 of info: 1 is
 # device to host. The transfer is 0 iso, 1 interrupt, 2 control, 3 bulk. A
@@ -104,6 +110,8 @@ def packets_pcapng(data):
 
 
 def packets(data):
+    if data[:6] == XZ_MAGIC:
+        data = lzma.decompress(data)
     if data[:4] == b"\x0a\x0d\x0d\x0a":
         return packets_pcapng(data)
     return packets_pcap(data)
@@ -157,7 +165,7 @@ def control(setup, payload):
     return "in" if setup[0] & 0x80 else "out", payload, setup
 
 
-def reports(data, device=None, counts=None):
+def reports(data, devices=None, counts=None):
     """Yields (seconds, direction, bytes, setup) for each transfer kept.
 
     Setup is None for a HID report and the setup packet for any other control
@@ -167,7 +175,7 @@ def reports(data, device=None, counts=None):
     first = None
     pending = {}
     for timestamp, seen, key, completion, transfer, endpoint, setup, payload in events(data, counts):
-        if device is not None and seen != device:
+        if devices is not None and seen not in devices:
             continue
         if first is None:
             first = timestamp
@@ -191,19 +199,19 @@ def reports(data, device=None, counts=None):
             yield (seconds, *control(setup, payload))
 
 
-def convert(data, source, device=None, warn=sys.stderr.write):
+def convert(data, source, devices=None, warn=sys.stderr.write):
     lines = [f"# qlm USB capture, converted from {source}"]
-    if device is not None:
-        lines.append(f"# device {device[0]}:{device[1]}")
+    if devices is not None:
+        lines.append("# device " + " ".join(f"{bus}:{address}" for bus, address in devices))
     lines.append("# seconds direction bytes")
     counts = {}
-    for seconds, direction, payload, setup in reports(data, device, counts):
+    for seconds, direction, payload, setup in reports(data, devices, counts):
         if setup is None:
             lines.append(f"{seconds:.6f} {direction} {payload.hex(' ').upper()}")
         else:
             line = f"# {seconds:.6f} {direction} control {setup.hex(' ').upper()}"
             lines.append(line + (f" data {payload.hex(' ').upper()}" if payload else ""))
-    if device is None and len(counts) > 1:
+    if devices is None and len(counts) > 1:
         seen = "".join(f"  {bus}:{address} {count} packets\n" for (bus, address), count in sorted(counts.items()))
         warn("warning: the capture holds more than one device; pick one with --device\n" + seen)
     return "\n".join(lines) + "\n"
@@ -300,17 +308,24 @@ def self_test():
     captures = [
         ("usbmon pcap", pcap(LINKTYPE_USB_LINUX_MMAPPED, synthetic_usbmon(LINKTYPE_USB_LINUX_MMAPPED))),
         ("usbmon pcapng", pcapng(LINKTYPE_USB_LINUX, synthetic_usbmon(LINKTYPE_USB_LINUX))),
+        ("usbmon pcapng xz", lzma.compress(pcapng(LINKTYPE_USB_LINUX, synthetic_usbmon(LINKTYPE_USB_LINUX)))),
     ]
     for name, capture in captures:
         warnings = []
-        check(name + " --device", convert(capture, "self-test", (1, 5), warnings.append), (
+        check(name + " --device", convert(capture, "self-test", [(1, 5)], warnings.append), (
             "# qlm USB capture, converted from self-test\n"
             "# device 1:5\n"
             "# seconds direction bytes\n" + adapter
         ))
         check(name + " --device warning", "".join(warnings), "")
-        warnings = []
         lines = adapter.splitlines(keepends=True)
+        check(name + " --device twice", convert(capture, "self-test", [(1, 5), (1, 1)], warnings.append), (
+            "# qlm USB capture, converted from self-test\n"
+            "# device 1:5 1:1\n"
+            "# seconds direction bytes\n" + lines[0] + "0.001000 in 02\n" + "".join(lines[1:])
+        ))
+        check(name + " --device twice warning", "".join(warnings), "")
+        warnings = []
         check(name, convert(capture, "self-test", warn=warnings.append), (
             "# qlm USB capture, converted from self-test\n"
             "# seconds direction bytes\n" + lines[0] + "0.001000 in 02\n" + "".join(lines[1:])
@@ -338,7 +353,7 @@ def parse_device(text):
 def main(argv):
     parser = argparse.ArgumentParser(usage=__doc__, add_help=False)
     parser.add_argument("capture", nargs="?")
-    parser.add_argument("--device", type=parse_device)
+    parser.add_argument("--device", type=parse_device, action="append")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv[1:])
     if args.self_test and args.capture is None and args.device is None:

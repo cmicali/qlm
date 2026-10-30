@@ -16,3 +16,6 @@ DerivedData/
 
 # Claude Code worktrees are checkouts of this repo living inside it.
 /.claude/worktrees/
+
+# Captures go into the repository xz-compressed. See captures/README.md.
+captures/*/capture.pcapng
