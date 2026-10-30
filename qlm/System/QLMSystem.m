@@ -622,23 +622,25 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return blocks;
 }
 
-// TRAP: unverified. The setup file's Serial is digits, and the bus gives an
-// ASCII serial with a model prefix. They are taken to match when the bus's
-// ends with the file's. A capture will settle it. Two matches is no match.
+// A setup node's Serial is its monitor's hardware ID, read big-endian, in
+// decimal. TRAP: the serial from 19 01 does not end in it.
 - (nullable QLMMonitorRecord *)monitorForNodeSerial:(NSString *)serial {
-    if (serial.length == 0) {
+    if (serial.length == 0 || serial.length > 8) {
         return nil;
     }
-    QLMMonitorRecord *found = nil;
-    for (QLMMonitorRecord *monitor in _monitors) {
-        if ([monitor.serialNumber hasSuffix:serial]) {
-            if (found != nil) {
-                return nil;
-            }
-            found = monitor;
+    uint32_t value = 0;
+    for (NSUInteger i = 0; i < serial.length; i++) {
+        unichar digit = [serial characterAtIndex:i];
+        if (digit < '0' || digit > '9') {
+            return nil;
         }
+        value = value * 10 + (uint32_t)(digit - '0');
     }
-    return found;
+    if (value > 0xFFFFFF) {
+        return nil;
+    }
+    const uint8_t hardwareID[3] = {(uint8_t)(value >> 16), (uint8_t)(value >> 8), (uint8_t)value};
+    return [self monitorWithHardwareID:[NSData dataWithBytes:hardwareID length:3]];
 }
 
 // GLM's apply: duck, wake, unmute and route, the blocks, then restore. Every
