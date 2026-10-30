@@ -66,10 +66,9 @@ typedef int (^QLMControlAction)(QLMSystem *system, QLMSnapshot *discovered);
 NSArray<NSData *> *_Nullable QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, QLMControlAction action,
                                               QLMSnapshotTest effect, int *status);
 
-// Dim, sent as GLM sends it (captures/mute-dim, 51.24 s): the level twice, a
-// round of 2B, then broadcast 2D 00 and 3D 00 00. System sends that only
-// when dim changes with a volume set, so this sets the state dim changes
-// from, then the volume, which goes out at that state, then dim.
+// Dim, as GLM sends it. System sends GLM's dim only when dim changes with a
+// volume set, so this sets the state dim changes from, then the volume,
+// which goes out at that state, then dim.
 QLMControlAction QLMDimAction(BOOL on, NSNumber *_Nullable volumeDecibels);
 
 // The wake. A volume, when given, is set first, so the wake ends with it, as

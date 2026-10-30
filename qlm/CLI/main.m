@@ -575,14 +575,13 @@ static int QLMPower(int argc, const char *argv[], BOOL wake) {
     QLMMonitorStatus wanted = wake ? QLMMonitorStatusOn : QLMMonitorStatusStandby;
     NSNumber *volume = options.volumeDecibels;
     __block NSUInteger count = 0;
-    QLMControlAction wakeAction = QLMWakeAction(volume);
-    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
-        count = discovered.monitors.count;
-        if (wake) {
-            return wakeAction(system, discovered);
-        }
+    QLMControlAction power = wake ? QLMWakeAction(volume) : ^int(QLMSystem *system, QLMSnapshot *discovered) {
         [system sleep];
         return 0;
+    };
+    return QLMRunControlCommand(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        count = discovered.monitors.count;
+        return power(system, discovered);
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
         if (!snapshot.idle || snapshot.monitors.count != count) {
             return NO;

@@ -151,8 +151,7 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         options.ceilingDecibels = number;
     }
 
-    BOOL sendsVolume = command == QLMControlCommandVolume || command == QLMControlCommandDim ||
-                       (command == QLMControlCommandWake && options.volumeDecibels != nil);
+    BOOL sendsVolume = command == QLMControlCommandDim || options.volumeDecibels != nil;
     if (options.overUSB && sendsVolume && ceiling == nil) {
         NSString *name = command == QLMControlCommandVolume ? @"volume" : (command == QLMControlCommandDim ? @"dim" : @"wake --volume");
         *problem = [NSString stringWithFormat:@"over USB, %@ needs --ceiling, at most %.0f dB", name, QLMCeilingLimit];

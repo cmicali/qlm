@@ -226,11 +226,9 @@ static NSData *QLMRecord(QLMMessage message) {
     return records;
 }
 
-// The round of 2B to both monitors, in the mirror's lease order, then
-// broadcast 2D 00 and 3D 00 00.
-static NSArray<NSData *> *QLMRoundAndPair(void) {
-    return @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueUnmuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueUnmuted)),
-             QLMRecord(QLMCommandInputPreamble()), QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
+// Broadcast 2D 00 and 3D 00 00.
+static NSArray<NSData *> *QLMPair(void) {
+    return @[QLMRecord(QLMCommandInputPreamble()), QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
 }
 
 // qlmctl dim sends GLM's whole dim (captures/mute-dim, 51.24 s on and
@@ -247,7 +245,9 @@ static NSArray<NSData *> *QLMRoundAndPair(void) {
         }];
         NSData *from = on.boolValue ? level : dimmed;
         NSData *to = on.boolValue ? dimmed : level;
-        NSArray<NSData *> *expected = [@[from, to, to] arrayByAddingObjectsFromArray:QLMRoundAndPair()];
+        // The round of 2B goes in the mirror's lease order.
+        NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueUnmuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueUnmuted))];
+        NSArray<NSData *> *expected = [[@[from, to, to] arrayByAddingObjectsFromArray:round] arrayByAddingObjectsFromArray:QLMPair()];
         XCTAssertEqualObjects(records, expected, @"dim %@", on.boolValue ? @"on" : @"off");
     }
 }
@@ -265,19 +265,14 @@ static NSArray<NSData *> *QLMRoundAndPair(void) {
         [expected addObject:QLMRecord(QLMCommandPower(QLMPowerStepWakeSecond))];
     }
     [expected addObject:level];
-    [expected addObject:QLMRecord(QLMCommandInputPreamble())];
-    [expected addObject:QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
+    [expected addObjectsFromArray:QLMPair()];
     XCTAssertEqualObjects(records, expected);
 }
 
 // Over USB, wake --volume needs a ceiling. Without --volume it needs none.
 - (void)testWakeWithAVolumeOverUSBNeedsACeiling {
-    NSString *problem = nil;
-    NSArray<NSString *> *noCeiling = @[@"--volume", @"-40"];
-    XCTAssertNil([QLMControlOptions optionsForCommand:QLMControlCommandWake arguments:noCeiling problem:&problem]);
-    XCTAssertTrue([problem containsString:@"--ceiling"], @"%@", problem);
-    NSArray<NSString *> *above = @[@"--volume", @"-30", @"--ceiling", @"-35"];
-    XCTAssertNil([QLMControlOptions optionsForCommand:QLMControlCommandWake arguments:above problem:&problem]);
+    [self refuse:QLMControlCommandWake arguments:@[@"--volume", @"-40"] mentions:@"--ceiling"];
+    [self refuse:QLMControlCommandWake arguments:@[@"--volume", @"-30", @"--ceiling", @"-35"] mentions:nil];
     QLMControlOptions *options = [self read:QLMControlCommandWake arguments:@[@"--volume", @"-40", @"--ceiling", @"-35"]];
     XCTAssertEqualObjects(options.volumeDecibels, @(-40));
     XCTAssertNil([self read:QLMControlCommandWake arguments:@[]].volumeDecibels);
