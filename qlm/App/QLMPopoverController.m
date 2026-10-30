@@ -5,6 +5,7 @@
 #include "QLMCommands.h"
 #import "QLMBannerView.h"
 #import "QLMFormat.h"
+#import "QLMGLM.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMPopoverWidth = 320;
@@ -56,6 +57,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSStackView *monitorsStack;
 @property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry, as the list only appends
 @property (nonatomic) NSTimeInterval sliderMovedAt;
+@property (nonatomic) BOOL askedGLMToQuit;  // until GLM lets go of the adapter
 // The snapshot says an apply is running, not which group.
 @property (nonatomic, copy, nullable) NSString *applyingGroupName;
 @property (nonatomic, copy, nullable) NSString *message;  // the last apply's error
@@ -141,7 +143,9 @@ static NSView *QLMSpacer(void) {
     NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, QLMPopoverWidth, 10)];
     CGFloat contentWidth = QLMPopoverWidth - 2 * QLMPopoverInset;
 
-    self.banner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50];
+    self.banner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50 style:QLMBannerStyleWarning];
+    self.banner.actionButton.target = self;
+    self.banner.actionButton.action = @selector(quitGLMClicked:);
 
     NSTextField *title = [NSTextField labelWithString:@"qlm"];
     title.font = [NSFont systemFontOfSize:NSFont.systemFontSize + 1 weight:NSFontWeightSemibold];
@@ -328,6 +332,17 @@ static NSView *QLMSpacer(void) {
     }];
 }
 
+// Asks politely, as the Dock's Quit does. GLM may ask to save first, and it
+// is never forced. The adapter opens on its own once GLM lets go.
+- (void)quitGLMClicked:(id)sender {
+    self.askedGLMToQuit = [[self runningGLM] terminate];
+    [self refresh];
+}
+
+- (nullable NSRunningApplication *)runningGLM {
+    return QLMRunningGLM();
+}
+
 - (void)showMonitorsClicked:(id)sender {
     [self.delegate popoverControllerShowMonitors:self];
 }
@@ -365,7 +380,7 @@ static NSView *QLMSpacer(void) {
 
 - (void)render {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
-    [self.banner showError:snapshot.adapterError];
+    [self renderBanner:snapshot.adapterError];
     self.deviceLabel.stringValue = snapshot.adapter.device ?: @"";
     self.deviceLabel.toolTip = snapshot.adapter.systemInfo;
     [self renderVolume:snapshot];
@@ -391,6 +406,18 @@ static NSView *QLMSpacer(void) {
     self.messageLabel.hidden = message == nil;
 
     [self renderMonitors:self.monitorList.entries snapshot:snapshot];
+}
+
+- (void)renderBanner:(nullable NSError *)error {
+    [self.banner showError:error];
+    BOOL glmHolds = QLMAdapterErrorIsBusy(error) && [self runningGLM] != nil;
+    if (!glmHolds) {
+        self.askedGLMToQuit = NO;
+    }
+    NSButton *quit = self.banner.actionButton;
+    quit.hidden = !glmHolds;
+    quit.enabled = !self.askedGLMToQuit;
+    quit.title = self.askedGLMToQuit ? @"Asked GLM to Quit" : @"Quit GLM";
 }
 
 - (void)renderVolume:(nullable QLMSnapshot *)snapshot {
