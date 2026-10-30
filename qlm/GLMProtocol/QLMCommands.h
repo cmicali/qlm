@@ -69,7 +69,7 @@ QLMMessage QLMCommandDuck(void);
 
 // The DSP block, in the order GLM sends it: prepare, delay, level, the
 // unknown level subcommand, twenty PEQ slots, crossover, input sync, routing.
-// A level word is linear gain at 2^23 - 1, rounded; 7F FF FF is 0 dB.
+// A level word is linear gain at 2^23 - 1, floored; 7F FF FF is 0 dB.
 uint32_t QLMLevelWordForDecibels(double decibels);
 QLMMessage QLMCommandPrepare(uint8_t session);
 QLMMessage QLMCommandDelay(uint8_t session, uint32_t samples);
