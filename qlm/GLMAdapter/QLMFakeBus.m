@@ -33,8 +33,16 @@
         _monitors = [monitors copy];
         _sent = [NSMutableArray array];
         _recordsSentMessages = YES;
+        // The shape of the adapter's own replies in captures/startup-idle.
+        _adapterSystemInfo = @"c-0;model-GLM Adapter;ver-1.4.0.6113;hw-0.0.202;build-2025.05.19.s  ";
+        _adapterSerialNumber = @"H00000F001";
+        _knobTenths = @(-1004);
     }
     return self;
+}
+
+- (NSString *)deviceDescription {
+    return [NSString stringWithFormat:@"a fake bus of %lu monitors", (unsigned long)_monitors.count];
 }
 
 + (instancetype)demoBusWithSubwoofer:(BOOL)withSubwoofer {
@@ -107,6 +115,11 @@
     }
 
     dispatch_async(queue, ^{
+        NSString *busy = self.busyReason;
+        if (busy != nil) {
+            handler(NULL, QLMAdapterErrorMake(QLMAdapterErrorBusy, busy));
+            return;
+        }
         if (self.recordsSentMessages) {
             [self->_sent addObject:QLMAdapterRecord(&message)];
         }
@@ -128,6 +141,42 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
     payload[0] = 0x09;
     memcpy(payload + 1, utf8, length);
     *reply = QLMMessageMake(QLMAddressReply, payload, 1 + length);
+}
+
+// docs/adapter-status.md: 01 08 gets the status fields, with the knob's
+// position when it is in; 01 39 and 01 19 01 the adapter's identity. Any
+// other message to 01 gets a bare ack, as 01 2B does.
+- (BOOL)adapterReplyTo:(const QLMMessage *)message into:(QLMMessage *)reply {
+    if (_adapterDropReplies > 0) {
+        _adapterDropReplies -= 1;
+        return NO;
+    }
+    switch (message->payload[0]) {
+    case 0x08: {
+        NSNumber *knob = _knobTenths;
+        if (knob == nil) {
+            const uint8_t bytes[] = {0x09, 0x33, 0x31};
+            *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
+        } else {
+            uint32_t tenths = (uint32_t)knob.intValue;
+            const uint8_t bytes[] = {0x09, 0x33, 0x30, 0x36, 0xDF, (uint8_t)(tenths >> 24), (uint8_t)(tenths >> 16),
+                                     (uint8_t)(tenths >> 8), (uint8_t)tenths};
+            *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
+        }
+        return YES;
+    }
+    case 0x19:
+        QLMFakeTextReply(reply, _adapterSerialNumber, NO);
+        return YES;
+    case 0x39:
+        QLMFakeTextReply(reply, _adapterSystemInfo, YES);
+        return YES;
+    default: {
+        uint8_t ack = 0x09;
+        *reply = QLMMessageMake(QLMAddressReply, &ack, 1);
+        return YES;
+    }
+    }
 }
 
 // The spec's section 9: a probe is answered by one monitor without a lease,
@@ -153,6 +202,10 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
             for (QLMFakeMonitor *monitor in _monitors) {
                 if (monitor.present && memcmp(monitor.hardwareID.bytes, payload + 1, 3) == 0) {
                     monitor.session = payload[4];
+                    if (monitor.dropReplies > 0) {
+                        monitor.dropReplies -= 1;
+                        return NO;
+                    }
                     uint8_t bytes[2] = {0x09, payload[4]};
                     *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
                     return YES;
@@ -173,6 +226,9 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
             }
         }
         return NO;
+    }
+    if (message->address == QLMAddressAdapter) {
+        return [self adapterReplyTo:message into:reply];
     }
 
     QLMFakeMonitor *target = nil;

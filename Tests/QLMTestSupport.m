@@ -1,5 +1,6 @@
 #import "QLMTestSupport.h"
 
+#import "QLMReportLink.h"
 #import "QLMSetupReader.h"
 
 NSData *QLMBytes(const uint8_t *bytes, size_t length) {
@@ -47,6 +48,89 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
         return capture;
     }
 }
+
+@implementation QLMCaptureDevice {
+    dispatch_queue_t _queue;
+    NSMutableDictionary<NSData *, NSMutableArray<QLMCaptureExchange *> *> *_unplayed;
+    NSMutableArray<NSData *> *_written;
+}
+
+- (instancetype)initWithCapture:(QLMCapture *)capture {
+    self = [super init];
+    if (self) {
+        _replyDelay = 0.001;
+        _written = [NSMutableArray array];
+        _unplayed = [NSMutableDictionary dictionary];
+        for (QLMCaptureExchange *exchange in capture.exchanges) {
+            NSMutableArray<QLMCaptureExchange *> *same = _unplayed[exchange.outputReport];
+            if (same == nil) {
+                same = [NSMutableArray array];
+                _unplayed[exchange.outputReport] = same;
+            }
+            [same addObject:exchange];
+        }
+    }
+    return self;
+}
+
++ (NSArray<NSData *> *)inputReportsForFrame:(NSData *)frame {
+    NSMutableArray<NSData *> *reports = [NSMutableArray array];
+    const uint8_t *bytes = frame.bytes;
+    for (NSUInteger offset = 0; offset < frame.length; offset += QLMReportFrameMax) {
+        uint8_t report[QLMReportLength] = {QLMReportInputPrefix};
+        NSUInteger count = MIN((NSUInteger)QLMReportFrameMax, frame.length - offset);
+        memcpy(report + 1, bytes + offset, count);
+        [reports addObject:[NSData dataWithBytes:report length:sizeof report]];
+    }
+    return reports;
+}
+
+- (NSString *)deviceDescription {
+    return @"a capture, report by report";
+}
+
+- (NSArray<NSData *> *)writtenReports {
+    return [_written copy];
+}
+
+- (void)startOnQueue:(dispatch_queue_t)queue {
+    _queue = queue;
+    __weak QLMCaptureDevice *weakSelf = self;
+    _link = [[QLMReportLink alloc] initWithQueue:queue writer:^NSError *(const uint8_t *report) {
+        [weakSelf answer:[NSData dataWithBytes:report length:QLMReportLength]];
+        return nil;
+    }];
+}
+
+- (void)stop {
+    [_link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"stopped")];
+}
+
+- (void)answer:(NSData *)report {
+    [_written addObject:report];
+    QLMCaptureExchange *exchange = _unplayed[report].firstObject;
+    if (exchange == nil) {
+        _unmatchedReports += 1;
+        return;
+    }
+    [_unplayed[report] removeObjectAtIndex:0];
+    if (exchange.replyFrame == nil || self.silent) {
+        return;
+    }
+    QLMReportLink *link = _link;
+    NSArray<NSData *> *inputs = [QLMCaptureDevice inputReportsForFrame:exchange.replyFrame];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.replyDelay * (double)NSEC_PER_SEC)), _queue, ^{
+        for (NSData *input in inputs) {
+            [link receiveReport:input.bytes length:input.length];
+        }
+    });
+}
+
+- (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    [_link sendMessage:message replyHandler:handler];
+}
+
+@end
 
 @implementation XCTestCase (QLMAdapter)
 

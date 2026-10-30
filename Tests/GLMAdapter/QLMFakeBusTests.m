@@ -188,6 +188,64 @@
     XCTAssertTrue(_left.on);
 }
 
+// docs/adapter-status.md: the adapter at 01 answers its status poll with
+// the knob's fields, and its identity queries with text, as in
+// captures/startup-idle.
+- (void)testTheAdapterAnswersAtItsOwnAddress {
+    QLMMessage reply;
+    QLMAdapterStatus status;
+    XCTAssertTrue([self send:QLMCommandPoll(QLMAddressAdapter) reply:&reply error:NULL]);
+    XCTAssertEqual(QLMReplyAdapterStatus(&reply, &status), QLMAdapterStatusOK);
+    XCTAssertTrue(status.knob);
+    XCTAssertEqual(status.knobTenths, -1004);
+
+    [_bus perform:^{
+        self->_bus.knobTenths = nil;
+    }];
+    XCTAssertTrue([self send:QLMCommandPoll(QLMAddressAdapter) reply:&reply error:NULL]);
+    XCTAssertEqual(QLMReplyAdapterStatus(&reply, &status), QLMAdapterStatusOK);
+    XCTAssertFalse(status.knob);
+
+    char text[QLMPayloadMax];
+    char model[32];
+    char firmware[32];
+    XCTAssertTrue([self send:QLMCommandSystemInfo(QLMAddressAdapter) reply:&reply error:NULL]);
+    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
+    XCTAssertTrue(QLMSystemInfoParse(text, model, sizeof model, firmware, sizeof firmware));
+    XCTAssertEqualObjects(@(model), @"GLM Adapter");
+    XCTAssertEqualObjects(@(firmware), @"1.4.0.6113");
+    XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:NULL]);
+    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
+    XCTAssertEqualObjects(@(text), @"H00000F001");
+
+    [_bus perform:^{
+        self->_bus.adapterDropReplies = 1;
+    }];
+    XCTAssertFalse([self send:QLMCommandPoll(QLMAddressAdapter) reply:&reply error:NULL]);
+    XCTAssertTrue([self send:QLMCommandPoll(QLMAddressAdapter) reply:&reply error:NULL]);
+}
+
+// While another host has the adapter, nothing goes out.
+- (void)testABusyAdapterSendsNothing {
+    _bus.busyReason = @"GLM is running.";
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandProbe() reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorBusy);
+    XCTAssertEqualObjects(error.localizedDescription, @"GLM is running.");
+    XCTAssertEqual(_bus.sentMessages.count, 0u);
+}
+
+// A monitor whose lease ack is lost still holds the lease.
+- (void)testALostLeaseAckStillLeases {
+    const uint8_t leftID[3] = {0x11, 0x22, 0x33};
+    [_bus perform:^{
+        self->_left.dropReplies = 1;
+    }];
+    XCTAssertFalse([self send:QLMCommandAssignSession(leftID, 0x02) reply:NULL error:NULL]);
+    XCTAssertEqual(_left.session, 0x02);
+    XCTAssertTrue([self send:QLMCommandPoll(0x02) reply:NULL error:NULL]);
+}
+
 // Section 9's enumeration: each DSP frame is acked on its own.
 - (void)testDSPFramesAreAcked {
     const uint8_t leftID[3] = {0x11, 0x22, 0x33};
