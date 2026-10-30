@@ -126,10 +126,18 @@
     QLMMessage under = QLMCommandVolume(-30, -20);
     QLMAssertBytes(under.payload, under.length, 0x1F, 0x04, 0x0C, 0x37);
 
+    // Dim goes 20 dB below what is playing: the ceiling, when the volume is
+    // above it.
     QLMMessage dim = QLMCommandDim(0, -20);
-    QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x0C, 0xCC, 0xCC);
+    QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x01, 0x47, 0xAE);
     QLMMessage dimUnder = QLMCommandDim(-10, 0);
     QLMAssertBytes(dimUnder.payload, dimUnder.length, 0x1F, 0x04, 0x0C, 0x37);
+    QLMMessage dimBetweenSteps = QLMCommandDim(0, -20.2);
+    QLMAssertBytes(dimBetweenSteps.payload, dimBetweenSteps.length, 0x1F, 0x01, 0x35, 0x59);
+    QLMMessage dimAboveZero = QLMCommandDim(INFINITY, INFINITY);
+    QLMAssertBytes(dimAboveZero.payload, dimAboveZero.length, 0x1F, 0x0C, 0xCC, 0xCC);
+    QLMMessage dimNoCeiling = QLMCommandDim(0, NAN);
+    QLMAssertBytes(dimNoCeiling.payload, dimNoCeiling.length, 0x1F, 0x00, 0x00, 0x08);
 
     QLMMessage duck = QLMCommandDuck();
     QLMAssertBytes(duck.payload, duck.length, 0x1F, 0x00, 0x00, 0x02);
@@ -151,7 +159,7 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
 }
 
 // The same rule across the whole scale, on and between the steps: no word
-// passes the ceiling or 7F FF FF.
+// passes the ceiling or 7F FF FF, and dim is 20 dB below the volume sent.
 - (void)testNoVolumeFramePassesTheCeiling {
     const double ceilings[] = {INFINITY, 6, 0, -0.1, -0.25, -0.5, -2.5, -3, -10.2, -20, -20.2, -59.75, -99.5, -99.9, -100, -120, -INFINITY, NAN};
     NSMutableArray<NSNumber *> *volumes = [NSMutableArray arrayWithArray:@[@(INFINITY), @(-INFINITY), @(NAN)]];
@@ -164,7 +172,10 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
         for (NSNumber *volume in volumes) {
             double decibels = volume.doubleValue;
             QLMMessage messages[] = {QLMCommandVolume(decibels, ceiling), QLMCommandDim(decibels, ceiling)};
-            BOOL ok = QLMVolumeWordOf(messages[1]) <= QLMVolumeWordOf(messages[0]);
+            uint32_t sent = QLMVolumeWordOf(messages[0]);
+            uint32_t dimmed = sent == QLMVolumeWordMin ? QLMVolumeWordMin
+                                                       : QLMVolumeWordForDecibels(QLMVolumeDecibelsForWord(sent) - QLMDimDecibels);
+            BOOL ok = QLMVolumeWordOf(messages[1]) == dimmed;
             for (size_t m = 0; m < 2; m++) {
                 uint32_t word = QLMVolumeWordOf(messages[m]);
                 ok = ok && messages[m].address == QLMAddressBroadcast && messages[m].length == 4;
@@ -184,7 +195,7 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
     }
 }
 
-// Section 9: dim is the current volume 20 dB down, floored at -120.4 dB.
+// Section 9: dim is the current volume 20 dB down, floored at 00 00 08.
 - (void)testDimFloorsAtTheSlider {
     QLMMessage dim = QLMCommandDim(-110, 0);
     QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x00, 0x00, 0x08);

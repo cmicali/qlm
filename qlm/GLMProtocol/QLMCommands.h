@@ -57,7 +57,9 @@ QLMMessage QLMCommandPower(QLMPowerStep step);
 QLMMessage QLMCommandVolumeWord(uint32_t word, uint32_t ceilingWord);
 // A ceiling between steps falls to the step below it.
 QLMMessage QLMCommandVolume(double decibels, double ceilingDecibels);
-// Dim is a plain volume frame QLMDimDecibels down, floored at QLMVolumeWordMin.
+// Dim is a plain volume frame QLMDimDecibels below what QLMCommandVolume
+// sends, so a volume above the ceiling dims from the ceiling. It floors at
+// QLMVolumeWordMin.
 QLMMessage QLMCommandDim(double decibels, double ceilingDecibels);
 QLMMessage QLMCommandDuck(void);
 

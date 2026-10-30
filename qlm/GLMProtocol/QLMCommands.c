@@ -117,7 +117,16 @@ QLMMessage QLMCommandVolume(double decibels, double ceilingDecibels) {
 }
 
 QLMMessage QLMCommandDim(double decibels, double ceilingDecibels) {
-    return QLMCommandVolume(decibels - QLMDimDecibels, ceilingDecibels);
+    double step = QLMVolumeStepNearest(decibels);
+    double ceilingStep = QLMVolumeStepAtOrBelow(ceilingDecibels);
+    if (step < 0) {
+        step = 0;
+    }
+    if (step < ceilingStep) {
+        step = ceilingStep;
+    }
+    double dimmed = step + QLMDimDecibels / QLMVolumeDecibelsStep;
+    return QLMCommandVolumeWord(QLMVolumeWordForStep(dimmed), QLMVolumeWordForStep(ceilingStep));
 }
 
 QLMMessage QLMCommandDuck(void) {
