@@ -1,21 +1,21 @@
 # Frames GLM sends that qlm does not
 
-GLM sends some frames that qlm refuses or leaves out. The allowlist refuses `05`, `3C`, `3E`, `42`, `43`, `4B`, and `22` and `51` to the adapter. `testEveryOutputReportRepacksByteForByte`, in `Tests/GLMProtocol/QLMGoldenTests.m`, pins that set. The allowlist accepts the rest. Broadcast `2D 00` was refused too, and is now allowed. System now sends it, broadcast `3D`, and `2B` to the adapter, as GLM does. It does not send the wake at startup. This doc says what each one does, and whether qlm needs it.
+GLM sends some frames that qlm refuses or leaves out. The allowlist refuses `05`, `43`, `4B`, and `22` and `51` to the adapter. `testEveryOutputReportRepacksByteForByte`, in `Tests/GLMProtocol/QLMGoldenTests.m`, pins that set. The allowlist accepts the rest. Broadcast `2D 00`, and `3C`, `3E`, and `42` to a subwoofer, were refused too, and are now allowed with exactly GLM's payloads. System now sends them, broadcast `3D`, and `2B` to the adapter, as GLM does. It does not send the wake at startup. This doc says what each one does, and whether qlm needs it. [The group apply](#the-group-apply) says what System's apply sends against GLM's.
 
-A time is seconds into that capture's `reports.txt`. "hlm §7" is section 7 of hlm's spec, `docs/Genelec GLM Protocol.13.md` in robcazzaro/hlm, revision 13, at commit `c08ced9`. Its facts are restated here in our own words. **Guess:** marks a guess. The code is as of `e55a0ba`.
+A time is seconds into that capture's `reports.txt`. "hlm §7" is section 7 of hlm's spec, `docs/Genelec GLM Protocol.13.md` in robcazzaro/hlm, revision 13, at commit `c08ced9`. Its facts are restated here in our own words. **Guess:** marks a guess. The code is as of this doc's last change.
 
 ## Short answers
 
 | Frame | Where GLM sends it | qlm today | Does qlm need it? |
 | --- | --- | --- | --- |
 | `05 04 …` | Every monitor's DSP block, and a group switch's routing pass | Refused | No. AGENTS.md forbids `05`. |
-| `3C`, `3E`, `42` | Each subwoofer's DSP block | Refused | Phase 3, to match GLM's apply |
+| `3C`, `3E`, `42` | Each subwoofer's DSP block | Allowed, `00 00` to a session only. Sent in each subwoofer's block. | Phase 3, to match GLM's apply. Done. |
 | `43 00 02`, `4B 00 00 00 01` | Each 8351B's DSP block | Refused | Phase 3, once the 8351B's rate is verified |
-| `FF 2D 00` | With `FF 3D 00 00`: startup, wake, group switch, dim, and knob unplug | Allowed, as a broadcast only. Sent in dim. | Phase 2, only for dim to match GLM byte for byte |
-| `FF 3D 00 00` | Right after every `FF 2D 00` | Accepted. Sent in dim. | As for `2D` |
+| `FF 2D 00` | With `FF 3D 00 00`: startup, wake, group switch, dim, and knob unplug | Allowed, as a broadcast only. Sent in dim, and at the end of each group apply. | Phase 2, for dim. Phase 3, for the apply. Done. |
+| `FF 3D 00 00` | Right after every `FF 2D 00` | Accepted. Sent with `2D 00`. | As for `2D` |
 | `01 22` | Once per connection | Refused | No |
 | `01 51 82` | Once per connection | Refused | No |
-| `01 2B 00`, `01 2B 01` | Mute all, unmute all, startup, each knob-driven level, and a group switch's tail | Accepted. Sent at mute all, unmute all, and each knob-driven level. | Phase 2, for mute all |
+| `01 2B 00`, `01 2B 01` | Mute all, unmute all, startup, each knob-driven level, and a group switch's tail | Accepted. Sent at mute all, unmute all, each knob-driven level, and a group switch's tail. | Phase 2, for mute all |
 | The wake | Startup and wake | Accepted, not sent at connect | Phase 2, for power |
 
 ## The hand-back
@@ -96,6 +96,8 @@ Across 12 captures: `3C` 52 times, `3E` 52, and `42` 26.
 
 **Need.** Phase 3. GLM sends them in every subwoofer block, so a dry run that matches GLM needs them. Phase 2 does not. They are not on AGENTS.md's never-send list. Allow exactly `3C 00 00`, `3E 00 00`, and `42 00 00`. The allowlist cannot see the model, so System sends them to subwoofers only, in GLM's order. Refuse a group whose subwoofer LFE fields are not zero until a capture maps them, as the plan's Risks table allows.
 
+**Now.** The allowlist takes exactly these three payloads, and the encoder sends them only to a session. `QLMFrameTests` covers both. A subwoofer's DSP block is GLM's, frame for frame: `17 01`, slot 0, the delay, the level, `10 01 09`, the routing pair, `3E`, `42`, the routing pair, `3B`, then `3C`, slot 0, and the delay twice, the routing pair, `3E`, the twenty slots, `3D`, and the routing pair. `QLMDSPBlockGoldenTests` checks all 26 captured subwoofer passes against it in order. The routing pair is `40 00 02 00 03` and `40 01 02 00 00`. What the second routes is unknown. The block refuses a subwoofer whose `LFE_+10`, `LFE_Channel`, `LFE_Level`, or `SubwooferGroupID` is not 0, or whose `LFE_CrossoverFrequency(Hz)` is not 120, the values in every capture.
+
 ### `43 00 02` and `4B 00 00 00 01`, to the 8351B
 
 **Where.** Only to the two 8351B. `43 00 02` follows the level pair `10 01 00` and `10 01 09`, before the PEQ slots. `4B 00 00 00 01` follows `3B`, before `3D`. In `startup-idle`: to `03` at 8.650 and 8.725 s, and to `06` at 9.048 and 9.116 s. Across 12 captures: `43` 27 times and `4B` 27, always with these payloads.
@@ -138,7 +140,7 @@ No other reply in `mute-dim` carries the marker, though its 14 mute actions send
 
 **Need.** Phase 2 needs it only for dim to match GLM byte for byte. Dim itself is the volume frame: hlm §9 says there is no dim command. The pair carries no level. For Phase 3, GLM sends it after every round of DSP blocks. **Guess:** a subwoofer may need it to take its routing. `2D` is not on the never-send list. Allow exactly `2D 00`. System sends it only as a broadcast, only right before `FF 3D 00 00`, and only where GLM does. `FF 3D 00 00` is already allowed.
 
-**Now.** The allowlist accepts exactly `2D 00`, and the encoder sends it only to `FF`. Every other `2D` payload and address is refused. `QLMFrameTests` covers both. System's dim sends GLM's whole sequence, `2D 00` included, and `QLMSystemGoldenTests` checks it against `mute-dim` byte for byte. Dim is the only place System sends broadcast `3D 00 00`. The group apply sends `3D 00 00` only to one monitor at a time, and GLM never puts `2D 00` before that: in every capture, all 39 broadcast `3D 00 00` follow `2D 00`, and none of the 73 unicast ones does. GLM also sends the pair after a round of `2B` in a group switch. System's apply does not yet, which is Phase 3's to match.
+**Now.** The allowlist accepts exactly `2D 00`, and the encoder sends it only to `FF`. Every other `2D` payload and address is refused. `QLMFrameTests` covers both. System's dim sends GLM's whole sequence, `2D 00` included, and `QLMSystemGoldenTests` checks it against `mute-dim` byte for byte. In every capture, all 39 broadcast `3D 00 00` follow `2D 00`, and none of the 73 unicast ones does. System's group apply now sends the pair as GLM does: after the round that ends a switch, and after the blocks of an apply at launch or wake. [The group apply](#the-group-apply) has the detail.
 
 ### `01 22`
 
@@ -196,13 +198,39 @@ Mute all sends the volume once (46.188 s), then `01 2B 01`, then `2B 03` to each
 | Frame | Change | When |
 | --- | --- | --- |
 | `2D 00` | Allowed: this payload only, as a broadcast only. System sends it right before `FF 3D 00 00`. | Done, in Phase 2 for dim's byte match |
-| `3C 00 00`, `3E 00 00`, `42 00 00` | Allow these payloads only. System sends them to subwoofers only. | Phase 3 |
+| `3C 00 00`, `3E 00 00`, `42 00 00` | Allowed: these payloads only, to a session only. System sends them to subwoofers only. | Done, in Phase 3 |
 | `43 00 02`, `4B 00 00 00 01` | Allow these payloads only. System sends them to the 8351B only. | Once the 8351B's rate is verified |
 | `05 …` | Keep refused. | Never. AGENTS.md forbids it. |
 | `01 22`, `01 51 82` | Keep refused. | Not needed |
 | `01 2B`, `FF 3D 00 00`, the wake | Already allowed. System sends them. | Phase 2 |
 
 The allowlist accepts by opcode, with finer checks for `02`, `10`, and `3A`. `2D 00` is its first exact-payload entry, and the encoder's first rule by opcode and address. The golden test's refused set shrinks with each one.
+
+## The group apply
+
+GLM sends two kinds of apply. `QLMApplySequence` builds both, System sends them, and `qlmctl apply-group --dry-run` prints them. `QLMApplyGoldenTests` diffs each against all eight captured applies, once GLM's cycle and the frames qlm skips are left out. "In device order" is the setup's device list. "On" means the monitor's last telemetry says on.
+
+**At launch and wake** (`startup-idle`, 8.534 to 9.901 s). For each new monitor, in lease order: `FF 04`, a subwoofer's `3B`, `05 04`, `17 01`, a two-way's extra `FF 04`, the rest of its block, `39`, and `19 01`. Off nodes get their block too. Then a round to the other monitors that are on, and the pair. Each new monitor gets its state right after its next poll. System sends this as its first apply, and to any monitor leased while a group is active, once the probe finds no more.
+
+**A group switch** (`group-switch-main-4x2-main-2x1`, 12.359 to 13.476 s):
+
+1. `FF 1F 00 00 08`, then the duck, `FF 1F 00 00 02`.
+2. `FF 3A 03 7F` twice.
+3. The routing pass, in the group's node order. A node that is on gets `3A 03 01` twice, and one that is off `3A 03 02`. A subwoofer gets `3B`. Then `05 04`, the state if the monitor is on, the routing frames, and the state again.
+4. A round, then the DSP pass in device order: `FF 04` for every node, and the block of each one that is on.
+5. `01 2B 00`, two rounds, the volume three times, a round, and the pair.
+
+A round restates the state of every monitor that is on, in device order. In the group it is `2B 04`, or `03` if muted. Outside it is `2B 05` then `07`, and `07` alone in the first of two rounds (`knob-sweep`, 19.135 s). Mute, dim, and the knob send the same rounds.
+
+The tests match byte for byte for the apply at launch, the one after a wake, and the switch from 4x2 to 2x1. Each other switch differs only where GLM raced itself:
+
+- **GLM's cycle runs beside its apply.** In `group-switch-main-4x2-main-2x2`, its polls found two monitors in standby mid-tail, so its later rounds left them out. System's cycle waits behind the apply, so its rounds keep them.
+- **GLM sent `01 2B 00` twice** in two switches, mid-round. No capture says why.
+- **GLM left out the last round and the pair** in `group-switch-main-2x2-main-2x1`, though it sent them in the other five.
+- **A monitor woken into the group loses its lease.** GLM then applies its block at the new lease beside the switch's restore. System sends the restore, then the block.
+- **GLM ran the switch twice** in `group-switch-main-2x1-main-2x2`, after the 7350A lost its lease. The test compares the first pass.
+
+Any group with an 8351B is still refused for a real apply: every node's block must build at a verified rate, on or off. The dry run still prints such a group, and ends with REFUSED.
 
 ## Open
 
