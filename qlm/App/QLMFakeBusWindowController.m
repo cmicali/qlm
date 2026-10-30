@@ -184,11 +184,6 @@ static const NSInteger QLMKnobBottomTenths = -1004;
     }];
 }
 
-void QLMFakeBusDropLeases(QLMFakeBus *bus) {
-    for (QLMFakeMonitor *monitor in bus.monitors) {
-        monitor.session = 0;
-    }
-}
 
 #pragma mark - Actions
 
@@ -210,9 +205,6 @@ void QLMFakeBusDropLeases(QLMFakeBus *bus) {
     BOOL busy = checkbox.state == NSControlStateValueOn;
     [self change:^(QLMFakeBus *bus) {
         bus.busyReason = busy ? QLMFakeBusyReason : nil;
-        if (!busy) {
-            QLMFakeBusDropLeases(bus);
-        }
     }];
 }
 
@@ -220,9 +212,6 @@ void QLMFakeBusDropLeases(QLMFakeBus *bus) {
     BOOL unplugged = checkbox.state == NSControlStateValueOn;
     [self change:^(QLMFakeBus *bus) {
         bus.disconnected = unplugged;
-        if (!unplugged) {
-            QLMFakeBusDropLeases(bus);
-        }
     }];
 }
 

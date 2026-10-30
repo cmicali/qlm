@@ -19,8 +19,9 @@
 
 // A ceiling change restarts System. Steps closer together than this make one.
 static const NSTimeInterval QLMRestartDelay = 0.6;
-// How long quit waits for System to let go. A stop sends at most the
-// hand-back level, then closes the adapter.
+// How long quit and sleep wait for System to let go, well within the Mac's
+// allowance for a sleep. A stop sends at most the hand-back level, then
+// closes the adapter.
 static const NSTimeInterval QLMStopAllowance = 3;
 
 @interface QLMAppDelegate () <QLMPopoverControllerDelegate, QLMSettingsWindowControllerDelegate>
@@ -36,6 +37,7 @@ static const NSTimeInterval QLMStopAllowance = 3;
 @property (nonatomic, nullable) QLMFakeBusWindowController *fakeBusController;
 @property (nonatomic, nullable) QLMFakeBus *bus;
 @property (nonatomic, nullable) QLMSystem *system;
+@property (nonatomic) BOOL restarting;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
@@ -178,33 +180,47 @@ static const NSTimeInterval QLMStopAllowance = 3;
                                 title:@"The level may have risen as the Mac slept"
                                  body:QLMHandBackRiseText(handBack)];
     }
-    [self.system stop];
+    // The Mac waits for this handler, though not without limit. The
+    // completion runs on the main queue, so the run loop turns until then.
+    __block BOOL stopped = NO;
+    [self.system stopWithCompletion:^{
+        stopped = YES;
+    }];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:QLMStopAllowance];
+    while (!stopped && deadline.timeIntervalSinceNow > 0) {
+        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
+    }
 }
 
-// The same System starts again. It keeps the volume, dim, and the active
-// group across a stop, and leases the monitors anew.
+// The same System starts again. It keeps the volume, dim, the mutes, and
+// the active group across a stop, and takes back the leases the monitors
+// still hold.
 - (void)macDidWake:(NSNotification *)notification {
-    QLMFakeBus *bus = self.bus;
-    [bus perform:^{
-        QLMFakeBusDropLeases(bus);
-    }];
     [self.system start];
 }
 
 // System copies its settings when made, so a new ceiling or adapter setting
-// takes a new System. It takes a new adapter too: a stopped one is not
-// handed to another. Dim carries over. Mutes, the active group, and the fake
-// bus's state do not: the new System has leased no monitor, and the bus is
-// new.
+// takes a new System, with a new adapter: a stopped one is not handed to
+// another. The new System starts once the old has let go, so the two never
+// hold the adapter at once. Mutes carry over through the saved record, and
+// dim by hand. The active group and the fake bus's state do not.
 - (void)restartSystem {
+    if (self.restarting) {
+        return;  // the restart under way reads the settings when it starts
+    }
+    self.restarting = YES;
     QLMSystem *old = self.system;
     BOOL dimmed = self.monitorList.snapshot.dimmed;
     [old setSnapshotHandler:nil queue:dispatch_get_main_queue()];
-    [old stop];
-    [self startSystem];
-    if (dimmed) {
-        [self.system setDimmed:YES];
-    }
+    __weak QLMAppDelegate *weakSelf = self;
+    [old stopWithCompletion:^{
+        QLMAppDelegate *strongSelf = weakSelf;
+        strongSelf.restarting = NO;
+        [strongSelf startSystem];
+        if (dimmed) {
+            [strongSelf.system setDimmed:YES];
+        }
+    }];
 }
 
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
