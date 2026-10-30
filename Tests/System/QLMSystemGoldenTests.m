@@ -11,8 +11,8 @@
 // Sources: the captures each test names, and their notes.md. Each test runs
 // one action through System over a fake bus of six monitors, and checks the
 // frames System sends against the frames GLM sent for it, byte for byte. The
-// session IDs differ, so the capture's are mapped to System's in the order
-// each first appears. A frame the allowlist refuses is left out. The
+// session IDs differ, so both sides number them in the order each first
+// appears. A frame the allowlist refuses is left out. The
 // adapter's 01 08 polls run on their own timer, so both sides leave them out.
 @interface QLMSystemGoldenTests : XCTestCase
 @end
@@ -124,8 +124,8 @@
 }
 
 static BOOL QLMIsAdapterPoll(NSData *record) {
-    const uint8_t *bytes = record.bytes;
-    return record.length == 2 && bytes[0] == QLMAddressAdapter && bytes[1] == 0x08;
+    QLMMessage poll = QLMCommandPoll(QLMAddressAdapter);
+    return [record isEqualToData:QLMAdapterRecord(&poll)];
 }
 
 // What System sent from `start` on, less the adapter's polls.
@@ -161,16 +161,36 @@ static BOOL QLMIsAdapterPoll(NSData *record) {
     return @[];
 }
 
-static BOOL QLMIsSession(uint8_t address) {
-    return address >= QLMAddressSessionFirst && address <= QLMAddressSessionLast && address != QLMAddressMulticast;
+// Each session ID becomes 02 for the first to appear, 03 for the next, and
+// so on, so the capture's sessions and System's compare.
+static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
+    NSMutableDictionary<NSNumber *, NSNumber *> *order = [NSMutableDictionary dictionary];
+    NSMutableArray<NSData *> *renumbered = [NSMutableArray arrayWithCapacity:frames.count];
+    for (NSData *frame in frames) {
+        NSMutableData *copy = [frame mutableCopy];
+        uint8_t *bytes = copy.mutableBytes;
+        if (QLMAddressIsLeasable(bytes[0])) {
+            NSNumber *session = order[@(bytes[0])];
+            if (session == nil) {
+                session = @(QLMAddressSessionFirst + order.count);
+                order[@(bytes[0])] = session;
+            }
+            bytes[0] = session.unsignedCharValue;
+        }
+        [renumbered addObject:copy];
+    }
+    return renumbered;
 }
 
-// The captured frames less the ones the allowlist refuses, which must be
-// `refused`, with each session ID mapped to System's.
-- (NSArray<NSData *> *)expectedFrom:(NSArray<QLMCaptureExchange *> *)captured
-                            refused:(NSArray<NSData *> *)refused
-                           sessions:(NSArray<QLMMonitorState *> *)monitors
-                          inOrderOf:(NSArray<NSData *> *)sent {
+// Checks what System sent from `start` on against the captured frames less
+// the ones the allowlist refuses, which must be `refused`. Returns the
+// captured frames.
+- (NSArray<QLMCaptureExchange *> *)assertSentFrom:(NSUInteger)start
+                                         isCapture:(NSString *)scenario
+                                              from:(NSTimeInterval)time
+                                             count:(NSUInteger)count
+                                           refused:(NSArray<NSData *> *)refused {
+    NSArray<QLMCaptureExchange *> *captured = [self frames:count of:scenario from:time];
     NSMutableArray<NSData *> *kept = [NSMutableArray array];
     NSMutableArray<NSData *> *dropped = [NSMutableArray array];
     for (QLMCaptureExchange *exchange in captured) {
@@ -184,57 +204,19 @@ static BOOL QLMIsSession(uint8_t address) {
     }
     XCTAssertEqualObjects(dropped, refused);
 
-    // Each captured session maps to the session System sent to in the same
-    // place, so the mapping comes from the first frame to each.
-    NSMutableDictionary<NSNumber *, NSNumber *> *map = [NSMutableDictionary dictionary];
-    NSMutableSet<NSNumber *> *leased = [NSMutableSet set];
-    for (QLMMonitorState *monitor in monitors) {
-        [leased addObject:@(monitor.session)];
-    }
-    NSMutableArray<NSData *> *expected = [NSMutableArray array];
-    for (NSUInteger i = 0; i < kept.count; i++) {
-        NSMutableData *frame = [kept[i] mutableCopy];
-        uint8_t *bytes = frame.mutableBytes;
-        if (QLMIsSession(bytes[0])) {
-            NSNumber *mapped = map[@(bytes[0])];
-            if (mapped == nil && i < sent.count) {
-                uint8_t to = ((const uint8_t *)sent[i].bytes)[0];
-                if ([leased containsObject:@(to)] && ![map.allValues containsObject:@(to)]) {
-                    mapped = @(to);
-                    map[@(bytes[0])] = mapped;
-                }
-            }
-            XCTAssertNotNil(mapped, @"no session for %02X at %lu", bytes[0], (unsigned long)i);
-            bytes[0] = (uint8_t)mapped.unsignedCharValue;
-        }
-        [expected addObject:frame];
-    }
-    return expected;
-}
-
-- (void)assertSentFrom:(NSUInteger)start
-             isCapture:(NSString *)scenario
-                  from:(NSTimeInterval)time
-                 count:(NSUInteger)count
-               refused:(NSArray<NSData *> *)refused
-              monitors:(NSArray<QLMMonitorState *> *)monitors {
-    NSArray<QLMCaptureExchange *> *captured = [self frames:count of:scenario from:time];
-    NSUInteger kept = captured.count - refused.count;
     [self waitUntil:^BOOL {
-        return [self sentFrom:start].count >= kept;
+        return [self sentFrom:start].count >= kept.count;
     }];
     // Long enough for a frame too many to show.
     [NSThread sleepForTimeInterval:0.05];
-    NSArray<NSData *> *sent = [self sentFrom:start];
-    NSArray<NSData *> *expected = [self expectedFrom:captured refused:refused sessions:monitors inOrderOf:sent];
-    XCTAssertEqualObjects(sent, expected, @"%@ from %.6f s", scenario, time);
+    XCTAssertEqualObjects(QLMRenumberSessions([self sentFrom:start]), QLMRenumberSessions(kept), @"%@ from %.6f s", scenario, time);
+    return captured;
 }
 
-// The gaps between the frames System sent from `start` on are the capture's,
-// give or take. A dispatch timer never fires early, so the slack below is
-// small and the slack above is wide.
-- (void)assertSpacingFrom:(NSUInteger)start isCapture:(NSString *)scenario from:(NSTimeInterval)time count:(NSUInteger)count {
-    NSArray<QLMCaptureExchange *> *captured = [self frames:count of:scenario from:time];
+// The gaps between the frames System sent from `start` on are the captured
+// frames' gaps, give or take. A dispatch timer never fires early, so the
+// slack below is small and the slack above is wide.
+- (void)assertSpacingFrom:(NSUInteger)start matches:(NSArray<QLMCaptureExchange *> *)captured {
     NSArray<NSNumber *> *times = _clock.sendTimes;
     XCTAssertEqual(times.count, start + captured.count);
     for (NSUInteger i = 1; i < captured.count && start + i < times.count; i++) {
@@ -250,23 +232,23 @@ static BOOL QLMIsSession(uint8_t address) {
 // Standby, standby-wake, 34.86 s: broadcast `3A 03 02` twice, then
 // `3A 03 00` twice, 21.6 to 22.0 ms apart.
 - (void)testSleepIsGLMs {
-    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    [self startSystem];
     NSUInteger before = _bus.sentMessages.count;
     NSUInteger clocked = _clock.sendTimes.count;
     [_system sleep];
-    [self assertSentFrom:before isCapture:@"standby-wake" from:34.855835 count:4 refused:@[] monitors:monitors];
-    [self assertSpacingFrom:clocked isCapture:@"standby-wake" from:34.855835 count:4];
+    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"standby-wake" from:34.855835 count:4 refused:@[]];
+    [self assertSpacingFrom:clocked matches:captured];
 }
 
 // Wake, startup-idle, 7.33 s: broadcast `3A 03 7F` then `3A 03 01`, back to
 // back, three times, 0.20 to 0.21 s apart.
 - (void)testWakeIsGLMs {
-    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    [self startSystem];
     NSUInteger before = _bus.sentMessages.count;
     NSUInteger clocked = _clock.sendTimes.count;
     [_system wake];
-    [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6 refused:@[] monitors:monitors];
-    [self assertSpacingFrom:clocked isCapture:@"startup-idle" from:7.331654 count:6];
+    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6 refused:@[]];
+    [self assertSpacingFrom:clocked matches:captured];
 }
 
 #pragma mark - The knob
@@ -279,13 +261,13 @@ static BOOL QLMIsSession(uint8_t address) {
     [_bus perform:^{
         self->_bus.knobTenths = @(-900);
     }];
-    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    [self startSystem];
 
     NSUInteger before = _bus.sentMessages.count;
     [_bus perform:^{
         self->_bus.knobTenths = @(-1002);
     }];
-    [self assertSentFrom:before isCapture:@"standby-wake" from:0.988149 count:17 refused:@[] monitors:monitors];
+    [self assertSentFrom:before isCapture:@"standby-wake" from:0.988149 count:17 refused:@[]];
     [self waitUntil:^BOOL {
         return [self->_system.snapshot.volumeDecibels isEqual:@(QLMVolumeDecibelsMin)];
     }];
@@ -302,27 +284,27 @@ static BOOL QLMIsSession(uint8_t address) {
 
     NSUInteger before = _bus.sentMessages.count;
     [_system setMuted:YES forMonitorWithHardwareID:last];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:19.186196 count:12 refused:@[] monitors:monitors];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:19.186196 count:12 refused:@[]];
 
     before = _bus.sentMessages.count;
     [_system setMuted:NO forMonitorWithHardwareID:last];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:22.739597 count:12 refused:@[] monitors:monitors];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:22.739597 count:12 refused:@[]];
 }
 
 // Mute all, mute-dim, 46.19 s, and unmute all, 48.60 s: the level, then
 // `2B 01` or `2B 00` to the adapter at 01, then two rounds of 2B to every
 // monitor.
 - (void)testMutingAllIsGLMs {
-    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    [self startSystem];
 
     NSUInteger before = _bus.sentMessages.count;
     [_system setAllMuted:YES];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:46.188342 count:14 refused:@[] monitors:monitors];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:46.188342 count:14 refused:@[]];
     XCTAssertTrue(_system.snapshot.allMuted);
 
     before = _bus.sentMessages.count;
     [_system setAllMuted:NO];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:48.595249 count:14 refused:@[] monitors:monitors];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:48.595249 count:14 refused:@[]];
     XCTAssertFalse(_system.snapshot.allMuted);
 }
 
@@ -331,18 +313,18 @@ static BOOL QLMIsSession(uint8_t address) {
 // Dim, mute-dim, 51.24 s on and 54.77 s off: the level twice, one round of
 // 2B to every monitor, then broadcast `2D 00` and `3D 00 00`. 2D is refused.
 - (void)testDimIsGLMs {
-    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    [self startSystem];
     const uint8_t duckBytes[] = {QLMAddressBroadcast, 0x2D, 0x00};
     NSArray<NSData *> *refused = @[QLMBytes(duckBytes, 3)];
 
     NSUInteger before = _bus.sentMessages.count;
     [_system setDimmed:YES];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:51.240592 count:10 refused:refused monitors:monitors];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:51.240592 count:10 refused:refused];
     XCTAssertTrue(_system.snapshot.dimmed);
 
     before = _bus.sentMessages.count;
     [_system setDimmed:NO];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:54.774959 count:10 refused:refused monitors:monitors];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:54.774959 count:10 refused:refused];
     XCTAssertFalse(_system.snapshot.dimmed);
 }
 

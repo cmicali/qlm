@@ -106,10 +106,12 @@
         if (message.address == QLMAddressBroadcast && message.length == 4 && message.payload[0] == 0x1F) {
             glmWord = (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
         }
+        if (message.address != QLMAddressAdapter || message.payload[0] != 0x08 || !exchange.answered) {
+            continue;
+        }
         QLMMessage reply = exchange.reply;
         QLMAdapterStatus status;
-        if (message.address != QLMAddressAdapter || message.payload[0] != 0x08 || !exchange.answered ||
-            QLMReplyAdapterStatus(&reply, &status) != QLMAdapterStatusOK || !status.hasKnobPosition) {
+        if (QLMReplyAdapterStatus(&reply, &status) != QLMAdapterStatusOK || !status.hasKnobPosition) {
             continue;
         }
         NSNumber *set = [knob volumeForReading:status.knobTenths atTime:exchange.time volume:current];
@@ -155,25 +157,14 @@
     return checked;
 }
 
-static NSUInteger QLMVolumeChanges(NSArray<QLMKnobReading *> *readings, double from) {
-    NSUInteger changes = 0;
-    double volume = from;
-    for (QLMKnobReading *reading in readings) {
-        if (reading.volume != volume) {
-            changes++;
-            volume = reading.volume;
-        }
-    }
-    return changes;
-}
-
-static NSTimeInterval QLMFirstChange(NSArray<QLMKnobReading *> *readings, double from) {
+// The first reading after which the volume is no longer `from`.
+static QLMKnobReading *_Nullable QLMFirstChange(NSArray<QLMKnobReading *> *readings, double from) {
     for (QLMKnobReading *reading in readings) {
         if (reading.volume != from) {
-            return reading.time;
+            return reading;
         }
     }
-    return INFINITY;
+    return nil;
 }
 
 // knob-sweep: GLM opens at -56.5 dB with the knob at -77.5, and keeps its
@@ -181,13 +172,9 @@ static NSTimeInterval QLMFirstChange(NSArray<QLMKnobReading *> *readings, double
 // the whole range four times. At every stop, qlm's level is GLM's.
 - (void)testTheKnobFollowsGLMInKnobSweep {
     NSArray<QLMKnobReading *> *readings = [self run:@"knob-sweep" from:-56.5];
-    NSTimeInterval first = QLMFirstChange(readings, -56.5);
-    XCTAssertEqualWithAccuracy(first, 18.945912, 0.0005);
-    for (QLMKnobReading *reading in readings) {
-        if (reading.time == first) {
-            XCTAssertEqual(QLMVolumeWordForDecibels(reading.volume), 0x000755u);
-        }
-    }
+    QLMKnobReading *first = QLMFirstChange(readings, -56.5);
+    XCTAssertEqualWithAccuracy(first.time, 18.945912, 0.0005);
+    XCTAssertEqual(QLMVolumeWordForDecibels(first.volume), 0x000755u);
     XCTAssertGreaterThanOrEqual([self assertRestPointsOf:readings from:0 within:0], 6u);
 }
 
@@ -197,11 +184,11 @@ static NSTimeInterval QLMFirstChange(NSArray<QLMKnobReading *> *readings, double
 // the knob reads 55 dB lower, and GLM follows it.
 - (void)testTheKnobRestsAtGLMsLevel {
     NSArray<QLMKnobReading *> *startup = [self run:@"startup-idle" from:-56.5];
-    XCTAssertEqualWithAccuracy(QLMFirstChange(startup, -56.5), 38.590, 0.001);
+    XCTAssertEqualWithAccuracy(QLMFirstChange(startup, -56.5).time, 38.590, 0.001);
     XCTAssertGreaterThanOrEqual([self assertRestPointsOf:startup from:0 within:0], 2u);
 
     NSArray<QLMKnobReading *> *hang = [self run:@"unplug-proxy-hang" from:-56.5];
-    XCTAssertEqualWithAccuracy(QLMFirstChange(hang, -56.5), 106.237, 0.001);
+    XCTAssertEqualWithAccuracy(QLMFirstChange(hang, -56.5).time, 106.237, 0.001);
     XCTAssertGreaterThanOrEqual([self assertRestPointsOf:hang from:0 within:0], 6u);
 }
 
@@ -209,7 +196,7 @@ static NSTimeInterval QLMFirstChange(NSArray<QLMKnobReading *> *readings, double
 // and GLM keeps -64.5 dB. So does qlm.
 - (void)testAWanderAtRestMovesNothingInSleepWakeNoSleep {
     NSArray<QLMKnobReading *> *readings = [self run:@"sleep-wake-no-sleep" from:-64.5];
-    XCTAssertEqual(QLMVolumeChanges(readings, -64.5), 0u);
+    XCTAssertNil(QLMFirstChange(readings, -64.5));
     XCTAssertGreaterThanOrEqual([self assertRestPointsOf:readings from:0 within:0], 1u);
 }
 
@@ -223,7 +210,7 @@ static NSTimeInterval QLMFirstChange(NSArray<QLMKnobReading *> *readings, double
     XCTAssertGreaterThanOrEqual([self assertRestPointsOf:standby from:0 within:1.0], 6u);
 
     NSArray<QLMKnobReading *> *darkwake = [self run:@"sleep-wake-darkwake" from:-73.0];
-    NSTimeInterval first = QLMFirstChange(darkwake, -73.0);
+    NSTimeInterval first = QLMFirstChange(darkwake, -73.0).time;
     XCTAssertEqualWithAccuracy(first, 165.688, 0.001);
     XCTAssertGreaterThanOrEqual([self assertRestPointsOf:darkwake from:first within:1.0], 20u);
 }
