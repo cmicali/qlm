@@ -55,7 +55,6 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
     NSMutableArray<NSData *> *_written;
     NSMutableArray<NSArray<NSData *> *> *_replies;  // due, in order
     NSUInteger _repliesDue;
-    NSUInteger _repliesDelivered;
     dispatch_time_t _lastDue;
 }
 
@@ -141,10 +140,10 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
 
 // The replies ahead of this one are due too, since none is due before them.
 - (void)deliverRepliesThrough:(NSUInteger)number {
-    while (_repliesDelivered < number) {
+    while (_deliveredReplies < number) {
         NSArray<NSData *> *inputs = _replies.firstObject;
         [_replies removeObjectAtIndex:0];
-        _repliesDelivered += 1;
+        _deliveredReplies += 1;
         for (NSData *input in inputs) {
             [_link receiveReport:input.bytes length:input.length];
         }

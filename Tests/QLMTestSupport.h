@@ -62,6 +62,7 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 // Every output report written, as 64 bytes. Read on the queue.
 @property (nonatomic, readonly) NSArray<NSData *> *writtenReports;
 @property (nonatomic, readonly) NSUInteger unmatchedReports;
+@property (nonatomic, readonly) NSUInteger deliveredReplies;  // read on the queue
 
 // A frame as the adapter delivers it: one input report per 63 bytes, each
 // starting with 3F and padded with zeros.

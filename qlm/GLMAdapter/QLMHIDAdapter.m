@@ -51,7 +51,11 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     io_iterator_t _arrivals;
     io_service_t _service;
     IOHIDDeviceRef _device;
+    // One link for each arrival of the adapter, kept across closes, so that
+    // a reopen knows which replies may still come. A replug is a new
+    // registry entry, and gets a new link.
     QLMReportLink *_link;
+    uint64_t _linkEntry;
     uint8_t _input[QLMReportLength];
     dispatch_source_t _watch;
     NSError *_problem;  // why a send fails while no device is open
@@ -180,6 +184,16 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         [self refuse:host];
         return;
     }
+    uint64_t entry = 0;
+    IORegistryEntryGetRegistryEntryID(_service, &entry);
+    if (entry != _linkEntry) {
+        _link = nil;
+        _linkEntry = entry;
+    }
+    if (_link.failure != nil) {
+        _problem = _link.failure;
+        return;
+    }
     IOHIDDeviceRef device = IOHIDDeviceCreate(kCFAllocatorDefault, _service);
     if (device == NULL) {
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"IOKit did not make a HID device of the GLM adapter.");
@@ -230,6 +244,10 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                           QLMHIDStringProperty(device, CFSTR(kIOHIDManufacturerKey)) ?: @"?",
                           QLMHIDStringProperty(device, CFSTR(kIOHIDSerialNumberKey)) ?: @"?", location.unsignedIntValue];
 
+    if (_link != nil) {
+        [_link reopen];
+        return nil;
+    }
     __weak QLMHIDAdapter *weakSelf = self;
     _link = [[QLMReportLink alloc] initWithQueue:_queue writer:^NSError *(const uint8_t *report) {
         QLMHIDAdapter *strongSelf = weakSelf;
@@ -237,28 +255,17 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                                  : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
     }];
     _link.replyTimeout = _replyTimeout;
-    // A failed link closes the device, which reopens at the next host check.
-    // TRAP: a reply later than that reopen would reach the new link. It takes
-    // the adapter leaving a sync unanswered for half a second to get here.
-    __weak QLMReportLink *link = _link;
-    _link.failureHandler = ^(NSError *error) {
-        QLMHIDAdapter *strongSelf = weakSelf;
-        if (strongSelf != nil && link != nil && strongSelf->_link == link) {
-            [strongSelf closeWithError:error removed:NO];
-        }
-    };
     return nil;
 }
 
 - (void)closeWithError:(NSError *)error removed:(BOOL)removed {
     _problem = error;
-    [_link closeWithError:error];
-    _link = nil;
     if (_device == NULL) {
         return;
     }
     IOHIDDeviceRef device = _device;
     _device = NULL;
+    [_link closeWithError:error];
     _deviceDescription = removed ? @"the GLM adapter over USB, unplugged" : @"the GLM adapter over USB, closed";
     if (!removed) {
         IOHIDDeviceClose(device, kIOHIDOptionsTypeSeizeDevice);
@@ -344,7 +351,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
-    if (_link != nil) {
+    if (_device != NULL) {
         [_link sendMessage:message replyHandler:handler];
         return;
     }

@@ -3,12 +3,12 @@
 #include "QLMCommands.h"
 #include "QLMReplies.h"
 
-// The shapes a sync can tell apart. A late reply of one shape is told from
-// a sync's reply of the other.
-typedef NS_ENUM(NSUInteger, QLMReplyShape) {
-    QLMReplyShapeOther,
-    QLMReplyShapeAdapterStatus,  // to 01 08
-    QLMReplyShapeSystemInfo,     // to 39
+// The shapes a reply can be told apart by. A sync asks for a shape that no
+// late reply could have.
+typedef NS_OPTIONS(NSUInteger, QLMReplyShape) {
+    QLMReplyShapeOther = 1 << 0,
+    QLMReplyShapeAdapterStatus = 1 << 1,  // to 01 08
+    QLMReplyShapeSystemInfo = 1 << 2,     // to 39
 };
 
 static QLMReplyShape QLMReplyShapeFor(const QLMMessage *message) {
@@ -18,8 +18,13 @@ static QLMReplyShape QLMReplyShapeFor(const QLMMessage *message) {
     return message->payload[0] == 0x39 ? QLMReplyShapeSystemInfo : QLMReplyShapeOther;
 }
 
-// A sync's reply queues behind the late one, so it waits longer.
+// A sync's reply queues behind the late one, so it has longer before the
+// link stalls.
 static const NSUInteger QLMSyncTimeouts = 5;
+
+static NSError *QLMStalledError(void) {
+    return QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The GLM adapter stopped answering.");
+}
 
 @interface QLMReportLinkRequest : NSObject
 @property (nonatomic) NSData *report;
@@ -39,12 +44,13 @@ static const NSUInteger QLMSyncTimeouts = 5;
     QLMReportLinkRequest *_waiting;
     // Ends a timer's claim: each wait for a reply has its own.
     uint64_t _generation;
-    // A reply timed out and may still come. Until a sync's reply comes, the
-    // next request is held.
-    BOOL _outOfStep;
-    QLMReplyShape _lateShape;
+    // The shapes of replies that may still come. While any may, the link is
+    // out of step, and the next request waits for a sync.
+    QLMReplyShape _late;
+    // The sync is overdue. Every send fails until its reply comes.
+    BOOL _stalled;
     QLMReportLinkRequest *_held;
-    NSError *_closed;
+    NSError *_closed;  // while the device is closed
 }
 
 - (instancetype)initWithQueue:(dispatch_queue_t)queue writer:(QLMReportWriter)writer {
@@ -90,13 +96,17 @@ static const NSUInteger QLMSyncTimeouts = 5;
         [self finish:handler reply:NULL error:refusal];
         return;
     }
+    if (_stalled) {
+        [self finish:handler reply:NULL error:QLMStalledError()];
+        return;
+    }
     if ((_waiting != nil && !_waiting.sync) || _held != nil) {
         NSAssert(NO, @"a send while another is in flight");
         [self finish:handler reply:NULL error:QLMAdapterErrorMake(QLMAdapterErrorBadReply, @"A request was already in flight.")];
         return;
     }
     request.handler = handler;
-    if (_outOfStep) {
+    if (_late != 0) {
         _held = request;
         if (_waiting == nil) {
             [self sync];
@@ -144,10 +154,21 @@ static const NSUInteger QLMSyncTimeouts = 5;
     }
     _timeouts += 1;
     if (_waiting.sync) {
-        [self fail];
+        [self stall];
         return;
     }
     [self loseReply:QLMAdapterErrorMake(QLMAdapterErrorTimeout, @"The adapter did not answer.")];
+}
+
+// Only the sync's reply can put the link back in step, so the link keeps
+// waiting for it, however long, and fails every send meanwhile.
+- (void)stall {
+    _stalled = YES;
+    QLMReportLinkRequest *held = _held;
+    _held = nil;
+    if (held != nil) {
+        [self finish:held.handler reply:NULL error:QLMStalledError()];
+    }
 }
 
 // The request in flight ends without its reply, which may still come.
@@ -156,17 +177,17 @@ static const NSUInteger QLMSyncTimeouts = 5;
     _waiting = nil;
     _generation += 1;
     QLMReportAssemblyReset(&_assembly);
-    _outOfStep = YES;
-    _lateShape = request.shape;
+    _late |= request.shape;
     [self finish:request.handler reply:NULL error:error];
     [self sync];
 }
 
-// The adapter's status poll, or its system info after a status poll. GLM
-// sends both.
+// The adapter's status poll, or else its system info. GLM sends both.
+// closeWithError: leaves at least one that no late reply could be taken for.
 - (void)sync {
-    QLMMessage query = _lateShape == QLMReplyShapeAdapterStatus ? QLMCommandSystemInfo(QLMAddressAdapter)
-                                                                 : QLMCommandPoll(QLMAddressAdapter);
+    BOOL statusLate = (_late & QLMReplyShapeAdapterStatus) != 0;
+    NSAssert(!statusLate || (_late & QLMReplyShapeSystemInfo) == 0, @"no sync is left");
+    QLMMessage query = statusLate ? QLMCommandSystemInfo(QLMAddressAdapter) : QLMCommandPoll(QLMAddressAdapter);
     QLMReportLinkRequest *sync = [self requestFor:&query error:NULL];
     if (sync == nil) {
         NSAssert(NO, @"the allowlist refused a sync");
@@ -176,19 +197,10 @@ static const NSUInteger QLMSyncTimeouts = 5;
     [self write:sync];
 }
 
-// The sync's reply never came, so no reply can be matched to its request.
-- (void)fail {
-    NSError *error = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The GLM adapter stopped answering.");
-    [self closeWithError:error];
-    void (^handler)(NSError *) = _failureHandler;
-    if (handler != nil) {
-        dispatch_async(_queue, ^{
-            handler(error);
-        });
-    }
-}
-
 - (void)receiveReport:(const uint8_t *)report length:(size_t)length {
+    if (_closed != nil) {
+        return;
+    }
     QLMMessage reply;
     QLMReportStatus status = QLMReportReadInput(&_assembly, report, length, &reply);
     if (status == QLMReportPending) {
@@ -209,7 +221,8 @@ static const NSUInteger QLMSyncTimeouts = 5;
         // Replies come in order, so every late one has come or never will.
         _waiting = nil;
         _generation += 1;
-        _outOfStep = NO;
+        _late = 0;
+        _stalled = NO;
         QLMReportLinkRequest *held = _held;
         _held = nil;
         if (held != nil) {
@@ -227,17 +240,33 @@ static const NSUInteger QLMSyncTimeouts = 5;
 }
 
 - (void)closeWithError:(NSError *)error {
-    _closed = error;
-    _generation += 1;
     QLMReportLinkRequest *waiting = _waiting;
     _waiting = nil;
-    if (waiting.handler != nil) {
-        [self finish:waiting.handler reply:NULL error:error];
+    _generation += 1;
+    _stalled = NO;
+    if (waiting != nil) {
+        _late |= waiting.shape;
+        if (waiting.handler != nil) {
+            [self finish:waiting.handler reply:NULL error:error];
+        }
     }
     if (_held != nil) {
         [self finish:_held.handler reply:NULL error:error];
         _held = nil;
     }
+    if ((_late & QLMReplyShapeAdapterStatus) != 0 && (_late & QLMReplyShapeSystemInfo) != 0) {
+        _failure = QLMAdapterErrorMake(QLMAdapterErrorDisconnected,
+                                       @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");
+    }
+    _closed = _failure ?: error;
+}
+
+- (void)reopen {
+    if (_failure != nil) {
+        return;
+    }
+    _closed = nil;
+    QLMReportAssemblyReset(&_assembly);
 }
 
 @end

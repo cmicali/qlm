@@ -4,7 +4,7 @@
 
 ## Where things stand
 
-Built, with 150 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 153 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
 - **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply.
 - **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. A failed seize is a refusal. **It has not run on the adapter.**
@@ -124,7 +124,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 Four layers. Each meets the next through values and blocks.
 
 1. **GLMProtocol (C, pure).** Framing, escaping, CRC, report packing and reassembly, command builders, and reply parsers: ack, hardware ID, telemetry TLVs, and ASCII strings. No I/O. Golden tests: every captured frame decodes and re-encodes byte for byte.
-2. **GLMAdapter.** An IOKit matching notification finds the adapter, and handles hot plug. `IOHIDDeviceSetDispatchQueue` delivers input reports to System's queue. A report link keeps one request in flight, with a timeout. Replies name no request, so after a timeout it syncs with a query whose reply has a shape the late one cannot, and drops replies until that one comes. The adapter is refused while GLM runs or another process holds it, and opened only seized, so a failed seize is a refusal too. Two stand-ins share its interface: a replay adapter that plays a capture, and a fake bus that simulates monitors, lease loss, and dropped replies.
+2. **GLMAdapter.** An IOKit matching notification finds the adapter, and handles hot plug. `IOHIDDeviceSetDispatchQueue` delivers input reports to System's queue. A report link keeps one request in flight, with a timeout. Replies name no request, so after a timeout it syncs with a query whose reply has a shape the late one cannot, and drops replies until that one comes. One link serves each arrival of the adapter, across reopens, and one that loses track waits for a replug. The adapter is refused while GLM runs or another process holds it, and opened only seized, so a failed seize is a refusal too. Two stand-ins share its interface: a replay adapter that plays a capture, and a fake bus that simulates monitors, lease loss, and dropped replies.
 3. **System.** One serial queue owns the bus. It runs the lease registry (hardware ID to session ID) and the cycle GLM runs: `FE`, the volume, and a `08` round, about every 0.57 s. Between rounds, it polls the adapter with `01 08` about every 110 ms, for the knob. It coalesces volume to at most one frame per 50 ms. It tracks mute in software. It runs a group apply as one transaction. It publishes an immutable snapshot of the monitors after each change.
 4. **Setups.** It reads `.sam` files into groups. It designs the biquads at each device's rate and checks that each filter is stable. It builds each monitor's DSP block as values. It reports every field it cannot carry, never dropping one silently. It watches the file and offers a re-import when GLM saves.
 

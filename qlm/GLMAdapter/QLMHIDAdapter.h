@@ -16,6 +16,10 @@ NS_ASSUME_NONNULL_BEGIN
 // it runs; when a host appears, it closes the device at once. It opens the
 // device only seized, so GLM cannot open it meanwhile. When IOKit will not
 // let it seize the device, that too is a refusal.
+//
+// Each arrival of the adapter gets one report link, kept across closes and
+// reopens. If the link loses track of the adapter's replies, the adapter
+// opens again only once it arrives anew, after a replug.
 @interface QLMHIDAdapter : NSObject <QLMAdapter>
 
 @property (nonatomic) NSTimeInterval replyTimeout;  // the report link's, 0.1 s
