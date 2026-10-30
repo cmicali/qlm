@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sysexits.h>
 
+#import "QLMApplySequence.h"
 #import "QLMCapture.h"
 #include "QLMCommands.h"
 #import "QLMControl.h"
@@ -33,8 +34,9 @@ static void QLMPrintUsage(FILE *stream) {
             "  sleep [BUS] [CONTROL]          put every monitor in standby\n"
             "  wake [BUS] [CONTROL]           wake every monitor\n"
             "  setup <file.sam> [--bands]     print a GLM 5 setup file\n"
-            "  apply-group <file.sam> <group> --dry-run | --fake\n"
-            "                                 print each monitor's DSP block frames, or apply the group\n"
+            "  apply-group <file.sam> <group> --dry-run [--launch] [--volume dB] [--ceiling dB] | --fake\n"
+            "                                 print every frame of a switch to the group, or of the apply at\n"
+            "                                 launch and wake, or apply the group\n"
             "\n"
             "BUS picks what a command drives:\n"
             "  (none)                         the GLM adapter over USB, opened only seized. Refused, with exit 69,\n"
@@ -706,10 +708,12 @@ static int QLMApplyGroupOnFakeBus(QLMSetupGroup *group) {
     });
 }
 
-// The dry run prints each node's DSP block frames, encoded, with a stand-in
-// session per node. The duck, wake, and restore frames are not shown.
-// --fake applies over the fake bus. System refuses an apply for any node
-// whose design rate is unverified.
+// The dry run prints every frame System sends, as QLMApplySequence builds
+// it: a switch to the group, or with --launch the apply at launch and wake.
+// Each node's monitor stands in at a session, from 02 in node order, on and
+// unmuted. The restore's volume is --volume, or the setup's, capped at
+// --ceiling. --fake applies over the fake bus. System refuses an apply for
+// any node whose design rate is unverified.
 static int QLMApplyGroup(int argc, const char *argv[]) {
     if (argc < 4) {
         QLMPrintUsage(stderr);
@@ -739,27 +743,63 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
     if (!dryRun) {
         return QLMApplyGroupOnFakeBus(group);
     }
-    NSArray<QLMDSPBlock *> *blocks = [QLMDSPBlock blocksForGroup:group error:&error];
-    if (blocks == nil) {
-        fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
-        return EX_DATAERR;
-    }
+
+    const char *volumeOption = QLMOptionValue(argc, argv, "--volume");
+    const char *ceilingOption = QLMOptionValue(argc, argv, "--ceiling");
+    double volume = volumeOption != NULL ? atof(volumeOption) : setup.volume;
+    double ceiling = ceilingOption != NULL ? atof(ceilingOption) : QLMCeilingLimit;
     BOOL allowed = YES;
     uint8_t session = QLMAddressSessionFirst;
-    for (QLMDSPBlock *block in blocks) {
-        QLMSetupDevice *device = [setup deviceWithSerial:block.node.serial];
-        printf("%s %s as session %02X, %lu frames at %.0f Hz%s\n", device.model.UTF8String ?: "?", block.node.serial.UTF8String,
-               session, (unsigned long)block.payloads.count, block.designRate, block.rateVerified ? "" : ", rate unverified");
+    NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
+    NSMutableDictionary<NSData *, QLMDSPBlock *> *blocks = [NSMutableDictionary dictionary];
+    for (QLMSetupNode *node in group.nodes) {
+        QLMDSPBlock *block = [QLMDSPBlock blockForNode:node inGroup:group error:&error];
+        if (block == nil) {
+            fprintf(stderr, "qlmctl: node %s: %s\n", node.serial.UTF8String, error.localizedDescription.UTF8String);
+            return EX_DATAERR;
+        }
+        if (node.hardwareID == nil) {
+            fprintf(stderr, "qlmctl: node %s has no hardware ID\n", node.serial.UTF8String);
+            return EX_DATAERR;
+        }
+        QLMSetupDevice *device = [setup deviceWithSerial:node.serial];
+        printf("%s %s %s as session %02X, %lu block frames at %.0f Hz%s\n", device.model.UTF8String ?: "?",
+               node.serial.UTF8String, node.on ? "on" : "off", session, (unsigned long)block.payloads.count, block.designRate,
+               block.rateVerified ? "" : ", rate unverified");
         for (NSString *warning in block.warnings) {
             printf("  ! %s\n", warning.UTF8String);
         }
         allowed = allowed && block.rateVerified;
-        for (NSData *payload in block.payloads) {
-            QLMMessage message = QLMMessageMake(session, payload.bytes, payload.length);
+        QLMApplyMonitor *monitor = [[QLMApplyMonitor alloc] initWithHardwareID:node.hardwareID session:session++];
+        monitor.on = YES;
+        [monitors addObject:monitor];
+        blocks[node.hardwareID] = block;
+    }
+
+    QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:NO];
+    NSArray<NSData *> *records;
+    NSMutableArray<NSData *> *afterPolls = [NSMutableArray array];
+    if (QLMHasFlag(argc, argv, "--launch")) {
+        printf("\nthe apply at launch and wake, to every monitor, then each one's state after its next poll\n");
+        records = [sequence enumerationOf:monitors blocks:blocks];
+        for (QLMApplyMonitor *monitor in monitors) {
+            [afterPolls addObjectsFromArray:[sequence stateOf:monitor firstOfTwo:NO]];
+        }
+    } else {
+        printf("\na switch to %s with every monitor on, restoring %.1f dB under a %.1f dB ceiling\n", group.name.UTF8String,
+               volume, ceiling);
+        records = [sequence switchWithBlocks:blocks volume:QLMCommandVolume(volume, ceiling)];
+    }
+    for (NSArray<NSData *> *part in @[records, afterPolls]) {
+        for (NSData *record in part) {
+            const uint8_t *bytes = record.bytes;
+            QLMMessage message = QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
             QLMPrintFrame(&message, NULL, NULL);
         }
-        session++;
     }
+    printf("%lu frames. Not sent, though GLM sends them: 05 04 before each block, and the 8351B's 43 00 02 and "
+           "4B 00 00 00 01.\n",
+           (unsigned long)(records.count + afterPolls.count));
     printf("%s\n", allowed ? "every node's rate is verified: an apply would be allowed"
                             : "REFUSED: a node's design rate is unverified, so an apply would not run");
     return 0;
