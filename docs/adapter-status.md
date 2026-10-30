@@ -25,7 +25,7 @@ GLM polls the adapter with `01 08`. This is what the reply carries, and what it 
 
 - `01 09` opens every reply, as for a monitor. `F5 ED` is the CRC. `7E` ends the frame. The plan's [The adapter is a thin bridge](plan.md#the-adapter-is-a-thin-bridge) has the framing.
 - The reply is escaped like any frame. A knob value of −643 is `FF FF FD 7D`, sent as `FF FF FD 7D 5D` (`sleep-wake-no-sleep`).
-- After `09` come tag-value fields with no length byte. **The top two bits of a tag give its value's length:** `00` none, `01` one byte, `10` two bytes, and `11` four bytes. This is an inference, not a published fact. It fits all 47,964 `08` replies in the captures, both the adapter's and the monitors' telemetry. There, tags `41` to `49` carry one byte, `81` to `8A` two, and the busy markers `06` and `07` none.
+- After `09` come tag-value fields with no length byte. **The top two bits of a tag give its value's length:** `00` none, `01` one byte, `10` two bytes, and `11` four bytes. This is an inference, not a published fact. It fits all 73,681 `08` replies in the captures, both the adapter's and the monitors' telemetry. There, tags `41` to `49` carry one byte, `81` to `8A` two, and the busy markers `06` and `07` none.
 
 | Tag | Value | Meaning |
 | --- | --- | --- |
