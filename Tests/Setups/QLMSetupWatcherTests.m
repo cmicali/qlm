@@ -3,7 +3,10 @@
 #import "QLMSetupWatcher.h"
 
 // No capture names how GLM saves a setup file, so both kinds of save are
-// covered: a write in place, and a save that replaces the file.
+// covered: a write in place, and a save that replaces the file. The watcher
+// hears the file system, so these tests run in real time. They wait for each
+// change with a generous deadline, and a slow host can only make one too many
+// go unseen.
 @interface QLMSetupWatcherTests : XCTestCase
 @property (nonatomic) NSString *folder;
 @property (nonatomic) NSString *path;
@@ -39,39 +42,49 @@
     XCTAssertTrue([data writeToFile:self.path options:atomically ? NSDataWritingAtomic : 0 error:NULL]);
 }
 
-// Runs the main queue past the settle interval several times over.
+// Runs the main queue past the settle interval, with time to spare.
 - (void)settle {
-    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:self.watcher.settleInterval + 0.25]];
+}
+
+// Runs the main queue until the handler has run `count` times in all, then
+// settles, so one change too many would show.
+- (void)waitForChanges:(NSUInteger)count {
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:30];
+    while (self.changes < count && [deadline timeIntervalSinceNow] > 0) {
+        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+    }
+    [self settle];
+    XCTAssertEqual(self.changes, count);
 }
 
 - (void)testWriteInPlace {
     [self startWatching];
     [self write:@"second" atomically:NO];
-    [self settle];
-    XCTAssertEqual(self.changes, 1u);
+    [self waitForChanges:1];
 }
 
 - (void)testSaveThatReplacesTheFile {
     [self startWatching];
     [self write:@"second" atomically:YES];
-    [self settle];
-    XCTAssertEqual(self.changes, 1u);
+    [self waitForChanges:1];
     // The new file is watched in turn.
     [self write:@"third" atomically:YES];
-    [self settle];
-    XCTAssertEqual(self.changes, 2u);
+    [self waitForChanges:2];
     [self write:@"fourth, in place" atomically:NO];
-    [self settle];
-    XCTAssertEqual(self.changes, 3u);
+    [self waitForChanges:3];
 }
 
+// The writes all land before the main queue, the watcher's, runs again, so
+// it hears them as one burst. The default settle interval leaves the file
+// system time to report them all.
 - (void)testWritesCloseTogetherMakeOneChange {
     [self startWatching];
+    self.watcher.settleInterval = 0.5;
     [self write:@"a" atomically:NO];
     [self write:@"bb" atomically:YES];
     [self write:@"ccc" atomically:NO];
-    [self settle];
-    XCTAssertEqual(self.changes, 1u);
+    [self waitForChanges:1];
 }
 
 - (void)testReadingIsNoChange {
@@ -95,16 +108,14 @@
     [self settle];
     XCTAssertEqual(self.changes, 0u);
     [self write:@"back" atomically:NO];
-    [self settle];
-    XCTAssertEqual(self.changes, 1u);
+    [self waitForChanges:1];
 }
 
 - (void)testFileMissingAtStart {
     XCTAssertTrue([NSFileManager.defaultManager removeItemAtPath:self.path error:NULL]);
     [self startWatching];
     [self write:@"new" atomically:YES];
-    [self settle];
-    XCTAssertEqual(self.changes, 1u);
+    [self waitForChanges:1];
 }
 
 - (void)testStopEndsTheCalls {
