@@ -275,7 +275,7 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
         QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterMuted), QLMCommandPower(QLMPowerStepWakeFirst),
         QLMCommandMonitorPower(0x02, QLMPowerStepWakeSecond), QLMCommandMonitorPower(0x02, QLMPowerStepStandbyPrepare),
         QLMCommandVolumeWord(0x7FFFFF, 0x7FFFFF), QLMCommandVolume(-6, 0), QLMCommandDim(-6, 0), QLMCommandDuck(),
-        QLMCommandInputSync(QLMAddressBroadcast),
+        QLMCommandInputSync(QLMAddressBroadcast), QLMCommandInputPreamble(),
     };
     for (size_t i = 0; i < sizeof messages / sizeof messages[0]; i++) {
         uint8_t out[QLMFrameMax];

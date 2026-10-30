@@ -721,8 +721,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 #pragma mark - Dim
 
 // GLM's dim: the level twice, one round of 2B, then broadcast 2D 00 and
-// 3D 00 00 (captures/mute-dim, 51.24 s). 2D is not on the allowlist, so qlm
-// leaves it out.
+// 3D 00 00 (captures/mute-dim, 51.24 s).
 - (void)setDimmed:(BOOL)dimmed {
     [self onQueue:^{
         if (self->_dimmed == dimmed) {
@@ -737,6 +736,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self sendVolume];
         [self sendVolume];
         [self sendMuteRounds:1];
+        [self send:QLMCommandInputPreamble() then:nil];
         [self send:QLMCommandInputSync(QLMAddressBroadcast) then:nil];
     }];
 }

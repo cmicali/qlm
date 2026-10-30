@@ -50,6 +50,8 @@ bool QLMFrameAllows(const uint8_t *payload, size_t length) {
             return length >= 3 && (payload[2] == 0x00 || payload[2] == 0x09);
         }
         return false;
+    case 0x2D: // the preamble to broadcast 3D 00 00, this payload only
+        return length == 2 && payload[1] == 0x00;
     case 0x3A: // power only, never the standalone settings
         return length >= 2 && payload[1] == 0x03;
     default:
@@ -85,6 +87,10 @@ QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t ca
     // 7E there is unknown, and neither goes out.
     if (!QLMFrameAllows(message->payload, message->length) || message->address == QLMFrameFlag ||
         message->address == QLMFrameEscape) {
+        return QLMFrameErrorForbidden;
+    }
+    // GLM sends 2D only as a broadcast.
+    if (message->payload[0] == 0x2D && message->address != QLMAddressBroadcast) {
         return QLMFrameErrorForbidden;
     }
 
