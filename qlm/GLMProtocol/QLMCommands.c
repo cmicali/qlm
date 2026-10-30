@@ -52,6 +52,19 @@ static double QLMVolumeStepAtOrBelow(double decibels) {
     return ceil(-decibels / QLMVolumeDecibelsStep);
 }
 
+// The step QLMCommandVolume sends: the nearest, held to 0 dB and the ceiling.
+// TRAP: not fmax. It turns a NaN volume into 0 dB.
+static double QLMVolumeStepSent(double decibels, double ceilingStep) {
+    double step = QLMVolumeStepNearest(decibels);
+    if (step < 0) {
+        step = 0;
+    }
+    if (step < ceilingStep) {
+        step = ceilingStep;
+    }
+    return step;
+}
+
 uint32_t QLMVolumeWordForDecibels(double decibels) {
     return QLMVolumeWordForStep(QLMVolumeStepNearest(decibels));
 }
@@ -116,20 +129,14 @@ QLMMessage QLMCommandVolumeWord(uint32_t word, uint32_t ceilingWord) {
 }
 
 QLMMessage QLMCommandVolume(double decibels, double ceilingDecibels) {
-    uint32_t ceilingWord = QLMVolumeWordForStep(QLMVolumeStepAtOrBelow(ceilingDecibels));
-    return QLMCommandVolumeWord(QLMVolumeWordForDecibels(decibels), ceilingWord);
+    double ceilingStep = QLMVolumeStepAtOrBelow(ceilingDecibels);
+    uint32_t word = QLMVolumeWordForStep(QLMVolumeStepSent(decibels, ceilingStep));
+    return QLMCommandVolumeWord(word, QLMVolumeWordForStep(ceilingStep));
 }
 
 QLMMessage QLMCommandDim(double decibels, double ceilingDecibels) {
-    double step = QLMVolumeStepNearest(decibels);
     double ceilingStep = QLMVolumeStepAtOrBelow(ceilingDecibels);
-    if (step < 0) {
-        step = 0;
-    }
-    if (step < ceilingStep) {
-        step = ceilingStep;
-    }
-    double dimmed = step + QLMDimDecibels / QLMVolumeDecibelsStep;
+    double dimmed = QLMVolumeStepSent(decibels, ceilingStep) + QLMDimDecibels / QLMVolumeDecibelsStep;
     return QLMCommandVolumeWord(QLMVolumeWordForStep(dimmed), QLMVolumeWordForStep(ceilingStep));
 }
 

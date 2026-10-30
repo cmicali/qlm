@@ -17,12 +17,10 @@ enum {
 };
 #define QLMVolumeDecibelsStep (0.5)
 #define QLMVolumeDecibelsMin (-100.0)
-#define QLMVolumeDecibelsMax (0.0)
 #define QLMDimDecibels (20.0)
 
-// GLM's word for the nearest step, from a table of the words GLM sends: no
-// formula gives all of them. At or below QLMVolumeDecibelsMin, and for NaN,
-// it is QLMVolumeWordMin.
+// GLM's word for the nearest step. At or below QLMVolumeDecibelsMin, and for
+// NaN, it is QLMVolumeWordMin.
 uint32_t QLMVolumeWordForDecibels(double decibels);
 // The inverse, for display. Word 0 gives -INFINITY.
 double QLMVolumeDecibelsForWord(uint32_t word);
