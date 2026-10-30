@@ -28,6 +28,10 @@
     return self;
 }
 
+- (NSArray<QLMSetupNode *> *)nodesInDeviceOrder {
+    return _nodesInDeviceOrder ?: _nodes;
+}
+
 - (QLMSetupNode *)nodeWithSerial:(NSString *)serial {
     for (QLMSetupNode *node in _nodes) {
         if ([node.serial isEqualToString:serial]) {

@@ -107,18 +107,13 @@ static NSData *QLMHex(NSString *hex) {
     return data;
 }
 
-// The frames GLM sends that qlm's block leaves out. The allowlist refuses
-// all but 40 01, the subwoofer's routing for input 1, whose meaning no
-// capture shows.
+// The frames GLM sends that qlm's block leaves out: the 8351B's two, which
+// the allowlist refuses while its rate is unverified.
 static NSSet<NSData *> *QLMExtrasForClass(QLMSetupNodeClass nodeClass) {
-    switch (nodeClass) {
-    case QLMSetupNodeClassThreeWay:
+    if (nodeClass == QLMSetupNodeClassThreeWay) {
         return [NSSet setWithArray:@[QLMHex(@"43 00 02"), QLMHex(@"4B 00 00 00 01")]];
-    case QLMSetupNodeClassSubwoofer:
-        return [NSSet setWithArray:@[QLMHex(@"40 01 02 00 00"), QLMHex(@"3E 00 00"), QLMHex(@"42 00 00"), QLMHex(@"3C 00 00")]];
-    default:
-        return [NSSet set];
     }
+    return [NSSet set];
 }
 
 // How `pass` differs from `block`. None when the pass holds every setting of
@@ -291,6 +286,20 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
         checked += 1;
     }
     XCTAssertEqual(checked, 47u);
+}
+
+// A subwoofer's pass is its block in order, frame for frame.
+- (void)testSubwooferPassesAreTheBlockInOrder {
+    NSUInteger checked = 0;
+    for (QLMCapturedPass *pass in [self passes]) {
+        if (pass.node.nodeClass != QLMSetupNodeClassSubwoofer) {
+            continue;
+        }
+        NSArray<NSData *> *mine = [QLMDSPBlock blockForNode:pass.node inGroup:pass.group error:NULL].payloads;
+        XCTAssertEqualObjects(pass.payloads, mine, @"%@", pass);
+        checked += 1;
+    }
+    XCTAssertEqual(checked, 26u);
 }
 
 // GLM floors the level word. Four captured levels tell floor from round,

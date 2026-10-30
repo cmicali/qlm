@@ -942,9 +942,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // monitor the user muted gets 03, so it stays muted.
     for (NSUInteger i = 0; i < blocks.count; i++) {
         uint8_t session = targets[i].session;
-        NSData *routing = blocks[i].payloads.lastObject;
         [self send:QLMCommandMute(session, [self muteValueFor:targets[i]]) then:acked];
-        [self send:QLMMessageMake(session, routing.bytes, routing.length) then:acked];
+        for (NSData *routing in blocks[i].routingPayloads) {
+            [self send:QLMMessageMake(session, routing.bytes, routing.length) then:acked];
+        }
     }
 
     for (NSUInteger i = 0; i < blocks.count; i++) {

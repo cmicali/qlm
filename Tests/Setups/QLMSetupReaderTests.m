@@ -1,5 +1,6 @@
 #import <XCTest/XCTest.h>
 
+#import "QLMSetupInternal.h"
 #import "QLMSetupReader.h"
 #import "QLMTestSupport.h"
 
@@ -99,6 +100,16 @@
     for (QLMSetupNode *node in main.nodes) {
         XCTAssertTrue(node.on);
     }
+
+    // The device list's order, the order of GLM's DSP pass
+    // (captures/group-switch-main-4x2-main-2x1, 13.020 to 13.344 s).
+    NSArray<NSString *> *deviceOrder = @[@"1000002", @"1000003", @"1000004", @"1000005", @"1000006", @"1000007"];
+    for (QLMSetupGroup *group in setup.groups) {
+        XCTAssertEqualObjects([group.nodesInDeviceOrder valueForKey:@"serial"], deviceOrder, @"%@", group.name);
+    }
+    QLMSetupGroup *made = [[QLMSetupGroup alloc] init];
+    made.nodes = @[main.nodes[4], main.nodes[1]];
+    XCTAssertEqualObjects(made.nodesInDeviceOrder, made.nodes);
 }
 
 - (void)testTwoWayNode {

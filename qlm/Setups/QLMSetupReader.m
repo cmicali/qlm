@@ -544,11 +544,29 @@ static QLMSetupNodeClass QLMNodeClassNamed(NSString *name) {
     return _error == nil ? group : nil;
 }
 
+static NSArray<QLMSetupNode *> *QLMNodesInDeviceOrder(NSArray<QLMSetupNode *> *nodes, NSArray<QLMSetupDevice *> *devices) {
+    NSMutableArray<QLMSetupNode *> *ordered = [NSMutableArray arrayWithCapacity:nodes.count];
+    for (QLMSetupDevice *device in devices) {
+        for (QLMSetupNode *node in nodes) {
+            if (device.serial != nil && [node.serial isEqualToString:device.serial] && ![ordered containsObject:node]) {
+                [ordered addObject:node];
+            }
+        }
+    }
+    for (QLMSetupNode *node in nodes) {
+        if (![ordered containsObject:node]) {
+            [ordered addObject:node];
+        }
+    }
+    return ordered;
+}
+
 - (void)parseGroupsInto:(QLMSetup *)setup {
     NSMutableArray<QLMSetupGroup *> *groups = [NSMutableArray array];
     for (NSUInteger i = 0; i < _groupCount && _error == nil; i++) {
         QLMSetupGroup *group = [self parseGroup];
         if (group != nil) {
+            group.nodesInDeviceOrder = QLMNodesInDeviceOrder(group.nodes, setup.devices);
             [groups addObject:group];
         }
     }

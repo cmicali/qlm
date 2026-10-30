@@ -12,6 +12,8 @@ static const double QLMDelayRate = 48000;  // delay is in 48 kHz samples on ever
 @property (nonatomic, readwrite) QLMSetupNode *node;
 @property (nonatomic, readwrite) double designRate;
 @property (nonatomic, readwrite) NSArray<NSData *> *payloads;
+@property (nonatomic, readwrite) NSArray<NSData *> *routingPayloads;
+@property (nonatomic, readwrite) NSData *crossoverPayload;
 @property (nonatomic, readwrite) NSArray<NSString *> *warnings;
 @end
 
@@ -21,6 +23,14 @@ static NSError *QLMDSPBlockFail(QLMDSPBlockError code, NSString *message) {
 
 static NSData *QLMPayload(QLMMessage message) {
     return [NSData dataWithBytes:message.payload length:message.length];
+}
+
+// The LFE fields every subwoofer has in every capture. 3C, 3E, and 42 go out
+// as 00 00 with these, and no capture shows what other values send.
+static BOOL QLMLFEAsCaptured(QLMSetupNode *node) {
+    NSNumber *crossover = node.lfeCrossoverFrequency;
+    return node.lfePlus10.doubleValue == 0 && node.lfeChannel.doubleValue == 0 && node.lfeLevel.doubleValue == 0 &&
+           node.subwooferGroupID.doubleValue == 0 && (crossover == nil || crossover.doubleValue == 120);
 }
 
 static BOOL QLMRateVerified(QLMSetupNodeClass nodeClass, double designRate) {
@@ -59,6 +69,10 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
     NSMutableArray<NSString *> *warnings = [NSMutableArray array];
     if (node.nodeClass == QLMSetupNodeClassUnknown) {
         if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorClass, [NSString stringWithFormat:@"no slot layout for %@", node.className]);
+        return nil;
+    }
+    if (node.nodeClass == QLMSetupNodeClassSubwoofer && !QLMLFEAsCaptured(node)) {
+        if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorLFE, @"LFE fields that no capture maps");
         return nil;
     }
     if (node.bands.count != QLMPEQSlots) {
@@ -124,22 +138,49 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
     uint32_t level = QLMLevelWordForDecibels(node.levelSensitivity + node.groupSensitivity);
     uint16_t crossover = (uint16_t)round(node.crossoverFrequency);
 
-    NSMutableArray<NSData *> *payloads = [NSMutableArray arrayWithCapacity:QLMPEQSlots + 8];
-    [payloads addObject:QLMPayload(QLMCommandPrepare(0))];
-    [payloads addObject:QLMPayload(QLMCommandDelay(0, delay))];
-    [payloads addObject:QLMPayload(QLMCommandLevel(0, level))];
-    [payloads addObject:QLMPayload(QLMCommandLevelUnknown(0))];
+    NSData *prepare = QLMPayload(QLMCommandPrepare(0));
+    NSData *delayed = QLMPayload(QLMCommandDelay(0, delay));
+    NSData *leveled = QLMPayload(QLMCommandLevel(0, level));
+    NSData *levelUnknown = QLMPayload(QLMCommandLevelUnknown(0));
+    NSData *crossed = QLMPayload(QLMCommandCrossover(0, crossover));
+    NSData *sync = QLMPayload(QLMCommandInputSync(0));
+    NSMutableArray<NSData *> *routing = [NSMutableArray arrayWithObject:QLMPayload(QLMCommandRouting(0, 0x00, source, pair, aesChannel))];
+    NSMutableArray<NSData *> *slots = [NSMutableArray arrayWithCapacity:QLMPEQSlots];
     for (NSUInteger slot = 0; slot < QLMPEQSlots; slot++) {
-        [payloads addObject:QLMPayload(QLMCommandPEQ(0, (uint8_t)slot, packed[slot]))];
+        [slots addObject:QLMPayload(QLMCommandPEQ(0, (uint8_t)slot, packed[slot]))];
     }
-    [payloads addObject:QLMPayload(QLMCommandCrossover(0, crossover))];
-    [payloads addObject:QLMPayload(QLMCommandInputSync(0))];
-    [payloads addObject:QLMPayload(QLMCommandRouting(0, 0x00, source, pair, aesChannel))];
+
+    NSMutableArray<NSData *> *payloads = [NSMutableArray array];
+    if (node.nodeClass == QLMSetupNodeClassSubwoofer) {
+        // GLM's subwoofer block (captures/startup-idle, 8.846 to 9.022 s).
+        // What 40 01 02 00 00 routes, and what 3C, 3E, and 42 set, is unknown.
+        [routing addObject:QLMPayload(QLMCommandRouting(0, 0x01, 0x02, 0x00, 0x00))];
+        NSData *lfe3C = QLMPayload(QLMCommandSubwooferUnknown(0, 0x3C));
+        NSData *lfe3E = QLMPayload(QLMCommandSubwooferUnknown(0, 0x3E));
+        NSData *lfe42 = QLMPayload(QLMCommandSubwooferUnknown(0, 0x42));
+        [payloads addObjectsFromArray:@[prepare, slots[0], delayed, leveled, levelUnknown]];
+        [payloads addObjectsFromArray:routing];
+        [payloads addObjectsFromArray:@[lfe3E, lfe42]];
+        [payloads addObjectsFromArray:routing];
+        [payloads addObjectsFromArray:@[crossed, lfe3C, slots[0], delayed, lfe3C, slots[0], delayed]];
+        [payloads addObjectsFromArray:routing];
+        [payloads addObject:lfe3E];
+        [payloads addObjectsFromArray:slots];
+        [payloads addObject:sync];
+        [payloads addObjectsFromArray:routing];
+    } else {
+        [payloads addObjectsFromArray:@[prepare, delayed, leveled, levelUnknown]];
+        [payloads addObjectsFromArray:slots];
+        [payloads addObjectsFromArray:@[crossed, sync]];
+        [payloads addObjectsFromArray:routing];
+    }
 
     QLMDSPBlock *block = [[QLMDSPBlock alloc] init];
     block.node = node;
     block.designRate = designRate;
     block.payloads = payloads;
+    block.routingPayloads = [routing copy];
+    block.crossoverPayload = crossed;
     block.warnings = warnings;
     return block;
 }

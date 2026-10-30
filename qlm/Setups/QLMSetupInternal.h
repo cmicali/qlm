@@ -50,6 +50,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite, nullable) QLMSetupBand *lowShelf;
 @property (nonatomic, readwrite, nullable) QLMSetupBand *highShelf;
 @property (nonatomic, readwrite) NSArray<QLMSetupNode *> *nodes;
+@property (nonatomic, readwrite) NSArray<QLMSetupNode *> *nodesInDeviceOrder;
 @end
 
 @interface QLMSetupDevice ()
