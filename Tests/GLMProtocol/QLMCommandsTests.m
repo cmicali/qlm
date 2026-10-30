@@ -223,10 +223,12 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
     XCTAssertEqual(QLMLevelWordForDecibels(0), 0x7FFFFFu);
     XCTAssertEqual(QLMLevelWordForDecibels(3), 0x7FFFFFu);
     for (NSNumber *observed in @[@0x7A3957, @0x748C42, @0x00679F]) {
-        double decibels = 20 * log10(observed.doubleValue / 8388607.0);
+        // TRAP: invert the middle of the word's step. About one word in ten,
+        // inverted itself, floors one count low.
+        double decibels = 20 * log10((observed.doubleValue + 0.5) / (double)QLMVolumeWordMax);
         XCTAssertEqual(QLMLevelWordForDecibels(decibels), observed.unsignedIntValue);
     }
-    XCTAssertEqualWithAccuracy(20 * log10(0x7A3957 / 8388607.0), -0.4, 0.01);
+    XCTAssertEqualWithAccuracy(20 * log10(0x7A3957 / (double)QLMVolumeWordMax), -0.4, 0.01);
 }
 
 // Sections 6, 7, and 9: the DSP block's frames.

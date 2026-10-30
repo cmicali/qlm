@@ -309,14 +309,14 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
                 uint32_t word = QLMLevelWordOf(payload);
                 XCTAssertEqual(word, QLMLevelWordForDecibels(decibels), @"%@", pass);
                 [levels addObject:@(decibels)];
-                if (decibels < 0 && word < round(pow(10, decibels / 20) * 8388607.0)) {
+                if (word < round(pow(10, decibels / 20) * (double)QLMVolumeWordMax)) {
                     [belowRound addObject:@(decibels)];
                 }
             }
         }
     }
     XCTAssertEqual(levels.count, 11u);
-    XCTAssertEqual(belowRound.count, 4u);
+    XCTAssertEqualObjects(belowRound, ([NSSet setWithArray:@[@-0.17, @-5.3, @-0.2, @-2.97]]));
 }
 
 // A node of `node`'s class and input, with its bands at `sampleRate`.
