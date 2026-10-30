@@ -96,8 +96,12 @@ QLMMessage QLMCommandMute(uint8_t session, uint8_t value) {
 }
 
 QLMMessage QLMCommandPower(QLMPowerStep step) {
+    return QLMCommandMonitorPower(QLMAddressBroadcast, step);
+}
+
+QLMMessage QLMCommandMonitorPower(uint8_t session, QLMPowerStep step) {
     const uint8_t payload[] = {0x3A, 0x03, (uint8_t)step};
-    return QLMMessageMake(QLMAddressBroadcast, payload, sizeof payload);
+    return QLMMessageMake(session, payload, sizeof payload);
 }
 
 QLMMessage QLMCommandVolumeWord(uint32_t word, uint32_t ceilingWord) {

@@ -90,6 +90,14 @@
     QLMAssertBytes(mute.payload, mute.length, 0x2B, 0x03);
     QLMMessage unmute = QLMCommandMute(0x02, QLMMuteValueUnmuted);
     QLMAssertBytes(unmute.payload, unmute.length, 0x2B, 0x04);
+
+    // mute-dim: mute all tells the adapter with `01 2B 01`, and unmute all
+    // with `01 2B 00`.
+    QLMMessage adapterMuted = QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterMuted);
+    XCTAssertEqual(adapterMuted.address, 0x01);
+    QLMAssertBytes(adapterMuted.payload, adapterMuted.length, 0x2B, 0x01);
+    QLMMessage adapterUnmuted = QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterUnmuted);
+    QLMAssertBytes(adapterUnmuted.payload, adapterUnmuted.length, 0x2B, 0x00);
 }
 
 // Section 7 and 9: `3A 03 02` then `3A 03 00` to sleep, `3A 03 7F` and
@@ -104,6 +112,13 @@
     QLMAssertBytes(wakeFirst.payload, wakeFirst.length, 0x3A, 0x03, 0x7F);
     QLMMessage wakeSecond = QLMCommandPower(QLMPowerStepWakeSecond);
     QLMAssertBytes(wakeSecond.payload, wakeSecond.length, 0x3A, 0x03, 0x01);
+
+    // The group-switch captures: the same frames to one monitor.
+    QLMMessage wakeOne = QLMCommandMonitorPower(0x08, QLMPowerStepWakeSecond);
+    XCTAssertEqual(wakeOne.address, 0x08);
+    QLMAssertBytes(wakeOne.payload, wakeOne.length, 0x3A, 0x03, 0x01);
+    QLMMessage standbyOne = QLMCommandMonitorPower(0x08, QLMPowerStepStandbyPrepare);
+    QLMAssertBytes(standbyOne.payload, standbyOne.length, 0x3A, 0x03, 0x02);
 }
 
 // Section 7: `1F` with the word big-endian on the broadcast address.
@@ -254,8 +269,10 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
     QLMMessage messages[] = {
         QLMCommandProbe(), QLMCommandAssignSession(hardwareID, 0x02), QLMCommandKeepAlive(), QLMCommandPoll(0x02),
         QLMCommandSerialNumber(0x02), QLMCommandSystemInfo(0x02), QLMCommandMute(0x02, QLMMuteValueMuted),
-        QLMCommandPower(QLMPowerStepWakeFirst), QLMCommandVolumeWord(0x7FFFFF, 0x7FFFFF), QLMCommandVolume(-6, 0),
-        QLMCommandDim(-6, 0), QLMCommandDuck(),
+        QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterMuted), QLMCommandPower(QLMPowerStepWakeFirst),
+        QLMCommandMonitorPower(0x02, QLMPowerStepWakeSecond), QLMCommandMonitorPower(0x02, QLMPowerStepStandbyPrepare),
+        QLMCommandVolumeWord(0x7FFFFF, 0x7FFFFF), QLMCommandVolume(-6, 0), QLMCommandDim(-6, 0), QLMCommandDuck(),
+        QLMCommandInputSync(QLMAddressBroadcast),
     };
     for (size_t i = 0; i < sizeof messages / sizeof messages[0]; i++) {
         uint8_t out[QLMFrameMax];

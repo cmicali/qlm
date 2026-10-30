@@ -28,13 +28,18 @@ uint32_t QLMVolumeWordForDecibels(double decibels);
 double QLMVolumeDecibelsForWord(uint32_t word);
 
 // The values GLM sends on 2B: bit 0 is mute, bits 1 and 2 pick the LED color.
+// Mute all also sends the adapter, at QLMAddressReply, bit 0 alone.
 enum {
     QLMMuteValueMuted = 0x03,
     QLMMuteValueUnmuted = 0x04,
+    QLMMuteValueAdapterMuted = 0x01,
+    QLMMuteValueAdapterUnmuted = 0x00,
 };
 
 // The subcommands of 3A 03. Sleep is prepare twice, then off twice. Wake is
-// the first and second steps three times.
+// the first and second steps three times. A group switch then sends each
+// monitor in the new group the second step twice, and every other monitor
+// prepare once.
 typedef enum {
     QLMPowerStepPowerOff = 0x00,
     QLMPowerStepWakeSecond = 0x01,
@@ -51,6 +56,7 @@ QLMMessage QLMCommandSerialNumber(uint8_t session);
 QLMMessage QLMCommandSystemInfo(uint8_t session);
 QLMMessage QLMCommandMute(uint8_t session, uint8_t value);
 QLMMessage QLMCommandPower(QLMPowerStep step);
+QLMMessage QLMCommandMonitorPower(uint8_t session, QLMPowerStep step);
 
 // Every volume frame passes through QLMCommandVolumeWord, which caps the word
 // at the ceiling. The ceiling is the user's, at most QLMVolumeWordMax.
