@@ -1,6 +1,9 @@
 # qlm build helpers. qlm.xcodeproj is generated from project.yml by XcodeGen.
 
 CONFIG ?= Release
+# The build number is the commit count, so a later commit builds a higher one.
+# project.yml holds the marketing version.
+BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
 
 .PHONY: help setup project build cli test open clean
 
@@ -35,12 +38,12 @@ project:
 # The menu bar app. ARGS reaches xcodebuild.
 build: project
 	xcodebuild -project qlm.xcodeproj -scheme qlm -configuration $(CONFIG) \
-	    -derivedDataPath build/DerivedData $(ARGS) build
+	    -derivedDataPath build/DerivedData CURRENT_PROJECT_VERSION=$(BUILD_NUMBER) $(ARGS) build
 
 # The command-line tool, qlmctl.
 cli: project
 	xcodebuild -project qlm.xcodeproj -scheme qlmctl -configuration $(CONFIG) \
-	    -derivedDataPath build/DerivedData $(ARGS) build
+	    -derivedDataPath build/DerivedData CURRENT_PROJECT_VERSION=$(BUILD_NUMBER) $(ARGS) build
 
 # The unit tests, in Debug.
 test: project
