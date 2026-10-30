@@ -67,6 +67,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // snapshot's handBack says what it did. A start while that goes out runs
 // once the stop is done.
 - (void)stop;
+// The same. The completion runs on the main queue once System has let go of
+// the adapter, or at once when it is not running.
+- (void)stopWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every
 // cycle, and ahead of everything else when a monitor is leased. Clamped to

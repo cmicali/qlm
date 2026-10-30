@@ -148,6 +148,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     BOOL _running;
     BOOL _stopping;        // sending the hand-back level before it lets go
     BOOL _startAfterStop;  // a start that came while stopping
+    NSMutableArray<dispatch_block_t> *_stopCompletions;
     QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
@@ -188,6 +189,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
         _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
+        _stopCompletions = [NSMutableArray array];
         _adapterMuted = settings.mutingAll;
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
@@ -274,9 +276,21 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)stop {
+    [self stopWithCompletion:nil];
+}
+
+- (void)stopWithCompletion:(dispatch_block_t)completion {
+    dispatch_block_t copied = [completion copy];
     [self onQueue:^{
         self->_startAfterStop = NO;
-        if (!self->_running || self->_stopping) {
+        if (copied != nil) {
+            [self->_stopCompletions addObject:copied];
+        }
+        if (!self->_running) {
+            [self callStopCompletions];
+            return;
+        }
+        if (self->_stopping) {
             return;
         }
         QLMHandBack *handBack = [self handBack];
@@ -329,9 +343,18 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System stopped during the apply.", nil)];
     }
     [self publish];
+    [self callStopCompletions];
     if (_startAfterStop) {
         _startAfterStop = NO;
         [self beginRunning];
+    }
+}
+
+- (void)callStopCompletions {
+    NSArray<dispatch_block_t> *completions = [_stopCompletions copy];
+    [_stopCompletions removeAllObjects];
+    for (dispatch_block_t completion in completions) {
+        dispatch_async(dispatch_get_main_queue(), completion);
     }
 }
 

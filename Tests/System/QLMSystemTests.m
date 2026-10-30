@@ -1637,6 +1637,31 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// A stop's completion runs on the main queue once System has let go of the
+// adapter: after the hand-back level, with the snapshot stopped. A stop
+// while not running completes at once.
+- (void)testAStopCompletesOnceTheAdapterIsClosed {
+    [self startWithKnob:@(-600) volume:@(-40)];
+    XCTestExpectation *stopped = [self expectationWithDescription:@"stopped"];
+    QLMSystem *system = _system;
+    QLMFakeBus *bus = _bus;
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    NSData *knobRecord = QLMAdapterRecord(&knob);
+    [_system stopWithCompletion:^{
+        XCTAssertTrue(NSThread.isMainThread);
+        XCTAssertFalse(system.snapshot.running);
+        XCTAssertEqualObjects(bus.sentMessages.lastObject, knobRecord);
+        [stopped fulfill];
+    }];
+    [self waitForExpectations:@[stopped] timeout:5];
+
+    XCTestExpectation *again = [self expectationWithDescription:@"again"];
+    [_system stopWithCompletion:^{
+        [again fulfill];
+    }];
+    [self waitForExpectations:@[again] timeout:5];
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.
