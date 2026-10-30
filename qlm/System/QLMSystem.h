@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #import "QLMAdapter.h"
+#import "QLMClock.h"
 #import "QLMSetup.h"
 #import "QLMSnapshot.h"
 
@@ -42,6 +43,9 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // filter design rate is unverified, such as the 8351B. Only qlmctl's
 // supervised test sets this, behind --unverified-rate. The app never does.
 @property (nonatomic) BOOL allowsUnverifiedRates;  // NO
+// Every timer, and every hop onto System's queue, goes through it. Tests
+// give a virtual clock.
+@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 
 @end
 

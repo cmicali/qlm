@@ -31,6 +31,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
         _adapterPollInterval = 0.107;
         _discoversMonitors = YES;
         _mutedHardwareIDs = [NSSet set];
+        _clock = QLMRealClock.shared;
     }
     return self;
 }
@@ -47,6 +48,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.mutedHardwareIDs = self.mutedHardwareIDs;
     copy.mutingAll = self.mutingAll;
     copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
+    copy.clock = self.clock;
     return copy;
 }
 
@@ -179,16 +181,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
-    dispatch_source_t _cycleTimer;
+    id<QLMTimer> _cycleTimer;
     BOOL _cycleQueued;
     QLMTrackedAdapter *_adapterRecord;
     NSError *_adapterError;
-    dispatch_source_t _adapterTimer;
+    id<QLMTimer> _adapterTimer;
     NSUInteger _adapterPollsQueued;
     QLMKnob *_knob;
     NSNumber *_volumeDecibels;
     BOOL _volumeSendPending;
-    NSDate *_lastVolumeSend;
+    NSTimeInterval _lastVolumeSend;  // on the clock; -INFINITY before the first
     BOOL _dimmed;
     // The hardware IDs the user muted. Kept by ID, so a mute outlives a
     // lease that lapses and the monitor's next lease.
@@ -212,6 +214,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _queue = dispatch_queue_create("com.commonwealthrecordings.qlm.system", DISPATCH_QUEUE_SERIAL);
         _adapter = adapter;
         _settings = [settings copy];
+        _lastVolumeSend = -INFINITY;
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
@@ -227,20 +230,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)dealloc {
-    if (_cycleTimer != NULL) {
-        dispatch_source_cancel(_cycleTimer);
-    }
-    if (_adapterTimer != NULL) {
-        dispatch_source_cancel(_adapterTimer);
-    }
+    [_cycleTimer cancel];
+    [_adapterTimer cancel];
 }
 
 // Every public method's work runs here, so the publishing rule holds after it.
 - (void)onQueue:(dispatch_block_t)block {
-    dispatch_async(_queue, ^{
+    [self.settings.clock async:_queue run:^{
         block();
         [self publishIfSettled];
-    });
+    }];
 }
 
 - (void)setSnapshotHandler:(QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue {
@@ -295,13 +294,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
 }
 
-- (dispatch_source_t)timerEvery:(NSTimeInterval)seconds run:(dispatch_block_t)block {
-    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, _queue);
-    uint64_t interval = (uint64_t)(seconds * (double)NSEC_PER_SEC);
-    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), interval, interval / 10);
-    dispatch_source_set_event_handler(timer, block);
-    dispatch_resume(timer);
-    return timer;
+- (id<QLMTimer>)timerEvery:(NSTimeInterval)seconds run:(dispatch_block_t)block {
+    return [self.settings.clock every:seconds queue:_queue run:block];
 }
 
 - (void)stop {
@@ -343,14 +337,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)cancelTimers {
-    if (_cycleTimer != NULL) {
-        dispatch_source_cancel(_cycleTimer);
-        _cycleTimer = NULL;
-    }
-    if (_adapterTimer != NULL) {
-        dispatch_source_cancel(_adapterTimer);
-        _adapterTimer = NULL;
-    }
+    [_cycleTimer cancel];
+    _cycleTimer = nil;
+    [_adapterTimer cancel];
+    _adapterTimer = nil;
 }
 
 // Timers are cancelled already. Drops what was queued during a hand-back.
@@ -480,16 +470,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)hold:(NSTimeInterval)seconds {
     NSUInteger run = _run;
     dispatch_queue_t queue = _queue;
+    id<QLMClock> clock = self.settings.clock;
     __weak QLMSystem *weakSelf = self;
     [self enqueue:^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), queue, ^{
+        [clock after:seconds queue:queue run:^{
             QLMSystem *strongSelf = weakSelf;
             // TRAP: a stop empties the line. A hold from before it must not
             // end an item of the next start.
             if (strongSelf != nil && strongSelf->_run == run) {
                 [strongSelf finishItem:nil];
             }
-        });
+        }];
     }];
 }
 
@@ -804,7 +795,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_knob reset];
         return;
     }
-    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:NSProcessInfo.processInfo.systemUptime volume:_volumeDecibels];
+    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:self.settings.clock.now volume:_volumeDecibels];
     if (volume == nil) {
         return;
     }
@@ -914,14 +905,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return;
     }
     NSTimeInterval interval = self.settings.volumeInterval;
-    NSTimeInterval since = _lastVolumeSend == nil ? interval : -[_lastVolumeSend timeIntervalSinceNow];
+    NSTimeInterval since = self.settings.clock.now - _lastVolumeSend;
     if (since >= interval) {
         [self sendVolume];
         return;
     }
     _volumeSendPending = YES;
     __weak QLMSystem *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((interval - since) * (double)NSEC_PER_SEC)), _queue, ^{
+    [self.settings.clock after:interval - since queue:_queue run:^{
         QLMSystem *strongSelf = weakSelf;
         if (strongSelf == nil) {
             return;
@@ -930,7 +921,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (strongSelf->_running) {
             [strongSelf sendVolume];
         }
-    });
+    }];
 }
 
 - (QLMMessage)volumeMessage {
@@ -940,7 +931,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (dispatch_block_t)volumeItem {
-    _lastVolumeSend = [NSDate date];
+    _lastVolumeSend = self.settings.clock.now;
     return [self itemSending:[self volumeMessage] then:nil];
 }
 
@@ -1272,7 +1263,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     };
 
     if (switching) {
-        _lastVolumeSend = [NSDate date];
+        _lastVolumeSend = self.settings.clock.now;
         for (QLMMonitorRecord *monitor in _monitors) {
             monitor.configured = YES;
         }
