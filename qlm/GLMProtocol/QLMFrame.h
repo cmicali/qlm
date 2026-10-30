@@ -15,15 +15,21 @@ enum {
     QLMAddressBroadcast = 0xFF,
 };
 
+// True for a session ID qlm may lease. F0 is the adapter's multicast, and
+// the encoder refuses an address of 7D or 7E.
+bool QLMAddressIsLeasable(uint8_t address);
+
 enum {
     QLMFrameFlag = 0x7E,
     QLMFrameEscape = 0x7D,
     QLMFrameEscapeXor = 0x20,
 };
 
-// The largest payload qlm sends is a PEQ band: 10 0E, an index, five floats,
-// and a flag, 24 bytes.
-#define QLMPayloadMax 32
+// Room for the longest reply the adapter can deliver: a frame of three input
+// reports, less the address, the CRC, and the flag. A monitor's system info
+// runs 66 bytes. What qlm sends must fit one output report; QLMReport.h has
+// that limit.
+#define QLMPayloadMax 185
 // Address, payload, and CRC with every byte escaped, then the flag.
 #define QLMFrameMax (2 * (1 + QLMPayloadMax + 2) + 1)
 
@@ -52,7 +58,8 @@ bool QLMFrameAllows(const uint8_t *payload, size_t length);
 
 // Encodes a message as one bus frame: the address, the payload, the CRC
 // big-endian, then the flag, with 7E and 7D in the payload and CRC escaped
-// after the CRC is computed. Refuses a payload the allowlist rejects.
+// after the CRC is computed. Refuses a payload the allowlist rejects, and an
+// address of 7D or 7E.
 QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t capacity, size_t *outLength);
 
 // Decodes one complete frame, which must end in the flag. It does not consult

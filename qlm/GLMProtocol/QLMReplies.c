@@ -10,6 +10,11 @@ static bool QLMReplyIsBusyMarker(uint8_t byte) {
     return byte == 0x06 || byte == 0x07;
 }
 
+bool QLMReplyIsNoAnswer(const QLMMessage *message) {
+    return message != NULL && message->address == QLMAddressReply && message->length == 1 &&
+           message->payload[0] == QLMFrameFlag;
+}
+
 bool QLMReplyIsAck(const QLMMessage *message) {
     return QLMReplyIsReply(message) && message->length == 1;
 }
@@ -99,12 +104,13 @@ bool QLMSystemInfoParse(const char *text, char *model, size_t modelCapacity, cha
     return model[0] != '\0';
 }
 
-// The value length of each tag. Zero for a tag the spec does not list.
+// The value length of each tag. Zero for a tag neither the spec nor a
+// capture shows.
 static size_t QLMTelemetryValueLength(uint8_t tag) {
     switch (tag) {
-    case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47:
+    case 0x42: case 0x43: case 0x44: case 0x45: case 0x46: case 0x47: case 0x49:
         return 1;
-    case 0x81: case 0x83: case 0x84:
+    case 0x81: case 0x82: case 0x83: case 0x84: case 0x88: case 0x89: case 0x8A:
         return 2;
     default:
         return 0;
