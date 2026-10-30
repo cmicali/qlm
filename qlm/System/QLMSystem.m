@@ -49,6 +49,10 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
 // GLM polls the adapter in pairs, 2.4 ms apart (docs/adapter-status.md).
 static const NSUInteger QLMAdapterPollsPerRound = 2;
 
+// GLM's spacing between the power steps.
+static const NSTimeInterval QLMSleepStepSpacing = 0.022;
+static const NSTimeInterval QLMWakePairSpacing = 0.2;
+
 // A monitor System is tracking. Touched only on the queue.
 @interface QLMMonitorRecord : NSObject
 @property (nonatomic) NSData *hardwareID;
@@ -128,6 +132,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableArray<dispatch_block_t> *_sends;
     BOOL _inFlight;
     BOOL _running;
+    NSUInteger _run;  // counts stops
     BOOL _dirty;
     dispatch_source_t _cycleTimer;
     BOOL _cycleQueued;
@@ -236,6 +241,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             return;
         }
         self->_running = NO;
+        self->_run += 1;
         if (self->_cycleTimer != NULL) {
             dispatch_source_cancel(self->_cycleTimer);
             self->_cycleTimer = NULL;
@@ -303,6 +309,27 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _adapterError = nil;
         _dirty = YES;
     }
+}
+
+// Not a send: holds the line, so the next item goes out `seconds` after the
+// one before it ends. Nothing else goes out meanwhile.
+- (void)hold:(NSTimeInterval)seconds {
+    NSUInteger run = _run;
+    __weak QLMSystem *weakSelf = self;
+    [self enqueue:^{
+        QLMSystem *strongSelf = weakSelf;
+        if (strongSelf == nil) {
+            return;
+        }
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), strongSelf->_queue, ^{
+            QLMSystem *later = weakSelf;
+            // TRAP: a stop empties the line. A hold from before it must not
+            // end an item of the next start.
+            if (later != nil && later->_run == run) {
+                [later finishItem:nil];
+            }
+        });
+    }];
 }
 
 // Not a send: the block runs when the line reaches it, after every item
@@ -742,7 +769,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Power
 
-// Sent back to back. GLM spaces them about 22 ms apart.
+// GLM's four steps, about 22 ms apart (captures/standby-wake, 34.86 s).
 - (void)sleep {
     [self onQueue:^{
         if (!self->_running) {
@@ -750,18 +777,26 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         const QLMPowerStep steps[] = {QLMPowerStepStandbyPrepare, QLMPowerStepStandbyPrepare, QLMPowerStepPowerOff, QLMPowerStepPowerOff};
         for (size_t i = 0; i < sizeof steps / sizeof steps[0]; i++) {
+            if (i > 0) {
+                [self hold:QLMSleepStepSpacing];
+            }
             [self send:QLMCommandPower(steps[i]) then:nil];
         }
     }];
 }
 
-// The monitors come back under new sessions, and the probe finds them.
+// GLM's three pairs, back to back within a pair and about 0.2 s apart
+// (captures/startup-idle, 7.33 s). The monitors come back under new
+// sessions, and the probe finds them.
 - (void)wake {
     [self onQueue:^{
         if (!self->_running) {
             return;
         }
         for (int pair = 0; pair < 3; pair++) {
+            if (pair > 0) {
+                [self hold:QLMWakePairSpacing];
+            }
             [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
         }

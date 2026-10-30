@@ -70,8 +70,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
 
-// Broadcasts the power sequences. The monitors' power state comes back in
-// their telemetry.
+// Broadcasts the power sequences, with GLM's spacing between the steps.
+// Nothing else goes out between them. The monitors' power state comes back
+// in their telemetry.
 - (void)sleep;
 - (void)wake;
 

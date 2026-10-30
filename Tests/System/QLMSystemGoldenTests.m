@@ -17,8 +17,56 @@
 @interface QLMSystemGoldenTests : XCTestCase
 @end
 
+// An adapter that notes when each message reaches it, then passes it on.
+@interface QLMClockedAdapter : NSObject <QLMAdapter>
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
+@property (nonatomic, readonly) NSArray<NSNumber *> *sendTimes;  // system uptime, in seconds
+@end
+
+@implementation QLMClockedAdapter {
+    id<QLMAdapter> _adapter;
+    NSMutableArray<NSNumber *> *_times;
+}
+
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
+    self = [super init];
+    if (self) {
+        _adapter = adapter;
+        _times = [NSMutableArray array];
+    }
+    return self;
+}
+
+- (NSString *)deviceDescription {
+    return _adapter.deviceDescription;
+}
+
+- (NSArray<NSNumber *> *)sendTimes {
+    @synchronized(self) {
+        return [_times copy];
+    }
+}
+
+- (void)startOnQueue:(dispatch_queue_t)queue {
+    [_adapter startOnQueue:queue];
+}
+
+- (void)stop {
+    [_adapter stop];
+}
+
+- (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    @synchronized(self) {
+        [_times addObject:@(NSProcessInfo.processInfo.systemUptime)];
+    }
+    [_adapter sendMessage:message replyHandler:handler];
+}
+
+@end
+
 @implementation QLMSystemGoldenTests {
     QLMFakeBus *_bus;
+    QLMClockedAdapter *_clock;
     QLMSystemSettings *_settings;
     QLMSystem *_system;
 }
@@ -33,6 +81,7 @@
                                                             systemInfo:@"c-2;model-8330A" deviceClass:QLMTelemetryClassTwoWay]];
     }
     _bus = [[QLMFakeBus alloc] initWithMonitors:monitors];
+    _clock = [[QLMClockedAdapter alloc] initWithAdapter:_bus];
     _settings = [[QLMSystemSettings alloc] init];
     // No cycle may fire inside an action.
     _settings.cycleInterval = 10;
@@ -59,7 +108,7 @@
 
 // Starts System, finds all six monitors, and sets GLM's level in mute-dim.
 - (NSArray<QLMMonitorState *> *)startSystem {
-    _system = [[QLMSystem alloc] initWithAdapter:_bus settings:_settings];
+    _system = [[QLMSystem alloc] initWithAdapter:_clock settings:_settings];
     [_system start];
     [self waitUntil:^BOOL {
         QLMSnapshot *snapshot = self->_system.snapshot;
@@ -179,6 +228,45 @@ static BOOL QLMIsSession(uint8_t address) {
     NSArray<NSData *> *sent = [self sentFrom:start];
     NSArray<NSData *> *expected = [self expectedFrom:captured refused:refused sessions:monitors inOrderOf:sent];
     XCTAssertEqualObjects(sent, expected, @"%@ from %.6f s", scenario, time);
+}
+
+// The gaps between the frames System sent from `start` on are the capture's,
+// give or take. A dispatch timer never fires early, so the slack below is
+// small and the slack above is wide.
+- (void)assertSpacingFrom:(NSUInteger)start isCapture:(NSString *)scenario from:(NSTimeInterval)time count:(NSUInteger)count {
+    NSArray<QLMCaptureExchange *> *captured = [self frames:count of:scenario from:time];
+    NSArray<NSNumber *> *times = _clock.sendTimes;
+    XCTAssertEqual(times.count, start + captured.count);
+    for (NSUInteger i = 1; i < captured.count && start + i < times.count; i++) {
+        NSTimeInterval glm = captured[i].time - captured[i - 1].time;
+        NSTimeInterval qlm = times[start + i].doubleValue - times[start + i - 1].doubleValue;
+        XCTAssertGreaterThan(qlm, 0.9 * glm - 0.001, @"gap %lu: GLM %.4f s", (unsigned long)i, glm);
+        XCTAssertLessThan(qlm, glm + 0.1, @"gap %lu: GLM %.4f s", (unsigned long)i, glm);
+    }
+}
+
+#pragma mark - Power
+
+// Standby, standby-wake, 34.86 s: broadcast `3A 03 02` twice, then
+// `3A 03 00` twice, 21.6 to 22.0 ms apart.
+- (void)testSleepIsGLMs {
+    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    NSUInteger before = _bus.sentMessages.count;
+    NSUInteger clocked = _clock.sendTimes.count;
+    [_system sleep];
+    [self assertSentFrom:before isCapture:@"standby-wake" from:34.855835 count:4 refused:@[] monitors:monitors];
+    [self assertSpacingFrom:clocked isCapture:@"standby-wake" from:34.855835 count:4];
+}
+
+// Wake, startup-idle, 7.33 s: broadcast `3A 03 7F` then `3A 03 01`, back to
+// back, three times, 0.20 to 0.21 s apart.
+- (void)testWakeIsGLMs {
+    NSArray<QLMMonitorState *> *monitors = [self startSystem];
+    NSUInteger before = _bus.sentMessages.count;
+    NSUInteger clocked = _clock.sendTimes.count;
+    [_system wake];
+    [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6 refused:@[] monitors:monitors];
+    [self assertSpacingFrom:clocked isCapture:@"startup-idle" from:7.331654 count:6];
 }
 
 #pragma mark - Mute
