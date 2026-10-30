@@ -37,8 +37,9 @@ bool QLMSystemInfoParse(const char *text, char *model, size_t modelCapacity, cha
 // Telemetry: 09, an optional busy marker, 41, the temperature in degrees C,
 // then tag-value fields with no length byte. A field not present is
 // QLMTelemetryAbsent. The 47 status is the only authority on power: 01 is on,
-// anything else is not. Tags 49, 82, 88, 89, and 8A have known lengths but
-// no known meaning, so the walk steps over them.
+// anything else is not. Tags 88 and 89 have known lengths but no known
+// meaning, so the walk steps over them. docs/telemetry.md has the evidence.
+// A poll before the monitor's next frame, one a second, gets a bare 09.
 #define QLMTelemetryAbsent (-1)
 
 enum {
@@ -47,21 +48,25 @@ enum {
     QLMTelemetryClassSubwoofer = 0x01,
     QLMTelemetryClassTwoWay = 0x02,
     QLMTelemetryClassStandby = 0x03,
+    QLMTelemetryOutputSilent = 0x80,  // an output meter's floor; a count is about a dB
 };
 
 typedef struct {
     bool busy;
     uint8_t temperature;
-    int16_t inputMeter;   // 42
+    int16_t inputMeter;   // 42, before the volume
     int16_t hfMeter;      // 43, floored on subwoofers
-    int16_t midMeter;     // 44, expected on three-way models, never seen
+    int16_t midMeter;     // 44, three-way models: the 8351B
     int16_t lfMeter;      // 45
     int16_t subMeter;     // 46, subwoofers only
     int16_t status;       // 47
+    int16_t wakeSeconds;  // 49, seconds since the monitor last woke, mod 256
     int16_t sensor81;     // 81, second byte
+    int16_t sensor82;     // 82, second byte, three-way models
     int16_t sensor83;     // 83, second byte
     int16_t deviceClass;  // 84, first byte
     int16_t stateMetric;  // 84, second byte, meaning unknown
+    int32_t wakeSteps;    // 8A: 0 at a wake, one more about every 240 s; one frame in 30 s
     uint8_t unknownTag;   // where the walk stopped, or 0
 } QLMTelemetry;
 
@@ -70,10 +75,16 @@ typedef enum {
     QLMTelemetryErrorNotTelemetry,
     QLMTelemetryErrorTruncated,
     QLMTelemetryErrorUnknownTag,
+    QLMTelemetryErrorPartial,
 } QLMTelemetryStatus;
 
 // Fills `telemetry` as far as the walk gets. On an unknown tag the fields
 // before it are valid and unknownTag names it.
+//
+// TRAP: a monitor sometimes splits a frame in two, at a field, across two
+// polls. Every whole frame ends with 84, or 84 and 8A. The first part has no
+// 84 and reads as QLMTelemetryErrorPartial, with its fields filled. The
+// second has no 41 and reads as QLMTelemetryErrorNotTelemetry.
 QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *telemetry);
 
 // The adapter's reply to 01 08: 09, then fields with no length byte. The top
