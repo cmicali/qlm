@@ -19,14 +19,17 @@ What the captures show, at a first look. Phase 1 verifies each against `reports.
 - **The report layer.** A report to the adapter is 64 bytes: `0x80` plus the frame length, then the frame, zero-padded. A report from the adapter starts with `3F`, and a reply can span more than one report.
 - **Volume** is broadcast `FF 1F` with a 3-byte linear level. `7F FF FF` is 0 dB, and −20 dB is `0C CC CC` (`quit-glm`). **Dim** is −20 dB on that level (`mute-dim`).
 - **Mute** is `2B`, sent to every monitor: `03` to a muted one, and `04` to the rest (`mute-dim`). **Standby** is broadcast `3A 03` (`standby-wake`).
-- **GLM re-addresses the monitors** on a group switch, a wake, and an unplug. A monitor's bus address is not stable, so System must match monitors by serial.
+- **GLM re-addresses the monitors** on a group switch, a wake, and an unplug. A monitor's bus address is not stable, so System matches monitors by hardware ID.
+- **A setup node's `Serial` is its monitor's hardware ID**: the three bytes of its discovery reply and its `F0 02` lease, read big-endian, in decimal (`startup-idle`). The serial from `19 01`, a model prefix and eight digits, does not end in it.
+- **A monitor's delay is `Time-of-flight_Compensation` in milliseconds**, at 48 kHz: 6 is 288 samples, and 1.23 is 59 (`group-switch-main-2x1-main-4x2`). A subwoofer's is its phase at the crossover, rounded (the same capture, and `startup-idle`).
+- **Inputs 1 to 3 route as AES3**, `40 00 02 00` and the channel (`group-switch-main-2x1-main-4x2`).
 - **The adapter speaks only when polled.** GLM polls it with `01 08` about 17 times a second. The calibration mic's readings ride in the reply (`startup-idle` against `startup-idle-mic`). The knob's position likely does too (`knob-sweep`). That reply is not decoded yet.
 - **GLM sends nothing on quit.** It stops polling (`quit-glm`). What level the adapter then applies happens on the monitor bus only, so USB cannot show it. It needs a listening test or the bus tap.
 
 Waiting on Phase 1:
 
 - The USB report layer, the HID adapter, the replay adapter, and golden tests over every captured frame.
-- Three readings marked unverified in code: a monitor's delay taken from `Time-of-flight_Compensation` as milliseconds, the analog routing frame, and matching a setup node to a monitor by the bus serial's suffix.
+- The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 - Whether the address byte is escaped. The code sends it bare.
 
 The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. The 8351B rate is unverified on the wire, so a group apply that includes one is refused.
