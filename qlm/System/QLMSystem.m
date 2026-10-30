@@ -632,9 +632,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // TRAP: a monitor that still holds its lease never answers a probe, so after
 // a restart or a short gap it stays hidden until the lease lapses, 23 s or
-// more (docs/plan.md). So each monitor System knew is asked for its serial
-// at its old session. A reply with the same serial is that monitor, and its
-// lease is taken back at once. The probe finds the rest.
+// more (docs/protocol.md: When the host goes quiet). So each monitor System
+// knew is asked for its serial at its old session. A reply with the same
+// serial is that monitor, and its lease is taken back at once. The probe
+// finds the rest.
 - (void)takeBackKnownLeases {
     [_knownLeases enumerateKeysAndObjectsUsingBlock:^(NSData *identity, QLMKnownLease *known, BOOL *stop) {
         uint8_t session = known.session;

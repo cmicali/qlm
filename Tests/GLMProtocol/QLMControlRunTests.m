@@ -131,7 +131,7 @@ static NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
 // adapter, two rounds of 2B to every monitor, then the level again. GLM's
 // first turn in knob-sweep, 19.24 s, has the same shape and the same level,
 // -41.5 dB. GLM sends 2B 05 and 2B 07 to monitors outside its group, and
-// qlm sends each 2B 04 (docs/plan.md).
+// qlm sends each 2B 04 (docs/protocol.md: Mute and mute all).
 - (void)testTheKnobsBurstIsGLMs {
     NSArray<QLMCaptureExchange *> *qlm = [self controls:11 of:@"qlm-control-first" from:373.115781];
     NSArray<QLMCaptureExchange *> *glm = [self controls:20 of:@"knob-sweep" from:19.241470];
