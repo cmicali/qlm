@@ -116,14 +116,14 @@ static BOOL QLMIsVolumeFrame(const QLMMessage *message) {
     return message->length == 4 && message->payload[0] == 0x1F;
 }
 
-static uint32_t QLMVolumeFrameWord(const QLMMessage *message) {
+static uint32_t QLMVolumeWordOf(const QLMMessage *message) {
     return (uint32_t)message->payload[1] << 16 | (uint32_t)message->payload[2] << 8 | message->payload[3];
 }
 
 // QLMCommandVolume holds 0 dB to the ceiling, so its word is the ceiling's.
 static uint32_t QLMCeilingWord(double ceilingDecibels) {
     QLMMessage top = QLMCommandVolume(0, ceilingDecibels);
-    return QLMVolumeFrameWord(&top);
+    return QLMVolumeWordOf(&top);
 }
 
 // A 2B to a monitor.
@@ -198,6 +198,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 @implementation QLMSystem {
     dispatch_queue_t _queue;
     id<QLMAdapter> _adapter;
+    BOOL _adapterRewrites;          // it takes sendMessage:rewrite:replyHandler:
+    QLMAdapterRewrite _rewrite;     // asItGoesOut:, as the adapter writes
     NSMutableArray<QLMMonitorRecord *> *_monitors;
     uint8_t _nextSession;
     NSMutableArray<dispatch_block_t> *_sends;
@@ -260,6 +262,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (self) {
         _queue = dispatch_queue_create("com.commonwealthrecordings.qlm.system", DISPATCH_QUEUE_SERIAL);
         _adapter = adapter;
+        _adapterRewrites = [adapter respondsToSelector:@selector(sendMessage:rewrite:replyHandler:)];
+        __weak QLMSystem *weakSelf = self;
+        _rewrite = ^QLMMessage(QLMMessage held) {
+            QLMSystem *system = weakSelf;
+            return system != nil ? [system asItGoesOut:held] : held;
+        };
         _settings = [settings copy];
         _clock = _settings.clock;
         _lastVolumeSend = -INFINITY;
@@ -442,7 +450,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return handBack;
     }
     QLMMessage sent = [self volumeMessage];
-    uint32_t word = QLMVolumeFrameWord(&sent);
+    uint32_t word = QLMVolumeWordOf(&sent);
     handBack.volumeDecibels = @(QLMVolumeDecibelsForWord(word));
     if (handBack.knobDecibels != nil) {
         BOOL atOrBelow = QLMVolumeWordForDecibels(handBack.knobDecibels.doubleValue) <= word;
@@ -468,33 +476,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (strongSelf == nil) {
             return;
         }
-        // TRAP: a frame that names a session reaches whichever monitor holds
-        // it now. While the bus is refused or gone, another host may lease
-        // that session to another monitor. So such a frame does not go out
-        // then, nor after, if it was queued before System checked the
-        // leases again.
-        if (QLMNamesSession(&message) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
-            NSError *error = strongSelf->_adapterError
-                                 ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, @"The frame was queued before System checked the leases again.", nil);
-            NSUInteger run = strongSelf->_run;
-            [strongSelf->_clock async:strongSelf->_queue run:^{
-                QLMSystem *system = weakSelf;
-                if (system == nil || system->_run != run) {
-                    return;
-                }
-                if (QLMIsMonitorState(&message)) {
-                    [system noteState:&message wentOut:NO];
-                }
-                [system finishItem:completion == nil ? nil : ^{
-                    completion(NULL, error);
-                }];
-            }];
-            return;
-        }
         // TRAP: a frame waits in line, and then in a report link behind its
         // syncs, while the ceiling and the mutes change. So each volume
         // frame is capped, and each 2B says the mutes, as it goes out.
         QLMMessage sent = [strongSelf asItGoesOut:message];
+        BOOL state = QLMIsMonitorState(&sent);
+        uint8_t session = sent.address;
+        uint8_t value = state ? sent.payload[1] : 0;
         NSUInteger run = strongSelf->_run;
         QLMAdapterReplyHandler handler = ^(const QLMMessage *reply, NSError *error) {
             QLMSystem *system = weakSelf;
@@ -505,24 +493,32 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
                 return;
             }
             [system noteSendError:error];
-            if (QLMIsMonitorState(&sent)) {
-                [system noteState:&sent wentOut:QLMSendWentOut(error)];
+            if (state) {
+                [system noteStateOf:session value:value wentOut:QLMSendWentOut(error)];
             }
             [system finishItem:completion == nil ? nil : ^{
                 completion(reply, error);
             }];
         };
-        id<QLMAdapter> adapter = strongSelf->_adapter;
-        if (![adapter respondsToSelector:@selector(sendMessage:rewrite:replyHandler:)]) {
-            [adapter sendMessage:sent replyHandler:handler];
+        // TRAP: a frame that names a session reaches whichever monitor holds
+        // it now. While the bus is refused or gone, another host may lease
+        // that session to another monitor. So such a frame does not go out
+        // then, nor after, if it was queued before System checked the
+        // leases again. It fails as a refusal would, and noteSendError:
+        // changes nothing for either error.
+        if (QLMNamesSession(&sent) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
+            NSError *error = strongSelf->_adapterError
+                                 ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, @"The frame was queued before System checked the leases again.", nil);
+            [strongSelf->_clock async:strongSelf->_queue run:^{
+                handler(NULL, error);
+            }];
             return;
         }
-        [adapter sendMessage:sent
-                     rewrite:^QLMMessage(QLMMessage held) {
-                         QLMSystem *system = weakSelf;
-                         return system != nil ? [system asItGoesOut:held] : held;
-                     }
-                replyHandler:handler];
+        if (strongSelf->_adapterRewrites) {
+            [strongSelf->_adapter sendMessage:sent rewrite:strongSelf->_rewrite replyHandler:handler];
+        } else {
+            [strongSelf->_adapter sendMessage:sent replyHandler:handler];
+        }
     };
 }
 
@@ -530,7 +526,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // 2B with the mutes now.
 - (QLMMessage)asItGoesOut:(QLMMessage)message {
     if (QLMIsVolumeFrame(&message)) {
-        QLMMessage capped = QLMCommandVolumeWord(QLMVolumeFrameWord(&message), QLMCeilingWord(self.settings.ceilingDecibels));
+        QLMMessage capped = QLMCommandVolumeWord(QLMVolumeWordOf(&message), QLMCeilingWord(self.settings.ceilingDecibels));
         capped.address = message.address;
         return capped;
     }
@@ -549,7 +545,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         state->payload[1] = _adapterMuted ? QLMMuteValueAdapterMuted : QLMMuteValueAdapterUnmuted;
         return;
     }
-    QLMMonitorRecord *monitor = QLMAddressIsLeasable(state->address) ? [self monitorAtSession:state->address] : nil;
+    QLMMonitorRecord *monitor = [self monitorAtSession:state->address];
     if (monitor != nil && (value == QLMMuteValueMuted || value == QLMMuteValueUnmuted)) {
         state->payload[1] = [_mutedIDs containsObject:monitor.hardwareID] ? QLMMuteValueMuted : QLMMuteValueUnmuted;
     }
@@ -557,12 +553,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // A 2B that did not go out leaves its monitor needing its state, after its
 // next poll that says on. One in the group that went out states it.
-- (void)noteState:(const QLMMessage *)state wentOut:(BOOL)wentOut {
-    QLMMonitorRecord *monitor = [self monitorAtSession:state->address];
+- (void)noteStateOf:(uint8_t)session value:(uint8_t)value wentOut:(BOOL)wentOut {
+    QLMMonitorRecord *monitor = [self monitorAtSession:session];
     if (monitor == nil) {
         return;
     }
-    uint8_t value = state->payload[1];
     if (!wentOut) {
         monitor.needsState = YES;
         [_unstatedIDs addObject:monitor.hardwareID];
@@ -603,12 +598,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (!_running) {
         return;
     }
-    BOOL gone = [error.domain isEqualToString:QLMAdapterErrorDomain] &&
-                (error.code == QLMAdapterErrorBusy || error.code == QLMAdapterErrorDisconnected);
+    BOOL noBus = QLMBusProblemFor(error) != QLMBusProblemNone;
     // The adapter that stopped answering is the one still open, so its
     // identity and its last knob reading stand, and the hand-back says
     // what its take-over will do.
-    BOOL noBus = gone || QLMAdapterProblemFor(error) != QLMAdapterProblemNone;
+    BOOL gone = noBus && QLMAdapterProblemFor(error) == QLMAdapterProblemNone;
     if (gone) {
         [self forgetAdapter];
     }
