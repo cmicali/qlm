@@ -24,7 +24,6 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMMonitorAlerts *alerts;
-@property (nonatomic) QLMNotifier *notifier;
 @property (nonatomic) NSStatusItem *statusItem;
 @property (nonatomic) NSPopover *popover;
 @property (nonatomic) QLMPopoverController *popoverController;
@@ -47,11 +46,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
-    self.notifier = [[QLMNotifier alloc] init];
-    QLMNotifier *notifier = self.notifier;
-    self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:^(NSString *identifier, NSString *title, NSString *body) {
-        [notifier postIdentifier:identifier title:title body:body];
-    }];
+    self.alerts = [[QLMMonitorAlerts alloc] initWithNotifier:[[QLMNotifier alloc] init]];
 
     self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
@@ -155,7 +150,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
     [self.monitorList updateWithSnapshot:snapshot];
-    [self.alerts updateWithSnapshot:snapshot];
+    [self.alerts updateWithMonitorList:self.monitorList];
     [self.popoverController refresh];
     [self.monitorsController refresh];
     [self.settingsController refresh];
@@ -200,14 +195,18 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 #pragma mark - The setup file
 
+// The watch starts before the read, so a save during the read still
+// offers to read again.
 - (void)loadSetup {
     NSUInteger load = ++self.setupLoads;
     NSString *chosen = self.preferences.setupFileName;
+    NSArray<NSString *> *names = QLMSetupFileNames();
+    NSString *name = chosen != nil && [names containsObject:chosen] ? chosen : names.firstObject;
+    NSString *path = name == nil ? nil : [QLMSetupDirectory() stringByAppendingPathComponent:name];
+    self.popoverController.changedSetupName = nil;
+    [self watchSetupAtPath:path];
     __weak QLMAppDelegate *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        NSArray<NSString *> *names = QLMSetupFileNames();
-        NSString *name = chosen != nil && [names containsObject:chosen] ? chosen : names.firstObject;
-        NSString *path = name == nil ? nil : [QLMSetupDirectory() stringByAppendingPathComponent:name];
         NSError *error = nil;
         QLMSetup *setup = path == nil ? nil : [QLMSetupReader readFileAtPath:path error:&error];
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -218,9 +217,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
             strongSelf.setup = setup;
             strongSelf.setupError = setup == nil ? error : nil;
             strongSelf.popoverController.setup = setup;
-            strongSelf.popoverController.changedSetupName = nil;
             [strongSelf.settingsController showSetup:setup error:strongSelf.setupError];
-            [strongSelf watchSetupAtPath:path];
         });
     });
 }

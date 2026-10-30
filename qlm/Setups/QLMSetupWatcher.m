@@ -130,10 +130,9 @@ static BOOL QLMFileStatesEqual(QLMFileState a, QLMFileState b) {
     _fileSource = [self sourceForDescriptor:file mask:mask];
 }
 
+// stop cancels the sources, and a cancelled source calls no handler, so
+// this needs no check that the watcher runs.
 - (void)noteEvent {
-    if (!_running) {
-        return;
-    }
     [self watchFile];
     NSUInteger event = ++_events;
     __weak QLMSetupWatcher *weakSelf = self;
@@ -144,7 +143,7 @@ static BOOL QLMFileStatesEqual(QLMFileState a, QLMFileState b) {
 
 // A missing file is no change, but its return is one.
 - (void)settleAfterEvent:(NSUInteger)event {
-    if (!_running || event != _events) {
+    if (event != _events) {
         return;
     }
     [self watchFile];

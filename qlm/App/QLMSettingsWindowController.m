@@ -15,6 +15,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) NSButton *adapterCheckbox;
 @property (nonatomic) NSTextField *handBackLevel;
+@property (nonatomic) NSGridRow *handBackRow;
 @property (nonatomic) NSPopUpButton *setupPicker;
 @property (nonatomic) NSTextField *setupNote;
 @property (nonatomic) NSTextField *lowestField;
@@ -127,6 +128,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
     self.grid = grid;
+    self.handBackRow = [grid cellForView:self.handBackLevel].row;
     [content addSubview:grid];
     [NSLayoutConstraint activateConstraints:@[
         [grid.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:20],
@@ -179,6 +181,8 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [super showWindow:sender];
 }
 
+// The live line changes with every turn of the knob, so the window refits
+// only when the line's height does.
 - (void)refresh {
     if (self.window.visible && [self renderHandBack]) {
         [self fitWindow];
@@ -276,7 +280,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 #pragma mark - Drawing
 
-// Returns whether the text changed.
+// Returns whether the line's height changed.
 - (BOOL)renderHandBack {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
     NSNumber *knob = snapshot.adapter.knobTenths;
@@ -285,10 +289,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     if (snapshot.adapter.hasStatus && knob == nil) {
         text = @"Now: no knob is in, so what the adapter would set is unknown.";
     } else if (knob != nil && volume != nil) {
-        double sent = [self.preferences cappedDecibels:volume.doubleValue];
-        if (snapshot.dimmed) {
-            sent = fmax(QLMVolumeDecibelsMin, sent - QLMDimDecibels);
-        }
+        double sent = [self.preferences sentDecibels:volume.doubleValue dimmed:snapshot.dimmed];
         double knobDecibels = knob.doubleValue / 10;
         double jump = knobDecibels - sent;
         NSString *change = fabs(jump) < QLMVolumeDecibelsStep ? @"barely move"
@@ -296,11 +297,13 @@ static const CGFloat QLMSettingsTextWidth = 360;
         text = [NSString stringWithFormat:@"Now: qlm sends %@, and the knob reads %@. If the adapter took over now, the level would %@.",
                                           QLMDecibelsText(sent), QLMDecibelsText(knobDecibels), change];
     }
-    BOOL changed = ![self.handBackLevel.stringValue isEqualToString:text ?: @""] || self.handBackLevel.hidden != (text == nil);
+    if ([self.handBackLevel.stringValue isEqualToString:text ?: @""] && self.handBackRow.hidden == (text == nil)) {
+        return NO;
+    }
+    CGFloat height = self.handBackRow.hidden ? 0 : self.handBackLevel.fittingSize.height;
     self.handBackLevel.stringValue = text ?: @"";
-    [self.grid cellForView:self.handBackLevel].row.hidden = text == nil;
-    self.handBackLevel.hidden = text == nil;
-    return changed;
+    self.handBackRow.hidden = text == nil;
+    return height != (self.handBackRow.hidden ? 0 : self.handBackLevel.fittingSize.height);
 }
 
 - (void)renderSetup {

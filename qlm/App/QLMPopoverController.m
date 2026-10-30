@@ -5,7 +5,7 @@
 #include "QLMCommands.h"
 #import "QLMBannerView.h"
 #import "QLMFormat.h"
-#import "QLMGLM.h"
+#import "QLMHostCheck.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMPopoverWidth = 320;
@@ -19,6 +19,17 @@ static NSTextField *QLMSmallLabel(NSString *text) {
     label.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     label.textColor = NSColor.secondaryLabelColor;
     return label;
+}
+
+// GLM 5, when it runs: an app whose executable QLMHostCheck counts as GLM.
+static NSRunningApplication *_Nullable QLMRunningGLM(void) {
+    for (NSRunningApplication *app in NSWorkspace.sharedWorkspace.runningApplications) {
+        NSString *path = app.executableURL.path;
+        if (path != nil && QLMHostCheckIsGLMExecutable(path)) {
+            return app;
+        }
+    }
+    return nil;
 }
 
 static NSView *QLMSpacer(void) {
@@ -59,6 +70,10 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry, as the list only appends
 @property (nonatomic) NSTimeInterval sliderMovedAt;
 @property (nonatomic) BOOL askedGLMToQuit;  // until GLM lets go of the adapter
+// GLM holds the adapter, as of checkedError. GLM starts and quits rarely, so
+// the app list is scanned only when System's error changes.
+@property (nonatomic) BOOL glmHolds;
+@property (nonatomic, nullable) NSError *checkedError;
 // The snapshot says an apply is running, not which group.
 @property (nonatomic, copy, nullable) NSString *applyingGroupName;
 @property (nonatomic, copy, nullable) NSString *message;  // the last apply's error
@@ -225,12 +240,11 @@ static NSView *QLMSpacer(void) {
     self.monitorsStack.alignment = NSLayoutAttributeLeading;
     self.monitorsStack.spacing = 5;
 
-    NSButton *monitorsButton = [self footerButtonWithTitle:@"Monitors…" action:@selector(showMonitorsClicked:)];
-    NSButton *settingsButton = [self footerButtonWithTitle:@"Settings…" action:@selector(showSettingsClicked:)];
-    self.fakeBusButton = [self footerButtonWithTitle:@"Fake Bus…" action:@selector(showFakeBusClicked:)];
+    NSButton *monitorsButton = QLMSmallButton(@"Monitors…", self, @selector(showMonitorsClicked:));
+    NSButton *settingsButton = QLMSmallButton(@"Settings…", self, @selector(showSettingsClicked:));
+    self.fakeBusButton = QLMSmallButton(@"Fake Bus…", self, @selector(showFakeBusClicked:));
     self.fakeBusButton.hidden = !self.showsFakeBus;
-    NSButton *quit = [self footerButtonWithTitle:@"Quit" action:@selector(terminate:)];
-    quit.target = NSApp;
+    NSButton *quit = QLMSmallButton(@"Quit", NSApp, @selector(terminate:));
     NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, self.fakeBusButton, QLMSpacer(), quit]];
     footer.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     footer.spacing = 6;
@@ -260,13 +274,6 @@ static NSView *QLMSpacer(void) {
     NSButton *button = [NSButton buttonWithTitle:title image:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]
                                           target:self action:action];
     button.buttonType = NSButtonTypePushOnPushOff;
-    return button;
-}
-
-- (NSButton *)footerButtonWithTitle:(NSString *)title action:(SEL)action {
-    NSButton *button = [NSButton buttonWithTitle:title target:self action:action];
-    button.controlSize = NSControlSizeSmall;
-    button.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     return button;
 }
 
@@ -354,6 +361,7 @@ static NSView *QLMSpacer(void) {
     [self.delegate popoverControllerReadSetupAgain:self];
 }
 
+// A method, so a check can stand in for GLM.
 - (nullable NSRunningApplication *)runningGLM {
     return QLMRunningGLM();
 }
@@ -428,12 +436,15 @@ static NSView *QLMSpacer(void) {
 
 - (void)renderBanner:(nullable NSError *)error {
     [self.banner showError:error];
-    BOOL glmHolds = QLMAdapterErrorIsBusy(error) && [self runningGLM] != nil;
-    if (!glmHolds) {
+    if (error != self.checkedError) {
+        self.checkedError = error;
+        self.glmHolds = QLMAdapterErrorIsBusy(error) && [self runningGLM] != nil;
+    }
+    if (!self.glmHolds) {
         self.askedGLMToQuit = NO;
     }
     NSButton *quit = self.banner.actionButton;
-    quit.hidden = !glmHolds;
+    quit.hidden = !self.glmHolds;
     quit.enabled = !self.askedGLMToQuit;
     quit.title = self.askedGLMToQuit ? @"Asked GLM to Quit" : @"Quit GLM";
 }
@@ -462,7 +473,7 @@ static NSView *QLMSpacer(void) {
         [parts addObject:ceilingText];
     }
     if (snapshot.dimmed) {
-        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText(fmax(QLMVolumeDecibelsMin, sent - QLMDimDecibels))]];
+        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText([self.preferences sentDecibels:decibels dimmed:YES])]];
     }
     if (snapshot.allMuted) {
         [parts addObject:@"muted"];

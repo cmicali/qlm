@@ -29,7 +29,6 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, nullable) QLMSystem *system;
 // Nil disables the group picker.
 @property (nonatomic, nullable) QLMSetup *setup;
-// Shows the Fake Bus button.
 @property (nonatomic) BOOL showsFakeBus;
 // The setup file GLM saved since it was read. Set, the popover offers to
 // read it again.

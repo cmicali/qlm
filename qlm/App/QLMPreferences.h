@@ -31,6 +31,8 @@ extern const double QLMVolumeRangeMinimumSpan;
 // What goes out for this volume: GLMProtocol caps every frame at the
 // ceiling.
 - (double)cappedDecibels:(double)decibels;
+// The same, less QLMDimDecibels while dimmed, as GLMProtocol's dim frame.
+- (double)sentDecibels:(double)decibels dimmed:(BOOL)dimmed;
 
 @end
 

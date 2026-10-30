@@ -46,14 +46,16 @@ NSString *QLMReplyAgeText(NSDate *date) {
     return [formatter stringFromDate:date];
 }
 
+BOOL QLMAdapterErrorIsBusy(NSError *error) {
+    return [error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorBusy;
+}
+
 NSString *QLMAdapterErrorTitle(NSError *error) {
-    if ([error.domain isEqualToString:QLMAdapterErrorDomain]) {
-        if (error.code == QLMAdapterErrorBusy) {
-            return @"Another host has the adapter";
-        }
-        if (error.code == QLMAdapterErrorDisconnected) {
-            return @"No adapter";
-        }
+    if (QLMAdapterErrorIsBusy(error)) {
+        return @"Another host has the adapter";
+    }
+    if ([error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorDisconnected) {
+        return @"No adapter";
     }
     return @"The adapter failed";
 }

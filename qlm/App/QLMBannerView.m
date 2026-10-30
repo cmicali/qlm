@@ -4,7 +4,7 @@
 #import "QLMViews.h"
 
 @implementation QLMBannerView {
-    QLMBannerStyle _style;
+    NSColor *_tint;
     NSTextField *_title;
     NSTextField *_detail;
 }
@@ -12,14 +12,14 @@
 - (instancetype)initWithTextWidth:(CGFloat)textWidth style:(QLMBannerStyle)style {
     self = [super initWithFrame:NSZeroRect];
     if (self) {
-        _style = style;
+        BOOL warning = style == QLMBannerStyleWarning;
+        _tint = warning ? NSColor.systemOrangeColor : NSColor.controlAccentColor;
         self.wantsLayer = YES;
         self.hidden = YES;
 
-        BOOL warning = style == QLMBannerStyleWarning;
         NSImageView *icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:warning ? @"exclamationmark.triangle.fill" : @"info.circle.fill"
                                                                       accessibilityDescription:warning ? @"Error" : @"Notice"]];
-        icon.contentTintColor = self.tint;
+        icon.contentTintColor = _tint;
         [icon setContentHuggingPriority:NSLayoutPriorityRequired forOrientation:NSLayoutConstraintOrientationHorizontal];
 
         _title = [NSTextField wrappingLabelWithString:@""];
@@ -27,9 +27,7 @@
         _title.preferredMaxLayoutWidth = textWidth;
         _detail = QLMNoteLabel(@"", textWidth);
         _detail.selectable = YES;
-        _actionButton = [NSButton buttonWithTitle:@"" target:nil action:nil];
-        _actionButton.controlSize = NSControlSizeSmall;
-        _actionButton.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+        _actionButton = QLMSmallButton(@"", nil, nil);
         _actionButton.hidden = YES;
 
         NSStackView *text = [NSStackView stackViewWithViews:@[_title, _detail, _actionButton]];
@@ -47,10 +45,6 @@
     return self;
 }
 
-- (NSColor *)tint {
-    return _style == QLMBannerStyleWarning ? NSColor.systemOrangeColor : NSColor.controlAccentColor;
-}
-
 - (BOOL)wantsUpdateLayer {
     return YES;
 }
@@ -58,15 +52,20 @@
 - (void)updateLayer {
     self.layer.cornerRadius = 6;
     self.layer.borderWidth = 1;
-    self.layer.backgroundColor = [self.tint colorWithAlphaComponent:0.12].CGColor;
-    self.layer.borderColor = [self.tint colorWithAlphaComponent:0.45].CGColor;
+    self.layer.backgroundColor = [_tint colorWithAlphaComponent:0.12].CGColor;
+    self.layer.borderColor = [_tint colorWithAlphaComponent:0.45].CGColor;
 }
 
+// Sets only what changed: a popover redraws often while the adapter is
+// refused.
 - (void)showTitle:(NSString *)title detail:(NSString *)detail {
     self.hidden = title == nil;
-    _title.stringValue = title ?: @"";
-    _detail.stringValue = detail ?: @"";
-    _detail.hidden = detail == nil;
+    if (![_title.stringValue isEqualToString:title ?: @""]) {
+        _title.stringValue = title ?: @"";
+    }
+    if (![_detail.stringValue isEqualToString:detail ?: @""]) {
+        _detail.stringValue = detail ?: @"";
+    }
 }
 
 - (void)showError:(NSError *)error {

@@ -47,6 +47,7 @@ NSString *QLMEntryStatusText(QLMMonitorEntry *entry) {
         _order = [NSMutableArray array];
         _lastStates = [NSMutableDictionary dictionary];
         _entries = @[];
+        _dropped = @[];
     }
     return self;
 }
@@ -61,6 +62,13 @@ NSString *QLMEntryStatusText(QLMMonitorEntry *entry) {
         _lastStates[monitor.hardwareID] = monitor;
         [tracked addObject:monitor.hardwareID];
     }
+    NSMutableArray<QLMMonitorState *> *dropped = [NSMutableArray array];
+    for (QLMMonitorEntry *entry in _entries) {
+        if (entry.tracked && ![tracked containsObject:entry.state.hardwareID]) {
+            [dropped addObject:entry.state];
+        }
+    }
+    _dropped = dropped;
     NSMutableArray<QLMMonitorEntry *> *entries = [NSMutableArray arrayWithCapacity:_order.count];
     for (NSData *hardwareID in _order) {
         QLMMonitorEntry *entry = [[QLMMonitorEntry alloc] init];

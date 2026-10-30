@@ -18,7 +18,6 @@
     [NSFileManager.defaultManager createDirectoryAtPath:self.folder withIntermediateDirectories:YES attributes:nil error:NULL];
     self.path = [self.folder stringByAppendingPathComponent:@"Main.sam"];
     [self write:@"first" atomically:NO];
-    self.changes = 0;
 }
 
 - (void)tearDown {
