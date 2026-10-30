@@ -27,26 +27,26 @@ QLMBiquad QLMBiquadPeak(double frequency, double gainDecibels, double q, double 
     return QLMBiquadNormalize(1 + alpha * A, -2 * c, 1 - alpha * A, 1 + alpha / A, -2 * c, 1 - alpha / A);
 }
 
-QLMBiquad QLMBiquadLowShelf(double frequency, double gainDecibels, double sampleRate) {
+QLMBiquad QLMBiquadLowShelf(double frequency, double gainDecibels, double q, double sampleRate) {
     if (gainDecibels == 0) {
         return QLMBiquadBypass();
     }
     double w0 = 2 * M_PI * frequency / sampleRate;
     double A = pow(10, gainDecibels / 40);
-    double alpha = sin(w0) / (2 * QLMBiquadLowShelfQ);
+    double alpha = sin(w0) / (2 * q);
     double c = cos(w0);
     double s = 2 * sqrt(A) * alpha;
     return QLMBiquadNormalize(A * ((A + 1) - (A - 1) * c + s), 2 * A * ((A - 1) - (A + 1) * c), A * ((A + 1) - (A - 1) * c - s),
                               (A + 1) + (A - 1) * c + s, -2 * ((A - 1) + (A + 1) * c), (A + 1) + (A - 1) * c - s);
 }
 
-QLMBiquad QLMBiquadHighShelf(double frequency, double gainDecibels, double sampleRate) {
+QLMBiquad QLMBiquadHighShelf(double frequency, double gainDecibels, double q, double sampleRate) {
     if (gainDecibels == 0) {
         return QLMBiquadBypass();
     }
     double w0 = 2 * M_PI * frequency / sampleRate;
     double A = pow(10, gainDecibels / 40);
-    double alpha = sin(w0) / (2 * QLMBiquadHighShelfQ);
+    double alpha = sin(w0) / (2 * q);
     double c = cos(w0);
     double s = 2 * sqrt(A) * alpha;
     return QLMBiquadNormalize(A * ((A + 1) + (A - 1) * c + s), -2 * A * ((A - 1) + (A + 1) * c), A * ((A + 1) + (A - 1) * c - s),

@@ -45,10 +45,11 @@ static NSInteger QLMSlotForBand(QLMSetupBand *band, QLMSetupNodeClass nodeClass)
     return -1;
 }
 
-static QLMBiquad QLMDesign(QLMSetupBand *band) {
+static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
+    double highShelfQ = nodeClass == QLMSetupNodeClassThreeWay ? QLMBiquadThreeWayHighShelfQ : QLMBiquadHighShelfQ;
     switch (band.type) {
-    case QLMSetupBandLowShelf: return QLMBiquadLowShelf(band.frequency, band.gain, band.sampleRate);
-    case QLMSetupBandHighShelf: return QLMBiquadHighShelf(band.frequency, band.gain, band.sampleRate);
+    case QLMSetupBandLowShelf: return QLMBiquadLowShelf(band.frequency, band.gain, QLMBiquadLowShelfQ, band.sampleRate);
+    case QLMSetupBandHighShelf: return QLMBiquadHighShelf(band.frequency, band.gain, highShelfQ, band.sampleRate);
     case QLMSetupBandPeak: return QLMBiquadPeak(band.frequency, band.gain, band.q, band.sampleRate);
     }
     return QLMBiquadBypass();
@@ -75,7 +76,7 @@ static QLMBiquad QLMDesign(QLMSetupBand *band) {
             if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorBands, [NSString stringWithFormat:@"band %ld fits no slot", (long)band.index]);
             return nil;
         }
-        QLMBiquad biquad = QLMDesign(band);
+        QLMBiquad biquad = QLMDesign(band, node.nodeClass);
         if (!QLMBiquadIsStable(&biquad)) {
             if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorUnstable, [NSString stringWithFormat:@"band %ld at %.2f Hz is unstable", (long)band.index, band.frequency]);
             return nil;

@@ -63,7 +63,7 @@
     XCTAssertEqual(memcmp(slot0 + 3, bypass, sizeof bypass), 0);
     const uint8_t *slot3 = block.payloads[4 + 3].bytes;
     uint8_t highShelf[QLMBiquadPackedSize];
-    QLMBiquad highShelfBiquad = QLMBiquadHighShelf(500.67, -0.27, 48000);
+    QLMBiquad highShelfBiquad = QLMBiquadHighShelf(500.67, -0.27, QLMBiquadHighShelfQ, 48000);
     QLMBiquadPack(&highShelfBiquad, highShelf);
     XCTAssertEqual(memcmp(slot3 + 3, highShelf, sizeof highShelf), 0);
     const uint8_t *slot4 = block.payloads[4 + 4].bytes;
@@ -172,6 +172,16 @@ static QLMDSPBlock *QLMBlockForSerial(QLMSetupGroup *group, NSString *serial) {
     XCTAssertEqual(block.designRate, 96000);
     XCTAssertFalse(block.rateVerified);
     XCTAssertTrue([block.warnings.firstObject containsString:@"96000"]);
+}
+
+// Source: captures/group-switch-main-2x2-main-2x1, the switch to Main 2x1.
+// The Left 8351B's slot 3 holds its second high shelf, at the three-way's
+// Q. It went to 03 at 14.580 s.
+- (void)testThreeWayHighShelfMatchesTheCapturedSwitchToMain2x1 {
+    QLMSetupGroup *group = QLMReadFixtureSetup().groups[2];
+    const uint8_t slot3[] = {0x10, 0x0E, 0x03, 0x38, 0xAB, 0x6E, 0x3F, 0x22, 0x65, 0xDE, 0xBF, 0xF3,
+                             0x89, 0x4E, 0x3F, 0x08, 0x22, 0xEF, 0x3F, 0xF6, 0xAE, 0x5E, 0xBF, 0x00};
+    XCTAssertEqualObjects(QLMBlockForSerial(group, @"1000002").payloads[4 + 3], QLMBytes(slot3, sizeof slot3));
 }
 
 - (void)testBlocksForGroupSkipNodesThatAreOff {

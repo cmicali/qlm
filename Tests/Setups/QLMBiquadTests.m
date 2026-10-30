@@ -5,7 +5,8 @@
 // Sources: the hlm protocol spec, revision 13. Section 5 gives the bypass
 // bytes and the slot rates, Appendix A.2 the sign flip, A.3 the RBJ forms
 // with Q 0.3 and 0.5 for the shelves, and A.4 the zero-gain bypass. The
-// captured slots come from captures/group-switch-main-2x1-main-4x2.
+// captured slots come from captures/group-switch-main-2x1-main-4x2 and
+// group-switch-main-2x2-main-2x1.
 @interface QLMBiquadTests : XCTestCase
 @end
 
@@ -19,7 +20,7 @@
 - (void)testZeroGainIsTheBypassFromSection5 {
     QLMBiquad peak = QLMBiquadPeak(1000, 0, 1, 48000);
     XCTAssertTrue(QLMBiquadIsBypass(&peak));
-    QLMBiquad low = QLMBiquadLowShelf(100, 0, 48000);
+    QLMBiquad low = QLMBiquadLowShelf(100, 0, QLMBiquadLowShelfQ, 48000);
     XCTAssertTrue(QLMBiquadIsBypass(&low));
     uint8_t packed[QLMBiquadPackedSize];
     QLMBiquadPack(&peak, packed);
@@ -43,12 +44,12 @@
 // A shelf reaches its gain on its side, unity on the other, and half its
 // decibels at its frequency.
 - (void)testShelfShapes {
-    QLMBiquad low = QLMBiquadLowShelf(100, 4, 48000);
+    QLMBiquad low = QLMBiquadLowShelf(100, 4, QLMBiquadLowShelfQ, 48000);
     [self assertBiquad:low at:0 rate:48000 decibels:4];
     [self assertBiquad:low at:24000 rate:48000 decibels:0];
     [self assertBiquad:low at:100 rate:48000 decibels:2];
 
-    QLMBiquad high = QLMBiquadHighShelf(500.67, -0.27, 48000);
+    QLMBiquad high = QLMBiquadHighShelf(500.67, -0.27, QLMBiquadHighShelfQ, 48000);
     [self assertBiquad:high at:24000 rate:48000 decibels:-0.27];
     [self assertBiquad:high at:0 rate:48000 decibels:0];
     [self assertBiquad:high at:500.67 rate:48000 decibels:-0.135];
@@ -65,7 +66,7 @@
 - (void)testStability {
     QLMBiquad peak = QLMBiquadPeak(250.31, 3, 0.7, 48000);
     XCTAssertTrue(QLMBiquadIsStable(&peak));
-    QLMBiquad low = QLMBiquadLowShelf(100, -12, 12000);
+    QLMBiquad low = QLMBiquadLowShelf(100, -12, QLMBiquadLowShelfQ, 12000);
     XCTAssertTrue(QLMBiquadIsStable(&low));
     QLMBiquad bypass = QLMBiquadBypass();
     XCTAssertTrue(QLMBiquadIsStable(&bypass));
@@ -108,8 +109,18 @@
 // 36.438 s.
 - (void)testNormalizesInSinglePrecisionAsGLMDoes {
     [self assertBiquad:QLMBiquadPeak(250.31, 3, 0.7, 48000) packsTo:@"02 05 81 3F 1D EC FA BF 34 13 74 3F 1D EC FA 3F 39 1D 76 BF"];
-    [self assertBiquad:QLMBiquadHighShelf(500.67, -0.27, 48000) packsTo:@"DD 68 78 3F 80 85 E8 BF 47 A6 59 3F F5 DE EF 3F 0F C2 60 BF"];
+    [self assertBiquad:QLMBiquadHighShelf(500.67, -0.27, QLMBiquadHighShelfQ, 48000) packsTo:@"DD 68 78 3F 80 85 E8 BF 47 A6 59 3F F5 DE EF 3F 0F C2 60 BF"];
     [self assertBiquad:QLMBiquadPeak(15.12, -7.33, 6.74, 12000) packsTo:@"94 DE 7F 3F 4E C3 FF BF 24 AC 7F 3F 4E C3 FF 3F B8 8A 7F BF"];
+}
+
+// The Left 8351B's second high shelf, 649.91 Hz at -0.63 dB, went to 03 at
+// 14.580 s in group-switch-main-2x2-main-2x1. It is a 96 kHz design with a
+// Q of 0.3, not the two-way's 0.5.
+- (void)testThreeWayHighShelfTakesItsOwnQ {
+    QLMBiquad shelf = QLMBiquadHighShelf(649.91, -0.63, QLMBiquadThreeWayHighShelfQ, 96000);
+    [self assertBiquad:shelf packsTo:@"38 AB 6E 3F 22 65 DE BF F3 89 4E 3F 08 22 EF 3F F6 AE 5E BF"];
+    QLMBiquad twoWayQ = QLMBiquadHighShelf(649.91, -0.63, QLMBiquadHighShelfQ, 96000);
+    XCTAssertGreaterThan(fabs(twoWayQ.a1 - shelf.a1), 0.04);
 }
 
 @end
