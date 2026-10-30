@@ -63,7 +63,7 @@
     XCTAssertEqual(memcmp(slot0 + 3, bypass, sizeof bypass), 0);
     const uint8_t *slot3 = block.payloads[4 + 3].bytes;
     uint8_t highShelf[QLMBiquadPackedSize];
-    QLMBiquad highShelfBiquad = QLMBiquadHighShelf(500.67, -0.27, 48000);
+    QLMBiquad highShelfBiquad = QLMBiquadHighShelf(500.67, -0.27, QLMBiquadHighShelfQ, 48000);
     QLMBiquadPack(&highShelfBiquad, highShelf);
     XCTAssertEqual(memcmp(slot3 + 3, highShelf, sizeof highShelf), 0);
     const uint8_t *slot4 = block.payloads[4 + 4].bytes;
