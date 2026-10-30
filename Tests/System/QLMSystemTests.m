@@ -1758,6 +1758,31 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// The Safety rule holds for frames already in line: a ceiling lowered after
+// the wake queues its level caps that level too, when it goes out.
+- (void)testALoweredCeilingCapsTheVolumeFramesAlreadyQueued {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-20];  // at the -20 dB ceiling
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [_system wake];
+    [_system setCeilingDecibels:-40];
+    [self waitUntil:^BOOL {
+        return [self sentWithOpcode:0x1F from:before].count >= 2;
+    }];
+    [_time advanceBy:0.1];
+    QLMMessage capped = QLMCommandVolume(-20, -40);
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertEqual(levels.count, 2u);  // the wake's, then the ceiling's own
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, QLMAdapterRecord(&capped));
+    }
+}
+
 // A stop's completion runs on the main queue once System has let go of the
 // adapter: after the hand-back level, with the snapshot stopped. A stop
 // while not running completes at once.

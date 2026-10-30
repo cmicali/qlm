@@ -81,8 +81,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // sets it too, as GLM lets it (QLMKnob). At start the knob sets nothing.
 - (void)setVolumeDecibels:(double)decibels;
 
-// Caps every volume frame after this. A volume already set goes out again at
-// once, under the new ceiling.
+// Caps every volume frame that goes out after this, those already in line
+// too. A volume already set goes out again, under the new ceiling.
 - (void)setCeilingDecibels:(double)ceilingDecibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A

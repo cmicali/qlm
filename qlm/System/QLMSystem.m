@@ -117,6 +117,20 @@ static const NSTimeInterval QLMWakeVolumeDelay = 0.235;
 @implementation QLMTrackedAdapter
 @end
 
+static BOOL QLMIsVolumeFrame(const QLMMessage *message) {
+    return message->length == 4 && message->payload[0] == 0x1F;
+}
+
+static uint32_t QLMVolumeFrameWord(const QLMMessage *message) {
+    return (uint32_t)message->payload[1] << 16 | (uint32_t)message->payload[2] << 8 | message->payload[3];
+}
+
+// QLMCommandVolume holds 0 dB to the ceiling, so its word is the ceiling's.
+static uint32_t QLMCeilingWord(double ceilingDecibels) {
+    QLMMessage top = QLMCommandVolume(0, ceilingDecibels);
+    return QLMVolumeFrameWord(&top);
+}
+
 static BOOL QLMAdapterStatusDiffers(const QLMAdapterStatus *a, const QLMAdapterStatus *b) {
     return a->knob != b->knob || a->mic != b->mic || a->hasKnobPosition != b->hasKnobPosition || a->knobTenths != b->knobTenths;
 }
@@ -386,7 +400,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return handBack;
     }
     QLMMessage sent = [self volumeMessage];
-    uint32_t word = (uint32_t)sent.payload[1] << 16 | (uint32_t)sent.payload[2] << 8 | sent.payload[3];
+    uint32_t word = QLMVolumeFrameWord(&sent);
     handBack.volumeDecibels = @(QLMVolumeDecibelsForWord(word));
     if (handBack.knobDecibels != nil) {
         BOOL atOrBelow = QLMVolumeWordForDecibels(handBack.knobDecibels.doubleValue) <= word;
@@ -411,7 +425,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (strongSelf == nil) {
             return;
         }
-        [strongSelf->_adapter sendMessage:message replyHandler:^(const QLMMessage *reply, NSError *error) {
+        // TRAP: a volume frame waits in line, and the ceiling may fall
+        // meanwhile. So it is capped again as it goes out.
+        QLMMessage sent = message;
+        if (QLMIsVolumeFrame(&sent)) {
+            sent = QLMCommandVolumeWord(QLMVolumeFrameWord(&sent), QLMCeilingWord(strongSelf.settings.ceilingDecibels));
+            sent.address = message.address;
+        }
+        [strongSelf->_adapter sendMessage:sent replyHandler:^(const QLMMessage *reply, NSError *error) {
             [weakSelf noteSendError:error];
             [weakSelf finishItem:completion == nil ? nil : ^{
                 completion(reply, error);
