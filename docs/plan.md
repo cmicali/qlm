@@ -1,6 +1,6 @@
 # qlm: the plan
 
-**Status: 2026-10-29. Everything that needs no adapter is built and tested against a fake bus. qlm itself has not touched real hardware. The Pi capture proxy relays GLM 5 to the real adapter, and GLM finds every monitor through it. The Phase 0 scenario captures are next.**
+**Status: 2026-10-29. Everything that needs no adapter is built and tested against a fake bus. qlm itself has not touched real hardware. The Phase 0 captures are recorded, through a Pi 5 inline proxy, except a true Mac sleep. Phase 1 is next.**
 
 ## Where things stand
 
@@ -11,11 +11,21 @@ Built, with 79 tests, every protocol fact named by its section of hlm's spec:
 - **System:** discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots.
 - **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block.
 - **The app and `qlmctl`:** both run over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
-- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`. A test capture through the Pi converts cleanly.
+- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
+- **The captures:** every scenario in `captures/README.md`, xz-compressed, each with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep.
 
-Waiting on the captures:
+What the captures show, at a first look. Phase 1 verifies each against `reports.txt` before code relies on it:
 
-- The USB report layer: the host report prefix, and reassembly of a reply across reports. Then the HID adapter, the replay adapter, and golden tests over every captured frame.
+- **The report layer.** A report to the adapter is 64 bytes: `0x80` plus the frame length, then the frame, zero-padded. A report from the adapter starts with `3F`, and a reply can span more than one report.
+- **Volume** is broadcast `FF 1F` with a 3-byte linear level. `7F FF FF` is 0 dB, and −20 dB is `0C CC CC` (`quit-glm`). **Dim** is −20 dB on that level (`mute-dim`).
+- **Mute** is `2B`, sent to every monitor: `03` to a muted one, and `04` to the rest (`mute-dim`). **Standby** is broadcast `3A 03` (`standby-wake`).
+- **GLM re-addresses the monitors** on a group switch, a wake, and an unplug. A monitor's bus address is not stable, so System must match monitors by serial.
+- **The adapter speaks only when polled.** GLM polls it with `01 08` about 17 times a second. The calibration mic's readings ride in the reply (`startup-idle` against `startup-idle-mic`). The knob's position likely does too (`knob-sweep`). That reply is not decoded yet.
+- **GLM sends nothing on quit.** It stops polling (`quit-glm`). What level the adapter then applies happens on the monitor bus only, so USB cannot show it. It needs a listening test or the bus tap.
+
+Waiting on Phase 1:
+
+- The USB report layer, the HID adapter, the replay adapter, and golden tests over every captured frame.
 - Three readings marked unverified in code: a monitor's delay taken from `Time-of-flight_Compensation` as milliseconds, the analog routing frame, and matching a setup node to a monitor by the bus serial's suffix.
 - Whether the address byte is escaped. The code sends it bare.
 
@@ -89,7 +99,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Open, for you to decide
 
-1. **The knob.** Is there a 9310 on the adapter? Its path to the host is unknown.
+1. **The knob.** Decided: no 9310. The adapter has its own optional volume knob. While it is attached, GLM locks its on-screen volume. Its path to the host is likely the adapter's reply to `01 08`.
 2. **Capture machine.** Decided: a Raspberry Pi 5 inline between the Mac and the adapter. [captures/README.md](../captures/README.md) has the steps.
 
 ## Architecture
