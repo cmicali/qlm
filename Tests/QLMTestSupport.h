@@ -86,9 +86,11 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
 @end
 
-// A clock that moves only when a test advances it. Every hop and timer it
-// runs joins one dispatch group, so it can wait until the work a timer
-// starts is done. Time then depends on the test alone, never on the host.
+// A clock that moves only when a test advances it, or while a caller waits
+// on it: a wait runs each timer due, one at a time, until its semaphore is
+// signalled or its time runs out. Every hop and timer it runs joins one
+// dispatch group, so it can wait until the work a timer starts is done.
+// Time then depends on the test alone, never on the host.
 @interface QLMVirtualClock : NSObject <QLMClock>
 
 // Runs each timer due by now + seconds, in order of time, the earlier first

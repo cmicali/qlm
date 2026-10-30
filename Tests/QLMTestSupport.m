@@ -351,19 +351,45 @@ QLMSetup *QLMReadFixtureSetup(void) {
     }
 }
 
-- (BOOL)advanceToNext {
-    [self settleOrRaise];
-    QLMVirtualTimer *timer = [self takeDueBy:INFINITY];
-    if (timer == nil) {
-        return NO;
-    }
+// Runs the timer's block, unless it is cancelled, and waits for the work.
+- (void)fire:(QLMVirtualTimer *)timer {
     dispatch_group_async(_group, timer.queue, ^{
         if (!timer.cancelled) {
             timer.block();
         }
     });
     [self settleOrRaise];
+}
+
+- (BOOL)advanceToNext {
+    [self settleOrRaise];
+    QLMVirtualTimer *timer = [self takeDueBy:INFINITY];
+    if (timer == nil) {
+        return NO;
+    }
+    [self fire:timer];
     return YES;
+}
+
+- (BOOL)wait:(dispatch_semaphore_t)semaphore timeout:(NSTimeInterval)seconds {
+    NSTimeInterval limit;
+    @synchronized(self) {
+        limit = _now + seconds;
+    }
+    for (;;) {
+        [self settleOrRaise];
+        if (dispatch_semaphore_wait(semaphore, DISPATCH_TIME_NOW) == 0) {
+            return YES;
+        }
+        QLMVirtualTimer *timer = [self takeDueBy:limit];
+        if (timer == nil) {
+            @synchronized(self) {
+                _now = MAX(_now, limit);
+            }
+            return NO;
+        }
+        [self fire:timer];
+    }
 }
 
 - (void)stallFor:(NSTimeInterval)seconds {
@@ -393,12 +419,7 @@ QLMSetup *QLMReadFixtureSetup(void) {
         }
     }
     for (QLMVirtualTimer *timer in due) {
-        dispatch_group_async(_group, timer.queue, ^{
-            if (!timer.cancelled) {
-                timer.block();
-            }
-        });
-        [self settleOrRaise];
+        [self fire:timer];
     }
 }
 
@@ -410,13 +431,7 @@ QLMSetup *QLMReadFixtureSetup(void) {
     [self settleOrRaise];
     QLMVirtualTimer *timer = nil;
     while ((timer = [self takeDueBy:limit]) != nil) {
-        QLMVirtualTimer *fired = timer;
-        dispatch_group_async(_group, fired.queue, ^{
-            if (!fired.cancelled) {
-                fired.block();
-            }
-        });
-        [self settleOrRaise];
+        [self fire:timer];
     }
     @synchronized(self) {
         _now = MAX(_now, limit);
