@@ -338,22 +338,18 @@ static QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable kn
     return handBack;
 }
 
-// qlmctl's note at exit says what the stop did. Only a take-over that
-// changes nothing is not a warning. A louder one names both levels.
+// qlmctl's note at exit says what the stop did. A louder take-over names
+// both levels.
 - (void)testTheHandBackNoteSaysWhatTheStopDid {
-    BOOL warning = YES;
-    NSString *text = QLMHandBackText(QLMMakeHandBack(QLMHandBackKnobLevel, @(-43.3), @(-40)), &warning);
-    XCTAssertFalse(warning);
+    NSString *text = QLMHandBackText(QLMMakeHandBack(QLMHandBackKnobLevel, @(-43.3), @(-40)));
     XCTAssertTrue([text containsString:@"-43.3 dB"], @"%@", text);
 
-    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackLouder, @(-30), @(-40)), &warning);
-    XCTAssertTrue(warning);
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackLouder, @(-30), @(-40)));
     XCTAssertTrue([text containsString:@"-30.0 dB"] && [text containsString:@"-40.0 dB"], @"%@", text);
 
-    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, nil, @(-40)), &warning);
-    XCTAssertTrue(warning);
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, nil, @(-40)));
     XCTAssertTrue([text containsString:@"no knob"], @"%@", text);
-    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, @(-40), nil), &warning);
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, @(-40), nil));
     XCTAssertTrue([text containsString:@"no volume"], @"%@", text);
 }
 

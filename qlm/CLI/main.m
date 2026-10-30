@@ -428,9 +428,8 @@ static int QLMDryRunControl(QLMControlOptions *options, QLMSnapshot *discovered,
 }
 
 // Runs the action once every monitor is identified, and stops as poll does.
-// A dry run stops the bus after discovery. Nil options, for apply-group's
-// fake bus, mean no dry run, no hold, and no USB.
-static int QLMRunControl(QLMSystem *system, QLMControlOptions *_Nullable options, QLMControlAction action, QLMSnapshotTest effect) {
+// A dry run stops the bus after discovery.
+static int QLMRunControl(QLMSystem *system, QLMControlOptions *options, QLMControlAction action, QLMSnapshotTest effect) {
     [system start];
     QLMSnapshot *discovered = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.adapterError != nil || snapshot.allIdentified;
@@ -481,9 +480,9 @@ static int QLMRunControl(QLMSystem *system, QLMControlOptions *_Nullable options
         return !snapshot.running;
     });
     if (sent && options.overUSB) {
-        BOOL warning = YES;
-        NSString *text = QLMHandBackText((stopped ?: system.snapshot).handBack, &warning);
-        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", text.UTF8String);
+        QLMHandBack *handBack = (stopped ?: system.snapshot).handBack;
+        BOOL warning = handBack.kind != QLMHandBackKnobLevel;
+        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", QLMHandBackText(handBack).UTF8String);
     }
     return status;
 }
@@ -546,15 +545,12 @@ static int QLMMute(int argc, const char *argv[]) {
             [system setAllMuted:options.on];
             return 0;
         }
-        NSArray<QLMMonitorState *> *matches = [discovered.monitors filteredArrayUsingPredicate:
-            [NSPredicate predicateWithBlock:^BOOL(QLMMonitorState *monitor, NSDictionary *bindings) {
-                return [monitor.serialNumber containsString:options.serial];
-            }]];
-        if (matches.count != 1) {
-            fprintf(stderr, "qlmctl: %lu monitors match '%s'\n", (unsigned long)matches.count, options.serial.UTF8String);
+        NSString *problem = nil;
+        target = QLMHardwareIDsForSerials(@[options.serial], discovered, &problem).anyObject;
+        if (target == nil) {
+            fprintf(stderr, "qlmctl: %s\n", problem.UTF8String);
             return EX_DATAERR;
         }
-        target = matches[0].hardwareID;
         [system setMuted:options.on forMonitorWithHardwareID:target];
         return 0;
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
@@ -767,12 +763,12 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
         return EX_DATAERR;
     }
+    BOOL allowed = YES;
+    for (QLMDSPBlock *block in blocks.allValues) {
+        allowed = allowed && block.rateVerified;
+    }
     if (!options.dryRun) {
-        BOOL unverified = NO;
-        for (QLMDSPBlock *block in blocks.allValues) {
-            unverified = unverified || !block.rateVerified;
-        }
-        if (unverified && !options.unverifiedRate) {
+        if (!allowed && !options.unverifiedRate) {
             fputs("qlmctl: the group has a model whose filter design rate is unverified, the 8351B. Its supervised test "
                   "takes --unverified-rate.\nqlmctl: nothing was sent.\n",
                   stderr);
@@ -787,7 +783,6 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
 
     double volume = options.volumeDecibels != nil ? options.volumeDecibels.doubleValue : setup.volume;
     double ceiling = options.ceilingDecibels;
-    BOOL allowed = YES;
     uint8_t session = QLMAddressSessionFirst;
     NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
     for (QLMSetupNode *node in group.nodes) {
@@ -803,7 +798,6 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         for (NSString *warning in block.warnings) {
             printf("  ! %s\n", warning.UTF8String);
         }
-        allowed = allowed && block.rateVerified;
         QLMApplyMonitor *monitor = [[QLMApplyMonitor alloc] initWithHardwareID:node.hardwareID session:session++];
         monitor.on = YES;
         [monitors addObject:monitor];

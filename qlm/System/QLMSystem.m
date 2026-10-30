@@ -263,10 +263,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)beginRunning {
-    self->_running = YES;
-    self->_stoppedHandBack = nil;
-    [self->_adapter startOnQueue:self->_queue];
-    self->_dirty = YES;
+    _running = YES;
+    _stoppedHandBack = nil;
+    [_adapter startOnQueue:_queue];
+    _dirty = YES;
     // GLM's opening, less what qlm never sends: the adapter's status, its
     // system info, its serial, then the cycle (captures/startup-idle,
     // 7.29 s). GLM's 01 22, 01 51 82, and wake are left out.
@@ -276,11 +276,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self runCycle];
 
     __weak QLMSystem *weakSelf = self;
-    self->_cycleTimer = [self timerEvery:self.settings.cycleInterval run:^{
+    _cycleTimer = [self timerEvery:self.settings.cycleInterval run:^{
         [weakSelf runCycle];
     }];
     if (self.settings.adapterPollInterval > 0) {
-        self->_adapterTimer = [self timerEvery:self.settings.adapterPollInterval run:^{
+        _adapterTimer = [self timerEvery:self.settings.adapterPollInterval run:^{
             [weakSelf pollAdapter];
         }];
     }
@@ -315,6 +315,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         QLMHandBack *handBack = [self handBack];
         self->_stoppedHandBack = handBack;
+        [self cancelTimers];
+        [self->_sends removeAllObjects];
         if (handBack.kind != QLMHandBackKnobLevel) {
             [self finishStop];
             return;
@@ -324,9 +326,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         // The knob is at or below the level qlm sends, so qlm sends the
         // knob's level first, and the take-over changes nothing.
         self->_stopping = YES;
-        [self cancelTimers];
-        [self->_sends removeAllObjects];
-        [self send:QLMCommandVolume(handBack.knobDecibels.doubleValue, self.settings.ceilingDecibels) then:nil];
+        [self send:[self knobOrBottomLevel] then:nil];
         [self afterSends:^{
             [self finishStop];
         }];
@@ -344,11 +344,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
 }
 
+// Timers are cancelled already. Drops what was queued during a hand-back.
 - (void)finishStop {
     _running = NO;
     _stopping = NO;
     _run += 1;
-    [self cancelTimers];
     [_sends removeAllObjects];
     // A reply that never comes must not stall the next start.
     _inFlight = NO;
@@ -382,19 +382,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // level System sends.
 - (QLMHandBack *)handBack {
     QLMHandBack *handBack = [[QLMHandBack alloc] init];
-    QLMTrackedAdapter *adapter = _adapterRecord;
-    QLMAdapterStatus status = adapter.status;
-    BOOL knob = adapter.hasStatus && status.knob && status.hasKnobPosition;
-    if (knob) {
-        handBack.knobDecibels = @(status.knobTenths / 10.0);
-    }
+    handBack.knobDecibels = [self knobDecibels];
     if (_volumeDecibels == nil) {
         return handBack;
     }
     QLMMessage sent = [self volumeMessage];
     uint32_t word = (uint32_t)sent.payload[1] << 16 | (uint32_t)sent.payload[2] << 8 | sent.payload[3];
     handBack.volumeDecibels = @(QLMVolumeDecibelsForWord(word));
-    if (knob) {
+    if (handBack.knobDecibels != nil) {
         BOOL atOrBelow = QLMVolumeWordForDecibels(handBack.knobDecibels.doubleValue) <= word;
         handBack.kind = atOrBelow ? QLMHandBackKnobLevel : QLMHandBackLouder;
     }
@@ -955,12 +950,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // The knob's position under the ceiling, or with no knob read, the bottom
 // level.
 - (QLMMessage)knobOrBottomLevel {
+    NSNumber *knob = [self knobDecibels];
+    return QLMCommandVolume(knob != nil ? knob.doubleValue : QLMVolumeDecibelsMin, self.settings.ceilingDecibels);
+}
+
+// The knob's position from the last reply to 01 08, or nil with no knob read.
+- (nullable NSNumber *)knobDecibels {
     QLMTrackedAdapter *adapter = _adapterRecord;
     QLMAdapterStatus status = adapter.status;
-    if (adapter.hasStatus && status.knob && status.hasKnobPosition) {
-        return QLMCommandVolume(status.knobTenths / 10.0, self.settings.ceilingDecibels);
-    }
-    return QLMCommandVolumeWord(QLMVolumeWordMin, QLMVolumeWordMax);
+    return adapter.hasStatus && status.knob && status.hasKnobPosition ? @(status.knobTenths / 10.0) : nil;
 }
 
 - (void)sendInputPair {
