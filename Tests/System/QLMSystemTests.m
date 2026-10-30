@@ -611,6 +611,112 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 2u);
 }
 
+// Every 2B sent from `start` on to any of `sessions`.
+- (NSArray<NSData *> *)mutesFrom:(NSUInteger)start to:(NSIndexSet *)sessions {
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return message.length == 3 && bytes[1] == 0x2B && [sessions containsIndex:bytes[0]];
+    }];
+}
+
+// Sends rounds of 2B from every action that sends them: a mute of the other
+// monitor and its lift, dim on and off, and a turn of the knob.
+- (void)sendEveryMuteRound {
+    [_system setMuted:YES forMonitorWithHardwareID:_right.hardwareID];
+    [_system setMuted:NO forMonitorWithHardwareID:_right.hardwareID];
+    [_system setDimmed:YES];
+    [_system setDimmed:NO];
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-500);
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-50)] && !snapshot.dimmed && snapshot.idle;
+    }];
+}
+
+// The user's mute outlives a lapsed lease. When the monitor answers the
+// probe again, it hears its mute first, under its new session. After that,
+// every 2B it gets says muted.
+- (void)testAMuteOutlivesALapsedLease {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    QLMSystem *system = _system;
+    NSData *leftID = _left.hardwareID;
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, leftID).muted;
+    } after:^{
+        [system setMuted:YES forMonitorWithHardwareID:leftID];
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_left.session = 0;
+    }];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *left = QLMFindMonitor(snapshot, leftID);
+        return left.session > 0x03 && left.identified;
+    }];
+    uint8_t session = QLMFindMonitor(again, leftID).session;
+    XCTAssertTrue(QLMFindMonitor(again, leftID).muted);
+    NSArray<NSData *> *toLeft = [self sentFrom:before matching:^BOOL(NSData *message) {
+        return ((const uint8_t *)message.bytes)[0] == session;
+    }];
+    const uint8_t mutedBytes[] = {session, 0x2B, QLMMuteValueMuted};
+    NSData *muted = QLMBytes(mutedBytes, sizeof mutedBytes);
+    XCTAssertGreaterThanOrEqual(toLeft.count, 2u);
+    if (toLeft.count >= 2) {
+        XCTAssertEqualObjects([toLeft subarrayWithRange:NSMakeRange(0, 2)], (@[muted, muted]));
+    }
+
+    [self sendEveryMuteRound];
+    NSMutableIndexSet *sessions = [NSMutableIndexSet indexSetWithIndex:session];
+    [sessions addIndex:0x02];
+    NSArray<NSData *> *mutes = [self mutesFrom:before to:sessions];
+    XCTAssertGreaterThan(mutes.count, 6u);
+    for (NSData *mute in mutes) {
+        XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
+    [_bus perform:^{
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+    }];
+}
+
+// The same when the monitor drops off the bus: System drops it after the
+// retry burst, and finds it again once it answers the probe.
+- (void)testAMuteOutlivesAMonitorDroppedAndFoundAgain {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    NSData *leftID = _left.hardwareID;
+    [_bus perform:^{
+        self->_left.present = NO;
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 1;
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_left.session = 0;
+        self->_left.present = YES;
+    }];
+    QLMSnapshot *found = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, leftID).identified;
+    }];
+    XCTAssertTrue(QLMFindMonitor(found, leftID).muted);
+
+    [self sendEveryMuteRound];
+    NSArray<NSData *> *mutes = [self mutesFrom:before to:[NSIndexSet indexSetWithIndex:QLMFindMonitor(found, leftID).session]];
+    XCTAssertGreaterThan(mutes.count, 6u);
+    for (NSData *mute in mutes) {
+        XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
+}
+
 // A gap the monitors ride out keeps every lease.
 - (void)testAShortGapKeepsTheLeases {
     [self startSystem];
@@ -1073,7 +1179,8 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
 // Section 9, "Apply / Group": duck, wake, per monitor 2B 04 and routing,
 // then 04 and the DSP block per monitor, then the volume five times and
 // 2B and 3D per monitor. qlm leaves out GLM's 05 04 00 (section 7's 05 is
-// on the never-send list).
+// on the never-send list). The muted monitor gets 2B 03 in place of 2B 04,
+// so the apply never unmutes it.
 - (void)testVerifiedApplySendsGLMsSequence {
     _settings.cycleInterval = 10;
     _settings.ceilingDecibels = 0;
@@ -1123,7 +1230,7 @@ static NSArray<NSData *> *QLMBlockFrames(QLMDSPBlock *block, uint8_t session) {
     [expected addObject:QLMBytes(wakeSecond, 4)];
     const uint8_t sessions[2] = {first, second};
     for (int i = 0; i < 2; i++) {
-        const uint8_t unmute[] = {sessions[i], 0x2B, QLMMuteValueUnmuted};
+        const uint8_t unmute[] = {sessions[i], 0x2B, i == 1 ? QLMMuteValueMuted : QLMMuteValueUnmuted};
         [expected addObject:QLMBytes(unmute, 3)];
         [expected addObject:QLMBlockFrames(blocks[(NSUInteger)i], sessions[i]).lastObject];
     }

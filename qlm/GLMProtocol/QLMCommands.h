@@ -66,6 +66,8 @@ QLMMessage QLMCommandVolume(double decibels, double ceilingDecibels);
 // QLMVolumeWordMin.
 QLMMessage QLMCommandDim(double decibels, double ceilingDecibels);
 QLMMessage QLMCommandDuck(void);
+// Broadcast 2D 00. GLM sends it right before broadcast 3D 00 00, each time.
+QLMMessage QLMCommandInputPreamble(void);
 
 // The DSP block, in the order GLM sends it: prepare, delay, level, the
 // unknown level subcommand, twenty PEQ slots, crossover, input sync, routing.

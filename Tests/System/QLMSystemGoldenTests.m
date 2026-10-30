@@ -12,8 +12,8 @@
 // one action through System over a fake bus of six monitors, and checks the
 // frames System sends against the frames GLM sent for it, byte for byte. The
 // session IDs differ, so both sides number them in the order each first
-// appears. A frame the allowlist refuses is left out. The
-// adapter's 01 08 polls run on their own timer, so both sides leave them out.
+// appears. The adapter's 01 08 polls run on their own timer, so both sides
+// leave them out.
 @interface QLMSystemGoldenTests : XCTestCase
 @end
 
@@ -182,34 +182,24 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
     return renumbered;
 }
 
-// Checks what System sent from `start` on against the captured frames less
-// the ones the allowlist refuses, which must be `refused`. Returns the
-// captured frames.
+// Checks what System sent from `start` on against the captured frames, and
+// returns them.
 - (NSArray<QLMCaptureExchange *> *)assertSentFrom:(NSUInteger)start
                                          isCapture:(NSString *)scenario
                                               from:(NSTimeInterval)time
-                                             count:(NSUInteger)count
-                                           refused:(NSArray<NSData *> *)refused {
+                                             count:(NSUInteger)count {
     NSArray<QLMCaptureExchange *> *captured = [self frames:count of:scenario from:time];
-    NSMutableArray<NSData *> *kept = [NSMutableArray array];
-    NSMutableArray<NSData *> *dropped = [NSMutableArray array];
+    NSMutableArray<NSData *> *expected = [NSMutableArray array];
     for (QLMCaptureExchange *exchange in captured) {
         QLMMessage message = exchange.message;
-        NSData *record = QLMAdapterRecord(&message);
-        if (QLMFrameAllows(message.payload, message.length)) {
-            [kept addObject:record];
-        } else {
-            [dropped addObject:record];
-        }
+        [expected addObject:QLMAdapterRecord(&message)];
     }
-    XCTAssertEqualObjects(dropped, refused);
-
     [self waitUntil:^BOOL {
-        return [self sentFrom:start].count >= kept.count;
+        return [self sentFrom:start].count >= expected.count;
     }];
     // Long enough for a frame too many to show.
     [NSThread sleepForTimeInterval:0.05];
-    XCTAssertEqualObjects(QLMRenumberSessions([self sentFrom:start]), QLMRenumberSessions(kept), @"%@ from %.6f s", scenario, time);
+    XCTAssertEqualObjects(QLMRenumberSessions([self sentFrom:start]), QLMRenumberSessions(expected), @"%@ from %.6f s", scenario, time);
     return captured;
 }
 
@@ -236,7 +226,7 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
     NSUInteger before = _bus.sentMessages.count;
     NSUInteger clocked = _clock.sendTimes.count;
     [_system sleep];
-    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"standby-wake" from:34.855835 count:4 refused:@[]];
+    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"standby-wake" from:34.855835 count:4];
     [self assertSpacingFrom:clocked matches:captured];
 }
 
@@ -247,7 +237,7 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
     NSUInteger before = _bus.sentMessages.count;
     NSUInteger clocked = _clock.sendTimes.count;
     [_system wake];
-    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6 refused:@[]];
+    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6];
     [self assertSpacingFrom:clocked matches:captured];
 }
 
@@ -267,7 +257,7 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
     [_bus perform:^{
         self->_bus.knobTenths = @(-1002);
     }];
-    [self assertSentFrom:before isCapture:@"standby-wake" from:0.988149 count:17 refused:@[]];
+    [self assertSentFrom:before isCapture:@"standby-wake" from:0.988149 count:17];
     [self waitUntil:^BOOL {
         return [self->_system.snapshot.volumeDecibels isEqual:@(QLMVolumeDecibelsMin)];
     }];
@@ -284,11 +274,11 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
 
     NSUInteger before = _bus.sentMessages.count;
     [_system setMuted:YES forMonitorWithHardwareID:last];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:19.186196 count:12 refused:@[]];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:19.186196 count:12];
 
     before = _bus.sentMessages.count;
     [_system setMuted:NO forMonitorWithHardwareID:last];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:22.739597 count:12 refused:@[]];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:22.739597 count:12];
 }
 
 // Mute all, mute-dim, 46.19 s, and unmute all, 48.60 s: the level, then
@@ -299,32 +289,30 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
 
     NSUInteger before = _bus.sentMessages.count;
     [_system setAllMuted:YES];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:46.188342 count:14 refused:@[]];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:46.188342 count:14];
     XCTAssertTrue(_system.snapshot.allMuted);
 
     before = _bus.sentMessages.count;
     [_system setAllMuted:NO];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:48.595249 count:14 refused:@[]];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:48.595249 count:14];
     XCTAssertFalse(_system.snapshot.allMuted);
 }
 
 #pragma mark - Dim
 
 // Dim, mute-dim, 51.24 s on and 54.77 s off: the level twice, one round of
-// 2B to every monitor, then broadcast `2D 00` and `3D 00 00`. 2D is refused.
+// 2B to every monitor, then broadcast `2D 00` and `3D 00 00`.
 - (void)testDimIsGLMs {
     [self startSystem];
-    const uint8_t duckBytes[] = {QLMAddressBroadcast, 0x2D, 0x00};
-    NSArray<NSData *> *refused = @[QLMBytes(duckBytes, 3)];
 
     NSUInteger before = _bus.sentMessages.count;
     [_system setDimmed:YES];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:51.240592 count:10 refused:refused];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:51.240592 count:10];
     XCTAssertTrue(_system.snapshot.dimmed);
 
     before = _bus.sentMessages.count;
     [_system setDimmed:NO];
-    [self assertSentFrom:before isCapture:@"mute-dim" from:54.774959 count:10 refused:refused];
+    [self assertSentFrom:before isCapture:@"mute-dim" from:54.774959 count:10];
     XCTAssertFalse(_system.snapshot.dimmed);
 }
 

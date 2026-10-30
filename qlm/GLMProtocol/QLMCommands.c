@@ -144,6 +144,11 @@ QLMMessage QLMCommandDuck(void) {
     return QLMCommandVolumeWord(QLMVolumeWordDuck, QLMVolumeWordMax);
 }
 
+QLMMessage QLMCommandInputPreamble(void) {
+    const uint8_t payload[] = {0x2D, 0x00};
+    return QLMMessageMake(QLMAddressBroadcast, payload, sizeof payload);
+}
+
 uint32_t QLMLevelWordForDecibels(double decibels) {
     if (decibels >= 0) {
         return QLMVolumeWordMax;

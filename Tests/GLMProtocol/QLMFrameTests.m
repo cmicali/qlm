@@ -144,6 +144,32 @@
     XCTAssertEqual(length, 0u);
 }
 
+// docs/refused-frames.md, "Broadcast 2D 00 and 3D 00 00": GLM sends 2D only
+// as 2D 00, and only as a broadcast, right before broadcast 3D 00 00
+// (captures/mute-dim, 51.32 s). The allowlist takes exactly that.
+- (void)testTheAllowlistTakes2D00OnlyAsABroadcast {
+    const uint8_t preamble[] = {0x2D, 0x00};
+    XCTAssertTrue(QLMFrameAllows(preamble, sizeof preamble));
+    const uint8_t bare[] = {0x2D};
+    XCTAssertFalse(QLMFrameAllows(bare, sizeof bare));
+    const uint8_t other[] = {0x2D, 0x01};
+    XCTAssertFalse(QLMFrameAllows(other, sizeof other));
+    const uint8_t longer[] = {0x2D, 0x00, 0x00};
+    XCTAssertFalse(QLMFrameAllows(longer, sizeof longer));
+
+    uint8_t out[QLMFrameMax];
+    size_t length = 0;
+    QLMMessage broadcast = QLMMakeMessage(QLMAddressBroadcast, 0x2D, 0x00);
+    XCTAssertEqual(QLMFrameEncode(&broadcast, out, sizeof out, &length), QLMFrameOK);
+    const uint8_t addresses[] = {QLMAddressAdapter, QLMAddressSessionFirst, 0x0B, QLMAddressMulticast, QLMAddressSessionLast};
+    for (size_t i = 0; i < sizeof addresses; i++) {
+        QLMMessage unicast = QLMMakeMessage(addresses[i], 0x2D, 0x00);
+        XCTAssertEqual(QLMFrameEncode(&unicast, out, sizeof out, &length), QLMFrameErrorForbidden, @"%02X", addresses[i]);
+    }
+    QLMMessage otherBroadcast = QLMMakeMessage(QLMAddressBroadcast, 0x2D, 0x01);
+    XCTAssertEqual(QLMFrameEncode(&otherBroadcast, out, sizeof out, &length), QLMFrameErrorForbidden);
+}
+
 // Section 7 and section 9's group apply: what qlm does send.
 - (void)testTheAllowlistAcceptsWhatQLMSends {
     const uint8_t allowed[][5] = {
