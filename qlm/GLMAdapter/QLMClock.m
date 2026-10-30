@@ -84,4 +84,8 @@
     return [[QLMRealRepeat alloc] initWithSource:source];
 }
 
+- (BOOL)wait:(dispatch_semaphore_t)semaphore timeout:(NSTimeInterval)seconds {
+    return dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC))) == 0;
+}
+
 @end

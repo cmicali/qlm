@@ -249,9 +249,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_snapshotQueue = queue;
         if (copied != nil) {
             QLMSnapshot *latest = self.snapshot;
-            dispatch_async(queue, ^{
+            [self.settings.clock async:queue run:^{
                 copied(latest);
-            });
+            }];
         }
     }];
 }
@@ -1376,9 +1376,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;
     if (handler != nil && _snapshotQueue != NULL) {
-        dispatch_async(_snapshotQueue, ^{
+        [self.settings.clock async:_snapshotQueue run:^{
             handler(snapshot);
-        });
+        }];
     }
 }
 

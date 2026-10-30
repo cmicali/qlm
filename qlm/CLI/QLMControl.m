@@ -223,7 +223,7 @@ QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSn
             dispatch_semaphore_signal(passed);
         }
     } queue:queue];
-    dispatch_semaphore_wait(passed, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * (double)NSEC_PER_SEC)));
+    [system.settings.clock wait:passed timeout:timeout];
     [system setSnapshotHandler:nil queue:queue];
     __block QLMSnapshot *found = nil;
     dispatch_sync(queue, ^{
@@ -364,6 +364,7 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     QLMFakeBus *bus = QLMMirrorBus(discovered);
     QLMSystemSettings *mirrorSettings = [settings copy];
     mirrorSettings.adapterPollInterval = 0;
+    bus.clock = mirrorSettings.clock;
     QLMSystem *mirror = [[QLMSystem alloc] initWithAdapter:bus settings:mirrorSettings];
     [mirror start];
     NSUInteger count = discovered.monitors.count;

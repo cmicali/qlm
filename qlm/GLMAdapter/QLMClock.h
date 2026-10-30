@@ -7,10 +7,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cancel;
 @end
 
-// Time, timers, and the hops between queues, for System and the adapters.
-// The real clock is the system's uptime and GCD. A test's virtual clock
-// moves only when the test advances it, and knows when the work a timer
-// starts is done, so no test waits on the host's speed.
+// Time, timers, the hops between queues, and waits, for System, the
+// adapters, and qlmctl. The real clock is the system's uptime and GCD. A
+// test's virtual clock moves only when the test advances it or a caller
+// waits on it, and knows when the work a timer starts is done, so no test
+// waits on the host's speed.
 @protocol QLMClock <NSObject>
 
 // Seconds, never going back.
@@ -22,6 +23,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (id<QLMTimer>)after:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block;
 // Runs the block on the queue every `seconds`, the first `seconds` from now.
 - (id<QLMTimer>)every:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block;
+// Waits for the semaphore, at most `seconds`. NO when the time ran out.
+- (BOOL)wait:(dispatch_semaphore_t)semaphore timeout:(NSTimeInterval)seconds;
 
 @end
 
