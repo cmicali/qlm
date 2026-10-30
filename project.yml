@@ -116,6 +116,7 @@ targets:
         LSApplicationCategoryType: "public.app-category.music"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
         LSUIElement: true                   # a menu bar item, no Dock icon
+        NSDocumentsFolderUsageDescription: "qlm reads GLM's setup files, which GLM saves in Documents/Genelec."
         NSHumanReadableCopyright: "Copyright © 2026 Christopher Micali. All rights reserved."
         NSPrincipalClass: NSApplication
     settings:
