@@ -51,6 +51,10 @@ NS_ASSUME_NONNULL_BEGIN
 // hardware ID.
 - (NSArray<NSData *> *)switchWithBlocks:(NSDictionary<NSData *, QLMDSPBlock *> *)blocks volume:(QLMMessage)volume;
 
+// Broadcast 2D 00 then 3D 00 00, the pair GLM sends after configuring
+// monitors, after dim, and after a wake (docs/refused-frames.md).
++ (NSArray<NSData *> *)inputPair;
+
 // GLM's apply to monitors newly leased, as at startup and wake: each one's
 // block in turn, then a round to the others and 2D 00 and 3D 00 00. Each
 // gets its state after its next poll, which System sends. Nothing, when no

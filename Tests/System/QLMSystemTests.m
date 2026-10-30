@@ -1374,13 +1374,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         return QLMFindMonitor(snapshot, rightID).identified;
     }];
     uint8_t session = QLMFindMonitor(joined, rightID).session;
-    NSArray<NSData *> *sent = [self sentFrom:before matching:^BOOL(NSData *message) {
-        return YES;
-    }];
-    NSMutableData *lease = [NSMutableData dataWithBytes:(const uint8_t[]){QLMAddressMulticast, 0x02} length:2];
-    [lease appendData:rightID];
-    [lease appendBytes:&session length:1];
-    NSUInteger leased = [sent indexOfObject:lease];
+    NSArray<NSData *> *all = _bus.sentMessages;
+    NSArray<NSData *> *sent = [all subarrayWithRange:NSMakeRange(before, all.count - before)];
+    QLMMessage lease = QLMCommandAssignSession(rightID.bytes, session);
+    NSUInteger leased = [sent indexOfObject:QLMAdapterRecord(&lease)];
     XCTAssertNotEqual(leased, NSNotFound);
     if (leased == NSNotFound || leased + 1 >= sent.count) {
         return;

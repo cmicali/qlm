@@ -329,11 +329,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // Ahead of everything queued, in order. Call it only from an item's
 // completion, which runs before the next item goes out.
+- (void)enqueueNext:(NSArray<dispatch_block_t> *)items {
+    [_sends insertObjects:items atIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, items.count)]];
+}
+
 - (void)sendRecordsNext:(NSArray<NSData *> *)records {
-    NSUInteger index = 0;
+    NSMutableArray<dispatch_block_t> *items = [NSMutableArray arrayWithCapacity:records.count];
     for (NSData *record in records) {
-        [_sends insertObject:[self itemSending:QLMApplyMessage(record) then:nil] atIndex:index++];
+        [items addObject:[self itemSending:QLMApplyMessage(record) then:nil]];
     }
+    [self enqueueNext:items];
 }
 
 // A busy or missing adapter shows in the snapshot until a send goes out.
@@ -508,12 +513,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         // TRAP: a monitor just switched on plays at its own stored level
         // until a host sends one, and that can be loud
-        // (captures/qlm-control-first/notes.md, after the capture). So once
-        // a volume is set, it goes out ahead of everything queued, before
-        // anything else reaches the new monitor.
+        // (captures/qlm-control-first/notes.md, after the capture).
         if (self->_volumeDecibels != nil) {
-            self->_lastVolumeSend = [NSDate date];
-            [self->_sends insertObject:[self itemSending:[self volumeMessage] then:nil] atIndex:0];
+            [self enqueueNext:@[[self volumeItem]]];
         }
         QLMMonitorRecord *monitor = [[QLMMonitorRecord alloc] init];
         monitor.hardwareID = identity;
@@ -775,9 +777,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return _dimmed ? QLMCommandDim(decibels, ceiling) : QLMCommandVolume(decibels, ceiling);
 }
 
-- (void)sendVolume {
+- (dispatch_block_t)volumeItem {
     _lastVolumeSend = [NSDate date];
-    [self send:[self volumeMessage] then:nil];
+    return [self itemSending:[self volumeMessage] then:nil];
+}
+
+- (void)sendVolume {
+    [self enqueue:[self volumeItem]];
+}
+
+- (void)sendInputPair {
+    [self sendRecords:[QLMApplySequence inputPair] then:nil];
 }
 
 #pragma mark - Dim
@@ -798,8 +808,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self sendVolume];
         [self sendVolume];
         [self sendMuteRounds:1];
-        [self send:QLMCommandInputPreamble() then:nil];
-        [self send:QLMCommandInputSync(QLMAddressBroadcast) then:nil];
+        [self sendInputPair];
     }];
 }
 
@@ -960,8 +969,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (self->_volumeDecibels != nil) {
             [self hold:QLMWakeVolumeDelay];
             [self sendVolume];
-            [self send:QLMCommandInputPreamble() then:nil];
-            [self send:QLMCommandInputSync(QLMAddressBroadcast) then:nil];
+            [self sendInputPair];
         }
     }];
 }
