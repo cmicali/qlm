@@ -55,7 +55,7 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter settings:(QLMSystemSettings *)settings;
 
-@property (nonatomic, readonly) QLMSystemSettings *settings;
+@property (atomic, readonly) QLMSystemSettings *settings;  // replaced whole when the ceiling changes
 @property (atomic, readonly) QLMSnapshot *snapshot;  // the latest
 
 // The handler gets the latest snapshot at once, then every one published.
@@ -73,6 +73,10 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // the ceiling in the builder. Once one is set, a turn of the adapter's knob
 // sets it too, as GLM lets it (QLMKnob). At start the knob sets nothing.
 - (void)setVolumeDecibels:(double)decibels;
+
+// Caps every volume frame after this. A volume already set goes out again at
+// once, under the new ceiling.
+- (void)setCeilingDecibels:(double)ceilingDecibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A
 // change sends GLM's dim sequence, or nothing while no volume is set.

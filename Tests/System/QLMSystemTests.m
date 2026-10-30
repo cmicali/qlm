@@ -1614,6 +1614,29 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(back.adapter.missedPolls, 0u);
 }
 
+// The ceiling changes while System runs. The volume goes out again at once
+// under it, lower or higher.
+- (void)testTheCeilingChangesWhileSystemRuns {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-10];  // above the -20 dB ceiling
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    for (NSNumber *ceiling in @[@(-40), @(-5)]) {
+        NSUInteger before = _bus.sentMessages.count;
+        [_system setCeilingDecibels:ceiling.doubleValue];
+        QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+            return received.ceilingDecibels == ceiling.doubleValue && received.idle;
+        }];
+        XCTAssertEqual(snapshot.ceilingDecibels, ceiling.doubleValue);
+        XCTAssertEqual(_system.settings.ceilingDecibels, ceiling.doubleValue);
+        QLMMessage volume = QLMCommandVolume(-10, ceiling.doubleValue);
+        XCTAssertEqualObjects([self sentWithOpcode:0x1F from:before], @[QLMAdapterRecord(&volume)]);
+    }
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.

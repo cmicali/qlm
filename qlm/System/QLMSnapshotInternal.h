@@ -57,6 +57,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite, nullable) NSError *adapterError;
 @property (nonatomic, readwrite) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
+@property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) BOOL dimmed;
 @property (nonatomic, readwrite) BOOL applying;
 @property (nonatomic, readwrite, nullable) NSString *activeGroupName;

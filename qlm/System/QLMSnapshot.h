@@ -102,6 +102,7 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly, nullable) NSError *adapterError;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed
+@property (nonatomic, readonly) double ceilingDecibels;            // every volume frame is capped at it
 @property (nonatomic, readonly) BOOL dimmed;
 @property (nonatomic, readonly) BOOL applying;
 @property (nonatomic, readonly, nullable) NSString *activeGroupName;  // the last group applied in full

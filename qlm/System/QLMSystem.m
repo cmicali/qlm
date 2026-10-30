@@ -135,6 +135,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 @interface QLMSystem ()
 @property (atomic, readwrite) QLMSnapshot *snapshot;
+@property (atomic, readwrite) QLMSystemSettings *settings;
 @end
 
 @implementation QLMSystem {
@@ -818,6 +819,18 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }];
 }
 
+- (void)setCeilingDecibels:(double)ceilingDecibels {
+    [self onQueue:^{
+        QLMSystemSettings *settings = [self.settings copy];
+        settings.ceilingDecibels = ceilingDecibels;
+        self.settings = settings;
+        self->_dirty = YES;
+        if (self->_running && !self->_stopping && self->_volumeDecibels != nil) {
+            [self sendVolume];
+        }
+    }];
+}
+
 - (void)scheduleVolumeSend {
     if (_volumeSendPending || !_running) {
         return;
@@ -1276,6 +1289,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.adapterError = _adapterError;
     snapshot.monitors = states;
     snapshot.volumeDecibels = _volumeDecibels;
+    snapshot.ceilingDecibels = self.settings.ceilingDecibels;
     snapshot.dimmed = _dimmed;
     snapshot.applying = _applyFinish != nil;
     snapshot.activeGroupName = _activeGroupName;
