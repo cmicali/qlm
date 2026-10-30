@@ -63,6 +63,21 @@ BOOL QLMIsControl(QLMMessage message);
 // Each output report in captures/<scenario> whose payload starts with `opcode`.
 NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
 
+@interface XCTestCase (QLMCaptureRun)
+
+// `count` frames of captures/<scenario>, from the one at `time` to the half
+// millisecond, each one `keep` passes, or every one when it is NULL. Nil,
+// after a failure, when there are fewer.
+- (nullable NSArray<QLMCaptureExchange *> *)qlm_frames:(NSUInteger)count
+                                                     of:(NSString *)scenario
+                                                   from:(NSTimeInterval)time
+                                                   keep:(BOOL (*_Nullable)(QLMMessage))keep;
+// The exchange's output report is `message`'s, as qlm packs it.
+- (void)qlm_assertExchange:(QLMCaptureExchange *)exchange is:(QLMMessage)message;
+- (void)qlm_assertExchange:(QLMCaptureExchange *)exchange isExchange:(QLMCaptureExchange *)other;
+
+@end
+
 @class QLMReportLink;
 
 // The GLM adapter as a capture saw it, at the level of reports, behind a

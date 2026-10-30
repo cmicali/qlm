@@ -1,5 +1,8 @@
 #import "QLMTestSupport.h"
 
+#include <math.h>
+
+#include "QLMReport.h"
 #import "QLMReportLink.h"
 #import "QLMSetupReader.h"
 
@@ -74,6 +77,41 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     }
     return reports;
 }
+
+@implementation XCTestCase (QLMCaptureRun)
+
+- (nullable NSArray<QLMCaptureExchange *> *)qlm_frames:(NSUInteger)count
+                                                     of:(NSString *)scenario
+                                                   from:(NSTimeInterval)time
+                                                   keep:(BOOL (*_Nullable)(QLMMessage))keep {
+    NSMutableArray<QLMCaptureExchange *> *run = [NSMutableArray array];
+    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+        if (run.count == 0 && fabs(exchange.time - time) >= 0.0005) {
+            continue;
+        }
+        if (keep != NULL && !keep(exchange.message)) {
+            continue;
+        }
+        [run addObject:exchange];
+        if (run.count == count) {
+            return run;
+        }
+    }
+    XCTFail(@"%@ has %lu of %lu frames from %.6f s", scenario, (unsigned long)run.count, (unsigned long)count, time);
+    return nil;
+}
+
+- (void)qlm_assertExchange:(QLMCaptureExchange *)exchange is:(QLMMessage)message {
+    uint8_t report[QLMReportLength];
+    XCTAssertEqual(QLMReportPackOutput(&message, report), QLMReportOK, @"%.6f s", exchange.time);
+    XCTAssertEqualObjects(exchange.outputReport, QLMBytes(report, sizeof report), @"%.6f s", exchange.time);
+}
+
+- (void)qlm_assertExchange:(QLMCaptureExchange *)exchange isExchange:(QLMCaptureExchange *)other {
+    XCTAssertEqualObjects(exchange.outputReport, other.outputReport, @"%.6f s against %.6f s", exchange.time, other.time);
+}
+
+@end
 
 @implementation QLMCaptureDevice {
     dispatch_queue_t _queue;
