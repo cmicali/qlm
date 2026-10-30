@@ -263,16 +263,21 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _settings.adapterPollInterval = 0.04;
     [self startSystem];
     [self waitForDiscovery];
-    [NSThread sleepForTimeInterval:0.4];
-    NSArray<NSData *> *sent = _bus.sentMessages;
     const uint8_t pollBytes[] = {QLMAddressAdapter, 0x08};
     NSData *poll = QLMBytes(pollBytes, 2);
+    // TRAP: a fixed sleep, read while System ran, failed under load.
+    [self waitUntil:^BOOL {
+        return [self countSent:poll from:0] >= 10;
+    }];
+    [_system stop];
+    NSArray<NSData *> *sent = _bus.sentMessages;
     NSUInteger polls = 0;
     for (NSUInteger i = 0; i < sent.count; i++) {
         if ([sent[i] isEqualToData:poll]) {
             polls += 1;
-            if (polls % 2 == 1) {
-                XCTAssertTrue(i + 1 < sent.count && [sent[i + 1] isEqualToData:poll], @"a poll at %lu with no pair", (unsigned long)i);
+            // The stop may cut the last pair in half.
+            if (polls % 2 == 1 && i + 1 < sent.count) {
+                XCTAssertEqualObjects(sent[i + 1], poll, @"a poll at %lu with no pair", (unsigned long)i);
             }
         }
     }
