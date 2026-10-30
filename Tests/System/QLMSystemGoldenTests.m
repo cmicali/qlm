@@ -231,14 +231,65 @@ static NSArray<NSData *> *QLMRenumberSessions(NSArray<NSData *> *frames) {
 }
 
 // Wake, startup-idle, 7.33 s: broadcast `3A 03 7F` then `3A 03 01`, back to
-// back, three times, 0.20 to 0.21 s apart.
+// back, three times, 0.20 to 0.21 s apart. Then standby-wake, 47.24 s: the
+// level, 0.235 s after the last pair, then broadcast `2D 00` and `3D 00 00`.
+// GLM's level there is the knob's bottom stop, so System's is set to it.
 - (void)testWakeIsGLMs {
     [self startSystem];
+    [_system setVolumeDecibels:QLMVolumeDecibelsMin];
+    const uint8_t bottomBytes[] = {QLMAddressBroadcast, 0x1F, 0x00, 0x00, 0x08};
+    NSData *bottom = QLMBytes(bottomBytes, sizeof bottomBytes);
+    [self waitUntil:^BOOL {
+        return [self->_bus.sentMessages containsObject:bottom];
+    }];
     NSUInteger before = _bus.sentMessages.count;
     NSUInteger clocked = _clock.sendTimes.count;
     [_system wake];
-    NSArray<QLMCaptureExchange *> *captured = [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6];
-    [self assertSpacingFrom:clocked matches:captured];
+
+    NSArray<QLMCaptureExchange *> *pairs = [self frames:6 of:@"startup-idle" from:7.331654];
+    NSArray<QLMCaptureExchange *> *level = [self frames:3 of:@"standby-wake" from:47.243052];
+    NSMutableArray<NSData *> *expected = [NSMutableArray array];
+    for (QLMCaptureExchange *exchange in [pairs arrayByAddingObjectsFromArray:level]) {
+        QLMMessage message = exchange.message;
+        [expected addObject:QLMAdapterRecord(&message)];
+    }
+    [self waitUntil:^BOOL {
+        return [self sentFrom:before].count >= expected.count;
+    }];
+    [NSThread sleepForTimeInterval:0.05];
+    XCTAssertEqualObjects([self sentFrom:before], expected);
+
+    // The pairs' spacing is startup-idle's, and the level's delay after them
+    // standby-wake's, give or take.
+    NSArray<NSNumber *> *times = _clock.sendTimes;
+    XCTAssertEqual(times.count, clocked + expected.count);
+    for (NSUInteger i = 1; i < pairs.count && clocked + i < times.count; i++) {
+        NSTimeInterval glm = pairs[i].time - pairs[i - 1].time;
+        NSTimeInterval qlm = times[clocked + i].doubleValue - times[clocked + i - 1].doubleValue;
+        XCTAssertGreaterThan(qlm, 0.9 * glm - 0.001, @"gap %lu: GLM %.4f s", (unsigned long)i, glm);
+        XCTAssertLessThan(qlm, glm + 0.1, @"gap %lu: GLM %.4f s", (unsigned long)i, glm);
+    }
+    if (times.count >= clocked + 7) {
+        NSTimeInterval glm = level[0].time - 47.008;  // standby-wake's last pair
+        NSTimeInterval qlm = times[clocked + 6].doubleValue - times[clocked + 5].doubleValue;
+        XCTAssertGreaterThan(qlm, 0.9 * glm - 0.001);
+        XCTAssertLessThan(qlm, glm + 0.1);
+    }
+}
+
+// A wake with no volume set sends the pairs alone.
+- (void)testWakeWithNoVolumeSendsThePairsAlone {
+    _system = [[QLMSystem alloc] initWithAdapter:_clock settings:_settings];
+    [_system start];
+    [self waitUntil:^BOOL {
+        QLMSnapshot *snapshot = self->_system.snapshot;
+        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [_system wake];
+    [self assertSentFrom:before isCapture:@"startup-idle" from:7.331654 count:6];
+    [NSThread sleepForTimeInterval:0.3];
+    XCTAssertEqual([self sentFrom:before].count, 6u);
 }
 
 #pragma mark - The knob

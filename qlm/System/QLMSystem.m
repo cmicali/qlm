@@ -54,6 +54,7 @@ static const NSUInteger QLMAdapterPollsPerRound = 2;
 // GLM's spacing between the power steps.
 static const NSTimeInterval QLMSleepStepSpacing = 0.022;
 static const NSTimeInterval QLMWakePairSpacing = 0.2;
+static const NSTimeInterval QLMWakeVolumeDelay = 0.235;
 
 // A monitor System is tracking. Touched only on the queue.
 @interface QLMMonitorRecord : NSObject
@@ -939,7 +940,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // GLM's three pairs, back to back within a pair and about 0.2 s apart
-// (captures/startup-idle, 7.33 s). The monitors come back under new
+// (captures/startup-idle, 7.33 s). Once a volume is set, it follows 0.235 s
+// later, then broadcast 2D 00 and 3D 00 00 (captures/standby-wake, 47.24 s).
+// A woken monitor keeps its own level until a host sends one
+// (captures/qlm-control-first/notes.md). The monitors come back under new
 // sessions, and the probe finds them.
 - (void)wake {
     [self onQueue:^{
@@ -952,6 +956,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             }
             [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
+        }
+        if (self->_volumeDecibels != nil) {
+            [self hold:QLMWakeVolumeDelay];
+            [self sendVolume];
+            [self send:QLMCommandInputPreamble() then:nil];
+            [self send:QLMCommandInputSync(QLMAddressBroadcast) then:nil];
         }
     }];
 }

@@ -214,6 +214,49 @@ static NSData *QLMRecord(QLMMessage message) {
     XCTAssertFalse(QLMVolumeFrameWord(&unicast, &word));
 }
 
+// What `action` sends on the dry run's mirror of QLMDiscovered, its monitors
+// at 09 and 05, with no cycle inside it.
+- (NSArray<NSData *> *)recordsOf:(QLMControlAction)action effect:(QLMSnapshotTest)effect {
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.ceilingDecibels = -35;
+    settings.cycleInterval = 10;
+    int status = -1;
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, action, effect, &status);
+    XCTAssertEqual(status, 0);
+    return records;
+}
+
+// qlmctl wake --volume sets the level, then wakes, so the wake ends with the
+// level and the pair, as GLM's does (captures/standby-wake, 47.24 s).
+- (void)testWakeWithAVolumeEndsWithIt {
+    NSData *level = QLMRecord(QLMCommandVolume(-43.5, -35));
+    NSArray<NSData *> *records = [self recordsOf:QLMWakeAction(@(-43.5)) effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.anyOn && [snapshot.volumeDecibels isEqual:@(-43.5)];
+    })];
+    NSMutableArray<NSData *> *expected = [NSMutableArray arrayWithObject:level];
+    for (int pair = 0; pair < 3; pair++) {
+        [expected addObject:QLMRecord(QLMCommandPower(QLMPowerStepWakeFirst))];
+        [expected addObject:QLMRecord(QLMCommandPower(QLMPowerStepWakeSecond))];
+    }
+    [expected addObject:level];
+    [expected addObject:QLMRecord(QLMCommandInputPreamble())];
+    [expected addObject:QLMRecord(QLMCommandInputSync(QLMAddressBroadcast))];
+    XCTAssertEqualObjects(records, expected);
+}
+
+// Over USB, wake --volume needs a ceiling. Without --volume it needs none.
+- (void)testWakeWithAVolumeOverUSBNeedsACeiling {
+    NSString *problem = nil;
+    NSArray<NSString *> *noCeiling = @[@"--volume", @"-40"];
+    XCTAssertNil([QLMControlOptions optionsForCommand:QLMControlCommandWake arguments:noCeiling problem:&problem]);
+    XCTAssertTrue([problem containsString:@"--ceiling"], @"%@", problem);
+    NSArray<NSString *> *above = @[@"--volume", @"-30", @"--ceiling", @"-35"];
+    XCTAssertNil([QLMControlOptions optionsForCommand:QLMControlCommandWake arguments:above problem:&problem]);
+    QLMControlOptions *options = [self read:QLMControlCommandWake arguments:@[@"--volume", @"-40", @"--ceiling", @"-35"]];
+    XCTAssertEqualObjects(options.volumeDecibels, @(-40));
+    XCTAssertNil([self read:QLMControlCommandWake arguments:@[]].volumeDecibels);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {

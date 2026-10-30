@@ -76,8 +76,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)setAllMuted:(BOOL)muted;
 
 // Broadcasts the power sequences, with GLM's spacing between the steps.
-// Nothing else goes out between them. The monitors' power state comes back
-// in their telemetry.
+// Nothing else goes out between them. Once a volume is set, the wake ends
+// with it, as GLM's does. The monitors' power state comes back in their
+// telemetry.
 - (void)sleep;
 - (void)wake;
 

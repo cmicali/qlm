@@ -66,6 +66,10 @@ typedef int (^QLMControlAction)(QLMSystem *system, QLMSnapshot *discovered);
 NSArray<NSData *> *_Nullable QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, QLMControlAction action,
                                               QLMSnapshotTest effect, int *status);
 
+// The wake. A volume, when given, is set first, so the wake ends with it, as
+// GLM's does.
+QLMControlAction QLMWakeAction(NSNumber *_Nullable volumeDecibels);
+
 // The word a volume frame carries. The frame is rebuilt from it, so only a
 // true volume frame passes.
 BOOL QLMVolumeFrameWord(const QLMMessage *message, uint32_t *word);
