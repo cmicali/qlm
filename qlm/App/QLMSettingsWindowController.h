@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 
+#import "QLMMonitorList.h"
 #import "QLMPreferences.h"
 #import "QLMSetup.h"
 
@@ -16,17 +17,22 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller;
 @end
 
-// Settings: the GLM adapter or the fake bus, the setup file, the volume
-// range and ceiling, waking the monitors at launch, and opening at login. Each change is saved at once.
+// Settings: the GLM adapter or the fake bus and its hand-back, the setup
+// file, the volume range and ceiling, waking the monitors at launch, and
+// opening at login. Each change is saved at once.
 // On the main queue.
 @interface QLMSettingsWindowController : NSWindowController
 
-- (instancetype)initWithPreferences:(QLMPreferences *)preferences;
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList;
 
 @property (nonatomic, weak, nullable) id<QLMSettingsWindowControllerDelegate> delegate;
 
 // The setup file in use, or why it did not read. Both nil: none was found.
 - (void)showSetup:(nullable QLMSetup *)setup error:(nullable NSError *)error;
+
+// Draws the hand-back from the monitor list's snapshot while the window is
+// open.
+- (void)refresh;
 
 @end
 

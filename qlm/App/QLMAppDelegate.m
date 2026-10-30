@@ -158,6 +158,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     [self.alerts updateWithSnapshot:snapshot];
     [self.popoverController refresh];
     [self.monitorsController refresh];
+    [self.settingsController refresh];
     if (self.fakeBusController.window.visible) {
         [self.fakeBusController refresh];
     }
@@ -275,7 +276,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
 
 - (void)popoverControllerShowSettings:(QLMPopoverController *)controller {
     if (self.settingsController == nil) {
-        self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences];
+        self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
         self.settingsController.delegate = self;
         [self.settingsController showSetup:self.setup error:self.setupError];
     }
