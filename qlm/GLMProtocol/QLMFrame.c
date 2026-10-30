@@ -4,6 +4,11 @@
 
 #include "QLMCRC.h"
 
+bool QLMAddressIsLeasable(uint8_t address) {
+    return address >= QLMAddressSessionFirst && address <= QLMAddressSessionLast && address != QLMAddressMulticast &&
+           address != QLMFrameFlag && address != QLMFrameEscape;
+}
+
 QLMMessage QLMMessageMake(uint8_t address, const uint8_t *payload, size_t length) {
     QLMMessage message;
     memset(&message, 0, sizeof message);
@@ -84,8 +89,8 @@ QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t ca
     uint16_t crc = QLMCRC16GSM(raw, 1 + message->length);
 
     // TRAP: the address is not escaped. On the bus its ninth bit marks it, so
-    // a session ID of 7D or 7E goes out bare. Unverified: no capture has an
-    // address above 19.
+    // a session ID of 7D or 7E would go out bare. Unverified: no capture has
+    // an address above 19, so QLMAddressIsLeasable keeps both out.
     size_t count = 0;
     bool ok = QLMFramePut(out, capacity, &count, message->address, false);
     for (size_t i = 0; ok && i < message->length; i++) {

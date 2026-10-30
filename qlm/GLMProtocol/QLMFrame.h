@@ -15,6 +15,10 @@ enum {
     QLMAddressBroadcast = 0xFF,
 };
 
+// True for a session ID qlm may lease. F0 is the adapter's multicast. 7D and
+// 7E would need escaping as an address, which no capture shows either way.
+bool QLMAddressIsLeasable(uint8_t address);
+
 enum {
     QLMFrameFlag = 0x7E,
     QLMFrameEscape = 0x7D,

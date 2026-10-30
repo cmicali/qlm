@@ -79,6 +79,19 @@
     XCTAssertEqual(QLMFrameDecode(tooShort, sizeof tooShort, &message), QLMFrameErrorLength);
 }
 
+// Section 3 gives sessions 02 to FE and the adapter's multicast F0. No
+// capture has an address above 19, so whether the adapter escapes an address
+// of 7D or 7E is unknown. qlm leases neither.
+- (void)testLeasesNoAddressThatNeedsEscapingOrIsTheMulticast {
+    NSUInteger leasable = 0;
+    for (unsigned address = 0; address <= 0xFF; address++) {
+        BOOL expected = address >= 0x02 && address <= 0xFE && address != 0x7D && address != 0x7E && address != 0xF0;
+        XCTAssertEqual(QLMAddressIsLeasable((uint8_t)address), expected, @"%02X", address);
+        leasable += expected ? 1 : 0;
+    }
+    XCTAssertEqual(leasable, 250u);
+}
+
 - (void)testRefusesABufferThatIsTooSmall {
     QLMMessage message = QLMMakeMessage(QLMAddressBroadcast, 0x04);
     uint8_t out[4];

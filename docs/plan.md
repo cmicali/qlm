@@ -4,7 +4,7 @@
 
 ## Where things stand
 
-Built, with 103 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 105 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
 - **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, and the USB report layer: packing an output report and assembling a reply across input reports.
 - **GLMAdapter:** the adapter protocol, a fake bus, a capture reader, and a replay adapter that answers as a capture did. **The adapter over HID is not written.**
@@ -18,7 +18,7 @@ Next:
 
 - The HID adapter, then `qlmctl info`, `discover`, and `poll`.
 - Three readings marked unverified in code: a monitor's delay taken from `Time-of-flight_Compensation` as milliseconds, the analog routing frame, and matching a setup node to a monitor by the bus serial's suffix.
-- Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. System's lease counter runs `02` to `FE`, through `7D`, `7E`, and `F0`. It should skip those three.
+- Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So System's leases skip `7D` and `7E`, and `F0`, the adapter's multicast, and the question cannot arise.
 
 ### What the captures showed
 

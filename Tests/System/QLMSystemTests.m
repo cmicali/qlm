@@ -215,6 +215,32 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
 }
 
+// A crowded bus runs the leases past 7C in one discovery. They skip 7D and
+// 7E, which no capture shows as an address, and F0, the adapter's multicast.
+- (void)testLeasesSkipAddressesThatNeedEscapingAndTheMulticast {
+    NSMutableArray<QLMFakeMonitor *> *monitors = [NSMutableArray array];
+    for (NSUInteger i = 0; i < 240; i++) {
+        const uint8_t hardwareID[3] = {0xA0, (uint8_t)(i >> 8), (uint8_t)i};
+        NSString *serial = [NSString stringWithFormat:@"8320apm2100%04lu", (unsigned long)i];
+        [monitors addObject:[[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:hardwareID length:3] serialNumber:serial
+                                                            systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay]];
+    }
+    _bus = [[QLMFakeBus alloc] initWithMonitors:monitors];
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.monitors.count == 240 && received.allIdentified;
+    }];
+    NSMutableIndexSet *sessions = [NSMutableIndexSet indexSet];
+    for (QLMMonitorState *monitor in snapshot.monitors) {
+        XCTAssertTrue(QLMAddressIsLeasable(monitor.session), @"%02X", monitor.session);
+        [sessions addIndex:monitor.session];
+    }
+    XCTAssertEqual(sessions.count, 240u);
+    XCTAssertTrue([sessions containsIndex:0x7C] && [sessions containsIndex:0x7F]);
+    XCTAssertTrue([sessions containsIndex:0xEF] && [sessions containsIndex:0xF1]);
+}
+
 // Section 3: four unanswered polls, then a burst to the dead address, then
 // the monitor is dropped. Nothing answers, so no probe finds it again.
 - (void)testAnUnpluggedMonitorIsDroppedAfterTheRetryBurst {
