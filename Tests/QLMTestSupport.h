@@ -88,17 +88,19 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
 // A clock that moves only when a test advances it, or while a caller waits
 // on it: a wait runs each timer due, one at a time, until its semaphore is
-// signalled or its time runs out. Every hop and timer it runs joins one
+// signalled or its time runs out. A hop waits until the clock settles,
+// advances, or waits, so the caller's own steps take no time, and a reply
+// never beats the caller's next step. Every hop and timer it runs joins one
 // dispatch group, so it can wait until the work a timer starts is done.
-// Time then depends on the test alone, never on the host.
+// Time and order then depend on the test alone, never on the host.
 @interface QLMVirtualClock : NSObject <QLMClock>
 
 // Runs each timer due by now + seconds, in order of time, the earlier first
 // when two are due together, with now set to its time. Before each, and at
 // the end, it waits for the work started so far. Then now is now + seconds.
 - (void)advanceBy:(NSTimeInterval)seconds;
-// Waits for the work started so far, with time still. NO if it is not done
-// within a generous deadline, which only a hang would reach.
+// Runs the hops waiting, and the work they start, with time still. NO if it
+// is not done within a generous deadline, which only a hang would reach.
 - (BOOL)settle;
 // Runs the next timer due, with now at its time, and waits for the work it
 // starts. NO when no timer is pending.

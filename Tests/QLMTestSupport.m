@@ -272,6 +272,7 @@ QLMSetup *QLMReadFixtureSetup(void) {
     NSTimeInterval _now;
     NSUInteger _order;
     NSMutableArray<QLMVirtualTimer *> *_timers;
+    NSMutableArray<NSArray *> *_hops;  // queue, block
     dispatch_group_t _group;
 }
 
@@ -279,6 +280,7 @@ QLMSetup *QLMReadFixtureSetup(void) {
     self = [super init];
     if (self) {
         _timers = [NSMutableArray array];
+        _hops = [NSMutableArray array];
         _group = dispatch_group_create();
     }
     return self;
@@ -291,7 +293,9 @@ QLMSetup *QLMReadFixtureSetup(void) {
 }
 
 - (void)async:(dispatch_queue_t)queue run:(dispatch_block_t)block {
-    dispatch_group_async(_group, queue, block);
+    @synchronized(self) {
+        [_hops addObject:@[queue, [block copy]]];
+    }
 }
 
 - (id<QLMTimer>)schedule:(NSTimeInterval)seconds period:(NSTimeInterval)period queue:(dispatch_queue_t)queue run:(dispatch_block_t)block {
@@ -315,8 +319,24 @@ QLMSetup *QLMReadFixtureSetup(void) {
     return [self schedule:seconds period:seconds queue:queue run:block];
 }
 
+// Runs the hops in rounds, each in the order they came, until none is left.
 - (BOOL)settle {
-    return dispatch_group_wait(_group, dispatch_time(DISPATCH_TIME_NOW, 30 * (int64_t)NSEC_PER_SEC)) == 0;
+    for (;;) {
+        if (dispatch_group_wait(_group, dispatch_time(DISPATCH_TIME_NOW, 30 * (int64_t)NSEC_PER_SEC)) != 0) {
+            return NO;
+        }
+        NSArray<NSArray *> *hops;
+        @synchronized(self) {
+            hops = [_hops copy];
+            [_hops removeAllObjects];
+        }
+        if (hops.count == 0) {
+            return YES;
+        }
+        for (NSArray *hop in hops) {
+            dispatch_group_async(_group, hop[0], hop[1]);
+        }
+    }
 }
 
 - (void)settleOrRaise {
