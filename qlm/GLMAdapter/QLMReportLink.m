@@ -9,7 +9,13 @@ typedef NS_OPTIONS(NSUInteger, QLMReplyShape) {
     QLMReplyShapeOther = 1 << 0,
     QLMReplyShapeAdapterStatus = 1 << 1,  // to 01 08
     QLMReplyShapeSystemInfo = 1 << 2,     // to 39
+    // Since an open: one reply to another host, of any shape, ahead of the
+    // link's own. A status is likeliest, so the first sync treats it as one.
+    QLMReplyShapeAny = 1 << 3,
 };
+
+// When both may be late, no sync is left.
+static const QLMReplyShape QLMReplyShapeSyncs = QLMReplyShapeAdapterStatus | QLMReplyShapeSystemInfo;
 
 static QLMReplyShape QLMReplyShapeFor(const QLMMessage *message) {
     if (message->address == QLMAddressAdapter && message->payload[0] == 0x08) {
@@ -47,8 +53,6 @@ static NSError *QLMStalledError(void) {
     // The shapes of replies that may still come. While any may, the link is
     // out of step, and the next request waits for a sync.
     QLMReplyShape _late;
-    // Since an open, a reply to another host may still come, of any shape.
-    BOOL _otherHostLate;
     // The sync is overdue. Every send fails until its reply comes.
     BOOL _stalled;
     QLMReportLinkRequest *_held;
@@ -61,7 +65,7 @@ static NSError *QLMStalledError(void) {
         _queue = queue;
         _writer = [writer copy];
         _replyTimeout = 0.1;
-        _otherHostLate = YES;
+        _late = QLMReplyShapeAny;
         QLMReportAssemblyReset(&_assembly);
     }
     return self;
@@ -109,7 +113,7 @@ static NSError *QLMStalledError(void) {
         return;
     }
     request.handler = handler;
-    if (_late != 0 || _otherHostLate) {
+    if (_late != 0) {
         _held = request;
         if (_waiting == nil) {
             [self sync];
@@ -187,13 +191,9 @@ static NSError *QLMStalledError(void) {
 
 // The adapter's status poll, or else its system info. GLM sends both.
 // closeWithError: leaves at least one that no late reply could be taken for.
-// Another host's late reply is likeliest a status, so after an open the
-// system info goes first.
 - (void)sync {
-    BOOL statusLate = (_late & QLMReplyShapeAdapterStatus) != 0;
-    BOOL infoLate = (_late & QLMReplyShapeSystemInfo) != 0;
-    NSAssert(!statusLate || !infoLate, @"no sync is left");
-    BOOL info = statusLate || (_otherHostLate && !infoLate);
+    NSAssert((_late & QLMReplyShapeSyncs) != QLMReplyShapeSyncs, @"no sync is left");
+    BOOL info = (_late & QLMReplyShapeSystemInfo) == 0 && (_late & (QLMReplyShapeAdapterStatus | QLMReplyShapeAny)) != 0;
     QLMMessage query = info ? QLMCommandSystemInfo(QLMAddressAdapter) : QLMCommandPoll(QLMAddressAdapter);
     QLMReportLinkRequest *sync = [self requestFor:&query error:NULL];
     if (sync == nil) {
@@ -228,10 +228,9 @@ static NSError *QLMStalledError(void) {
         _waiting = nil;
         _generation += 1;
         _stalled = NO;
-        if (_otherHostLate) {
+        if ((_late & QLMReplyShapeAny) != 0) {
             // This may have been the other host's reply, and then the sync's
             // own is late. A sync of the other shape drops it.
-            _otherHostLate = NO;
             _late = request.shape;
             [self sync];
             return;
@@ -262,8 +261,8 @@ static NSError *QLMStalledError(void) {
     if (waiting != nil) {
         _late |= waiting.shape;
         // The other host's reply comes first, and may have either shape.
-        if (_otherHostLate) {
-            _late |= QLMReplyShapeAdapterStatus | QLMReplyShapeSystemInfo;
+        if ((_late & QLMReplyShapeAny) != 0) {
+            _late |= QLMReplyShapeSyncs;
         }
         if (waiting.handler != nil) {
             [self finish:waiting.handler reply:NULL error:error];
@@ -273,7 +272,7 @@ static NSError *QLMStalledError(void) {
         [self finish:_held.handler reply:NULL error:error];
         _held = nil;
     }
-    if ((_late & QLMReplyShapeAdapterStatus) != 0 && (_late & QLMReplyShapeSystemInfo) != 0) {
+    if ((_late & QLMReplyShapeSyncs) == QLMReplyShapeSyncs) {
         _failure = QLMAdapterErrorMake(QLMAdapterErrorDisconnected,
                                        @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");
     }
@@ -285,7 +284,7 @@ static NSError *QLMStalledError(void) {
         return;
     }
     _closed = nil;
-    _otherHostLate = YES;
+    _late |= QLMReplyShapeAny;
     QLMReportAssemblyReset(&_assembly);
 }
 
