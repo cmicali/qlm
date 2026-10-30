@@ -3,7 +3,7 @@
 #import <IOKit/IOKitLib.h>
 
 #import "QLMHostCheck.h"
-#import "QLMHIDAdapter.h"
+#import "QLMHIDAdapterInternal.h"
 #include "QLMReport.h"
 
 // Sources: this Mac's IORegistry and process table with GLM 5 running, read
@@ -58,6 +58,40 @@
     XCTAssertFalse(adapter.seized);
     XCTAssertEqualObjects(adapter.deviceDescription, @"the GLM adapter over USB, not open");
     XCTAssertEqualWithAccuracy(adapter.replyTimeout, 0.1, 1e-9);
+}
+
+// A failed seize refuses the adapter. qlm never opens it shared, where GLM
+// could open it too and drive the bus alongside qlm. The stand-in for IOKit
+// fails every open, so a shared retry shows as a second call.
+- (void)testAFailedSeizeRefusesTheAdapterAndOpensNothing {
+    QLMHIDAdapter *adapter = [[QLMHIDAdapter alloc] init];
+    NSMutableArray<NSNumber *> *opens = [NSMutableArray array];
+    adapter.open = ^IOReturn(IOHIDDeviceRef device, IOOptionBits options) {
+        [opens addObject:@(options)];
+        return kIOReturnNotPrivileged;
+    };
+    // Only the stand-in and CFRelease touch it.
+    IOHIDDeviceRef device = (IOHIDDeviceRef)CFBridgingRetain([[NSObject alloc] init]);
+    NSError *refusal = [adapter openDevice:device];
+    XCTAssertEqualObjects(opens, @[@(kIOHIDOptionsTypeSeizeDevice)]);
+    XCTAssertEqualObjects(refusal.domain, QLMAdapterErrorDomain);
+    XCTAssertEqual(refusal.code, QLMAdapterErrorBusy);
+    XCTAssertEqualObjects(refusal.localizedDescription,
+                          @"qlm could not seize the GLM adapter (0xe00002c1). It opens the adapter only seized.");
+    // No device is open, so no report can be written.
+    XCTAssertFalse(adapter.seized);
+    XCTAssertEqualObjects(adapter.deviceDescription, @"the GLM adapter over USB, not open");
+
+    opens = [NSMutableArray array];
+    adapter.open = ^IOReturn(IOHIDDeviceRef device, IOOptionBits options) {
+        [opens addObject:@(options)];
+        return kIOReturnExclusiveAccess;
+    };
+    refusal = [adapter openDevice:(IOHIDDeviceRef)CFBridgingRetain([[NSObject alloc] init])];
+    XCTAssertEqualObjects(opens, @[@(kIOHIDOptionsTypeSeizeDevice)]);
+    XCTAssertEqual(refusal.code, QLMAdapterErrorBusy);
+    XCTAssertEqualObjects(refusal.localizedDescription, @"Another process has seized the GLM adapter.");
+    XCTAssertFalse(adapter.seized);
 }
 
 @end

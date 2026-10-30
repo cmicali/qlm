@@ -1,4 +1,4 @@
-#import "QLMHIDAdapter.h"
+#import "QLMHIDAdapterInternal.h"
 
 #import <IOKit/IOKitLib.h>
 #import <IOKit/hid/IOHIDDevice.h>
@@ -51,7 +51,6 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     io_iterator_t _arrivals;
     io_service_t _service;
     IOHIDDeviceRef _device;
-    IOOptionBits _openOptions;
     QLMReportLink *_link;
     uint8_t _input[QLMReportLength];
     dispatch_source_t _watch;
@@ -66,8 +65,15 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         _checkQueue = dispatch_queue_create("com.commonwealthrecordings.qlm.hostcheck", DISPATCH_QUEUE_SERIAL);
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
         _deviceDescription = @"the GLM adapter over USB, not open";
+        _open = ^IOReturn(IOHIDDeviceRef device, IOOptionBits options) {
+            return IOHIDDeviceOpen(device, options);
+        };
     }
     return self;
+}
+
+- (BOOL)seized {
+    return _device != NULL;
 }
 
 - (NSString *)deviceDescription {
@@ -179,29 +185,31 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"IOKit did not make a HID device of the GLM adapter.");
         return;
     }
-    IOOptionBits options = kIOHIDOptionsTypeSeizeDevice;
-    IOReturn result = IOHIDDeviceOpen(device, options);
-    if (result != kIOReturnSuccess) {
-        options = kIOHIDOptionsTypeNone;
-        result = IOHIDDeviceOpen(device, options);
+    NSError *refusal = [self openDevice:device];
+    if (refusal != nil) {
+        _problem = refusal;
     }
+}
+
+// TRAP: never fall back to a shared open. GLM could then open the adapter
+// too, and drive the bus alongside qlm until the next host check.
+- (NSError *)openDevice:(IOHIDDeviceRef)device {
+    IOReturn result = _open(device, kIOHIDOptionsTypeSeizeDevice);
     if (result != kIOReturnSuccess) {
         CFRelease(device);
         if (result == kIOReturnExclusiveAccess) {
-            [self refuse:@"Another process has seized the GLM adapter."];
-        } else {
-            NSString *description = [NSString stringWithFormat:@"The GLM adapter did not open (0x%08x).", result];
-            _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, description);
+            return QLMAdapterErrorMake(QLMAdapterErrorBusy, @"Another process has seized the GLM adapter.");
         }
-        return;
+        NSString *description =
+            [NSString stringWithFormat:@"qlm could not seize the GLM adapter (0x%08x). It opens the adapter only seized.", result];
+        return QLMAdapterErrorMake(QLMAdapterErrorBusy, description);
     }
     // GLM may have started between the check and the open.
-    host = QLMHostCheckOtherHost();
+    NSString *host = QLMHostCheckOtherHost();
     if (host != nil) {
-        IOHIDDeviceClose(device, options);
+        IOHIDDeviceClose(device, kIOHIDOptionsTypeSeizeDevice);
         CFRelease(device);
-        [self refuse:host];
-        return;
+        return QLMAdapterErrorMake(QLMAdapterErrorBusy, host);
     }
 
     const void *context = CFBridgingRetain(self);
@@ -215,15 +223,12 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     IOHIDDeviceActivate(device);
 
     _device = device;
-    _openOptions = options;
-    _seized = options == kIOHIDOptionsTypeSeizeDevice;
     _problem = nil;
     NSNumber *location = QLMHIDNumberProperty(device, CFSTR(kIOHIDLocationIDKey));
-    _deviceDescription = [NSString stringWithFormat:@"%@ by %@ over USB, serial %@, location 0x%08x, %@",
+    _deviceDescription = [NSString stringWithFormat:@"%@ by %@ over USB, serial %@, location 0x%08x, seized",
                           QLMHIDStringProperty(device, CFSTR(kIOHIDProductKey)) ?: @"?",
                           QLMHIDStringProperty(device, CFSTR(kIOHIDManufacturerKey)) ?: @"?",
-                          QLMHIDStringProperty(device, CFSTR(kIOHIDSerialNumberKey)) ?: @"?", location.unsignedIntValue,
-                          _seized ? @"seized" : @"shared, as IOKit would not let it be seized"];
+                          QLMHIDStringProperty(device, CFSTR(kIOHIDSerialNumberKey)) ?: @"?", location.unsignedIntValue];
 
     __weak QLMHIDAdapter *weakSelf = self;
     _link = [[QLMReportLink alloc] initWithQueue:_queue writer:^NSError *(const uint8_t *report) {
@@ -232,13 +237,13 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                                  : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
     }];
     _link.replyTimeout = _replyTimeout;
+    return nil;
 }
 
 - (void)closeWithError:(NSError *)error removed:(BOOL)removed {
     _problem = error;
     [_link closeWithError:error];
     _link = nil;
-    _seized = NO;
     if (_device == NULL) {
         return;
     }
@@ -246,7 +251,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     _device = NULL;
     _deviceDescription = removed ? @"the GLM adapter over USB, unplugged" : @"the GLM adapter over USB, closed";
     if (!removed) {
-        IOHIDDeviceClose(device, _openOptions);
+        IOHIDDeviceClose(device, kIOHIDOptionsTypeSeizeDevice);
     }
     IOHIDDeviceCancel(device);
 }
@@ -291,6 +296,8 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 #pragma mark - Reports
 
+// A device is open only seized, so a report goes out only while qlm owns the
+// adapter.
 // TRAP: IOHIDDeviceSetReport blocks System's queue until the report is out,
 // up to the device's RequestTimeout of 5 s if the adapter stops taking them.
 - (NSError *_Nullable)writeReport:(const uint8_t *)report {

@@ -13,13 +13,14 @@ NS_ASSUME_NONNULL_BEGIN
 // another process holding the device. Then every send fails with
 // QLMAdapterErrorBusy, whose description names the host, and nothing goes
 // out. It checks before it opens, again just after, and every second while
-// it runs; when a host appears, it closes the device at once. It seizes the
-// device when IOKit allows, so GLM cannot open it meanwhile.
+// it runs; when a host appears, it closes the device at once. It opens the
+// device only seized, so GLM cannot open it meanwhile. When IOKit will not
+// let it seize the device, that too is a refusal.
 @interface QLMHIDAdapter : NSObject <QLMAdapter>
 
 @property (nonatomic) NSTimeInterval replyTimeout;  // the report link's, 0.1 s
 
-// Whether the open device is seized. NO while none is open.
+// Whether a device is open, which it is only seized.
 @property (nonatomic, readonly) BOOL seized;
 
 @end

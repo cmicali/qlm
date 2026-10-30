@@ -13,7 +13,7 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
     QLMAdapterErrorDisconnected,  // no adapter
     QLMAdapterErrorTimeout,       // the adapter never answered
     QLMAdapterErrorCapture,       // a capture does not read; the description names the line
-    QLMAdapterErrorBusy,          // another host has the adapter; the description names it, and nothing was sent
+    QLMAdapterErrorBusy,          // another host has the adapter, or qlm could not seize it; the description says which, and nothing was sent
     QLMAdapterErrorBadReply,      // the reply did not read
 };
 
