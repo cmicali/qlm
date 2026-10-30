@@ -209,7 +209,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 - (void)testClosingDuringAnOpensSyncLosesTrack {
     [self startDevice];
     NSError *failure = [self sendThenReopen:QLMCommandSerialNumber(QLMAddressAdapter)];
-    XCTAssertEqual(failure.code, QLMAdapterErrorDisconnected);
+    XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
     NSError *error = nil;
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
     XCTAssertEqualObjects(error, failure);
@@ -316,7 +316,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
         NSError *sendError = nil;
         answered = [self send:message reply:reply error:&sendError];
         failure = sendError;
-        return failure.code != QLMAdapterErrorDisconnected;
+        return failure.code != QLMAdapterErrorUnresponsive;
     } within:60];
     *error = failure;
     return answered;
@@ -324,9 +324,11 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 
 // The system info comes 800 ms late, and the sync's reply queues behind it,
 // past the sync's five timeouts. The link stalls rather than give up: the
-// held request and every send fail at once, and none is written. Once the
-// sync's reply comes, the link is in step, and the late reply has answered
-// nothing. The sync is overdue 300 ms in, 500 ms before the late reply.
+// held request and every send fail at once, and none is written. The sync
+// is overdue 300 ms in, 500 ms before the late reply, so the link sends a
+// second status poll. Its reply queues too. Once the first sync's reply
+// comes, the second's may still, so a system info drops it. The link is in
+// step, and the late reply has answered nothing.
 - (void)testAnOverdueSyncStallsTheLinkUntilItsReplyComes {
     QLMMessage reply;
     NSError *error = nil;
@@ -334,7 +336,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertFalse([self send:QLMCommandSystemInfo(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
-    XCTAssertEqual(error.code, QLMAdapterErrorDisconnected);
+    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
     XCTAssertEqualObjects(error.localizedDescription, @"The GLM adapter stopped answering.");
 
     XCTAssertTrue([self sendOnceInStep:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
@@ -342,11 +344,100 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     char text[QLMPayloadMax];
     XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
     XCTAssertEqualObjects(@(text), @"H99999F000");
-    NSArray<NSData *> *sent = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter)),
-                                QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
+    NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
+    NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
+    NSArray<NSData *> *sent = @[info, poll, poll, info, QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
     XCTAssertEqualObjects([self written], sent);
-    XCTAssertEqual(_device.link.strayReplies, 1u);
+    XCTAssertEqual(_device.link.strayReplies, 2u);  // the late system info, and the second sync's status
     XCTAssertEqual(_device.link.timeouts, 2u);
+}
+
+// A status reply is lost, and then the reply to its sync, the system info.
+// That reply may still come, so the link sends another system info, whose
+// reply comes. It may be the first's, so a status poll then drops the rest.
+// The link is in step, and the serial query gets its own reply.
+- (void)testALostSyncReplyIsSyncedAgain {
+    _device.dropReplies = 2;
+    QLMMessage reply;
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandPoll(QLMAddressAdapter) reply:&reply error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
+    XCTAssertTrue([self sendOnceInStep:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
+    XCTAssertNil(error);
+    char text[QLMPayloadMax];
+    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
+    XCTAssertEqualObjects(@(text), @"H99999F000");
+    NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
+    NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
+    NSArray<NSData *> *sent = @[poll, info, info, poll, QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
+    XCTAssertEqualObjects([self written], sent);
+    XCTAssertEqual(_device.link.timeouts, 2u);
+    XCTAssertEqual(_device.link.strayReplies, 0u);
+}
+
+// With the adapter silent, the link sends four syncs of one shape, each
+// waiting twice as long as the one before: 0.25, 0.5, 1, and 2 s here. Then
+// it sends nothing more, and every send fails at once. A status poll and a
+// system info may both come late now, so a close loses track.
+- (void)testASilentAdapterGetsFourSyncsThenNothing {
+    _device.silent = YES;
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandPoll(QLMAddressAdapter) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
+    NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
+    NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
+    NSArray<NSNumber *> *steps = @[@0.24, @0.02, @0.48, @0.02, @0.98, @0.02, @1.98, @0.02, @10];
+    NSArray<NSNumber *> *syncs = @[@1, @2, @2, @3, @3, @4, @4, @4, @4];
+    for (NSUInteger i = 0; i < steps.count; i++) {
+        [_time advanceBy:steps[i].doubleValue];
+        NSMutableArray<NSData *> *sent = [NSMutableArray arrayWithObject:poll];
+        for (NSUInteger sync = 0; sync < syncs[i].unsignedIntegerValue; sync++) {
+            [sent addObject:info];
+        }
+        XCTAssertEqualObjects([self written], sent, @"step %lu", (unsigned long)i);
+    }
+    XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
+    XCTAssertEqual([self written].count, 5u);
+
+    QLMReportLink *link = _device.link;
+    __block NSError *failure = nil;
+    dispatch_sync(_queue, ^{
+        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
+        [link reopen];
+        failure = link.failure;
+    });
+    XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
+}
+
+// A stall whose late replies have one sync shape between them leaves the
+// other. A close and a reopen then keep track, and the open's syncs bring
+// the link back in step with no replug. No monitor holds session 30, so the
+// poll to it gets no reply here.
+- (void)testAReopenAfterAStallKeepsTrackWhileASyncIsLeft {
+    _device.silent = YES;
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandPoll(0x30) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
+    [_time advanceBy:1];
+    XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
+
+    QLMReportLink *link = _device.link;
+    __block NSError *failure = nil;
+    dispatch_sync(_queue, ^{
+        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
+        [link reopen];
+        failure = link.failure;
+    });
+    XCTAssertNil(failure);
+    _device.silent = NO;
+    QLMMessage reply;
+    XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
+    XCTAssertNil(error);
+    char text[QLMPayloadMax];
+    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
+    XCTAssertEqualObjects(@(text), @"H99999F000");
 }
 
 // The device closes with a request in flight, as when GLM appears, and
@@ -390,7 +481,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
         [link reopen];
         failure = link.failure;
     });
-    XCTAssertEqual(failure.code, QLMAdapterErrorDisconnected);
+    XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
     XCTAssertEqualObjects(failure.localizedDescription,
                           @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");
 

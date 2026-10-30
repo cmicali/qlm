@@ -73,9 +73,21 @@ extern const NSInteger QLMMonitorValueAbsent;
 // Why nothing reaches the bus.
 typedef NS_ENUM(NSInteger, QLMBusProblem) {
     QLMBusProblemNone = 0,
-    QLMBusProblemNoAdapter,  // no GLM adapter is connected
+    QLMBusProblemNoAdapter,  // no GLM adapter is connected, or adapterProblem says why it is no use
     QLMBusProblemGLM,        // GLM holds the adapter: quit it first
     QLMBusProblemOtherHost,  // another process holds the adapter, or qlm could not seize it
+};
+
+// Why qlm holds the adapter, but nothing reaches the bus. The adapter takes
+// over at the knob's level about 2.6 s after the last report it took, so
+// warn with the snapshot's handBack, which keeps the last knob reading.
+typedef NS_ENUM(NSInteger, QLMAdapterProblem) {
+    QLMAdapterProblemNone = 0,
+    // It stopped answering. qlm syncs a few times over about 7 s, then waits
+    // for a reply, and resumes once one comes.
+    QLMAdapterProblemUnresponsive,
+    // qlm lost track of its replies, and sends nothing until a replug.
+    QLMAdapterProblemLostTrack,
 };
 
 // What the adapter's take-over does to the level. About 2.6 s after the
@@ -114,10 +126,13 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) QLMAdapterState *adapter;
 // Why nothing reaches the bus: QLMAdapterErrorBusy while another host has
-// the adapter, or QLMAdapterErrorDisconnected. Nil once a send goes out.
+// the adapter, QLMAdapterErrorDisconnected, QLMAdapterErrorUnresponsive, or
+// QLMAdapterErrorLostTrack. Nil once a send goes out.
 @property (nonatomic, readonly, nullable) NSError *adapterError;
 // The same, typed, so the app need not read GLMAdapter's error codes.
 @property (nonatomic, readonly) QLMBusProblem busProblem;
+// Set only while busProblem is NoAdapter. Read it first.
+@property (nonatomic, readonly) QLMAdapterProblem adapterProblem;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed
 @property (nonatomic, readonly) double ceilingDecibels;            // every volume frame is capped at it

@@ -80,6 +80,7 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
 @property (atomic) NSTimeInterval replyDelay;                   // 1 ms
 @property (atomic) NSTimeInterval nextReplyDelay;               // above 0: the next reply's delay, once
 @property (atomic) BOOL silent;
+@property (atomic) NSUInteger dropReplies;  // the next N replies never come
 // Every output report written, as 64 bytes. Read on the queue.
 @property (nonatomic, readonly) NSArray<NSData *> *writtenReports;
 @property (nonatomic, readonly) NSUInteger unmatchedReports;  // reports the capture never sent

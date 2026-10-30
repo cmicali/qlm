@@ -153,6 +153,10 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     if (exchange.replyFrame == nil || self.silent) {
         return;
     }
+    if (self.dropReplies > 0) {
+        self.dropReplies -= 1;
+        return;
+    }
     NSTimeInterval delay = self.replyDelay;
     if (self.nextReplyDelay > 0) {
         delay = self.nextReplyDelay;

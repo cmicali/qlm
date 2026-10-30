@@ -146,13 +146,24 @@ static QLMBusProblem QLMBusProblemFor(NSError *_Nullable error) {
     if (error == nil || ![error.domain isEqualToString:QLMAdapterErrorDomain]) {
         return QLMBusProblemNone;
     }
-    if (error.code == QLMAdapterErrorDisconnected) {
+    if (error.code == QLMAdapterErrorDisconnected || error.code == QLMAdapterErrorUnresponsive || error.code == QLMAdapterErrorLostTrack) {
         return QLMBusProblemNoAdapter;
     }
     if (error.code != QLMAdapterErrorBusy) {
         return QLMBusProblemNone;
     }
     return [error.localizedDescription hasPrefix:@"GLM is running"] ? QLMBusProblemGLM : QLMBusProblemOtherHost;
+}
+
+static QLMAdapterProblem QLMAdapterProblemFor(NSError *_Nullable error) {
+    if (error == nil || ![error.domain isEqualToString:QLMAdapterErrorDomain]) {
+        return QLMAdapterProblemNone;
+    }
+    switch (error.code) {
+    case QLMAdapterErrorUnresponsive: return QLMAdapterProblemUnresponsive;
+    case QLMAdapterErrorLostTrack: return QLMAdapterProblemLostTrack;
+    default: return QLMAdapterProblemNone;
+    }
 }
 
 static QLMMonitorStatus QLMMonitorStatusFor(const QLMTelemetry *telemetry) {
@@ -500,9 +511,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (!_running) {
         return;
     }
-    BOOL noBus = [error.domain isEqualToString:QLMAdapterErrorDomain] &&
-                 (error.code == QLMAdapterErrorBusy || error.code == QLMAdapterErrorDisconnected);
-    if (noBus) {
+    BOOL gone = [error.domain isEqualToString:QLMAdapterErrorDomain] &&
+                (error.code == QLMAdapterErrorBusy || error.code == QLMAdapterErrorDisconnected);
+    // The adapter that stopped answering is the one still open, so its
+    // identity and its last knob reading stand, and the hand-back says
+    // what its take-over will do.
+    BOOL noBus = gone || QLMAdapterProblemFor(error) != QLMAdapterProblemNone;
+    if (gone) {
         [self forgetAdapter];
     }
     if (noBus && ![_adapterError isEqual:error]) {
@@ -1498,6 +1513,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.adapter = [self adapterState];
     snapshot.adapterError = _adapterError;
     snapshot.busProblem = QLMBusProblemFor(_adapterError);
+    snapshot.adapterProblem = QLMAdapterProblemFor(_adapterError);
     snapshot.monitors = states;
     snapshot.volumeDecibels = _volumeDecibels;
     snapshot.ceilingDecibels = self.settings.ceilingDecibels;

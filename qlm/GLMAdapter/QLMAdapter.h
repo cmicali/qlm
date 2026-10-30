@@ -16,6 +16,8 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
     QLMAdapterErrorCapture,       // a capture does not read; the description names the line
     QLMAdapterErrorBusy,          // another host has the adapter, or qlm could not seize it; the description says which, and nothing was sent
     QLMAdapterErrorBadReply,      // the reply did not read
+    QLMAdapterErrorUnresponsive,  // the adapter stopped answering, so the link sends nothing but its syncs; nothing was sent
+    QLMAdapterErrorLostTrack,     // the link lost track of the adapter's replies, and stays closed until a replug; nothing was sent
 };
 
 // One handler call per send, on the queue given to startOnQueue:clock:.

@@ -87,6 +87,56 @@
 
 @end
 
+// Passes each message on, but while `failure` is set, fails each one it
+// matches with that error, and sends nothing. It matches every message, or
+// with `failsOnlySessions`, only those to a session.
+@interface QLMFailingAdapter : NSObject <QLMAdapter>
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
+@property (atomic, nullable) NSError *failure;
+@property (atomic) BOOL failsOnlySessions;
+@end
+
+@implementation QLMFailingAdapter {
+    id<QLMAdapter> _adapter;
+    dispatch_queue_t _queue;
+    id<QLMClock> _clock;
+}
+
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
+    self = [super init];
+    if (self) {
+        _adapter = adapter;
+    }
+    return self;
+}
+
+- (NSString *)deviceDescription {
+    return _adapter.deviceDescription;
+}
+
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
+    _queue = queue;
+    _clock = clock;
+    [_adapter startOnQueue:queue clock:clock];
+}
+
+- (void)stop {
+    [_adapter stop];
+}
+
+- (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    NSError *failure = self.failure;
+    if (failure != nil && (!self.failsOnlySessions || QLMAddressIsLeasable(message.address))) {
+        [_clock async:_queue run:^{
+            handler(NULL, failure);
+        }];
+        return;
+    }
+    [_adapter sendMessage:message replyHandler:handler];
+}
+
+@end
+
 @implementation QLMSystemTests {
     QLMFakeMonitor *_left;
     QLMFakeMonitor *_right;
@@ -1987,6 +2037,63 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         XCTAssertNotEqual(self->_right.session, self->_left.session);
         XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
     }];
+}
+
+// The adapter goes silent, through the report link the HID adapter uses.
+// About 2.6 s after the host goes quiet, the adapter takes over at the
+// knob's level (captures/qlm-control-first/notes.md), so the snapshot says
+// it stopped answering, apart from no adapter, and keeps the last knob
+// reading for the warning. Once it answers again, the link resyncs, and
+// System takes every lease back.
+- (void)testASilentAdapterShowsAsItsOwnProblemWithTheKnobKept {
+    _settings.cycleInterval = 0.05;
+    _settings.adapterPollInterval = 0.02;
+    QLMCaptureDevice *device = [[QLMCaptureDevice alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
+    [self startSystemWithAdapter:device];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified && snapshot.idle;
+    }];
+    device.silent = YES;
+    QLMSnapshot *silent = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    XCTAssertEqual(silent.adapterProblem, QLMAdapterProblemUnresponsive);
+    XCTAssertEqual(silent.busProblem, QLMBusProblemNoAdapter);
+    XCTAssertEqual(silent.adapterError.code, QLMAdapterErrorUnresponsive);
+    XCTAssertEqualObjects(silent.handBack.knobDecibels, @(-100.4));
+    XCTAssertTrue(silent.adapter.identified);
+
+    device.silent = NO;
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError == nil && snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
+    }];
+    XCTAssertEqual(back.adapterProblem, QLMAdapterProblemNone);
+    [self stopSystem];
+    // Every report is GLM's, but the state each monitor taken back hears:
+    // GLM sent 2B 04 only to Main 2x1's members, and no group is active here.
+    NSMutableSet<NSData *> *captured = [NSMutableSet set];
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"startup-idle", NULL).exchanges) {
+        [captured addObject:exchange.outputReport];
+    }
+    for (NSData *report in device.writtenReports) {
+        const uint8_t *bytes = report.bytes;
+        BOOL state = bytes[2] == 0x2B && bytes[3] == QLMMuteValueUnmuted;
+        XCTAssertTrue([captured containsObject:report] || state, @"%@", report);
+    }
+}
+
+// A link that lost track is a problem of its own too, and keeps the knob.
+- (void)testALinkThatLostTrackShowsAsItsOwnProblem {
+    QLMFailingAdapter *failing = [[QLMFailingAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:failing];
+    [self waitForDiscovery];
+    failing.failure = QLMAdapterErrorMake(QLMAdapterErrorLostTrack, @"qlm lost track of the GLM adapter's replies.");
+    QLMSnapshot *lost = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    XCTAssertEqual(lost.adapterProblem, QLMAdapterProblemLostTrack);
+    XCTAssertEqual(lost.busProblem, QLMBusProblemNoAdapter);
+    XCTAssertEqualObjects(lost.handBack.knobDecibels, @(-100.4));
 }
 
 // The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or
