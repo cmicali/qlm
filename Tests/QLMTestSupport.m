@@ -184,6 +184,49 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
 
 @end
 
+QLMSetupGroup *QLMFixtureGroup(NSString *name) {
+    for (QLMSetupGroup *group in QLMReadFixtureSetup().groups) {
+        if ([group.name isEqualToString:name]) {
+            return group;
+        }
+    }
+    return nil;
+}
+
+@implementation QLMApplyFilter {
+    NSMutableSet<NSNumber *> *_prepared;
+    BOOL _cycleVolumeDue;
+}
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _prepared = [NSMutableSet set];
+    }
+    return self;
+}
+
+- (BOOL)keeps:(NSData *)record {
+    const uint8_t *bytes = record.bytes;
+    uint8_t address = bytes[0];
+    uint8_t opcode = bytes[1];
+    if (record.length == 2 && opcode == 0x08) {
+        return NO;
+    }
+    BOOL probing = (address == QLMAddressBroadcast && opcode == 0xFE) || (address == QLMAddressMulticast && opcode == 0x02);
+    // The cycle's volume is its first after its probe, though the apply's
+    // frames may come between.
+    BOOL cycleVolume = _cycleVolumeDue && address == QLMAddressBroadcast && opcode == 0x1F;
+    _cycleVolumeDue = probing || (_cycleVolumeDue && !cycleVolume);
+    if (opcode == 0x17) {
+        [_prepared addObject:@(address)];
+    }
+    BOOL identifying = opcode == 0x39 || (opcode == 0x19 && record.length == 3);
+    return !probing && !cycleVolume && !(identifying && ![_prepared containsObject:@(address)]);
+}
+
+@end
+
 QLMSetup *QLMReadFixtureSetup(void) {
     static QLMSetup *setup;
     static dispatch_once_t once;

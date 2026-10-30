@@ -1,5 +1,6 @@
 #import "QLMApplySequence.h"
 
+#import "QLMAdapter.h"
 #include "QLMCommands.h"
 
 @implementation QLMApplyMonitor
@@ -15,22 +16,25 @@
 
 @end
 
+QLMMessage QLMApplyMessage(NSData *record) {
+    const uint8_t *bytes = record.bytes;
+    return QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
+}
+
 static NSData *QLMRecord(QLMMessage message) {
-    NSMutableData *record = [NSMutableData dataWithBytes:&message.address length:1];
-    [record appendBytes:message.payload length:message.length];
-    return record;
+    return QLMAdapterRecord(&message);
 }
 
 static NSData *QLMRecordTo(uint8_t session, NSData *payload) {
-    NSMutableData *record = [NSMutableData dataWithBytes:&session length:1];
-    [record appendData:payload];
-    return record;
+    return QLMRecord(QLMMessageMake(session, payload.bytes, payload.length));
 }
 
 @implementation QLMApplySequence {
     QLMSetupGroup *_group;
-    NSArray<QLMApplyMonitor *> *_monitors;
     BOOL _adapterMuted;
+    NSDictionary<NSData *, QLMApplyMonitor *> *_byHardwareID;
+    // The monitors in device order, then those with no node, in lease order.
+    NSArray<QLMApplyMonitor *> *_inDeviceOrder;
 }
 
 - (instancetype)initWithGroup:(QLMSetupGroup *)group monitors:(NSArray<QLMApplyMonitor *> *)monitors adapterMuted:(BOOL)adapterMuted {
@@ -39,48 +43,31 @@ static NSData *QLMRecordTo(uint8_t session, NSData *payload) {
         _group = group;
         _monitors = [monitors copy];
         _adapterMuted = adapterMuted;
+        NSMutableDictionary<NSData *, QLMApplyMonitor *> *byHardwareID = [NSMutableDictionary dictionary];
+        for (QLMApplyMonitor *monitor in _monitors.reverseObjectEnumerator) {
+            byHardwareID[monitor.hardwareID] = monitor;
+        }
+        _byHardwareID = byHardwareID;
+        NSMutableOrderedSet<QLMApplyMonitor *> *ordered = [NSMutableOrderedSet orderedSet];
+        for (QLMSetupNode *node in group.nodesInDeviceOrder) {
+            QLMApplyMonitor *monitor = [self monitorFor:node];
+            if (monitor != nil) {
+                [ordered addObject:monitor];
+            }
+        }
+        [ordered addObjectsFromArray:_monitors];
+        _inDeviceOrder = ordered.array;
     }
     return self;
 }
 
 - (nullable QLMApplyMonitor *)monitorFor:(QLMSetupNode *)node {
-    for (QLMApplyMonitor *monitor in _monitors) {
-        if (node.hardwareID != nil && [monitor.hardwareID isEqualToData:node.hardwareID]) {
-            return monitor;
-        }
-    }
-    return nil;
-}
-
-- (nullable QLMSetupNode *)nodeFor:(QLMApplyMonitor *)monitor {
-    for (QLMSetupNode *node in _group.nodes) {
-        if (node.hardwareID != nil && [node.hardwareID isEqualToData:monitor.hardwareID]) {
-            return node;
-        }
-    }
-    return nil;
+    return node.hardwareID != nil ? _byHardwareID[node.hardwareID] : nil;
 }
 
 - (BOOL)isMember:(QLMApplyMonitor *)monitor {
-    QLMSetupNode *node = [self nodeFor:monitor];
+    QLMSetupNode *node = [_group nodeWithHardwareID:monitor.hardwareID];
     return node == nil || node.on;
-}
-
-// The monitors in device order, then those with no node, in lease order.
-- (NSArray<QLMApplyMonitor *> *)monitorsInDeviceOrder {
-    NSMutableArray<QLMApplyMonitor *> *ordered = [NSMutableArray arrayWithCapacity:_monitors.count];
-    for (QLMSetupNode *node in _group.nodesInDeviceOrder) {
-        QLMApplyMonitor *monitor = [self monitorFor:node];
-        if (monitor != nil && ![ordered containsObject:monitor]) {
-            [ordered addObject:monitor];
-        }
-    }
-    for (QLMApplyMonitor *monitor in _monitors) {
-        if (![ordered containsObject:monitor]) {
-            [ordered addObject:monitor];
-        }
-    }
-    return ordered;
 }
 
 // captures/knob-sweep, 19.135 s: in the group 04, and outside 07 in the
@@ -98,9 +85,10 @@ static NSData *QLMRecordTo(uint8_t session, NSData *payload) {
 }
 
 - (NSArray<NSData *> *)roundFirstOfTwo:(BOOL)first excluding:(NSArray<QLMApplyMonitor *> *)excluded {
+    NSArray<NSNumber *> *excludedSessions = [excluded valueForKey:@"session"];
     NSMutableArray<NSData *> *frames = [NSMutableArray array];
-    for (QLMApplyMonitor *monitor in [self monitorsInDeviceOrder]) {
-        if (monitor.on && ![excluded containsObject:monitor]) {
+    for (QLMApplyMonitor *monitor in _inDeviceOrder) {
+        if (monitor.on && ![excludedSessions containsObject:@(monitor.session)]) {
             [frames addObjectsFromArray:[self stateOf:monitor firstOfTwo:first]];
         }
     }
@@ -123,18 +111,18 @@ static NSData *QLMRecordTo(uint8_t session, NSData *payload) {
     return frames;
 }
 
-// The block from 17 01 on. A two-way gets a keep-alive right after 17 01
-// (captures/startup-idle, 8.540 s, and group-switch-main-2x2-main-4x2,
-// 10.947 s). The 8351B and the subwoofers do not.
+// The block, from prepare on. A two-way gets a keep-alive right after
+// prepare (captures/startup-idle, 8.540 s, and
+// group-switch-main-2x2-main-4x2, 10.947 s). The 8351B and the subwoofers
+// do not.
 - (void)addBlock:(QLMDSPBlock *)block to:(QLMApplyMonitor *)monitor into:(NSMutableArray<NSData *> *)frames {
     BOOL twoWay = block.node.nodeClass == QLMSetupNodeClassTwoWay;
-    for (NSData *payload in block.payloads) {
+    [block.payloads enumerateObjectsUsingBlock:^(NSData *payload, NSUInteger index, BOOL *stop) {
         [frames addObject:QLMRecordTo(monitor.session, payload)];
-        const uint8_t *bytes = payload.bytes;
-        if (twoWay && payload.length == 2 && bytes[0] == 0x17) {
+        if (twoWay && index == 0) {
             [frames addObject:QLMRecord(QLMCommandKeepAlive())];
         }
-    }
+    }];
 }
 
 // The pair GLM sends after configuring monitors (docs/refused-frames.md).

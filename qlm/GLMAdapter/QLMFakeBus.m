@@ -71,11 +71,6 @@
     return [[self alloc] initWithMonitors:monitors];
 }
 
-+ (NSData *)recordForSession:(uint8_t)session payload:(NSData *)payload {
-    QLMMessage message = QLMMessageMake(session, payload.bytes, payload.length);
-    return QLMAdapterRecord(&message);
-}
-
 - (NSArray<NSData *> *)sentMessages {
     __block NSArray<NSData *> *sent;
     [self perform:^{

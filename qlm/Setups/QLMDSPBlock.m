@@ -189,17 +189,19 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
     return QLMRateVerified(_node.nodeClass, _designRate);
 }
 
-+ (NSArray<QLMDSPBlock *> *)blocksForGroup:(QLMSetupGroup *)group error:(NSError **)error {
-    NSMutableArray<QLMDSPBlock *> *blocks = [NSMutableArray array];
++ (NSDictionary<NSData *, QLMDSPBlock *> *)blocksByHardwareIDForGroup:(QLMSetupGroup *)group error:(NSError **)error {
+    NSMutableDictionary<NSData *, QLMDSPBlock *> *blocks = [NSMutableDictionary dictionary];
     for (QLMSetupNode *node in group.nodes) {
-        if (!node.on) {
+        if (node.hardwareID == nil) {
             continue;
         }
-        QLMDSPBlock *block = [self blockForNode:node inGroup:group error:error];
+        NSError *failure = nil;
+        QLMDSPBlock *block = [self blockForNode:node inGroup:group error:&failure];
         if (block == nil) {
+            if (error != NULL) *error = QLMDSPBlockFail((QLMDSPBlockError)failure.code, [NSString stringWithFormat:@"node %@: %@", node.serial, failure.localizedDescription]);
             return nil;
         }
-        [blocks addObject:block];
+        blocks[node.hardwareID] = block;
     }
     return blocks;
 }

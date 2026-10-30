@@ -37,6 +37,18 @@ NSString *QLMFixturePath(NSString *name);
 // Fixtures/Main.sam, parsed once and shared. Never change it.
 QLMSetup *QLMReadFixtureSetup(void);
 
+// The fixture's group with this name.
+QLMSetupGroup *_Nullable QLMFixtureGroup(NSString *name);
+
+// Picks out a group apply from frames as they went out, as the address
+// byte, then the payload. Feed it every frame in order: it drops GLM's or
+// System's cycle beside the apply, which is the adapter's polls, the probes,
+// the leases, the polls, the volume after a probe, and a monitor's 39 and
+// 19 01 before its block.
+@interface QLMApplyFilter : NSObject
+- (BOOL)keeps:(NSData *)record;
+@end
+
 // Every directory under captures/ with a reports.txt, sorted.
 NSArray<NSString *> *QLMCaptureScenarios(void);
 

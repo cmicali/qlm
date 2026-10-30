@@ -24,8 +24,10 @@ typedef NS_ERROR_ENUM(QLMDSPBlockErrorDomain, QLMDSPBlockError) {
 
 + (nullable instancetype)blockForNode:(QLMSetupNode *)node inGroup:(QLMSetupGroup *)group error:(NSError **)error;
 
-// Blocks for every node that is on. Nil, with the error, if any node fails.
-+ (nullable NSArray<QLMDSPBlock *> *)blocksForGroup:(QLMSetupGroup *)group error:(NSError **)error;
+// Every node's block, on or off, keyed by its hardware ID. A node with no
+// hardware ID gets none, since no monitor can match it. Nil, with the
+// error, if any node's block fails.
++ (nullable NSDictionary<NSData *, QLMDSPBlock *> *)blocksByHardwareIDForGroup:(QLMSetupGroup *)group error:(NSError **)error;
 
 @property (nonatomic, readonly) QLMSetupNode *node;
 @property (nonatomic, readonly) double designRate;

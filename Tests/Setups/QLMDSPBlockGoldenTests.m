@@ -153,7 +153,7 @@ static NSArray<NSString *> *QLMDifferences(QLMDSPBlock *block, QLMCapturedPass *
 // Each capture's DSP passes in order, as session and node serial, and the
 // group GLM applied. A monitor that wakes into the group is leased again
 // and gets a second pass at its new session. At startup GLM sends every
-// node its block, off ones included; blocksForGroup skips those.
+// node its block, off ones included.
 static const struct {
     const char *scenario;
     const char *group;
@@ -195,15 +195,6 @@ static NSDictionary<NSNumber *, NSString *> *QLMModelsInCapture(QLMCapture *capt
     return models;
 }
 
-static QLMSetupGroup *QLMGroupNamed(NSString *name) {
-    for (QLMSetupGroup *group in QLMReadFixtureSetup().groups) {
-        if ([group.name isEqualToString:name]) {
-            return group;
-        }
-    }
-    return nil;
-}
-
 @implementation QLMDSPBlockGoldenTests
 
 // Every pass in the table, with its scenario, group, node, and model.
@@ -212,7 +203,7 @@ static QLMSetupGroup *QLMGroupNamed(NSString *name) {
     NSMutableArray<QLMCapturedPass *> *passes = [NSMutableArray array];
     for (size_t s = 0; s < sizeof QLMScenarios / sizeof QLMScenarios[0]; s++) {
         NSString *scenario = @(QLMScenarios[s].scenario);
-        QLMSetupGroup *group = QLMGroupNamed(@(QLMScenarios[s].group));
+        QLMSetupGroup *group = QLMFixtureGroup(@(QLMScenarios[s].group));
         NSArray<NSString *> *expected = [@(QLMScenarios[s].passes) componentsSeparatedByString:@" "];
         QLMCapture *capture = QLMReadCapture(scenario, NULL);
         NSArray<QLMCapturedPass *> *captured = QLMPassesInCapture(capture);

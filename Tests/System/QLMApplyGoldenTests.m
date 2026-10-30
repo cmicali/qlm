@@ -1,5 +1,6 @@
 #import <XCTest/XCTest.h>
 
+#import "QLMAdapter.h"
 #import "QLMApplySequence.h"
 #import "QLMDSPBlock.h"
 #import "QLMTestSupport.h"
@@ -39,15 +40,6 @@ static NSString *QLMHexOf(NSData *record) {
         [bytes addObject:[NSString stringWithFormat:@"%02X", raw[i]]];
     }
     return [bytes componentsJoinedByString:@" "];
-}
-
-static QLMSetupGroup *QLMFixtureGroup(NSString *name) {
-    for (QLMSetupGroup *group in QLMReadFixtureSetup().groups) {
-        if ([group.name isEqualToString:name]) {
-            return group;
-        }
-    }
-    return nil;
 }
 
 // One captured frame, kept for the diff.
@@ -125,14 +117,19 @@ static QLMSetupGroup *QLMFixtureGroup(NSString *name) {
     return monitor;
 }
 
-- (NSDictionary<NSData *, QLMDSPBlock *> *)blocksFor:(QLMSetupGroup *)group {
-    NSMutableDictionary<NSData *, QLMDSPBlock *> *blocks = [NSMutableDictionary dictionary];
-    for (QLMSetupNode *node in group.nodes) {
-        NSError *error = nil;
-        QLMDSPBlock *block = [QLMDSPBlock blockForNode:node inGroup:group error:&error];
-        XCTAssertNotNil(block, @"%@", error);
-        blocks[node.hardwareID] = block;
+// Every monitor on the bus, in lease order.
+- (NSMutableArray<QLMApplyMonitor *> *)monitorsOf:(QLMCapturedBus *)bus {
+    NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
+    for (NSNumber *session in bus.leaseOrder) {
+        [monitors addObject:[self monitorAt:session.unsignedCharValue of:bus]];
     }
+    return monitors;
+}
+
+- (NSDictionary<NSData *, QLMDSPBlock *> *)blocksFor:(QLMSetupGroup *)group {
+    NSError *error = nil;
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [QLMDSPBlock blocksByHardwareIDForGroup:group error:&error];
+    XCTAssertEqual(blocks.count, group.nodes.count, @"%@", error);
     return blocks;
 }
 
@@ -144,38 +141,18 @@ static BOOL QLMIsSkipped(const QLMMessage *message) {
 // GLM's frames from `from` to `to`, less its cycle and the frames qlm skips.
 - (NSArray<QLMCapturedFrame *> *)glmFramesOf:(QLMCapture *)capture from:(NSTimeInterval)from to:(NSTimeInterval)to {
     NSMutableArray<QLMCapturedFrame *> *frames = [NSMutableArray array];
-    NSMutableSet<NSNumber *> *prepared = [NSMutableSet set];
-    // The cycle's volume is its first after its probe, though the apply's
-    // frames may come between.
-    BOOL cycleVolumeDue = NO;
+    QLMApplyFilter *filter = [[QLMApplyFilter alloc] init];
     for (QLMCaptureExchange *exchange in capture.exchanges) {
         if (exchange.time > to) {
             break;
         }
         QLMMessage message = exchange.message;
-        uint8_t opcode = message.payload[0];
-        if (opcode == 0x08 && message.length == 1) {
-            continue;
-        }
-        BOOL probing = (message.address == QLMAddressBroadcast && opcode == 0xFE) ||
-                       (message.address == QLMAddressMulticast && opcode == 0x02);
-        BOOL cycleVolume = cycleVolumeDue && message.address == QLMAddressBroadcast && opcode == 0x1F;
-        cycleVolumeDue = probing || (cycleVolumeDue && !cycleVolume);
-        if (exchange.time < from || probing || cycleVolume || QLMIsSkipped(&message)) {
-            continue;
-        }
-        if (opcode == 0x17) {
-            [prepared addObject:@(message.address)];
-        }
-        BOOL identifying = opcode == 0x39 || (opcode == 0x19 && message.length == 2);
-        if (identifying && ![prepared containsObject:@(message.address)]) {
+        NSData *record = QLMAdapterRecord(&message);
+        if (![filter keeps:record] || exchange.time < from || QLMIsSkipped(&message)) {
             continue;
         }
         QLMCapturedFrame *frame = [[QLMCapturedFrame alloc] init];
         frame.time = exchange.time;
-        frame.record = QLMBytes((const uint8_t *)&message.address, 1);
-        NSMutableData *record = [frame.record mutableCopy];
-        [record appendBytes:message.payload length:message.length];
         frame.record = record;
         [frames addObject:frame];
     }
@@ -241,11 +218,7 @@ static NSArray<NSString *> *QLMDiff(NSArray<QLMCapturedFrame *> *glm, NSArray<NS
     XCTAssertNotNil(capture);
     QLMSetupGroup *group = QLMFixtureGroup(groupName);
     QLMCapturedBus *bus = [self busOf:capture seed:seed before:from];
-    NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
-    for (NSNumber *session in bus.leaseOrder) {
-        [monitors addObject:[self monitorAt:session.unsignedCharValue of:bus]];
-    }
-    QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:NO];
+    QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:group monitors:[self monitorsOf:bus] adapterMuted:NO];
     NSArray<NSData *> *qlm = [sequence switchWithBlocks:[self blocksFor:group] volume:QLMCommandVolumeWord(0x003107, QLMVolumeWordMax)];
     return [self diff:capture from:from to:to against:qlm];
 }
@@ -305,11 +278,7 @@ static NSArray<NSString *> *QLMDiff(NSArray<QLMCapturedFrame *> *glm, NSArray<NS
     QLMSetupGroup *group = QLMFixtureGroup(groupName);
     NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self blocksFor:group];
     QLMCapturedBus *before = [self busOf:capture seed:seed before:from];
-    NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
-    for (NSNumber *session in before.leaseOrder) {
-        [monitors addObject:[self monitorAt:session.unsignedCharValue of:before]];
-    }
-    QLMApplySequence *switching = [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:NO];
+    QLMApplySequence *switching = [[QLMApplySequence alloc] initWithGroup:group monitors:[self monitorsOf:before] adapterMuted:NO];
     NSMutableArray<NSData *> *qlm = [[switching switchWithBlocks:blocks volume:QLMCommandVolumeWord(0x003107, QLMVolumeWordMax)] mutableCopy];
 
     // After the switch: the old leases of the woken monitors are gone, and
@@ -399,11 +368,7 @@ static NSArray<NSString *> *QLMDiff(NSArray<QLMCapturedFrame *> *glm, NSArray<NS
                                     to:(NSTimeInterval)to {
     QLMCapture *capture = QLMReadCapture(scenario, NULL);
     QLMSetupGroup *group = QLMFixtureGroup(groupName);
-    QLMCapturedBus *bus = [self busOf:capture seed:@"" before:from];
-    NSMutableArray<QLMApplyMonitor *> *fresh = [NSMutableArray array];
-    for (NSNumber *session in bus.leaseOrder) {
-        [fresh addObject:[self monitorAt:session.unsignedCharValue of:bus]];
-    }
+    NSArray<QLMApplyMonitor *> *fresh = [self monitorsOf:[self busOf:capture seed:@"" before:from]];
     QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:group monitors:fresh adapterMuted:NO];
     NSMutableArray<NSData *> *qlm = [[sequence enumerationOf:fresh blocks:[self blocksFor:group]] mutableCopy];
     for (QLMApplyMonitor *monitor in fresh) {

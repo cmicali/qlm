@@ -34,6 +34,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 @property (nonatomic, readonly) NSArray<QLMApplyMonitor *> *monitors;
 
+// In the group: its node is on, or it has none, or no group is active.
+- (BOOL)isMember:(QLMApplyMonitor *)monitor;
+
 // In the group: 2B 04, or 03 when muted. Outside: 2B 05 then 07, and 07
 // alone in the first of two rounds.
 - (NSArray<NSData *> *)stateOf:(QLMApplyMonitor *)monitor firstOfTwo:(BOOL)first;
@@ -56,5 +59,8 @@ NS_ASSUME_NONNULL_BEGIN
                               blocks:(NSDictionary<NSData *, QLMDSPBlock *> *)blocks;
 
 @end
+
+// A record's message: its first byte is the address, the rest the payload.
+QLMMessage QLMApplyMessage(NSData *record);
 
 NS_ASSUME_NONNULL_END

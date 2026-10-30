@@ -41,6 +41,15 @@
     return nil;
 }
 
+- (QLMSetupNode *)nodeWithHardwareID:(NSData *)hardwareID {
+    for (QLMSetupNode *node in _nodes) {
+        if (node.hardwareID != nil && [node.hardwareID isEqualToData:hardwareID]) {
+            return node;
+        }
+    }
+    return nil;
+}
+
 @end
 
 @implementation QLMSetupDevice

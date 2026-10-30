@@ -224,16 +224,26 @@ static NSData *QLMDelayOf(QLMDSPBlock *block) {
     XCTAssertTrue([block.warnings.firstObject containsString:@"96000"]);
 }
 
-- (void)testBlocksForGroupSkipNodesThatAreOff {
-    QLMSetup *setup = QLMReadFixtureSetup();
+// GLM sends a node that is off its block too (captures/startup-idle, 8.534
+// s), so every node gets one, keyed by its monitor's hardware ID.
+- (void)testBlocksByHardwareIDIncludeNodesThatAreOff {
+    QLMSetupGroup *twoByTwo = QLMReadFixtureSetup().groups[1];
     NSError *error = nil;
-    NSArray<QLMDSPBlock *> *all = [QLMDSPBlock blocksForGroup:setup.groups[0] error:&error];
-    XCTAssertEqual(all.count, 6u, @"%@", error);
-    NSArray<QLMDSPBlock *> *twoByTwo = [QLMDSPBlock blocksForGroup:setup.groups[1] error:&error];
-    XCTAssertEqual(twoByTwo.count, 4u, @"%@", error);
-    for (QLMDSPBlock *block in twoByTwo) {
-        XCTAssertTrue(block.node.on);
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [QLMDSPBlock blocksByHardwareIDForGroup:twoByTwo error:&error];
+    XCTAssertEqual(blocks.count, 6u, @"%@", error);
+    for (QLMSetupNode *node in twoByTwo.nodes) {
+        XCTAssertEqual(blocks[node.hardwareID].node, node);
+        XCTAssertEqual([twoByTwo nodeWithHardwareID:node.hardwareID], node);
     }
+    XCTAssertFalse(twoByTwo.nodes[0].on);
+
+    QLMSetupGroup *broken = [[QLMSetupGroup alloc] init];
+    QLMSetupNode *unknownClass = [[QLMSetupNode alloc] init];
+    unknownClass.className = @"FourwayGen3";
+    unknownClass.hardwareID = twoByTwo.nodes[0].hardwareID;
+    broken.nodes = @[twoByTwo.nodes[1], unknownClass];
+    XCTAssertNil([QLMDSPBlock blocksByHardwareIDForGroup:broken error:&error]);
+    XCTAssertEqual(error.code, QLMDSPBlockErrorClass);
 }
 
 - (void)testRefusals {

@@ -77,6 +77,7 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly) NSArray<QLMSetupNode *> *nodesInDeviceOrder;
 
 - (nullable QLMSetupNode *)nodeWithSerial:(NSString *)serial;
+- (nullable QLMSetupNode *)nodeWithHardwareID:(NSData *)hardwareID;
 
 @end
 

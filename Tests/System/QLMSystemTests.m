@@ -1187,26 +1187,15 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     return [self groupNamed:name from:source nodes:@[source.nodes[0], source.nodes[2], source.nodes[3]]];
 }
 
-// What System sent from `start` on, less its cycle: the probes and leases,
-// the volume after a probe, the polls, and identity asked before a block.
+// What System sent from `start` on, less its cycle.
 - (NSArray<NSData *> *)applyFramesFrom:(NSUInteger)start {
     NSArray<NSData *> *sent = _bus.sentMessages;
     NSMutableArray<NSData *> *frames = [NSMutableArray array];
-    NSMutableSet<NSNumber *> *prepared = [NSMutableSet set];
-    BOOL afterProbe = NO;
+    QLMApplyFilter *filter = [[QLMApplyFilter alloc] init];
     for (NSUInteger i = start; i < sent.count; i++) {
-        const uint8_t *bytes = sent[i].bytes;
-        BOOL probing = (bytes[0] == QLMAddressBroadcast && bytes[1] == 0xFE) || (bytes[0] == QLMAddressMulticast && bytes[1] == 0x02);
-        BOOL cycleVolume = afterProbe && bytes[0] == QLMAddressBroadcast && bytes[1] == 0x1F;
-        afterProbe = probing;
-        if (bytes[1] == 0x17) {
-            [prepared addObject:@(bytes[0])];
+        if ([filter keeps:sent[i]]) {
+            [frames addObject:sent[i]];
         }
-        BOOL identifying = (bytes[1] == 0x39 || bytes[1] == 0x19) && ![prepared containsObject:@(bytes[0])];
-        if (probing || cycleVolume || identifying || (sent[i].length == 2 && bytes[1] == 0x08)) {
-            continue;
-        }
-        [frames addObject:sent[i]];
     }
     return frames;
 }
@@ -1223,11 +1212,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 }
 
 - (NSDictionary<NSData *, QLMDSPBlock *> *)blocksOf:(QLMSetupGroup *)group {
-    NSMutableDictionary<NSData *, QLMDSPBlock *> *blocks = [NSMutableDictionary dictionary];
-    for (QLMSetupNode *node in group.nodes) {
-        blocks[node.hardwareID] = [QLMDSPBlock blockForNode:node inGroup:group error:NULL];
-    }
-    return blocks;
+    return [QLMDSPBlock blocksByHardwareIDForGroup:group error:NULL];
 }
 
 // Waits until the frames System sent from `start` on, less its cycle, are
@@ -1445,7 +1430,9 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     // In "Main 2x2" the two 8330A, nodes 0 and 2, are off.
     QLMSetupGroup *source = QLMReadFixtureSetup().groups[1];
     QLMSetupGroup *group = [self groupNamed:@"Off" from:source nodes:@[source.nodes[0], source.nodes[2]]];
-    XCTAssertEqual([QLMDSPBlock blocksForGroup:group error:NULL].count, 0u);
+    for (QLMSetupNode *node in group.nodes) {
+        XCTAssertFalse(node.on);
+    }
 
     NSUInteger before = _bus.sentMessages.count;
     XCTAssertNil([self applyGroup:group]);
