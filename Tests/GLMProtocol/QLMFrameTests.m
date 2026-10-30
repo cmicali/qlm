@@ -1,5 +1,6 @@
 #import "QLMTestSupport.h"
 
+#include "QLMCommands.h"
 #import "QLMFrame.h"
 
 // Sources: the hlm protocol spec, revision 13. Section 1 gives the framing and
@@ -168,6 +169,42 @@
     }
     QLMMessage otherBroadcast = QLMMakeMessage(QLMAddressBroadcast, 0x2D, 0x01);
     XCTAssertEqual(QLMFrameEncode(&otherBroadcast, out, sizeof out, &length), QLMFrameErrorForbidden);
+}
+
+// docs/refused-frames.md, "3C, 3E, and 42, to the subwoofers": GLM sends
+// each only to a subwoofer's session, and always with 00 00 (captures/
+// startup-idle, 8.910, 8.912, and 8.921 s). The allowlist takes exactly that.
+- (void)testTheAllowlistTakesTheSubwooferFramesOnlyAsZerosToASession {
+    const uint8_t opcodes[] = {0x3C, 0x3E, 0x42};
+    uint8_t out[QLMFrameMax];
+    size_t length = 0;
+    for (size_t i = 0; i < sizeof opcodes; i++) {
+        const uint8_t zeros[] = {opcodes[i], 0x00, 0x00};
+        XCTAssertTrue(QLMFrameAllows(zeros, sizeof zeros), @"%02X", opcodes[i]);
+        const uint8_t bare[] = {opcodes[i]};
+        XCTAssertFalse(QLMFrameAllows(bare, sizeof bare), @"%02X", opcodes[i]);
+        const uint8_t shorter[] = {opcodes[i], 0x00};
+        XCTAssertFalse(QLMFrameAllows(shorter, sizeof shorter), @"%02X", opcodes[i]);
+        const uint8_t value[] = {opcodes[i], 0x00, 0x78};
+        XCTAssertFalse(QLMFrameAllows(value, sizeof value), @"%02X", opcodes[i]);
+        const uint8_t high[] = {opcodes[i], 0x01, 0x00};
+        XCTAssertFalse(QLMFrameAllows(high, sizeof high), @"%02X", opcodes[i]);
+        const uint8_t longer[] = {opcodes[i], 0x00, 0x00, 0x00};
+        XCTAssertFalse(QLMFrameAllows(longer, sizeof longer), @"%02X", opcodes[i]);
+
+        const uint8_t sessions[] = {QLMAddressSessionFirst, 0x05, 0x0B, QLMAddressSessionLast};
+        for (size_t j = 0; j < sizeof sessions; j++) {
+            QLMMessage unicast = QLMCommandSubwooferUnknown(sessions[j], opcodes[i]);
+            XCTAssertEqual(QLMFrameEncode(&unicast, out, sizeof out, &length), QLMFrameOK, @"%02X to %02X", opcodes[i], sessions[j]);
+        }
+        const uint8_t others[] = {QLMAddressAdapter, QLMAddressMulticast, QLMAddressBroadcast};
+        for (size_t j = 0; j < sizeof others; j++) {
+            QLMMessage elsewhere = QLMCommandSubwooferUnknown(others[j], opcodes[i]);
+            XCTAssertEqual(QLMFrameEncode(&elsewhere, out, sizeof out, &length), QLMFrameErrorForbidden, @"%02X to %02X", opcodes[i], others[j]);
+        }
+    }
+    QLMMessage other = QLMCommandSubwooferUnknown(0x05, 0x43);
+    XCTAssertEqual(QLMFrameEncode(&other, out, sizeof out, &length), QLMFrameErrorForbidden);
 }
 
 // Section 7 and section 9's group apply: what qlm does send.

@@ -82,5 +82,8 @@ QLMMessage QLMCommandPEQ(uint8_t session, uint8_t slot, const uint8_t coefficien
 QLMMessage QLMCommandCrossover(uint8_t session, uint16_t value);
 QLMMessage QLMCommandInputSync(uint8_t session);
 QLMMessage QLMCommandRouting(uint8_t session, uint8_t inputIndex, uint8_t source, uint8_t pair, uint8_t aesChannel);
+// 3C, 3E, or 42, then 00 00, as GLM sends each to a subwoofer. What they set
+// is unknown. Any other opcode gives a message the allowlist refuses.
+QLMMessage QLMCommandSubwooferUnknown(uint8_t session, uint8_t opcode);
 
 #endif

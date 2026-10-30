@@ -258,8 +258,11 @@ static uint32_t QLMVolumeWordOf(QLMMessage message) {
     QLMAssertBytes(sync.payload, sync.length, 0x3D, 0x00, 0x00);
     QLMMessage routing = QLMCommandRouting(0x02, 0x00, 0x02, 0x00, 0x01);
     QLMAssertBytes(routing.payload, routing.length, 0x40, 0x00, 0x02, 0x00, 0x01);
+    QLMMessage subwoofer = QLMCommandSubwooferUnknown(0x05, 0x3E);
+    XCTAssertEqual(subwoofer.address, 0x05);
+    QLMAssertBytes(subwoofer.payload, subwoofer.length, 0x3E, 0x00, 0x00);
 
-    QLMMessage messages[] = {prepare, delay, level, unknown, peq, crossover, sync, routing};
+    QLMMessage messages[] = {prepare, delay, level, unknown, peq, crossover, sync, routing, subwoofer};
     for (size_t i = 0; i < sizeof messages / sizeof messages[0]; i++) {
         uint8_t out[QLMFrameMax];
         size_t length = 0;
