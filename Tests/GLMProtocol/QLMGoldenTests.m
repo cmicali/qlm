@@ -36,7 +36,9 @@ static NSString *QLMDescribeExchange(QLMCaptureExchange *exchange) {
     return text;
 }
 
-// The scenarios captures/README.md lists, each one read with every report in it.
+// The scenarios captures/README.md lists, each one read with every report in
+// it: each output report unpacked and decoded, and each input report starting
+// with 3F and read into a reply.
 - (void)testEveryScenarioReads {
     NSArray<NSString *> *scenarios = QLMCaptureScenarios();
     for (NSString *required in @[@"startup-idle", @"startup-idle-mic", @"volume-sweep", @"knob-sweep", @"mute-dim",
@@ -46,12 +48,12 @@ static NSString *QLMDescribeExchange(QLMCaptureExchange *exchange) {
     NSPredicate *switches = [NSPredicate predicateWithFormat:@"SELF BEGINSWITH 'group-switch-'"];
     XCTAssertEqual([scenarios filteredArrayUsingPredicate:switches].count, 6u);
 
-    NSUInteger reports = 0;
+    NSUInteger exchanges = 0;
     for (QLMCapture *capture in [self captures]) {
         XCTAssertGreaterThan(capture.exchanges.count, 0u);
-        reports += capture.reports.count;
+        exchanges += capture.exchanges.count;
     }
-    XCTAssertGreaterThan(reports, 100000u);
+    XCTAssertGreaterThan(exchanges, 60000u);
 }
 
 // Every output report GLM sent unpacks and decodes. qlm packs every one the
@@ -72,7 +74,7 @@ static NSString *QLMDescribeExchange(QLMCaptureExchange *exchange) {
                 [refused addObject:[NSString stringWithFormat:@"%@%02X", target, message.payload[0]]];
                 continue;
             }
-            if (status != QLMReportOK || ![[NSData dataWithBytes:report length:sizeof report] isEqualToData:exchange.outputReport]) {
+            if (status != QLMReportOK || ![QLMBytes(report, sizeof report) isEqualToData:exchange.outputReport]) {
                 if (mismatches++ < 5) {
                     XCTFail(@"%@ does not repack", QLMDescribeExchange(exchange));
                 }
@@ -110,39 +112,25 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
     return count;
 }
 
-// Every input report starts with 3F. Each reply assembles, decodes from 01,
-// and re-escapes to the bytes the adapter sent. Some span two reports; none
-// spans more.
-- (void)testEveryInputReportAssemblesAndReencodes {
+// Each reply comes from 01 and re-escapes to the bytes the adapter sent.
+// Some span two input reports; none spans more.
+- (void)testEveryReplyReencodesByteForByte {
     NSUInteger replies = 0;
     NSUInteger spanning = 0;
     NSUInteger escaped = 0;
     for (QLMCapture *capture in [self captures]) {
-        QLMReportAssembly assembly;
-        QLMReportAssemblyReset(&assembly);
-        NSUInteger parts = 0;
-        for (QLMCaptureReport *report in capture.reports) {
-            if (report.output) {
+        for (QLMCaptureExchange *exchange in capture.exchanges) {
+            NSData *frame = exchange.replyFrame;
+            if (frame == nil) {
                 continue;
             }
-            XCTAssertEqual(((const uint8_t *)report.bytes.bytes)[0], QLMReportInputPrefix);
-            parts += 1;
-            QLMReportStatus status = QLMReportAssemblyAdd(&assembly, report.bytes.bytes, report.bytes.length);
-            if (status == QLMReportPending) {
-                continue;
-            }
-            XCTAssertEqual(status, QLMReportOK);
-            XCTAssertLessThanOrEqual(parts, 2u);
-            spanning += parts > 1 ? 1 : 0;
-            parts = 0;
-
-            QLMMessage reply;
-            XCTAssertEqual(QLMFrameDecode(assembly.frame, assembly.length, &reply), QLMFrameOK);
+            QLMMessage reply = exchange.reply;
             XCTAssertEqual(reply.address, QLMAddressReply);
             uint8_t again[QLMFrameMax];
             size_t length = QLMEscapeFrame(&reply, again);
-            XCTAssertEqual(length, assembly.length);
-            XCTAssertEqual(memcmp(again, assembly.frame, MIN(length, assembly.length)), 0);
+            XCTAssertEqualObjects(QLMBytes(again, length), frame);
+            XCTAssertLessThanOrEqual(frame.length, 2u * QLMReportFrameMax);
+            spanning += frame.length > QLMReportFrameMax ? 1 : 0;
             escaped += length > reply.length + 4 ? 1 : 0;
             replies += 1;
         }
@@ -166,55 +154,59 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
             QLMMessage message = exchange.message;
             QLMMessage reply = exchange.reply;
             uint8_t opcode = message.payload[0];
-            NSString *what = QLMDescribeExchange(exchange);
+            // Built only when an assertion fails.
+            NSString * (^what)(void) = ^{
+                return QLMDescribeExchange(exchange);
+            };
             if (message.address == QLMAddressBroadcast && opcode != 0xFE) {
-                XCTAssertFalse(exchange.hasReply, @"%@", what);
+                XCTAssertNil(exchange.replyFrame, @"%@", what());
                 continue;
             }
-            if (!exchange.hasReply) {
-                XCTAssertEqual(exchange, last, @"%@", what);
+            if (exchange.replyFrame == nil) {
+                XCTAssertEqual(exchange, last, @"%@", what());
                 continue;
             }
-            if (QLMReplyIsNoAnswer(&reply)) {
+            if (!exchange.answered) {
+                XCTAssertTrue(QLMReplyIsNoAnswer(&reply), @"%@", what());
                 noAnswers += 1;
                 continue;
             }
-            XCTAssertGreaterThan(reply.length, 0u, @"%@", what);
-            XCTAssertEqual(reply.payload[0], 0x09, @"%@", what);
+            XCTAssertGreaterThan(reply.length, 0u, @"%@", what());
+            XCTAssertEqual(reply.payload[0], 0x09, @"%@", what());
 
             char text[QLMPayloadMax];
             if (opcode == 0xFE) {
-                XCTAssertTrue(QLMReplyHardwareID(&reply, NULL), @"%@", what);
+                XCTAssertTrue(QLMReplyHardwareID(&reply, NULL), @"%@", what());
             } else if (message.address == QLMAddressMulticast) {
                 uint8_t session = 0;
-                XCTAssertEqual(opcode, 0x02, @"%@", what);
-                XCTAssertTrue(QLMReplySessionAck(&reply, &session), @"%@", what);
-                XCTAssertEqual(session, message.payload[4], @"%@", what);
+                XCTAssertEqual(opcode, 0x02, @"%@", what());
+                XCTAssertTrue(QLMReplySessionAck(&reply, &session), @"%@", what());
+                XCTAssertEqual(session, message.payload[4], @"%@", what());
             } else if (message.address == QLMAddressReply) {
                 // The adapter itself: its status poll, identity strings, and mute.
                 if (opcode == 0x08 || opcode == 0x2B) {
-                    XCTAssertTrue(reply.length >= 2 || QLMReplyIsAck(&reply), @"%@", what);
+                    XCTAssertTrue(reply.length >= 2 || QLMReplyIsAck(&reply), @"%@", what());
                 } else {
-                    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text), @"%@", what);
+                    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text), @"%@", what());
                 }
             } else if (opcode == 0x08) {
                 QLMTelemetry values;
                 QLMTelemetryStatus status = QLMReplyTelemetry(&reply, &values);
-                XCTAssertNotEqual(status, QLMTelemetryErrorUnknownTag, @"%@: tag %02X", what, values.unknownTag);
-                XCTAssertNotEqual(status, QLMTelemetryErrorTruncated, @"%@", what);
+                XCTAssertNotEqual(status, QLMTelemetryErrorUnknownTag, @"%@: tag %02X", what(), values.unknownTag);
+                XCTAssertNotEqual(status, QLMTelemetryErrorTruncated, @"%@", what());
                 telemetry += status == QLMTelemetryOK ? 1 : 0;
             } else if (opcode == 0x19) {
-                XCTAssertTrue(QLMReplyText(&reply, text, sizeof text), @"%@", what);
-                XCTAssertTrue(strlen(text) == 14 || strlen(text) == 15, @"%@", what);
+                XCTAssertTrue(QLMReplyText(&reply, text, sizeof text), @"%@", what());
+                XCTAssertTrue(strlen(text) == 14 || strlen(text) == 15, @"%@", what());
             } else if (opcode == 0x39) {
                 char model[32];
                 char firmware[32];
-                XCTAssertTrue(QLMReplyText(&reply, text, sizeof text), @"%@", what);
-                XCTAssertTrue(QLMSystemInfoParse(text, model, sizeof model, firmware, sizeof firmware), @"%@", what);
-                XCTAssertNotEqual(firmware[0], '\0', @"%@", what);
+                XCTAssertTrue(QLMReplyText(&reply, text, sizeof text), @"%@", what());
+                XCTAssertTrue(QLMSystemInfoParse(text, model, sizeof model, firmware, sizeof firmware), @"%@", what());
+                XCTAssertNotEqual(firmware[0], '\0', @"%@", what());
                 identities += 1;
             } else {
-                XCTAssertTrue(QLMReplyIsAck(&reply), @"%@", what);
+                XCTAssertTrue(QLMReplyIsAck(&reply), @"%@", what());
             }
         }
     }
@@ -264,7 +256,7 @@ static NSData *QLMDataFromHex(NSString *hex) {
                 XCTAssertEqual(bytes[10] | bytes[11] << 8, QLMAdapterProductID);
                 devices += 1;
             } else if ([parts[0] containsString:@"control 81 06 00 22"]) {
-                XCTAssertEqualObjects(data, [NSData dataWithBytes:descriptor length:sizeof descriptor]);
+                XCTAssertEqualObjects(data, QLMBytes(descriptor, sizeof descriptor));
                 reports += 1;
             }
         }
@@ -273,20 +265,14 @@ static NSData *QLMDataFromHex(NSString *hex) {
     XCTAssertGreaterThan(reports, 0u);
 }
 
-// The output reports of one capture, as a set.
-- (NSSet<NSData *> *)outputReportsOf:(NSString *)scenario {
-    NSMutableSet<NSData *> *reports = [NSMutableSet set];
-    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
-        [reports addObject:exchange.outputReport];
-    }
-    return reports;
-}
-
 - (void)assertScenario:(NSString *)scenario sent:(QLMMessage)message {
     uint8_t report[QLMReportLength];
     XCTAssertEqual(QLMReportPackOutput(&message, report), QLMReportOK);
-    NSData *packed = [NSData dataWithBytes:report length:sizeof report];
-    XCTAssertTrue([[self outputReportsOf:scenario] containsObject:packed], @"%@ never sent %@", scenario, packed);
+    NSData *packed = QLMBytes(report, sizeof report);
+    NSUInteger found = [QLMReadCapture(scenario, NULL).exchanges indexOfObjectPassingTest:^BOOL(QLMCaptureExchange *exchange, NSUInteger index, BOOL *stop) {
+        return [exchange.outputReport isEqualToData:packed];
+    }];
+    XCTAssertNotEqual(found, NSNotFound, @"%@ never sent %@", scenario, packed);
 }
 
 // GLM's own frames, from the captures the notes describe: startup, the
@@ -319,7 +305,7 @@ static NSData *QLMDataFromHex(NSString *hex) {
     QLMMessage assign = QLMCommandAssignSession(leased.payload + 1, QLMAddressSessionFirst);
     uint8_t report[QLMReportLength];
     XCTAssertEqual(QLMReportPackOutput(&assign, report), QLMReportOK);
-    XCTAssertEqualObjects([NSData dataWithBytes:report length:sizeof report], lease.outputReport);
+    XCTAssertEqualObjects(QLMBytes(report, sizeof report), lease.outputReport);
 
     [self assertScenario:@"standby-wake" sent:QLMCommandPower(QLMPowerStepStandbyPrepare)];
     [self assertScenario:@"standby-wake" sent:QLMCommandPower(QLMPowerStepPowerOff)];

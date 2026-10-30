@@ -1,12 +1,9 @@
 #import "QLMReplayAdapter.h"
 
-#include "QLMReplies.h"
-#include "QLMReport.h"
-
 @implementation QLMReplayAdapter {
     dispatch_queue_t _queue;
-    // For each distinct output report, the indexes of its unplayed exchanges, in order.
-    NSMutableDictionary<NSData *, NSMutableArray<NSNumber *> *> *_unplayed;
+    // For each distinct output report, its unplayed exchanges, in order.
+    NSMutableDictionary<NSData *, NSMutableArray<QLMCaptureExchange *> *> *_unplayed;
     NSMutableArray<NSData *> *_unmatched;
     NSUInteger _played;
 }
@@ -14,18 +11,15 @@
 - (instancetype)initWithCapture:(QLMCapture *)capture {
     self = [super init];
     if (self) {
-        _capture = capture;
         _unmatched = [NSMutableArray array];
         _unplayed = [NSMutableDictionary dictionary];
-        NSArray<QLMCaptureExchange *> *exchanges = capture.exchanges;
-        for (NSUInteger i = 0; i < exchanges.count; i++) {
-            NSData *report = exchanges[i].outputReport;
-            NSMutableArray<NSNumber *> *indexes = _unplayed[report];
-            if (indexes == nil) {
-                indexes = [NSMutableArray array];
-                _unplayed[report] = indexes;
+        for (QLMCaptureExchange *exchange in capture.exchanges) {
+            NSMutableArray<QLMCaptureExchange *> *same = _unplayed[exchange.outputReport];
+            if (same == nil) {
+                same = [NSMutableArray array];
+                _unplayed[exchange.outputReport] = same;
             }
-            [indexes addObject:@(i)];
+            [same addObject:exchange];
         }
     }
     return self;
@@ -55,36 +49,28 @@
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
 
-    uint8_t bytes[QLMReportLength];
-    if (QLMReportPackOutput(&message, bytes) != QLMReportOK) {
-        NSError *error = [NSError errorWithDomain:QLMAdapterErrorDomain code:QLMAdapterErrorForbidden userInfo:nil];
+    uint8_t report[QLMReportLength];
+    NSError *refusal = nil;
+    if (!QLMAdapterPackReport(&message, report, &refusal)) {
         dispatch_async(queue, ^{
-            handler(NULL, error);
+            handler(NULL, refusal);
         });
         return;
     }
-    NSData *report = [NSData dataWithBytes:bytes length:sizeof bytes];
     QLMCaptureExchange *exchange = nil;
     @synchronized(self) {
-        NSMutableArray<NSNumber *> *indexes = _unplayed[report];
-        if (indexes.count > 0) {
-            exchange = _capture.exchanges[indexes.firstObject.unsignedIntegerValue];
-            [indexes removeObjectAtIndex:0];
+        NSMutableArray<QLMCaptureExchange *> *exchanges = _unplayed[[NSData dataWithBytes:report length:sizeof report]];
+        exchange = exchanges.firstObject;
+        if (exchange != nil) {
+            [exchanges removeObjectAtIndex:0];
             _played += 1;
         } else {
-            NSMutableData *record = [NSMutableData dataWithBytes:&message.address length:1];
-            [record appendBytes:message.payload length:message.length];
-            [_unmatched addObject:record];
+            [_unmatched addObject:QLMAdapterRecord(&message)];
         }
     }
 
-    QLMMessage reply;
-    memset(&reply, 0, sizeof reply);
-    BOOL answered = NO;
-    if (exchange != nil && exchange.hasReply) {
-        reply = exchange.reply;
-        answered = !QLMReplyIsNoAnswer(&reply);
-    }
+    BOOL answered = exchange.answered;
+    QLMMessage reply = answered ? exchange.reply : QLMMessageMake(0, NULL, 0);
     dispatch_async(queue, ^{
         handler(answered ? &reply : NULL, nil);
     });

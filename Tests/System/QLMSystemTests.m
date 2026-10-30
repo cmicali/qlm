@@ -2,6 +2,7 @@
 
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
+#import "QLMReplayAdapter.h"
 #import "QLMSetupInternal.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
@@ -48,7 +49,11 @@
 }
 
 - (void)startSystem {
-    _system = [[QLMSystem alloc] initWithAdapter:_bus settings:_settings];
+    [self startSystemWithAdapter:_bus];
+}
+
+- (void)startSystemWithAdapter:(id<QLMAdapter>)adapter {
+    _system = [[QLMSystem alloc] initWithAdapter:adapter settings:_settings];
     NSMutableArray<QLMSnapshot *> *received = _received;
     [_system setSnapshotHandler:^(QLMSnapshot *snapshot) {
         [received addObject:snapshot];
@@ -239,6 +244,46 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     XCTAssertEqual(sessions.count, 240u);
     XCTAssertTrue([sessions containsIndex:0x7C] && [sessions containsIndex:0x7F]);
     XCTAssertTrue([sessions containsIndex:0xEF] && [sessions containsIndex:0xF1]);
+}
+
+// captures/startup-idle, where GLM finds the user's six monitors: two 8330A,
+// two 8351B, a 7370A, and a 7350A, all on. System's discovery sends what GLM
+// sent, in GLM's lease order, so the replay answers it.
+- (void)testDiscoversEveryMonitorInAReplayOfStartupIdle {
+    NSError *error = nil;
+    QLMCapture *capture = QLMReadCapture(@"startup-idle", &error);
+    XCTAssertNotNil(capture, @"%@", error);
+    _settings.cycleInterval = 0.05;
+    [self startSystemWithAdapter:[[QLMReplayAdapter alloc] initWithCapture:capture]];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        BOOL known = received.monitors.count == 6 && received.allIdentified;
+        for (QLMMonitorState *monitor in received.monitors) {
+            known = known && monitor.deviceClass != QLMMonitorClassUnknown;
+        }
+        return known;
+    }];
+
+    NSDictionary<NSString *, NSArray *> *expected = @{
+        @"8330A": @[@"1.14.7.6281", @(QLMMonitorClassTwoWay)],
+        @"8351B": @[@"1.24.07.6470", @(QLMMonitorClassTwoWay)],
+        @"7370A": @[@"1.14.7.6281", @(QLMMonitorClassSubwoofer)],
+        @"7350A": @[@"1.14.7.6281", @(QLMMonitorClassSubwoofer)],
+    };
+    NSCountedSet<NSString *> *models = [NSCountedSet set];
+    for (QLMMonitorState *monitor in snapshot.monitors) {
+        NSArray *facts = expected[monitor.model];
+        XCTAssertNotNil(facts, @"%@", monitor.model);
+        [models addObject:monitor.model ?: @""];
+        XCTAssertEqualObjects(monitor.firmwareVersion, facts[0]);
+        XCTAssertEqual(monitor.deviceClass, [facts[1] integerValue]);
+        XCTAssertTrue([monitor.serialNumber hasPrefix:monitor.model], @"%@", monitor.serialNumber);
+        XCTAssertEqual(monitor.status, QLMMonitorStatusOn);
+        XCTAssertGreaterThan(monitor.temperature, 0);
+    }
+    XCTAssertEqual([models countForObject:@"8330A"], 2u);
+    XCTAssertEqual([models countForObject:@"8351B"], 2u);
+    XCTAssertEqual([models countForObject:@"7370A"], 1u);
+    XCTAssertEqual([models countForObject:@"7350A"], 1u);
 }
 
 // Section 3: four unanswered polls, then a burst to the dead address, then

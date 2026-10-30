@@ -4,22 +4,18 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// One HID report from a capture's reports.txt.
-@interface QLMCaptureReport : NSObject
-
-@property (nonatomic, readonly) NSTimeInterval time;  // seconds from the capture's first packet
-@property (nonatomic, readonly) BOOL output;          // host to adapter
-@property (nonatomic, readonly) NSData *bytes;        // QLMReportLength bytes
-
-@end
-
-// One output report and the reply the adapter gave before the next one.
+// One output report, and the reply the adapter gave before the next one.
 @interface QLMCaptureExchange : NSObject
 
-@property (nonatomic, readonly) NSTimeInterval time;
+@property (nonatomic, readonly) NSTimeInterval time;  // seconds from the capture's first packet
 @property (nonatomic, readonly) NSData *outputReport;
+// The reply as the adapter sent it, escaped, across its input reports. Nil
+// for a broadcast, or for a reply the capture cut off.
+@property (nonatomic, readonly, nullable) NSData *replyFrame;
+// A monitor answered: NO with no reply, and for the adapter's no-answer frame.
+@property (nonatomic, readonly) BOOL answered;
+// Each decoded on every read. The reply is zeroed when there is none.
 @property (nonatomic, readonly) QLMMessage message;
-@property (nonatomic, readonly) BOOL hasReply;  // NO for a broadcast, or a reply the capture cut off
 @property (nonatomic, readonly) QLMMessage reply;
 
 @end
@@ -34,7 +30,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable instancetype)initWithData:(NSData *)data error:(NSError **)error NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
-@property (nonatomic, readonly) NSArray<QLMCaptureReport *> *reports;
 @property (nonatomic, readonly) NSArray<QLMCaptureExchange *> *exchanges;
 @property (nonatomic, readonly) NSArray<NSString *> *comments;  // without the `# `
 

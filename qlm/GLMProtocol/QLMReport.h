@@ -32,11 +32,13 @@ enum {
 typedef enum {
     QLMReportOK = 0,
     QLMReportPending,         // the frame runs on into the next input report
+    QLMReportNoAnswer,        // the adapter's own reply: no monitor answered
     QLMReportErrorLength,     // not a report's length, or a frame that does not fit
     QLMReportErrorForbidden,  // the allowlist refused the message
     QLMReportErrorPrefix,
     QLMReportErrorPadding,    // a nonzero byte after the frame
     QLMReportErrorOverflow,   // no closing flag within QLMReportAssemblyMax
+    QLMReportErrorFrame,      // the assembled frame does not decode
 } QLMReportStatus;
 
 // Encodes the message through the allowlist and packs it as one output
@@ -50,15 +52,18 @@ QLMReportStatus QLMReportUnpackOutput(const uint8_t *report, size_t length, cons
 // Gathers one reply frame from consecutive input reports.
 typedef struct {
     size_t length;
-    bool complete;
     uint8_t frame[QLMReportAssemblyMax];
 } QLMReportAssembly;
 
 void QLMReportAssemblyReset(QLMReportAssembly *assembly);
 
-// Adds one input report. QLMReportOK means the closing flag arrived: the
-// whole frame is in `frame`, for QLMFrameDecode, until the next call. After
-// an error the next report starts a new frame.
-QLMReportStatus QLMReportAssemblyAdd(QLMReportAssembly *assembly, const uint8_t *report, size_t length);
+// A frame has begun, and its closing flag has not arrived.
+bool QLMReportAssemblyIsPending(const QLMReportAssembly *assembly);
+
+// Adds one input report. When the closing flag arrives, decodes the frame
+// into `reply`: QLMReportOK for a monitor's reply, QLMReportNoAnswer for the
+// adapter's. Either way the escaped frame stays in `frame` until the next
+// call. After an error the next report starts a new frame.
+QLMReportStatus QLMReportReadInput(QLMReportAssembly *assembly, const uint8_t *report, size_t length, QLMMessage *reply);
 
 #endif

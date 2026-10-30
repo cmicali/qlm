@@ -13,19 +13,33 @@
 
 @implementation QLMReportTests
 
+// The bytes, zero-padded to a whole report.
 static void QLMFillReport(uint8_t report[QLMReportLength], const uint8_t *bytes, size_t length) {
     memset(report, 0, QLMReportLength);
     memcpy(report, bytes, length);
+}
+
+// `frame` points into a buffer that lasts until the next call.
+static QLMReportStatus QLMUnpack(const uint8_t *bytes, size_t length, const uint8_t **frame, size_t *frameLength) {
+    static uint8_t report[QLMReportLength];
+    QLMFillReport(report, bytes, length);
+    return QLMReportUnpackOutput(report, sizeof report, frame, frameLength);
+}
+
+static QLMReportStatus QLMRead(QLMReportAssembly *assembly, const uint8_t *bytes, size_t length, QLMMessage *reply) {
+    uint8_t report[QLMReportLength];
+    QLMFillReport(report, bytes, length);
+    return QLMReportReadInput(assembly, report, sizeof report, reply);
 }
 
 - (void)testPacksTheAdapterPollAsCaptured {
     QLMMessage poll = QLMCommandPoll(QLMAddressReply);
     uint8_t report[QLMReportLength];
     XCTAssertEqual(QLMReportPackOutput(&poll, report), QLMReportOK);
-    QLMAssertBytes(report, 6, 0x85, 0x01, 0x08, 0x4D, 0xC6, 0x7E);
-    for (size_t i = 6; i < QLMReportLength; i++) {
-        XCTAssertEqual(report[i], 0);
-    }
+    const uint8_t expected[] = {0x85, 0x01, 0x08, 0x4D, 0xC6, 0x7E};
+    uint8_t padded[QLMReportLength];
+    QLMFillReport(padded, expected, sizeof expected);
+    XCTAssertEqualObjects(QLMBytes(report, sizeof report), QLMBytes(padded, sizeof padded));
 }
 
 - (void)testPacksAVolumeFrameAsCaptured {
@@ -41,9 +55,8 @@ static void QLMFillReport(uint8_t report[QLMReportLength], const uint8_t *bytes,
     XCTAssertEqual(QLMReportPackOutput(&commit, report), QLMReportErrorForbidden);
     QLMMessage generator = QLMMakeMessage(0x02, 0x05, 0x04, 0x00, 0x00, 0x00);
     XCTAssertEqual(QLMReportPackOutput(&generator, report), QLMReportErrorForbidden);
-    for (size_t i = 0; i < QLMReportLength; i++) {
-        XCTAssertEqual(report[i], 0);
-    }
+    const uint8_t zeros[QLMReportLength] = {0};
+    XCTAssertEqualObjects(QLMBytes(report, sizeof report), QLMBytes(zeros, sizeof zeros));
 }
 
 // The longest builder, a PEQ band, still fits fully escaped. A longer
@@ -64,36 +77,27 @@ static void QLMFillReport(uint8_t report[QLMReportLength], const uint8_t *bytes,
 
 - (void)testUnpacksAnOutputReport {
     const uint8_t bytes[] = {0x85, 0x01, 0x08, 0x4D, 0xC6, 0x7E};
-    uint8_t report[QLMReportLength];
-    QLMFillReport(report, bytes, sizeof bytes);
     const uint8_t *frame = NULL;
     size_t length = 0;
-    XCTAssertEqual(QLMReportUnpackOutput(report, sizeof report, &frame, &length), QLMReportOK);
+    XCTAssertEqual(QLMUnpack(bytes, sizeof bytes, &frame, &length), QLMReportOK);
     QLMAssertBytes(frame, length, 0x01, 0x08, 0x4D, 0xC6, 0x7E);
 }
 
 - (void)testUnpackRejectsABadOutputReport {
-    uint8_t report[QLMReportLength];
     const uint8_t noPrefix[] = {0x05, 0x01, 0x08, 0x4D, 0xC6, 0x7E};
-    QLMFillReport(report, noPrefix, sizeof noPrefix);
-    XCTAssertEqual(QLMReportUnpackOutput(report, sizeof report, NULL, NULL), QLMReportErrorPrefix);
-
+    XCTAssertEqual(QLMUnpack(noPrefix, sizeof noPrefix, NULL, NULL), QLMReportErrorPrefix);
     const uint8_t empty[] = {0x80};
-    QLMFillReport(report, empty, sizeof empty);
-    XCTAssertEqual(QLMReportUnpackOutput(report, sizeof report, NULL, NULL), QLMReportErrorLength);
-
+    XCTAssertEqual(QLMUnpack(empty, sizeof empty, NULL, NULL), QLMReportErrorLength);
     const uint8_t tooLong[] = {0xC0};
-    QLMFillReport(report, tooLong, sizeof tooLong);
-    XCTAssertEqual(QLMReportUnpackOutput(report, sizeof report, NULL, NULL), QLMReportErrorLength);
-
+    XCTAssertEqual(QLMUnpack(tooLong, sizeof tooLong, NULL, NULL), QLMReportErrorLength);
     const uint8_t padded[] = {0x85, 0x01, 0x08, 0x4D, 0xC6, 0x7E, 0x01};
-    QLMFillReport(report, padded, sizeof padded);
-    XCTAssertEqual(QLMReportUnpackOutput(report, sizeof report, NULL, NULL), QLMReportErrorPadding);
+    XCTAssertEqual(QLMUnpack(padded, sizeof padded, NULL, NULL), QLMReportErrorPadding);
 
+    uint8_t report[QLMReportLength] = {0x85, 0x01, 0x08, 0x4D, 0xC6, 0x7E};
     XCTAssertEqual(QLMReportUnpackOutput(report, QLMReportLength - 1, NULL, NULL), QLMReportErrorLength);
 }
 
-- (void)testAssemblesTheAdapterSystemInfoAcrossTwoReports {
+- (void)testReadsTheAdapterSystemInfoAcrossTwoReports {
     const uint8_t first[] = {
         0x3F, 0x01, 0x09, 0x63, 0x2D, 0x30, 0x3B, 0x6D, 0x6F, 0x64, 0x65, 0x6C, 0x2D, 0x47, 0x4C, 0x4D,
         0x20, 0x41, 0x64, 0x61, 0x70, 0x74, 0x65, 0x72, 0x3B, 0x76, 0x65, 0x72, 0x2D, 0x31, 0x2E, 0x34,
@@ -101,18 +105,15 @@ static void QLMFillReport(uint8_t report[QLMReportLength], const uint8_t *bytes,
         0x30, 0x32, 0x3B, 0x62, 0x75, 0x69, 0x6C, 0x64, 0x2D, 0x32, 0x30, 0x32, 0x35, 0x2E, 0x30, 0x35,
     };
     const uint8_t second[] = {0x3F, 0x2E, 0x31, 0x39, 0x2E, 0x73, 0x20, 0x20, 0x00, 0x4D, 0x20, 0x7E};
-    uint8_t report[QLMReportLength];
     QLMReportAssembly assembly;
     QLMReportAssemblyReset(&assembly);
-
-    QLMFillReport(report, first, sizeof first);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportPending);
-    QLMFillReport(report, second, sizeof second);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportOK);
+    QLMMessage reply;
+    XCTAssertEqual(QLMRead(&assembly, first, sizeof first, &reply), QLMReportPending);
+    XCTAssertTrue(QLMReportAssemblyIsPending(&assembly));
+    XCTAssertEqual(QLMRead(&assembly, second, sizeof second, &reply), QLMReportOK);
+    XCTAssertFalse(QLMReportAssemblyIsPending(&assembly));
     XCTAssertEqual(assembly.length, (size_t)(63 + 11));
 
-    QLMMessage reply;
-    XCTAssertEqual(QLMFrameDecode(assembly.frame, assembly.length, &reply), QLMFrameOK);
     char text[QLMPayloadMax];
     XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
     char model[32];
@@ -122,55 +123,48 @@ static void QLMFillReport(uint8_t report[QLMReportLength], const uint8_t *bytes,
     XCTAssertEqualObjects(@(firmware), @"1.4.0.6113");
 }
 
-- (void)testAssemblesTheNoAnswerFrame {
-    const uint8_t bytes[] = {0x3F, 0x01, 0x7D, 0x5E, 0x53, 0x97, 0x7E};
-    uint8_t report[QLMReportLength];
-    QLMFillReport(report, bytes, sizeof bytes);
+- (void)testReadsTheNoAnswerFrame {
     QLMReportAssembly assembly;
     QLMReportAssemblyReset(&assembly);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportOK);
     QLMMessage reply;
-    XCTAssertEqual(QLMFrameDecode(assembly.frame, assembly.length, &reply), QLMFrameOK);
+    const uint8_t noAnswer[] = {0x3F, 0x01, 0x7D, 0x5E, 0x53, 0x97, 0x7E};
+    XCTAssertEqual(QLMRead(&assembly, noAnswer, sizeof noAnswer, &reply), QLMReportNoAnswer);
     XCTAssertTrue(QLMReplyIsNoAnswer(&reply));
-    XCTAssertFalse(QLMReplyIsAck(&reply));
 
     // The next report starts a new frame.
     const uint8_t ack[] = {0x3F, 0x01, 0x09, 0x5D, 0xE7, 0x7E};
-    QLMFillReport(report, ack, sizeof ack);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportOK);
-    XCTAssertEqual(QLMFrameDecode(assembly.frame, assembly.length, &reply), QLMFrameOK);
+    XCTAssertEqual(QLMRead(&assembly, ack, sizeof ack, &reply), QLMReportOK);
     XCTAssertTrue(QLMReplyIsAck(&reply));
-    XCTAssertFalse(QLMReplyIsNoAnswer(&reply));
 }
 
-- (void)testAssemblyRejectsABadInputReport {
-    uint8_t report[QLMReportLength];
+- (void)testReadRejectsABadInputReport {
     QLMReportAssembly assembly;
     QLMReportAssemblyReset(&assembly);
-
+    QLMMessage reply;
     const uint8_t prefix[] = {0x3E, 0x01, 0x09, 0x5D, 0xE7, 0x7E};
-    QLMFillReport(report, prefix, sizeof prefix);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportErrorPrefix);
-
+    XCTAssertEqual(QLMRead(&assembly, prefix, sizeof prefix, &reply), QLMReportErrorPrefix);
     const uint8_t padded[] = {0x3F, 0x01, 0x09, 0x5D, 0xE7, 0x7E, 0x00, 0x01};
-    QLMFillReport(report, padded, sizeof padded);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportErrorPadding);
-    XCTAssertEqual(assembly.length, 0u);
+    XCTAssertEqual(QLMRead(&assembly, padded, sizeof padded, &reply), QLMReportErrorPadding);
+    const uint8_t badCRC[] = {0x3F, 0x01, 0x09, 0x5D, 0xE8, 0x7E};
+    XCTAssertEqual(QLMRead(&assembly, badCRC, sizeof badCRC, &reply), QLMReportErrorFrame);
+    XCTAssertFalse(QLMReportAssemblyIsPending(&assembly));
 
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, QLMReportLength + 1), QLMReportErrorLength);
+    uint8_t report[QLMReportLength] = {0x3F};
+    XCTAssertEqual(QLMReportReadInput(&assembly, report, QLMReportLength + 1, &reply), QLMReportErrorLength);
 }
 
-- (void)testAssemblyStopsAfterThreeReportsWithNoFlag {
+- (void)testReadStopsAfterThreeReportsWithNoFlag {
     uint8_t report[QLMReportLength];
     memset(report, 0x11, sizeof report);
     report[0] = QLMReportInputPrefix;
     QLMReportAssembly assembly;
     QLMReportAssemblyReset(&assembly);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportPending);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportPending);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportPending);
-    XCTAssertEqual(QLMReportAssemblyAdd(&assembly, report, sizeof report), QLMReportErrorOverflow);
-    XCTAssertEqual(assembly.length, 0u);
+    QLMMessage reply;
+    for (int i = 0; i < 3; i++) {
+        XCTAssertEqual(QLMReportReadInput(&assembly, report, sizeof report, &reply), QLMReportPending);
+    }
+    XCTAssertEqual(QLMReportReadInput(&assembly, report, sizeof report, &reply), QLMReportErrorOverflow);
+    XCTAssertFalse(QLMReportAssemblyIsPending(&assembly));
 }
 
 @end

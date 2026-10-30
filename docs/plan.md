@@ -18,7 +18,7 @@ Next:
 
 - The HID adapter, then `qlmctl info`, `discover`, and `poll`.
 - Three readings marked unverified in code: a monitor's delay taken from `Time-of-flight_Compensation` as milliseconds, the analog routing frame, and matching a setup node to a monitor by the bus serial's suffix.
-- Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So System's leases skip `7D` and `7E`, and `F0`, the adapter's multicast, and the question cannot arise.
+- Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So the encoder refuses a `7D` or `7E` address, and System's leases skip both, and `F0`, the adapter's multicast. The question cannot arise.
 
 ### What the captures showed
 

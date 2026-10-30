@@ -2,6 +2,8 @@
 
 #include <string.h>
 
+#include "QLMReplies.h"
+
 _Static_assert(QLMReportAssemblyMax <= 1 + QLMPayloadMax + 2 + 1, "an assembled frame must fit a message");
 
 static bool QLMReportIsZero(const uint8_t *bytes, size_t length) {
@@ -58,41 +60,52 @@ QLMReportStatus QLMReportUnpackOutput(const uint8_t *report, size_t length, cons
 void QLMReportAssemblyReset(QLMReportAssembly *assembly) {
     if (assembly != NULL) {
         assembly->length = 0;
-        assembly->complete = false;
     }
 }
 
-QLMReportStatus QLMReportAssemblyAdd(QLMReportAssembly *assembly, const uint8_t *report, size_t length) {
-    if (assembly == NULL) {
+// Only the closing flag can end the frame: an escaped frame holds no other 7E.
+static bool QLMReportAssemblyIsComplete(const QLMReportAssembly *assembly) {
+    return assembly->length > 0 && assembly->frame[assembly->length - 1] == QLMFrameFlag;
+}
+
+bool QLMReportAssemblyIsPending(const QLMReportAssembly *assembly) {
+    return assembly != NULL && assembly->length > 0 && !QLMReportAssemblyIsComplete(assembly);
+}
+
+static QLMReportStatus QLMReportAssemblyFail(QLMReportAssembly *assembly, QLMReportStatus status) {
+    QLMReportAssemblyReset(assembly);
+    return status;
+}
+
+QLMReportStatus QLMReportReadInput(QLMReportAssembly *assembly, const uint8_t *report, size_t length, QLMMessage *reply) {
+    if (assembly == NULL || reply == NULL) {
         return QLMReportErrorLength;
     }
-    if (assembly->complete) {
+    if (QLMReportAssemblyIsComplete(assembly)) {
         QLMReportAssemblyReset(assembly);
     }
     if (report == NULL || length != QLMReportLength) {
-        QLMReportAssemblyReset(assembly);
-        return QLMReportErrorLength;
+        return QLMReportAssemblyFail(assembly, QLMReportErrorLength);
     }
     if (report[0] != QLMReportInputPrefix) {
-        QLMReportAssemblyReset(assembly);
-        return QLMReportErrorPrefix;
+        return QLMReportAssemblyFail(assembly, QLMReportErrorPrefix);
     }
     const uint8_t *body = report + 1;
     const uint8_t *flag = memchr(body, QLMFrameFlag, QLMReportFrameMax);
     size_t count = flag == NULL ? QLMReportFrameMax : (size_t)(flag - body) + 1;
     if (assembly->length + count > QLMReportAssemblyMax) {
-        QLMReportAssemblyReset(assembly);
-        return QLMReportErrorOverflow;
+        return QLMReportAssemblyFail(assembly, QLMReportErrorOverflow);
     }
     if (!QLMReportIsZero(body + count, QLMReportFrameMax - count)) {
-        QLMReportAssemblyReset(assembly);
-        return QLMReportErrorPadding;
+        return QLMReportAssemblyFail(assembly, QLMReportErrorPadding);
     }
     memcpy(assembly->frame + assembly->length, body, count);
     assembly->length += count;
     if (flag == NULL) {
         return QLMReportPending;
     }
-    assembly->complete = true;
-    return QLMReportOK;
+    if (QLMFrameDecode(assembly->frame, assembly->length, reply) != QLMFrameOK) {
+        return QLMReportAssemblyFail(assembly, QLMReportErrorFrame);
+    }
+    return QLMReplyIsNoAnswer(reply) ? QLMReportNoAnswer : QLMReportOK;
 }

@@ -15,8 +15,8 @@
 // command just sent tells them apart, so the caller picks the parser.
 
 // The adapter answers every probe and unicast with one frame: the monitor's
-// reply, or a bare 7E from 01 when no monitor answered. An adapter passes the
-// 7E on as no reply.
+// reply, or a bare 7E from 01 when no monitor answered. QLMReportReadInput
+// tells them apart, so an adapter passes the 7E on as no reply.
 bool QLMReplyIsNoAnswer(const QLMMessage *message);
 
 bool QLMReplyIsAck(const QLMMessage *message);

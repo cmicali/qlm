@@ -15,9 +15,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithCapture:(QLMCapture *)capture NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
-@property (nonatomic, readonly) QLMCapture *capture;
 @property (nonatomic, readonly) NSUInteger playedCount;
-// Every message no exchange matched, as the address byte, then the payload.
+// Every message no exchange matched, as QLMAdapterRecord gives it.
 @property (nonatomic, readonly) NSArray<NSData *> *unmatchedMessages;
 
 @end

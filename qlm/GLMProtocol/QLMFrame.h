@@ -15,8 +15,8 @@ enum {
     QLMAddressBroadcast = 0xFF,
 };
 
-// True for a session ID qlm may lease. F0 is the adapter's multicast. 7D and
-// 7E would need escaping as an address, which no capture shows either way.
+// True for a session ID qlm may lease. F0 is the adapter's multicast, and
+// the encoder refuses an address of 7D or 7E.
 bool QLMAddressIsLeasable(uint8_t address);
 
 enum {
@@ -58,7 +58,8 @@ bool QLMFrameAllows(const uint8_t *payload, size_t length);
 
 // Encodes a message as one bus frame: the address, the payload, the CRC
 // big-endian, then the flag, with 7E and 7D in the payload and CRC escaped
-// after the CRC is computed. Refuses a payload the allowlist rejects.
+// after the CRC is computed. Refuses a payload the allowlist rejects, and an
+// address of 7D or 7E.
 QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t capacity, size_t *outLength);
 
 // Decodes one complete frame, which must end in the flag. It does not consult

@@ -3,35 +3,41 @@
 #import "QLMAdapter.h"
 #include "QLMReport.h"
 
-@implementation QLMCaptureReport
-
-- (instancetype)initWithTime:(NSTimeInterval)time output:(BOOL)output bytes:(NSData *)bytes {
-    self = [super init];
-    if (self) {
-        _time = time;
-        _output = output;
-        _bytes = [bytes copy];
-    }
-    return self;
-}
-
-@end
-
 @interface QLMCaptureExchange ()
-@property (nonatomic, readwrite) BOOL hasReply;
-@property (nonatomic, readwrite) QLMMessage reply;
+@property (nonatomic, readwrite, nullable) NSData *replyFrame;
+@property (nonatomic, readwrite) BOOL answered;
 @end
 
 @implementation QLMCaptureExchange
 
-- (instancetype)initWithTime:(NSTimeInterval)time outputReport:(NSData *)outputReport message:(QLMMessage)message {
+- (instancetype)initWithTime:(NSTimeInterval)time outputReport:(NSData *)outputReport {
     self = [super init];
     if (self) {
         _time = time;
         _outputReport = [outputReport copy];
-        _message = message;
     }
     return self;
+}
+
+// The capture checked both frames when it read them.
+- (QLMMessage)message {
+    const uint8_t *frame = NULL;
+    size_t length = 0;
+    QLMMessage message;
+    memset(&message, 0, sizeof message);
+    if (QLMReportUnpackOutput(_outputReport.bytes, _outputReport.length, &frame, &length) == QLMReportOK) {
+        QLMFrameDecode(frame, length, &message);
+    }
+    return message;
+}
+
+- (QLMMessage)reply {
+    QLMMessage reply;
+    memset(&reply, 0, sizeof reply);
+    if (_replyFrame != nil) {
+        QLMFrameDecode(_replyFrame.bytes, _replyFrame.length, &reply);
+    }
+    return reply;
 }
 
 @end
@@ -60,12 +66,24 @@ static const char *QLMSkipSpaces(const char *cursor, const char *end) {
 // Returns a description of what is wrong, or nil.
 static NSString *QLMParseReportLine(const char *line, const char *end, NSTimeInterval *time, BOOL *output,
                                     uint8_t bytes[QLMReportLength]) {
+    // strtod needs a terminated string, so the time is copied out.
+    char number[32];
+    const char *cursor = line;
+    while (cursor < end && *cursor != ' ' && *cursor != '\t') {
+        cursor++;
+    }
+    size_t digits = (size_t)(cursor - line);
     char *afterTime = NULL;
-    *time = strtod(line, &afterTime);
-    if (afterTime == line || afterTime > end) {
+    if (digits == 0 || digits >= sizeof number) {
         return @"no time";
     }
-    const char *cursor = QLMSkipSpaces(afterTime, end);
+    memcpy(number, line, digits);
+    number[digits] = '\0';
+    *time = strtod(number, &afterTime);
+    if (afterTime != number + digits) {
+        return @"no time";
+    }
+    cursor = QLMSkipSpaces(cursor, end);
     if (end - cursor >= 4 && strncmp(cursor, "out ", 4) == 0) {
         *output = YES;
         cursor += 4;
@@ -106,16 +124,13 @@ static NSString *QLMParseReportLine(const char *line, const char *end, NSTimeInt
     if (self == nil) {
         return nil;
     }
-    NSMutableArray<QLMCaptureReport *> *reports = [NSMutableArray array];
     NSMutableArray<QLMCaptureExchange *> *exchanges = [NSMutableArray array];
     NSMutableArray<NSString *> *comments = [NSMutableArray array];
     QLMReportAssembly assembly;
     QLMReportAssemblyReset(&assembly);
     QLMCaptureExchange *current = nil;
 
-    NSMutableData *text = [data mutableCopy];
-    [text appendBytes:"" length:1];
-    const char *cursor = text.bytes;
+    const char *cursor = data.bytes;
     const char *stop = cursor + data.length;
     NSUInteger lineNumber = 0;
     NSString *problem = nil;
@@ -126,7 +141,7 @@ static NSString *QLMParseReportLine(const char *line, const char *end, NSTimeInt
             end = stop;
         }
         const char *line = QLMSkipSpaces(cursor, end);
-        cursor = end + 1;
+        cursor = end < stop ? end + 1 : stop;
         if (line == end) {
             continue;
         }
@@ -144,21 +159,19 @@ static NSString *QLMParseReportLine(const char *line, const char *end, NSTimeInt
         if (problem != nil) {
             break;
         }
-        NSData *report = [NSData dataWithBytes:bytes length:sizeof bytes];
-        [reports addObject:[[QLMCaptureReport alloc] initWithTime:time output:output bytes:report]];
 
         if (output) {
             const uint8_t *frame = NULL;
             size_t length = 0;
             QLMMessage message;
-            if (assembly.length > 0 && !assembly.complete) {
+            if (QLMReportAssemblyIsPending(&assembly)) {
                 problem = @"an output report cuts a reply short";
             } else if (QLMReportUnpackOutput(bytes, sizeof bytes, &frame, &length) != QLMReportOK) {
                 problem = @"the output report does not unpack";
             } else if (QLMFrameDecode(frame, length, &message) != QLMFrameOK) {
                 problem = @"the output frame does not decode";
             } else {
-                current = [[QLMCaptureExchange alloc] initWithTime:time outputReport:report message:message];
+                current = [[QLMCaptureExchange alloc] initWithTime:time outputReport:[NSData dataWithBytes:bytes length:sizeof bytes]];
                 [exchanges addObject:current];
             }
             continue;
@@ -168,23 +181,21 @@ static NSString *QLMParseReportLine(const char *line, const char *end, NSTimeInt
             problem = @"a reply before any output report";
             break;
         }
-        QLMReportStatus status = QLMReportAssemblyAdd(&assembly, bytes, sizeof bytes);
+        QLMMessage reply;
+        QLMReportStatus status = QLMReportReadInput(&assembly, bytes, sizeof bytes, &reply);
         if (status == QLMReportPending) {
             continue;
         }
-        QLMMessage reply;
-        if (status != QLMReportOK) {
-            problem = @"the input report does not assemble";
-        } else if (QLMFrameDecode(assembly.frame, assembly.length, &reply) != QLMFrameOK) {
-            problem = @"the reply frame does not decode";
-        } else if (current.hasReply) {
+        if (status != QLMReportOK && status != QLMReportNoAnswer) {
+            problem = @"the input report does not read";
+        } else if (current.replyFrame != nil) {
             problem = @"a second reply to one output report";
         } else {
-            current.reply = reply;
-            current.hasReply = YES;
+            current.replyFrame = [NSData dataWithBytes:assembly.frame length:assembly.length];
+            current.answered = status == QLMReportOK;
         }
     }
-    if (problem == nil && assembly.length > 0 && !assembly.complete) {
+    if (problem == nil && QLMReportAssemblyIsPending(&assembly)) {
         problem = @"the capture ends inside a reply";
     }
     if (problem != nil) {
@@ -195,7 +206,6 @@ static NSString *QLMParseReportLine(const char *line, const char *end, NSTimeInt
         }
         return nil;
     }
-    _reports = [reports copy];
     _exchanges = [exchanges copy];
     _comments = [comments copy];
     return self;

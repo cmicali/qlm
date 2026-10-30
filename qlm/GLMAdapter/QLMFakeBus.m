@@ -2,7 +2,6 @@
 
 #include "QLMCommands.h"
 #include "QLMReplies.h"
-#include "QLMReport.h"
 
 @implementation QLMFakeMonitor
 
@@ -65,9 +64,8 @@
 }
 
 + (NSData *)recordForSession:(uint8_t)session payload:(NSData *)payload {
-    NSMutableData *record = [NSMutableData dataWithBytes:&session length:1];
-    [record appendData:payload];
-    return record;
+    QLMMessage message = QLMMessageMake(session, payload.bytes, payload.length);
+    return QLMAdapterRecord(&message);
 }
 
 - (NSArray<NSData *> *)sentMessages {
@@ -100,33 +98,24 @@
     NSAssert(queue != NULL, @"send before start");
 
     uint8_t report[QLMReportLength];
-    if (QLMReportPackOutput(&message, report) != QLMReportOK) {
-        NSError *error = [NSError errorWithDomain:QLMAdapterErrorDomain code:QLMAdapterErrorForbidden userInfo:nil];
+    NSError *refusal = nil;
+    if (!QLMAdapterPackReport(&message, report, &refusal)) {
         dispatch_async(queue, ^{
-            handler(NULL, error);
+            handler(NULL, refusal);
         });
         return;
     }
-    const uint8_t *frame = NULL;
-    size_t length = 0;
-    QLMMessage decoded;
-    memset(&decoded, 0, sizeof decoded);
-    BOOL roundTrips = QLMReportUnpackOutput(report, sizeof report, &frame, &length) == QLMReportOK &&
-                      QLMFrameDecode(frame, length, &decoded) == QLMFrameOK;
-    NSAssert(roundTrips, @"the codec does not round-trip");
-    (void)roundTrips;
 
     dispatch_async(queue, ^{
         if (self.recordsSentMessages) {
-            NSData *payload = [NSData dataWithBytes:decoded.payload length:decoded.length];
-            [self->_sent addObject:[QLMFakeBus recordForSession:decoded.address payload:payload]];
+            [self->_sent addObject:QLMAdapterRecord(&message)];
         }
         if (self.disconnected) {
             handler(NULL, [NSError errorWithDomain:QLMAdapterErrorDomain code:QLMAdapterErrorDisconnected userInfo:nil]);
             return;
         }
         QLMMessage reply;
-        BOOL answered = [self replyTo:&decoded into:&reply];
+        BOOL answered = [self replyTo:&message into:&reply];
         handler(answered ? &reply : NULL, nil);
     });
 }

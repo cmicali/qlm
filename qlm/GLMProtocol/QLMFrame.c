@@ -25,7 +25,8 @@ bool QLMFrameAllows(const uint8_t *payload, size_t length) {
         return false;
     }
     switch (payload[0]) {
-    case 0x02: // assign a session ID
+    case 0x02: // assign a session ID, only one qlm may lease
+        return length == 5 && QLMAddressIsLeasable(payload[4]);
     case 0x04: // keep-alive
     case 0x08: // telemetry poll
     case 0x17: // prepare for configuration
@@ -79,7 +80,11 @@ QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t ca
     if (message == NULL || out == NULL || message->length == 0 || message->length > QLMPayloadMax) {
         return QLMFrameErrorLength;
     }
-    if (!QLMFrameAllows(message->payload, message->length)) {
+    // TRAP: the address is not escaped; on the bus its ninth bit marks it. No
+    // capture has an address above 19, so whether the adapter escapes a 7D or
+    // 7E there is unknown, and neither goes out.
+    if (!QLMFrameAllows(message->payload, message->length) || message->address == QLMFrameFlag ||
+        message->address == QLMFrameEscape) {
         return QLMFrameErrorForbidden;
     }
 
@@ -88,9 +93,6 @@ QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t ca
     memcpy(raw + 1, message->payload, message->length);
     uint16_t crc = QLMCRC16GSM(raw, 1 + message->length);
 
-    // TRAP: the address is not escaped. On the bus its ninth bit marks it, so
-    // a session ID of 7D or 7E would go out bare. Unverified: no capture has
-    // an address above 19, so QLMAddressIsLeasable keeps both out.
     size_t count = 0;
     bool ok = QLMFramePut(out, capacity, &count, message->address, false);
     for (size_t i = 0; ok && i < message->length; i++) {

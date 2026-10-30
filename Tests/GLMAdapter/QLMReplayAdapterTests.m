@@ -26,28 +26,8 @@
     [_adapter startOnQueue:_queue];
 }
 
-// Sends on the adapter's queue and waits. Returns whether a reply came.
 - (BOOL)send:(QLMMessage)message reply:(QLMMessage *)reply error:(NSError **)error {
-    dispatch_semaphore_t done = dispatch_semaphore_create(0);
-    __block BOOL answered = NO;
-    __block NSError *failure = nil;
-    dispatch_async(_queue, ^{
-        [self->_adapter sendMessage:message replyHandler:^(const QLMMessage *received, NSError *sendError) {
-            if (received != NULL) {
-                answered = YES;
-                if (reply != NULL) {
-                    *reply = *received;
-                }
-            }
-            failure = sendError;
-            dispatch_semaphore_signal(done);
-        }];
-    });
-    XCTAssertEqual(dispatch_semaphore_wait(done, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)), 0);
-    if (error != NULL) {
-        *error = failure;
-    }
-    return answered;
+    return [self qlm_send:message to:_adapter queue:_queue reply:reply error:error];
 }
 
 - (void)testAnswersDiscoveryAsTheCaptureDid {
@@ -57,7 +37,7 @@
         uint8_t hardwareID[3];
         XCTAssertTrue([self send:QLMCommandProbe() reply:&reply error:NULL]);
         XCTAssertTrue(QLMReplyHardwareID(&reply, hardwareID));
-        [hardwareIDs addObject:[NSData dataWithBytes:hardwareID length:3]];
+        [hardwareIDs addObject:QLMBytes(hardwareID, sizeof hardwareID)];
 
         uint8_t acked = 0;
         XCTAssertTrue([self send:QLMCommandAssignSession(hardwareID, session) reply:&reply error:NULL]);
@@ -79,7 +59,7 @@
     XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
     XCTAssertTrue(QLMSystemInfoParse(text, model, sizeof model, firmware, sizeof firmware));
     XCTAssertEqualObjects(@(model), @"8351B");
-    XCTAssertTrue(_adapter.unmatchedMessages.count == 0);
+    XCTAssertEqual(_adapter.unmatchedMessages.count, 0u);
     XCTAssertEqual(_adapter.playedCount, 14u);
 }
 
@@ -107,7 +87,7 @@
     XCTAssertNil(error);
     XCTAssertEqual(_adapter.playedCount, 0u);
     const uint8_t record[] = {0x55, 0x08};
-    XCTAssertEqualObjects(_adapter.unmatchedMessages, @[[NSData dataWithBytes:record length:sizeof record]]);
+    XCTAssertEqualObjects(_adapter.unmatchedMessages, @[QLMBytes(record, sizeof record)]);
 }
 
 // GLM sent `05` to every monitor; the allowlist still refuses it here.
@@ -121,43 +101,54 @@
     XCTAssertEqual(_adapter.unmatchedMessages.count, 0u);
 }
 
+// One report line, its bytes padded with zeros to a whole report.
+static NSString *QLMLine(NSString *start, NSString *bytes) {
+    NSMutableString *line = [NSMutableString stringWithFormat:@"%@ %@", start, bytes];
+    for (NSUInteger i = [bytes componentsSeparatedByString:@" "].count; i < QLMReportLength; i++) {
+        [line appendString:@" 00"];
+    }
+    [line appendString:@"\n"];
+    return line;
+}
+
 static QLMCapture *QLMCaptureFromText(NSString *text, NSError **error) {
     return [[QLMCapture alloc] initWithData:[text dataUsingEncoding:NSUTF8StringEncoding] error:error];
 }
 
-static NSString *QLMPadded(NSString *bytes) {
-    NSMutableString *line = [bytes mutableCopy];
-    NSUInteger count = [bytes componentsSeparatedByString:@" "].count;
-    for (NSUInteger i = count; i < QLMReportLength; i++) {
-        [line appendString:@" 00"];
-    }
-    return line;
-}
-
 - (void)testACaptureReadsExchanges {
-    NSString *text = [NSString stringWithFormat:@"# a comment\n\n0.1 out %@\n0.2 in %@\n0.3 out %@\n",
-                      QLMPadded(@"85 01 08 4D C6 7E"), QLMPadded(@"3F 01 09 5D E7 7E"), QLMPadded(@"85 FF 04 BC 84 7E")];
+    NSString *text = [@[@"# a comment\n\n", QLMLine(@"0.1 out", @"85 01 08 4D C6 7E"), QLMLine(@"0.2 in", @"3F 01 09 5D E7 7E"),
+                        QLMLine(@"0.3 out", @"85 FF 04 BC 84 7E"), QLMLine(@"0.4 out", @"85 FF FE F2 D1 7E"),
+                        QLMLine(@"0.5 in", @"3F 01 7D 5E 53 97 7E")] componentsJoinedByString:@""];
     NSError *error = nil;
     QLMCapture *capture = QLMCaptureFromText(text, &error);
     XCTAssertNotNil(capture, @"%@", error);
     XCTAssertEqualObjects(capture.comments, @[@"a comment"]);
-    XCTAssertEqual(capture.reports.count, 3u);
-    XCTAssertEqual(capture.exchanges.count, 2u);
-    QLMMessage reply = capture.exchanges[0].reply;
-    XCTAssertTrue(capture.exchanges[0].hasReply);
+    XCTAssertEqual(capture.exchanges.count, 3u);
+
+    QLMCaptureExchange *poll = capture.exchanges[0];
+    QLMMessage reply = poll.reply;
+    XCTAssertTrue(poll.answered);
     XCTAssertTrue(QLMReplyIsAck(&reply));
-    XCTAssertFalse(capture.exchanges[1].hasReply);
-    XCTAssertEqualWithAccuracy(capture.exchanges[1].time, 0.3, 1e-9);
+    XCTAssertEqual(poll.message.address, QLMAddressReply);
+
+    QLMCaptureExchange *keepAlive = capture.exchanges[1];
+    XCTAssertNil(keepAlive.replyFrame);
+    XCTAssertFalse(keepAlive.answered);
+    XCTAssertEqualWithAccuracy(keepAlive.time, 0.3, 1e-9);
+
+    QLMCaptureExchange *probe = capture.exchanges[2];
+    XCTAssertNotNil(probe.replyFrame);
+    XCTAssertFalse(probe.answered);
 }
 
 - (void)testACaptureRejectsWhatTheReportLayerRejects {
     NSArray<NSString *> *bad = @[
-        [NSString stringWithFormat:@"0.1 in %@\n", QLMPadded(@"3F 01 09 5D E7 7E")],                                   // no request
-        [NSString stringWithFormat:@"0.1 out %@\n", QLMPadded(@"85 01 08 4D C6 7F")],                                  // no flag
-        [NSString stringWithFormat:@"0.1 out %@\n", QLMPadded(@"85 01 08 4D C7 7E")],                                  // CRC
-        @"0.1 out 85 01 08 4D C6 7E\n",                                                                                // short
-        [NSString stringWithFormat:@"0.1 sideways %@\n", QLMPadded(@"85 01 08 4D C6 7E")],                             // direction
-        [NSString stringWithFormat:@"0.1 out %@\n0.2 in %@\n", QLMPadded(@"85 01 08 4D C6 7E"), QLMPadded(@"3F 01 09")], // cut off
+        QLMLine(@"0.1 in", @"3F 01 09 5D E7 7E"),                                               // no request
+        QLMLine(@"0.1 out", @"85 01 08 4D C6 7F"),                                              // no flag
+        QLMLine(@"0.1 out", @"85 01 08 4D C7 7E"),                                              // CRC
+        @"0.1 out 85 01 08 4D C6 7E\n",                                                         // short
+        QLMLine(@"0.1 sideways", @"85 01 08 4D C6 7E"),                                         // direction
+        [QLMLine(@"0.1 out", @"85 01 08 4D C6 7E") stringByAppendingString:QLMLine(@"0.2 in", @"3F 01 09")], // cut off
     ];
     for (NSString *text in bad) {
         NSError *error = nil;
