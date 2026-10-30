@@ -39,11 +39,7 @@ bool QLMSystemInfoParse(const char *text, char *model, size_t modelCapacity, cha
 // QLMTelemetryAbsent. The 47 status is the only authority on power: 01 is on,
 // anything else is not. Tags 88 and 89 have known lengths but no known
 // meaning, so the walk steps over them. docs/telemetry.md has the evidence.
-//
-// A monitor makes one frame a second. A poll that comes before the next one
-// gets a bare 09. The meters read about one count per dB. An output meter
-// rests at QLMTelemetryOutputSilent when muted and at silence. 42 reads
-// before the volume.
+// A poll before the monitor's next frame, one a second, gets a bare 09.
 #define QLMTelemetryAbsent (-1)
 
 enum {
@@ -52,13 +48,13 @@ enum {
     QLMTelemetryClassSubwoofer = 0x01,
     QLMTelemetryClassTwoWay = 0x02,
     QLMTelemetryClassStandby = 0x03,
-    QLMTelemetryOutputSilent = 0x80,
+    QLMTelemetryOutputSilent = 0x80,  // an output meter's floor; a count is about a dB
 };
 
 typedef struct {
     bool busy;
     uint8_t temperature;
-    int16_t inputMeter;   // 42
+    int16_t inputMeter;   // 42, before the volume
     int16_t hfMeter;      // 43, floored on subwoofers
     int16_t midMeter;     // 44, three-way models: the 8351B
     int16_t lfMeter;      // 45
@@ -70,9 +66,7 @@ typedef struct {
     int16_t sensor83;     // 83, second byte
     int16_t deviceClass;  // 84, first byte
     int16_t stateMetric;  // 84, second byte, meaning unknown
-    // 8A, big-endian: 0 at a wake, then one more about every 240 s. Only one
-    // frame in 30 s carries it, so it is absent from most.
-    int32_t wakeSteps;
+    int32_t wakeSteps;    // 8A: 0 at a wake, one more about every 240 s; one frame in 30 s
     uint8_t unknownTag;   // where the walk stopped, or 0
 } QLMTelemetry;
 

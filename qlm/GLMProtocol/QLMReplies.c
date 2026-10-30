@@ -155,6 +155,7 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
     }
     telemetry->temperature = message->payload[i++];
 
+    bool whole = false;
     while (i < message->length) {
         uint8_t tag = message->payload[i];
         size_t valueLength = QLMTelemetryValueLength(tag);
@@ -180,13 +181,14 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
         case 0x84:
             telemetry->deviceClass = value[0];
             telemetry->stateMetric = value[1];
+            whole = true;
             break;
         case 0x8A: telemetry->wakeSteps = (int32_t)value[0] << 8 | value[1]; break;
         default: break;
         }
         i += 1 + valueLength;
     }
-    return telemetry->deviceClass == QLMTelemetryAbsent ? QLMTelemetryErrorPartial : QLMTelemetryOK;
+    return whole ? QLMTelemetryOK : QLMTelemetryErrorPartial;
 }
 
 static uint32_t QLMReadBigEndian32(const uint8_t *bytes) {

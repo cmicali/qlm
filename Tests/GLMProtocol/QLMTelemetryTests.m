@@ -20,21 +20,28 @@
 
 @implementation QLMTelemetryTests
 
+// A monitor's 08 poll, answered.
+static BOOL QLMIsAnsweredPoll(QLMCaptureExchange *exchange) {
+    QLMMessage message = exchange.message;
+    return QLMAddressIsLeasable(message.address) && message.payload[0] == 0x08 && exchange.answered;
+}
+
 // Every reply in `scenario` that reads as telemetry, by the address polled.
 static NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *QLMTelemetryFrames(NSString *scenario) {
     NSMutableDictionary<NSNumber *, NSMutableArray<QLMTelemetryFrame *> *> *frames = [NSMutableDictionary dictionary];
     for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
-        QLMMessage message = exchange.message;
+        if (!QLMIsAnsweredPoll(exchange)) {
+            continue;
+        }
         QLMMessage reply = exchange.reply;
         QLMTelemetry telemetry;
-        if (!QLMAddressIsLeasable(message.address) || message.payload[0] != 0x08 || !exchange.answered ||
-            QLMReplyTelemetry(&reply, &telemetry) != QLMTelemetryOK) {
+        if (QLMReplyTelemetry(&reply, &telemetry) != QLMTelemetryOK) {
             continue;
         }
         QLMTelemetryFrame *frame = [QLMTelemetryFrame new];
         frame.time = exchange.time;
         frame.telemetry = telemetry;
-        NSNumber *address = @(message.address);
+        NSNumber *address = @(exchange.message.address);
         if (frames[address] == nil) {
             frames[address] = [NSMutableArray array];
         }
@@ -43,22 +50,47 @@ static NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *QLMTelemetryFra
     return frames;
 }
 
-// The telemetry that answered the poll to `address` at `time`.
-- (QLMTelemetry)telemetryIn:(NSString *)scenario from:(uint8_t)address at:(NSTimeInterval)time {
-    for (QLMTelemetryFrame *frame in QLMTelemetryFrames(scenario)[@(address)]) {
-        if (fabs(frame.time - time) < 0.005) {
-            return frame.telemetry;
-        }
-    }
-    XCTFail(@"%@: no telemetry from %02X at %.3f", scenario, address, time);
-    QLMTelemetry none;
-    memset(&none, 0, sizeof none);
-    return none;
+// The frames in `run` that carry 8A.
+static NSArray<QLMTelemetryFrame *> *QLMWakeStepFrames(NSArray<QLMTelemetryFrame *> *run) {
+    return [run filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(QLMTelemetryFrame *frame, NSDictionary *bindings) {
+        return frame.telemetry.wakeSteps != QLMTelemetryAbsent;
+    }]];
 }
 
 // 49 advances by one a second, mod 256.
 static NSInteger QLMWakeSecondsAdvance(QLMTelemetry from, QLMTelemetry to) {
     return (to.wakeSeconds - from.wakeSeconds + 256) % 256;
+}
+
+// A split frame's two parts as one: the first, then the second after its 09.
+static QLMMessage QLMJoinedFrame(QLMMessage first, QLMMessage second) {
+    uint8_t payload[QLMPayloadMax];
+    memcpy(payload, first.payload, first.length);
+    size_t rest = MIN(second.length - 1, sizeof payload - first.length);
+    memcpy(payload + first.length, second.payload + 1, rest);
+    return QLMMessageMake(first.address, payload, first.length + rest);
+}
+
+// The frame in `run` from the poll at `time`.
+- (QLMTelemetry)telemetryIn:(NSArray<QLMTelemetryFrame *> *)run at:(NSTimeInterval)time {
+    for (QLMTelemetryFrame *frame in run) {
+        if (fabs(frame.time - time) < 0.005) {
+            return frame.telemetry;
+        }
+    }
+    XCTFail(@"no telemetry at %.3f", time);
+    return (QLMTelemetry){0};
+}
+
+// From the poll at `before` to the one at `after`, each output meter falls
+// 20 counts, give or take `accuracy`, and the input meter holds.
+- (void)assertOutputsIn:(NSArray<QLMTelemetryFrame *> *)run fallFrom:(NSTimeInterval)before to:(NSTimeInterval)after within:(double)accuracy {
+    QLMTelemetry from = [self telemetryIn:run at:before];
+    QLMTelemetry to = [self telemetryIn:run at:after];
+    XCTAssertEqualWithAccuracy(from.hfMeter - to.hfMeter, 20, accuracy, @"%.3f", after);
+    XCTAssertEqualWithAccuracy(from.midMeter - to.midMeter, 20, accuracy, @"%.3f", after);
+    XCTAssertEqualWithAccuracy(from.lfMeter - to.lfMeter, 20, accuracy, @"%.3f", after);
+    XCTAssertEqual(from.inputMeter, to.inputMeter, @"%.3f", after);
 }
 
 // qlm-control-first, 829.40 s: the Right 8351B's first frame after qlm's
@@ -108,7 +140,7 @@ static NSInteger QLMWakeSecondsAdvance(QLMTelemetry from, QLMTelemetry to) {
             NSInteger advance = QLMWakeSecondsAdvance(run[i - 1].telemetry, run[i].telemetry);
             NSTimeInterval elapsed = run[i].time - run[i - 1].time;
             XCTAssertGreaterThan(advance, 0, @"%@ at %.2f", address, run[i].time);
-            XCTAssertLessThanOrEqual(fabs(advance - elapsed), 1.0, @"%@ at %.2f", address, run[i].time);
+            XCTAssertEqualWithAccuracy(advance, elapsed, 1.0, @"%@ at %.2f", address, run[i].time);
             pairs += 1;
         }
     }
@@ -122,7 +154,7 @@ static NSInteger QLMWakeSecondsAdvance(QLMTelemetry from, QLMTelemetry to) {
             NSTimeInterval elapsed = run[i].time - run[i - 1].time;
             if (elapsed > 200 && elapsed < 256) {
                 XCTAssertNotEqual(run[i].telemetry.status, QLMTelemetryStatusOn);
-                XCTAssertLessThanOrEqual(fabs(QLMWakeSecondsAdvance(run[i - 1].telemetry, run[i].telemetry) - elapsed), 0.03 * elapsed);
+                XCTAssertEqualWithAccuracy(QLMWakeSecondsAdvance(run[i - 1].telemetry, run[i].telemetry), elapsed, 0.03 * elapsed);
                 gaps += 1;
             }
         }
@@ -146,54 +178,55 @@ static NSInteger QLMWakeSecondsAdvance(QLMTelemetry from, QLMTelemetry to) {
         XCTAssertEqualWithAccuracy(run.firstObject.time, 49.05, 0.05, @"%02X", address);
         XCTAssertLessThanOrEqual(run.firstObject.telemetry.wakeSeconds, 2, @"%02X", address);
         XCTAssertGreaterThanOrEqual(run.firstObject.telemetry.wakeSeconds, 1, @"%02X", address);
-        NSUInteger index = [run indexOfObjectPassingTest:^BOOL(QLMTelemetryFrame *frame, NSUInteger i, BOOL *stop) {
-            return frame.telemetry.wakeSteps != QLMTelemetryAbsent;
-        }];
-        XCTAssertNotEqual(index, NSNotFound, @"%02X", address);
-        if (index != NSNotFound) {
-            XCTAssertEqual(run[index].telemetry.wakeSteps, 0, @"%02X", address);
-        }
+        NSArray<QLMTelemetryFrame *> *steps = QLMWakeStepFrames(run);
+        XCTAssertEqual(steps.count > 0 ? steps[0].telemetry.wakeSteps : QLMTelemetryAbsent, 0, @"%02X", address);
     }
 }
 
 // sleep-wake-darkwake: the Left 8351B, at 15, splits a frame at 313.28 s.
 // The first part is the temperature alone. The next poll, at 313.88 s,
-// brings the rest. In every capture, each of the 21 first parts is followed
-// by its second part, at that monitor's next poll, and no second part comes
-// without one.
+// brings the rest. In every capture, each of the 21 first parts and the
+// monitor's next reply make one whole frame, and no second part comes alone.
 - (void)testASplitFrame {
-    QLMMessage head = QLMMakeMessage(QLMAddressReply, 0x09, 0x41, 0x2A);
-    QLMMessage tail = QLMMakeMessage(QLMAddressReply, 0x09, 0x81, 0x00, 0x2A, 0x82, 0x00, 0x2A, 0x83, 0x00, 0x2A, 0x42, 0x9F,
-                                     0x43, 0x80, 0x45, 0x80, 0x44, 0x80, 0x47, 0x01, 0x49, 0x73, 0x88, 0x00, 0x4B, 0x89, 0x00,
-                                     0x41, 0x84, 0x02, 0xF1);
+    QLMMessage first = QLMMakeMessage(QLMAddressReply, 0x09, 0x41, 0x2A);
+    QLMMessage second = QLMMakeMessage(QLMAddressReply, 0x09, 0x81, 0x00, 0x2A, 0x82, 0x00, 0x2A, 0x83, 0x00, 0x2A, 0x42, 0x9F,
+                                       0x43, 0x80, 0x45, 0x80, 0x44, 0x80, 0x47, 0x01, 0x49, 0x73, 0x88, 0x00, 0x4B, 0x89, 0x00,
+                                       0x41, 0x84, 0x02, 0xF1);
     QLMTelemetry t;
-    XCTAssertEqual(QLMReplyTelemetry(&head, &t), QLMTelemetryErrorPartial);
+    XCTAssertEqual(QLMReplyTelemetry(&first, &t), QLMTelemetryErrorPartial);
     XCTAssertEqual(t.temperature, 0x2A);
     XCTAssertEqual(t.status, QLMTelemetryAbsent);
-    XCTAssertEqual(QLMReplyTelemetry(&tail, &t), QLMTelemetryErrorNotTelemetry);
+    XCTAssertEqual(QLMReplyTelemetry(&second, &t), QLMTelemetryErrorNotTelemetry);
+    QLMMessage whole = QLMJoinedFrame(first, second);
+    XCTAssertEqual(QLMReplyTelemetry(&whole, &t), QLMTelemetryOK);
+    XCTAssertEqual(t.wakeSeconds, 0x73);
 
-    NSUInteger heads = 0;
+    NSUInteger splits = 0;
     for (NSString *scenario in QLMCaptureScenarios()) {
-        NSMutableSet<NSNumber *> *waiting = [NSMutableSet set];
+        QLMMessage firsts[256];
+        bool waiting[256] = {false};
         for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
-            QLMMessage message = exchange.message;
-            if (!QLMAddressIsLeasable(message.address) || message.payload[0] != 0x08 || !exchange.answered) {
+            if (!QLMIsAnsweredPoll(exchange)) {
                 continue;
             }
+            uint8_t address = exchange.message.address;
             QLMMessage reply = exchange.reply;
             QLMTelemetryStatus status = QLMReplyTelemetry(&reply, &t);
-            NSNumber *address = @(message.address);
-            // Longer than a bare 09 or a busy marker.
-            BOOL second = status == QLMTelemetryErrorNotTelemetry && reply.length > 2;
-            XCTAssertEqual(second, [waiting containsObject:address], @"%@ %@ at %.3f", scenario, address, exchange.time);
-            [waiting removeObject:address];
-            if (status == QLMTelemetryErrorPartial) {
-                [waiting addObject:address];
-                heads += 1;
+            if (waiting[address]) {
+                whole = QLMJoinedFrame(firsts[address], reply);
+                XCTAssertEqual(QLMReplyTelemetry(&whole, &t), QLMTelemetryOK, @"%@ %02X at %.3f", scenario, address, exchange.time);
+                XCTAssertEqual(t.unknownTag, 0, @"%@ %02X at %.3f", scenario, address, exchange.time);
+                splits += 1;
+            } else {
+                // Longer than a bare 09 or a busy marker.
+                XCTAssertFalse(status == QLMTelemetryErrorNotTelemetry && reply.length > 2, @"%@ %02X at %.3f", scenario, address,
+                               exchange.time);
             }
+            waiting[address] = status == QLMTelemetryErrorPartial;
+            firsts[address] = reply;
         }
     }
-    XCTAssertEqual(heads, 21u);
+    XCTAssertEqual(splits, 21u);
 }
 
 // sleep-wake-darkwake: 8A rides one frame in 30 s. One frame that carried it
@@ -203,12 +236,7 @@ static NSInteger QLMWakeSecondsAdvance(QLMTelemetry from, QLMTelemetry to) {
 - (void)testWakeStepsEveryThirtySeconds {
     NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *frames = QLMTelemetryFrames(@"sleep-wake-darkwake");
     for (NSNumber *address in frames) {
-        NSMutableArray<QLMTelemetryFrame *> *steps = [NSMutableArray array];
-        for (QLMTelemetryFrame *frame in frames[address]) {
-            if (frame.telemetry.wakeSteps != QLMTelemetryAbsent) {
-                [steps addObject:frame];
-            }
-        }
+        NSArray<QLMTelemetryFrame *> *steps = QLMWakeStepFrames(frames[address]);
         XCTAssertGreaterThanOrEqual(steps.count, 19u, @"%@", address);
         XCTAssertEqual(steps.firstObject.telemetry.wakeSteps, 2, @"%@", address);
         XCTAssertEqual(steps.lastObject.telemetry.wakeSteps, 4, @"%@", address);
@@ -242,28 +270,17 @@ static NSInteger QLMWakeSecondsAdvance(QLMTelemetry from, QLMTelemetry to) {
 // meter falls about a count per dB, and to its floor on mute. The input
 // meter does not move.
 - (void)testTheMetersReadOneCountPerDB {
-    NSString *run = @"qlm-control-first";
-    QLMTelemetry before = [self telemetryIn:run from:0x04 at:274.744];
-    QLMTelemetry after = [self telemetryIn:run from:0x04 at:279.294];
-    XCTAssertEqualWithAccuracy(before.hfMeter - after.hfMeter, 20, 1);
-    XCTAssertEqualWithAccuracy(before.midMeter - after.midMeter, 20, 1);
-    XCTAssertEqualWithAccuracy(before.lfMeter - after.lfMeter, 20, 1);
-    XCTAssertEqual(before.inputMeter, after.inputMeter);
+    NSArray<QLMTelemetryFrame *> *right = QLMTelemetryFrames(@"qlm-control-first")[@0x04];
+    [self assertOutputsIn:right fallFrom:274.744 to:279.294 within:1];
+    [self assertOutputsIn:right fallFrom:538.330 to:541.180 within:2];
 
-    before = [self telemetryIn:run from:0x04 at:538.330];
-    after = [self telemetryIn:run from:0x04 at:541.180];
-    XCTAssertEqualWithAccuracy(before.hfMeter - after.hfMeter, 20, 2);
-    XCTAssertEqualWithAccuracy(before.midMeter - after.midMeter, 20, 2);
-    XCTAssertEqualWithAccuracy(before.lfMeter - after.lfMeter, 20, 2);
-    XCTAssertEqual(before.inputMeter, after.inputMeter);
-
-    before = [self telemetryIn:run from:0x04 at:639.271];
-    after = [self telemetryIn:run from:0x04 at:640.366];
-    XCTAssertGreaterThan(before.hfMeter, QLMTelemetryOutputSilent + 40);
-    XCTAssertEqual(after.hfMeter, QLMTelemetryOutputSilent);
-    XCTAssertEqual(after.midMeter, QLMTelemetryOutputSilent);
-    XCTAssertEqual(after.lfMeter, QLMTelemetryOutputSilent);
-    XCTAssertEqual(before.inputMeter, after.inputMeter);
+    QLMTelemetry unmuted = [self telemetryIn:right at:639.271];
+    QLMTelemetry muted = [self telemetryIn:right at:640.366];
+    XCTAssertGreaterThan(unmuted.hfMeter, QLMTelemetryOutputSilent + 40);
+    XCTAssertEqual(muted.hfMeter, QLMTelemetryOutputSilent);
+    XCTAssertEqual(muted.midMeter, QLMTelemetryOutputSilent);
+    XCTAssertEqual(muted.lfMeter, QLMTelemetryOutputSilent);
+    XCTAssertEqual(unmuted.inputMeter, muted.inputMeter);
 }
 
 @end
