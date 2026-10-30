@@ -2125,6 +2125,67 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(mostMissed, 0u);
 }
 
+// A mute whose 2B never went out still reaches the monitor. As GLM states a
+// new monitor's mute right after its first poll (captures/startup-idle,
+// 9.861 s), each monitor whose 2B IOKit did not take hears its state after
+// its next poll: the left its mute, and the right the lift of its own.
+- (void)testAMuteWhose2BDidNotGoOutIsStatedAfterTheNextPoll {
+    QLMFailingAdapter *failing = [[QLMFailingAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:failing];
+    [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_right.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.idle;
+    }];
+    failing.matches = ^BOOL(const QLMMessage *message) {
+        return QLMAddressIsLeasable(message->address) && message->payload[0] == 0x2B;
+    };
+    failing.failure = QLMHIDWriteError(kIOReturnTimeout);
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [_system setMuted:NO forMonitorWithHardwareID:_right.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && !QLMFindMonitor(snapshot, self->_right.hardwareID).muted &&
+               snapshot.idle;
+    }];
+    [_bus perform:^{
+        XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted);
+    }];
+    failing.failure = nil;
+    [self waitUntil:^BOOL {
+        __block BOOL stated = NO;
+        [self->_bus perform:^{
+            stated = self->_left.muteValue == QLMMuteValueMuted && self->_right.muteValue == QLMMuteValueUnmuted;
+        }];
+        return stated;
+    }];
+}
+
+// A stop drops the rounds still queued. A mute lifted just before a stop
+// reaches the monitor at the next start, after its first poll. The round
+// goes to the left first, so only the right's 2B is dropped here.
+- (void)testAMuteLiftedJustBeforeAStopReachesTheMonitorAtTheNextStart {
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_right.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.idle;
+    }];
+    [_system setMuted:NO forMonitorWithHardwareID:_right.hardwareID];
+    [self stopSystem];
+    [_bus perform:^{
+        XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted);
+    }];
+    [_system start];
+    [self waitUntil:^BOOL {
+        __block BOOL stated = NO;
+        [self->_bus perform:^{
+            stated = self->_right.muteValue == QLMMuteValueUnmuted;
+        }];
+        return stated;
+    }];
+    XCTAssertFalse(QLMFindMonitor(_system.snapshot, _right.hardwareID).muted);
+}
+
 // The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or
 // another host. GLM's case is pinned to the sentence QLMHostCheck writes.
 - (void)testTheSnapshotSaysWhoHoldsTheBus {

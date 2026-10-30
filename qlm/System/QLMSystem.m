@@ -124,6 +124,11 @@ static uint32_t QLMCeilingWord(double ceilingDecibels) {
     return QLMVolumeFrameWord(&top);
 }
 
+// A 2B to a monitor.
+static BOOL QLMIsMonitorState(const QLMMessage *message) {
+    return QLMAddressIsLeasable(message->address) && message->length == 2 && message->payload[0] == 0x2B;
+}
+
 // A frame to a session, or the lease of one.
 static BOOL QLMNamesSession(const QLMMessage *message) {
     return QLMAddressIsLeasable(message->address) ||
@@ -226,6 +231,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // The hardware IDs the user muted. Kept by ID, so a mute outlives a
     // lease that lapses and the monitor's next lease.
     NSMutableSet<NSData *> *_mutedIDs;
+    // The hardware IDs whose mute changed, or whose 2B did not go out, with
+    // no 2B in the group gone out to them since. Kept across a stop, which
+    // drops the rounds still queued, so each hears its state at the next
+    // start.
+    NSMutableSet<NSData *> *_unstatedIDs;
     BOOL _adapterMuted;
     NSString *_activeGroupName;
     // Set when an apply starts, since GLM's routing pass already treats the
@@ -251,6 +261,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
         _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
+        _unstatedIDs = [NSMutableSet set];
         _stopCompletions = [NSMutableArray array];
         _knownLeases = [NSMutableDictionary dictionary];
         for (QLMKnownLease *lease in settings.knownLeases) {
@@ -457,7 +468,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             NSError *error = strongSelf->_adapterError
                                  ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, @"The frame was queued before System checked the leases again.", nil);
             [strongSelf->_clock async:strongSelf->_queue run:^{
-                [weakSelf finishItem:completion == nil ? nil : ^{
+                QLMSystem *system = weakSelf;
+                if (QLMIsMonitorState(&message)) {
+                    [system noteState:&message wentOut:NO];
+                }
+                [system finishItem:completion == nil ? nil : ^{
                     completion(NULL, error);
                 }];
             }];
@@ -471,12 +486,32 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             sent.address = message.address;
         }
         [strongSelf->_adapter sendMessage:sent replyHandler:^(const QLMMessage *reply, NSError *error) {
-            [weakSelf noteSendError:error];
-            [weakSelf finishItem:completion == nil ? nil : ^{
+            QLMSystem *system = weakSelf;
+            [system noteSendError:error];
+            if (QLMIsMonitorState(&sent)) {
+                [system noteState:&sent wentOut:QLMSendWentOut(error)];
+            }
+            [system finishItem:completion == nil ? nil : ^{
                 completion(reply, error);
             }];
         }];
     };
+}
+
+// A 2B that did not go out leaves its monitor needing its state, after its
+// next poll that says on. One in the group that went out states it.
+- (void)noteState:(const QLMMessage *)state wentOut:(BOOL)wentOut {
+    QLMMonitorRecord *monitor = [self monitorAtSession:state->address];
+    if (monitor == nil) {
+        return;
+    }
+    uint8_t value = state->payload[1];
+    if (!wentOut) {
+        monitor.needsState = YES;
+        [_unstatedIDs addObject:monitor.hardwareID];
+    } else if (value == QLMMuteValueMuted || value == QLMMuteValueUnmuted) {
+        [_unstatedIDs removeObject:monitor.hardwareID];
+    }
 }
 
 - (void)send:(QLMMessage)message then:(nullable QLMSendCompletion)completion {
@@ -819,7 +854,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // its first poll, as GLM sends it. One that gets a block hears it after
     // the block instead.
     monitor.configured = _activeGroup == nil;
-    monitor.needsState = monitor.configured && (stating || [_mutedIDs containsObject:identity]);
+    monitor.needsState = monitor.configured && (stating || [_mutedIDs containsObject:identity] || [_unstatedIDs containsObject:identity]);
     [self identify:monitor];
     [self pollMonitor:monitor];
 }
@@ -1144,6 +1179,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         } else {
             [self->_mutedIDs removeObject:identity];
         }
+        [self->_unstatedIDs addObject:identity];
         self->_dirty = YES;
         QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
         if (monitor != nil) {
@@ -1167,6 +1203,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!self->_running) {
             return;
         }
+        [self->_unstatedIDs unionSet:self->_mutedIDs];
         if (muted) {
             for (QLMMonitorRecord *monitor in self->_monitors) {
                 [self->_mutedIDs addObject:monitor.hardwareID];
@@ -1176,6 +1213,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         for (QLMMonitorRecord *monitor in self->_monitors) {
             monitor.needsState = monitor.needsState || !monitor.isOn;
+            [self->_unstatedIDs addObject:monitor.hardwareID];
         }
         self->_adapterMuted = muted;
         if (self->_volumeDecibels != nil) {
@@ -1252,7 +1290,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self sendRecords:[[self sequenceFor:_activeGroup] enumerationOf:monitors blocks:blocks] then:completionFor];
     [self afterSends:^{
         for (QLMMonitorRecord *monitor in fresh) {
-            monitor.needsState = blocks[monitor.hardwareID] != nil || [self->_mutedIDs containsObject:monitor.hardwareID];
+            NSData *identity = monitor.hardwareID;
+            monitor.needsState = blocks[identity] != nil || [self->_mutedIDs containsObject:identity] || [self->_unstatedIDs containsObject:identity];
         }
     }];
 }
