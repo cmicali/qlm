@@ -68,8 +68,9 @@ static void QLMPrintUsage(FILE *stream) {
             "    volume, dim, sleep, and wake are broadcasts, and every monitor obeys them.\n"
             "    To try one on a single monitor, put the others in standby in GLM, then quit GLM. wake wakes\n"
             "    them all, so try it last.\n"
-            "  - About 2.6 s after qlmctl exits, the adapter takes over with its own level, likely the knob's\n"
-            "    position. That level is not yet measured, so turn the knob down first.\n"
+            "  - About 2.6 s after qlmctl exits, the adapter takes over at the knob's position. qlmctl sends that\n"
+            "    level as it exits when it is at or below its own. When the knob is higher, the level rises then,\n"
+            "    so turn the knob down first.\n"
             "\n"
             "apply-group runs only with --dry-run or --fake until its frames are checked on the monitors.\n",
             QLMDimDecibels, QLMCeilingLimit);
@@ -358,17 +359,16 @@ static void QLMPrintFrame(const QLMMessage *message, const char *_Nullable label
     printf("%s\n", note ?: "");
 }
 
-// TRAP: about 2.6 s after the host goes quiet, the adapter takes over with
-// its own level, and USB does not show which (docs/plan.md).
-static NSString *QLMHandBackText(QLMAdapterState *adapter) {
-    NSString *level = @"That level is likely the knob's position. It is not yet measured.";
-    if (adapter.knobTenths != nil) {
-        level = [NSString stringWithFormat:@"That level is likely the knob's position, %.1f dB. It is not yet measured.",
-                                           adapter.knobTenths.doubleValue / 10.0];
-    } else if (adapter.hasStatus && !adapter.knobPresent) {
-        level = @"No knob is in, so that level is unknown.";
+// The dry run's note: what the stop would do, by the knob's reading now.
+static NSString *QLMDryRunHandBackText(QLMAdapterState *adapter) {
+    if (adapter.knobTenths == nil) {
+        return @"About 2.6 s after qlm stops, the adapter takes over with its own level. No knob is in, so that level is "
+               @"unknown.";
     }
-    return [NSString stringWithFormat:@"About 2.6 s after qlm stops, the adapter takes over with its own level. %@", level];
+    return [NSString stringWithFormat:@"About 2.6 s after qlm stops, the adapter takes over at the knob's %.1f dB. If that "
+                                      @"is at or below qlm's level, qlm sends it as it stops, and nothing changes. If it "
+                                      @"is above, the level rises then.",
+                                      adapter.knobTenths.doubleValue / 10.0];
 }
 
 static void QLMPrintDryRun(QLMControlOptions *options, QLMSnapshot *discovered, NSArray<NSData *> *records) {
@@ -400,7 +400,7 @@ static void QLMPrintDryRun(QLMControlOptions *options, QLMSnapshot *discovered, 
         printf("The cycle sends the volume again every %.2f s while qlmctl runs.\n", options.settings.cycleInterval);
     }
     if (options.overUSB) {
-        printf("%s\n", QLMHandBackText(discovered.adapter).UTF8String);
+        printf("%s\n", QLMDryRunHandBackText(discovered.adapter).UTF8String);
     }
     printf("Nothing was sent beyond discovery.\n");
 }
@@ -471,10 +471,15 @@ static int QLMRunControl(QLMSystem *system, QLMControlOptions *_Nullable options
             status = EX_UNAVAILABLE;
         }
     }
-    QLMAdapterState *adapter = system.snapshot.adapter;
+    // The stop may send the knob's level first, so wait for it.
     [system stop];
+    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    });
     if (sent && options.overUSB) {
-        fprintf(stderr, "qlmctl: warning: %s\n", QLMHandBackText(adapter).UTF8String);
+        BOOL warning = YES;
+        NSString *text = QLMHandBackText((stopped ?: system.snapshot).handBack, &warning);
+        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", text.UTF8String);
     }
     return status;
 }

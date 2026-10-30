@@ -330,6 +330,33 @@ static NSArray<NSData *> *QLMPair(void) {
     XCTAssertEqual(status, EX_DATAERR);
 }
 
+static QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume) {
+    QLMHandBack *handBack = [[QLMHandBack alloc] init];
+    handBack.kind = kind;
+    handBack.knobDecibels = knob;
+    handBack.volumeDecibels = volume;
+    return handBack;
+}
+
+// qlmctl's note at exit says what the stop did. Only a take-over that
+// changes nothing is not a warning. A louder one names both levels.
+- (void)testTheHandBackNoteSaysWhatTheStopDid {
+    BOOL warning = YES;
+    NSString *text = QLMHandBackText(QLMMakeHandBack(QLMHandBackKnobLevel, @(-43.3), @(-40)), &warning);
+    XCTAssertFalse(warning);
+    XCTAssertTrue([text containsString:@"-43.3 dB"], @"%@", text);
+
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackLouder, @(-30), @(-40)), &warning);
+    XCTAssertTrue(warning);
+    XCTAssertTrue([text containsString:@"-30.0 dB"] && [text containsString:@"-40.0 dB"], @"%@", text);
+
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, nil, @(-40)), &warning);
+    XCTAssertTrue(warning);
+    XCTAssertTrue([text containsString:@"no knob"], @"%@", text);
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, @(-40), nil), &warning);
+    XCTAssertTrue([text containsString:@"no volume"], @"%@", text);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {
