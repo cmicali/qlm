@@ -100,6 +100,75 @@
     XCTAssertEqual(block.warnings.count, 0u);
 }
 
+// The delay frame `serial` gets in `group`.
+static NSData *QLMDelayPayload(QLMSetupGroup *group, NSString *serial) {
+    QLMDSPBlock *block = [QLMDSPBlock blockForNode:[group nodeWithSerial:serial] inGroup:group error:NULL];
+    return block.payloads[1];
+}
+
+// Source: captures/group-switch-main-2x1-main-4x2, the switch to Main 4x2.
+// Each monitor is known by its level frame. Time-of-flight_Compensation is
+// in milliseconds: the 8330As' 6 is 288 samples, and the 8351B's 1.23 is 59.
+// The subwoofers' delays are their phase at 85 Hz.
+- (void)testDelaysMatchTheCapturedSwitchToMain4x2 {
+    QLMSetupGroup *group = QLMReadFixtureSetup().groups[0];
+    const uint8_t rearRight[] = {0x10, 0x02, 0x00, 0x00, 0x01, 0x20};  // 36.125 s, to 02
+    XCTAssertEqualObjects(QLMDelayPayload(group, @"1000005"), QLMBytes(rearRight, sizeof rearRight));
+    const uint8_t left[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0x3B};  // 35.615 s, to 03
+    XCTAssertEqualObjects(QLMDelayPayload(group, @"1000002"), QLMBytes(left, sizeof left));
+    const uint8_t rearLeft[] = {0x10, 0x02, 0x00, 0x00, 0x01, 0x20};  // 35.805 s, to 04
+    XCTAssertEqualObjects(QLMDelayPayload(group, @"1000004"), QLMBytes(rearLeft, sizeof rearLeft));
+    const uint8_t sub[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0xEB};  // 36.441 s, to 05
+    XCTAssertEqualObjects(QLMDelayPayload(group, @"1000006"), QLMBytes(sub, sizeof sub));
+    const uint8_t right[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0x00};  // 35.704 s, to 06
+    XCTAssertEqualObjects(QLMDelayPayload(group, @"1000003"), QLMBytes(right, sizeof right));
+    const uint8_t center[] = {0x10, 0x02, 0x00, 0x00, 0x00, 0xA5};  // 36.672 s, to 07
+    XCTAssertEqualObjects(QLMDelayPayload(group, @"1000007"), QLMBytes(center, sizeof center));
+
+    QLMDSPBlock *block = [QLMDSPBlock blockForNode:[group nodeWithSerial:@"1000005"] inGroup:group error:NULL];
+    XCTAssertEqual(block.warnings.count, 0u);
+}
+
+// Source: captures/startup-idle, at 8.857 s. GLM opened on Main 2x1 and sent
+// its 7370A 10 02 00 00 01 90: 180 degrees at a 60 Hz crossover, 400 samples.
+- (void)testSubwooferDelayMatchesTheCapturedStartup {
+    QLMSetupGroup *group = QLMReadFixtureSetup().groups[2];
+    const uint8_t sub[] = {0x10, 0x02, 0x00, 0x00, 0x01, 0x90};
+    XCTAssertEqualObjects(QLMDelayPayload(group, @"1000006"), QLMBytes(sub, sizeof sub));
+}
+
+// Source: captures/group-switch-main-2x1-main-4x2, the 40 frames of the
+// switch to Main 4x2. Inputs 1 to 3 are AES3, with the channel last.
+- (void)testAESRoutingMatchesTheCapturedSwitchToMain4x2 {
+    QLMSetupGroup *group = QLMReadFixtureSetup().groups[0];
+    NSError *error = nil;
+    QLMDSPBlock *rearRight = [QLMDSPBlock blockForNode:[group nodeWithSerial:@"1000005"] inGroup:group error:&error];
+    const uint8_t inputTwo[] = {0x40, 0x00, 0x02, 0x00, 0x02};  // 36.423 s, to 02
+    XCTAssertEqualObjects(rearRight.payloads.lastObject, QLMBytes(inputTwo, sizeof inputTwo), @"%@", error);
+    QLMDSPBlock *left = [QLMDSPBlock blockForNode:[group nodeWithSerial:@"1000002"] inGroup:group error:&error];
+    const uint8_t inputOne[] = {0x40, 0x00, 0x02, 0x00, 0x01};  // 35.699 s, to 03
+    XCTAssertEqualObjects(left.payloads.lastObject, QLMBytes(inputOne, sizeof inputOne), @"%@", error);
+    QLMDSPBlock *sub = [QLMDSPBlock blockForNode:[group nodeWithSerial:@"1000006"] inGroup:group error:&error];
+    const uint8_t inputThree[] = {0x40, 0x00, 0x02, 0x00, 0x03};  // 36.515 s, to 05
+    XCTAssertEqualObjects(sub.payloads.lastObject, QLMBytes(inputThree, sizeof inputThree), @"%@", error);
+}
+
+// No capture has a node on input 4, so the analog frame stays unverified.
+- (void)testAnalogRoutingIsMarkedUnverified {
+    QLMSetupGroup *group = QLMReadFixtureSetup().groups[0];
+    QLMSetupNode *node = [[QLMSetupNode alloc] init];
+    node.className = @"TwowayGen2";
+    node.nodeClass = QLMSetupNodeClassTwoWay;
+    node.input = 4;
+    node.bands = [group nodeWithSerial:@"1000005"].bands;
+    NSError *error = nil;
+    QLMDSPBlock *block = [QLMDSPBlock blockForNode:node inGroup:group error:&error];
+    XCTAssertNotNil(block, @"%@", error);
+    const uint8_t analog[] = {0x40, 0x00, 0x01, 0x02, 0x00};
+    XCTAssertEqualObjects(block.payloads.lastObject, QLMBytes(analog, sizeof analog));
+    XCTAssertTrue([block.warnings.lastObject containsString:@"analog"]);
+}
+
 // The Safety rule: an 8351B's rate is unverified, so its block says so.
 - (void)testThreeWayIsUnverified {
     QLMSetup *setup = QLMReadFixtureSetup();
