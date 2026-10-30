@@ -131,6 +131,12 @@ static uint32_t QLMCeilingWord(double ceilingDecibels) {
     return QLMVolumeFrameWord(&top);
 }
 
+// A frame to a session, or the lease of one.
+static BOOL QLMNamesSession(const QLMMessage *message) {
+    return QLMAddressIsLeasable(message->address) ||
+           (message->address == QLMAddressMulticast && message->length > 0 && message->payload[0] == 0x02);
+}
+
 static BOOL QLMAdapterStatusDiffers(const QLMAdapterStatus *a, const QLMAdapterStatus *b) {
     return a->knob != b->knob || a->mic != b->mic || a->hasKnobPosition != b->hasKnobPosition || a->knobTenths != b->knobTenths;
 }
@@ -192,6 +198,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // Each identified monitor's last session and serial, by hardware ID,
     // kept across a stop to take its lease back at the next start.
     NSMutableDictionary<NSData *, QLMKnownLease *> *_knownLeases;
+    // Sessions whose serial check another monitor answered. None is leased.
+    NSMutableIndexSet *_foreignSessions;
+    NSUInteger _checksOut;  // serial checks queued or in flight; the probe leases nothing meanwhile
+    NSUInteger _leaseEpoch;  // counts the drops of every record; see itemSending:then:
     QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
@@ -238,6 +248,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
         _stopCompletions = [NSMutableArray array];
         _knownLeases = [NSMutableDictionary dictionary];
+        _foreignSessions = [NSMutableIndexSet indexSet];
         _adapterMuted = settings.mutingAll;
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
@@ -297,7 +308,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // 7.29 s). GLM's 01 22, 01 51 82, and wake are left out.
     [self pollAdapter];
     [self identifyAdapter];
-    [self takeBackKnownLeases];
+    [self takeBackKnownLeasesFirst:NO stating:NO];
     [self runCycle];
 
     __weak QLMSystem *weakSelf = self;
@@ -366,6 +377,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _inFlight = NO;
     _cycleQueued = NO;
     _probing = NO;
+    _checksOut = 0;
     _adapterPollsQueued = 0;
     [_adapter stop];
     [_monitors removeAllObjects];
@@ -420,9 +432,25 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (dispatch_block_t)itemSending:(QLMMessage)message then:(nullable QLMSendCompletion)completion {
     __weak QLMSystem *weakSelf = self;
+    NSUInteger epoch = _leaseEpoch;
     return ^{
         QLMSystem *strongSelf = weakSelf;
         if (strongSelf == nil) {
+            return;
+        }
+        // TRAP: a frame that names a session reaches whichever monitor holds
+        // it now. While the bus is refused or gone, another host may lease
+        // that session to another monitor. So such a frame does not go out
+        // then, nor after, if it was queued before System checked the
+        // leases again.
+        if (QLMNamesSession(&message) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
+            NSError *error = strongSelf->_adapterError
+                                 ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, @"The frame was queued before System checked the leases again.", nil);
+            [strongSelf->_clock async:strongSelf->_queue run:^{
+                [weakSelf finishItem:completion == nil ? nil : ^{
+                    completion(NULL, error);
+                }];
+            }];
             return;
         }
         // TRAP: a volume frame waits in line, and the ceiling may fall
@@ -468,6 +496,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // A busy or missing adapter shows in the snapshot until a send goes out.
+// Then every lease is checked again. Call it only from an item's completion.
 - (void)noteSendError:(nullable NSError *)error {
     if (!_running) {
         return;
@@ -483,7 +512,27 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     } else if (error == nil && _adapterError != nil) {
         _adapterError = nil;
         _dirty = YES;
+        [self takeBackAfterGap];
     }
+}
+
+// TRAP: another host may have had the bus meanwhile. GLM leases from 02 in
+// its own probe order, and a host that quits leaves its leases
+// (docs/protocol.md: Discovery and the lease). So a record's session may be
+// another monitor's now. Every record is dropped, and each monitor System
+// knew is taken back only where its own serial answers, ahead of anything
+// queued. Each one taken back hears its state after its first poll: its last
+// 2B may not have gone out, and the other host may have changed it.
+- (void)takeBackAfterGap {
+    if (_stopping || !self.settings.discoversMonitors) {
+        return;
+    }
+    if (_monitors.count > 0) {
+        [_monitors removeAllObjects];
+        _dirty = YES;
+    }
+    _leaseEpoch += 1;
+    [self takeBackKnownLeasesFirst:YES stating:YES];
 }
 
 // Not a send: holds the line, so the next item goes out `seconds` after the
@@ -574,7 +623,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     for (unsigned attempt = 0; attempt < 256; attempt++) {
         uint8_t candidate = _nextSession;
         _nextSession = (uint8_t)(candidate >= QLMAddressSessionLast ? QLMAddressSessionFirst : candidate + 1);
-        if (!QLMAddressIsLeasable(candidate)) {
+        if (!QLMAddressIsLeasable(candidate) || [_foreignSessions containsIndex:candidate]) {
             continue;
         }
         if ([self monitorAtSession:candidate] == nil) {
@@ -610,10 +659,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)probeNext {
     [self send:QLMCommandProbe() then:^(const QLMMessage *reply, NSError *error) {
         uint8_t hardwareID[3];
-        if (reply != NULL && QLMReplyHardwareID(reply, hardwareID)) {
+        BOOL found = reply != NULL && QLMReplyHardwareID(reply, hardwareID);
+        if (found && self->_checksOut == 0) {
             [self assignSessionTo:hardwareID];
-        } else {
-            self->_probing = NO;
+            return;
+        }
+        // While serial checks are out, they may yet find a session held. The
+        // monitor answers the next probe.
+        self->_probing = NO;
+        if (!found) {
             [self applyToNewMonitors];
         }
     }];
@@ -646,29 +700,71 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             self->_probing = NO;
             return;
         }
-        [self track:identity session:session serial:nil];
+        [self track:identity session:session serial:nil stating:NO];
         [self probeNext];
     }];
 }
 
 // TRAP: a monitor that still holds its lease never answers a probe, so after
-// a restart or a short gap it stays hidden until the lease lapses, 23 s or
-// more (docs/protocol.md: When the host goes quiet). So each monitor System
-// knew is asked for its serial at its old session. A reply with the same
-// serial is that monitor, and its lease is taken back at once. The probe
-// finds the rest.
-- (void)takeBackKnownLeases {
+// a restart or a gap it stays hidden until the lease lapses, 23 s or more
+// (docs/protocol.md: When the host goes quiet). So each session a monitor
+// System knew last held is asked for its serial. Where that monitor's own
+// serial answers, its lease is taken back at once. A session that answers
+// with another serial is another monitor's, so it is never leased, and
+// nothing more goes to it. The probe finds the rest, once every check is
+// done. `first` puts the checks ahead of everything queued; call it so only
+// from an item's completion. `stating`: each monitor taken back hears its
+// state after its first poll, not only a muted one.
+- (void)takeBackKnownLeasesFirst:(BOOL)first stating:(BOOL)stating {
+    if (!self.settings.discoversMonitors) {
+        return;
+    }
+    NSMutableDictionary<NSNumber *, NSMutableArray<NSData *> *> *bySession = [NSMutableDictionary dictionary];
     [_knownLeases enumerateKeysAndObjectsUsingBlock:^(NSData *identity, QLMKnownLease *known, BOOL *stop) {
-        uint8_t session = known.session;
-        NSString *serial = known.serial;
-        [self send:QLMCommandSerialNumber(session) then:^(const QLMMessage *reply, NSError *error) {
-            char text[QLMPayloadMax];
-            BOOL same = reply != NULL && QLMReplyText(reply, text, sizeof text) && [@(text) isEqualToString:serial];
-            if (same && [self monitorWithHardwareID:identity] == nil && [self monitorAtSession:session] == nil) {
-                [self track:identity session:session serial:serial];
-            }
-        }];
+        NSMutableArray<NSData *> *identities = bySession[@(known.session)];
+        if (identities == nil) {
+            identities = [NSMutableArray array];
+            bySession[@(known.session)] = identities;
+        }
+        [identities addObject:identity];
     }];
+    NSMutableArray<dispatch_block_t> *checks = [NSMutableArray array];
+    for (NSNumber *key in [bySession.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
+        uint8_t session = key.unsignedCharValue;
+        NSArray<NSData *> *identities = bySession[key];
+        _checksOut += 1;
+        [checks addObject:[self itemSending:QLMCommandSerialNumber(session) then:^(const QLMMessage *reply, NSError *error) {
+            self->_checksOut -= 1;
+            char text[QLMPayloadMax];
+            if (reply == NULL || !QLMReplyText(reply, text, sizeof text)) {
+                return;
+            }
+            [self session:session answered:@(text) expecting:identities stating:stating];
+        }]];
+    }
+    if (first) {
+        [self enqueueNext:checks];
+        return;
+    }
+    for (dispatch_block_t check in checks) {
+        [self enqueue:check];
+    }
+}
+
+- (void)session:(uint8_t)session answered:(NSString *)serial expecting:(NSArray<NSData *> *)identities stating:(BOOL)stating {
+    for (NSData *identity in identities) {
+        if (![_knownLeases[identity].serial isEqualToString:serial]) {
+            continue;
+        }
+        if ([self monitorWithHardwareID:identity] == nil && [self monitorAtSession:session] == nil) {
+            [_foreignSessions removeIndex:session];
+            [self track:identity session:session serial:serial stating:stating];
+        }
+        return;
+    }
+    if ([self monitorAtSession:session] == nil) {
+        [_foreignSessions addIndex:session];
+    }
 }
 
 - (nullable QLMMonitorRecord *)monitorAtSession:(uint8_t)session {
@@ -681,8 +777,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // A monitor that holds `session`, from a lease or one taken back. It
-// replaces any record of the same monitor, whose lease is gone.
-- (void)track:(NSData *)identity session:(uint8_t)session serial:(nullable NSString *)serial {
+// replaces any record of the same monitor, whose lease is gone. `stating`:
+// it hears its state after its first poll even when it is not muted.
+- (void)track:(NSData *)identity session:(uint8_t)session serial:(nullable NSString *)serial stating:(BOOL)stating {
     QLMMonitorRecord *stale = [self monitorWithHardwareID:identity];
     if (stale != nil) {
         [_monitors removeObject:stale];
@@ -708,7 +805,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // its first poll, as GLM sends it. One that gets a block hears it after
     // the block instead.
     monitor.configured = _activeGroup == nil;
-    monitor.needsState = monitor.configured && [_mutedIDs containsObject:identity];
+    monitor.needsState = monitor.configured && (stating || [_mutedIDs containsObject:identity]);
     [self identify:monitor];
     [self pollMonitor:monitor];
 }

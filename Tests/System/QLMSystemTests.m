@@ -1843,6 +1843,111 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertNil(QLMFindMonitor(moved, _right.hardwareID));
 }
 
+// Every frame sent from `start` on to any of `sessions`.
+- (NSArray<NSData *> *)sentFrom:(NSUInteger)start to:(NSIndexSet *)sessions {
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        return [sessions containsIndex:((const uint8_t *)message.bytes)[0]];
+    }];
+}
+
+// GLM leases from 02 in its own probe order, and a host that quits leaves
+// its leases: in captures/qlm-first-discover they held for up to 42 s after
+// GLM quit. Here GLM takes the bus, leases each monitor the other's
+// session, and quits. When the bus comes back, System drops its records and
+// asks each old session for its serial. Each answers with the other
+// monitor's, so System sends nothing more to either session, and leases
+// neither. Once GLM's leases lapse, the probe finds both monitors, and each
+// hears its own mute.
+- (void)testABusThatComesBackChecksEveryLeaseBeforeUsingIt {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    uint8_t leftSession = QLMFindMonitor(first, _left.hardwareID).session;
+    uint8_t rightSession = QLMFindMonitor(first, _right.hardwareID).session;
+    NSMutableIndexSet *oldSessions = [NSMutableIndexSet indexSetWithIndex:leftSession];
+    [oldSessions addIndex:rightSession];
+    [_system setVolumeDecibels:-30];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.busProblem == QLMBusProblemGLM;
+    }];
+    [_bus perform:^{
+        self->_left.session = rightSession;
+        self->_right.session = leftSession;
+        self->_left.muteValue = QLMMuteValueUnmuted;
+        self->_right.muteValue = QLMMuteValueUnmuted;
+        self->_bus.busyReason = nil;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [_time advanceBy:0.3];
+    QLMSnapshot *back = _system.snapshot;
+    XCTAssertEqual(back.busProblem, QLMBusProblemNone);
+    XCTAssertEqual(back.monitors.count, 0u);
+    QLMMessage leftCheck = QLMCommandSerialNumber(leftSession);
+    QLMMessage rightCheck = QLMCommandSerialNumber(rightSession);
+    NSSet<NSData *> *checks = [NSSet setWithObjects:QLMAdapterRecord(&leftCheck), QLMAdapterRecord(&rightCheck), nil];
+    XCTAssertEqualObjects([NSSet setWithArray:[self sentFrom:before to:oldSessions]], checks);
+    XCTAssertEqual([self sentFrom:before to:oldSessions].count, 2u);
+
+    [self lapseLeases];
+    QLMSnapshot *found = [self waitForDiscovery];
+    for (QLMMonitorState *monitor in found.monitors) {
+        XCTAssertFalse([oldSessions containsIndex:monitor.session], @"%02X", monitor.session);
+    }
+    [self sendEveryMuteRound];
+    XCTAssertEqual([self sentFrom:before to:oldSessions].count, 2u);
+    [_bus perform:^{
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+        XCTAssertEqual(self->_right.muteValue, QLMMuteValueUnmuted);
+    }];
+}
+
+// The same, with the leases where System left them. Each monitor is taken
+// back at once, with no lease, and hears its own state after its first
+// poll, since the other host changed both mutes.
+- (void)testABusThatComesBackTakesBackTheLeasesStillHeld {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    [_bus perform:^{
+        self->_left.muteValue = QLMMuteValueUnmuted;
+        self->_right.muteValue = QLMMuteValueMuted;
+        self->_bus.busyReason = nil;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [self waitUntil:^BOOL {
+        __block BOOL restated = NO;
+        [self->_bus perform:^{
+            restated = self->_left.muteValue == QLMMuteValueMuted && self->_right.muteValue == QLMMuteValueUnmuted;
+        }];
+        return restated;
+    }];
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+    }];
+    for (QLMMonitorState *monitor in first.monitors) {
+        XCTAssertEqual(QLMFindMonitor(back, monitor.hardwareID).session, monitor.session);
+    }
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 0u);
+}
+
 // The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or
 // another host. GLM's case is pinned to the sentence QLMHostCheck writes.
 - (void)testTheSnapshotSaysWhoHoldsTheBus {
