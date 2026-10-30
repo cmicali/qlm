@@ -151,15 +151,17 @@ static NSData *QLMReportFor(QLMMessage message) {
     }
 }
 
-// The system info comes 340 ms late, and the sync's reply queues behind it,
+// The system info comes 800 ms late, and the sync's reply queues behind it,
 // past the sync's five timeouts. The link stalls rather than give up: the
 // held request and every send fail at once, and none is written. Once the
 // sync's reply comes, the link is in step, and the late reply has answered
 // nothing.
+// TRAP: the sync is overdue about 300 ms in, but CI's timers fire late. At
+// 340 ms the late reply landed inside the sync's window there.
 - (void)testAnOverdueSyncStallsTheLinkUntilItsReplyComes {
     QLMMessage reply;
     NSError *error = nil;
-    _device.nextReplyDelay = 0.34;
+    _device.nextReplyDelay = 0.8;
     XCTAssertFalse([self send:QLMCommandSystemInfo(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
