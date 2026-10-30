@@ -319,18 +319,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // one before it ends. Nothing else goes out meanwhile.
 - (void)hold:(NSTimeInterval)seconds {
     NSUInteger run = _run;
+    dispatch_queue_t queue = _queue;
     __weak QLMSystem *weakSelf = self;
     [self enqueue:^{
-        QLMSystem *strongSelf = weakSelf;
-        if (strongSelf == nil) {
-            return;
-        }
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), strongSelf->_queue, ^{
-            QLMSystem *later = weakSelf;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), queue, ^{
+            QLMSystem *strongSelf = weakSelf;
             // TRAP: a stop empties the line. A hold from before it must not
             // end an item of the next start.
-            if (later != nil && later->_run == run) {
-                [later finishItem:nil];
+            if (strongSelf != nil && strongSelf->_run == run) {
+                [strongSelf finishItem:nil];
             }
         });
     }];

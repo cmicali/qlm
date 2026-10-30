@@ -4,15 +4,11 @@
 
 #include "QLMCommands.h"
 
-// A turn moves the reading a whole dB from where the knob rested. The rest
-// point gives way to the reading every half second, so a slower move is no
-// turn. For 2 s after a turn the volume follows a reading 4 tenths from it,
-// past its step's edge by more than a tenth, so jitter at the edge does not
-// flip it. Later, a volume that is the knob's follows a reading a whole dB
-// from it.
-static const NSInteger QLMKnobTurnTenths = 10;
-static const NSTimeInterval QLMKnobRestInterval = 0.5;
-static const NSTimeInterval QLMKnobFollowInterval = 2;
+static const NSInteger QLMKnobTurnTenths = 10;          // a turn, and a wander
+static const NSTimeInterval QLMKnobRestInterval = 0.5;  // the rest point's age, at most
+static const NSTimeInterval QLMKnobFollowInterval = 2;  // following, after a turn
+// Past a step's edge by more than a tenth, so jitter at the edge does not
+// flip the volume.
 static const double QLMKnobFollowTenths = 4;
 
 // The nearest step, from QLMVolumeDecibelsMin to 0 dB. No tenth falls
@@ -56,13 +52,11 @@ static double QLMKnobStep(NSInteger tenths) {
     if (volume == nil || step == volume.doubleValue) {
         return nil;
     }
-    if (!turned) {
-        double distance = fabs((double)tenths - volume.doubleValue * 10);
-        BOOL following = time < _followUntil && distance >= QLMKnobFollowTenths;
-        BOOL wandered = _lastVolume != nil && [volume isEqualToNumber:_lastVolume] && distance >= QLMKnobTurnTenths;
-        if (!following && !wandered) {
-            return nil;
-        }
+    double distance = fabs((double)tenths - volume.doubleValue * 10);
+    BOOL following = time < _followUntil && distance >= QLMKnobFollowTenths;
+    BOOL wandered = [volume isEqual:_lastVolume] && distance >= QLMKnobTurnTenths;
+    if (!turned && !following && !wandered) {
+        return nil;
     }
     _lastVolume = @(step);
     return _lastVolume;

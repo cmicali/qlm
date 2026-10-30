@@ -62,13 +62,12 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)setVolumeDecibels:(double)decibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A
-// change sends GLM's dim: the level twice, a round of 2B, and 3D. With no
-// volume set, it sends nothing.
+// change sends GLM's dim sequence, or nothing while no volume is set.
 - (void)setDimmed:(BOOL)dimmed;
 
 // Each sends two rounds of 2B to every leased monitor, restating each one's
-// mute state. Mute all first re-sends the volume, then sets the adapter's
-// own mute at 01.
+// mute state. Mute all also re-sends the volume and sets the adapter's own
+// mute, as GLM does.
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
 
