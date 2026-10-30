@@ -68,7 +68,6 @@ static const NSTimeInterval QLMWakePairSpacing = 0.2;
 @property (nonatomic) NSUInteger missedPolls;
 @property (nonatomic) NSDate *lastReply;
 @property (nonatomic) BOOL retrying;
-@property (nonatomic) BOOL muted;
 @end
 
 @implementation QLMMonitorRecord
@@ -98,10 +97,6 @@ static BOOL QLMAdapterStatusDiffers(const QLMAdapterStatus *a, const QLMAdapterS
 static BOOL QLMSendWentOut(NSError *_Nullable error) {
     return error == nil || ([error.domain isEqualToString:QLMAdapterErrorDomain] &&
                             (error.code == QLMAdapterErrorTimeout || error.code == QLMAdapterErrorBadReply));
-}
-
-static uint8_t QLMMuteValueFor(QLMMonitorRecord *monitor) {
-    return monitor.muted ? QLMMuteValueMuted : QLMMuteValueUnmuted;
 }
 
 static QLMMonitorStatus QLMMonitorStatusFor(const QLMTelemetry *telemetry) {
@@ -146,6 +141,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     BOOL _volumeSendPending;
     NSDate *_lastVolumeSend;
     BOOL _dimmed;
+    // The hardware IDs the user muted. Kept by ID, so a mute outlives a
+    // lease that lapses and the monitor's next lease.
+    NSMutableSet<NSData *> *_mutedIDs;
     BOOL _adapterMuted;
     NSString *_activeGroupName;
     void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
@@ -162,6 +160,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
+        _mutedIDs = [NSMutableSet set];
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
         _snapshot = [[QLMSnapshot alloc] init];
@@ -260,6 +259,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_adapterPollsQueued = 0;
         [self->_adapter stop];
         [self->_monitors removeAllObjects];
+        [self->_mutedIDs removeAllObjects];
         self->_adapterMuted = NO;
         [self->_knob reset];
         self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
@@ -469,6 +469,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         monitor.lastReply = [NSDate date];
         [self->_monitors addObject:monitor];
         self->_dirty = YES;
+        // A monitor the user muted may come back unmuted, so it hears its
+        // mute first, twice, as every state change goes out.
+        if ([self->_mutedIDs containsObject:identity]) {
+            for (int i = 0; i < 2; i++) {
+                [self send:QLMCommandMute(session, QLMMuteValueMuted) then:nil];
+            }
+        }
         [self identify:monitor];
         [self pollMonitor:monitor];
         [self probe];
@@ -742,9 +749,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!self->_running) {
             return;
         }
-        QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
-        if (monitor != nil) {
-            monitor.muted = muted;
+        if (muted) {
+            [self->_mutedIDs addObject:identity];
+        } else {
+            [self->_mutedIDs removeObject:identity];
+        }
+        self->_dirty = YES;
+        if ([self monitorWithHardwareID:identity] != nil) {
             [self sendMuteRounds:2];
         }
     }];
@@ -755,8 +766,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!self->_running) {
             return;
         }
-        for (QLMMonitorRecord *monitor in self->_monitors) {
-            monitor.muted = muted;
+        if (muted) {
+            for (QLMMonitorRecord *monitor in self->_monitors) {
+                [self->_mutedIDs addObject:monitor.hardwareID];
+            }
+        } else {
+            [self->_mutedIDs removeAllObjects];
         }
         self->_adapterMuted = muted;
         if (self->_volumeDecibels != nil) {
@@ -775,13 +790,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self sendMuteRounds:2];
 }
 
+- (uint8_t)muteValueFor:(QLMMonitorRecord *)monitor {
+    return [_mutedIDs containsObject:monitor.hardwareID] ? QLMMuteValueMuted : QLMMuteValueUnmuted;
+}
+
 // Each round restates every monitor's mute state. A 2B reply is a bare ack,
 // and a missed one is a lost send, not a missed poll.
 - (void)sendMuteRounds:(NSUInteger)rounds {
     NSArray<QLMMonitorRecord *> *monitors = [_monitors copy];
     for (NSUInteger round = 0; round < rounds; round++) {
         for (QLMMonitorRecord *monitor in monitors) {
-            [self send:QLMCommandMute(monitor.session, QLMMuteValueFor(monitor)) then:nil];
+            [self send:QLMCommandMute(monitor.session, [self muteValueFor:monitor]) then:nil];
         }
     }
     [self afterSends:^{
@@ -919,11 +938,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:broadcast];
 
     // GLM also sends each monitor 05 04 00, the test signal off. 05 is on
-    // the never-send list, so qlm skips it.
+    // the never-send list, so qlm skips it. GLM's 2B here is 04, unmuted; a
+    // monitor the user muted gets 03, so it stays muted.
     for (NSUInteger i = 0; i < blocks.count; i++) {
         uint8_t session = targets[i].session;
         NSData *routing = blocks[i].payloads.lastObject;
-        [self send:QLMCommandMute(session, QLMMuteValueUnmuted) then:acked];
+        [self send:QLMCommandMute(session, [self muteValueFor:targets[i]]) then:acked];
         [self send:QLMMessageMake(session, routing.bytes, routing.length) then:acked];
     }
 
@@ -940,7 +960,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self send:[self volumeMessage] then:broadcast];
     }
     for (QLMMonitorRecord *monitor in targets) {
-        [self send:QLMCommandMute(monitor.session, QLMMuteValueFor(monitor)) then:acked];
+        [self send:QLMCommandMute(monitor.session, [self muteValueFor:monitor]) then:acked];
         [self send:QLMCommandInputSync(monitor.session) then:acked];
     }
     NSString *name = [group.name copy];
@@ -1009,7 +1029,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         state.firmwareVersion = monitor.firmwareVersion;
         state.missedPolls = monitor.missedPolls;
         state.lastReply = monitor.lastReply;
-        state.muted = monitor.muted;
+        state.muted = [_mutedIDs containsObject:monitor.hardwareID];
         if (monitor.hasTelemetry) {
             QLMTelemetry telemetry = monitor.telemetry;
             state.temperature = telemetry.temperature;
