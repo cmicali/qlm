@@ -3,14 +3,15 @@
 #import "QLMCommands.h"
 
 // Sources: the hlm protocol spec, revision 13. Section 4 gives the volume
-// scale and its calibration points, section 7 each command's bytes, and
-// section 9 the power and dim procedures.
+// scale's calibration points, section 7 each command's bytes, and section 9
+// the power and dim procedures. GLM's own levels, which settle the scale,
+// are in QLMVolumeScaleTests.
 @interface QLMCommandsTests : XCTestCase
 @end
 
 @implementation QLMCommandsTests
 
-// Section 4's calibration points, reproduced by truncation.
+// Section 4's calibration points. GLM's levels in the captures agree.
 - (void)testVolumeWordsMatchSection4 {
     XCTAssertEqual(QLMVolumeWordForDecibels(0), 0x7FFFFFu);
     XCTAssertEqual(QLMVolumeWordForDecibels(-10), 0x287A26u);
@@ -26,13 +27,25 @@
 
 - (void)testVolumeWordsClampToTheSlider {
     XCTAssertEqual(QLMVolumeWordForDecibels(6), 0x7FFFFFu);
+    XCTAssertEqual(QLMVolumeWordForDecibels(INFINITY), 0x7FFFFFu);
+    XCTAssertEqual(QLMVolumeWordForDecibels(-99.5), 0x000058u);
+    XCTAssertEqual(QLMVolumeWordForDecibels(-100), 0x000008u);
     XCTAssertEqual(QLMVolumeWordForDecibels(-200), 0x000008u);
     XCTAssertEqual(QLMVolumeWordForDecibels(-INFINITY), 0x000008u);
     XCTAssertEqual(QLMVolumeWordForDecibels(NAN), 0x000008u);
 }
 
+// Between steps, the nearest step, as GLM does with the knob.
+- (void)testVolumeWordsRoundToTheNearestStep {
+    XCTAssertEqual(QLMVolumeWordForDecibels(-0.2), 0x7FFFFFu);
+    XCTAssertEqual(QLMVolumeWordForDecibels(-0.3), 0x78D6FBu);
+    XCTAssertEqual(QLMVolumeWordForDecibels(-41.7), 0x0113B5u);
+    XCTAssertEqual(QLMVolumeWordForDecibels(-99.7), 0x000058u);
+    XCTAssertEqual(QLMVolumeWordForDecibels(-99.8), 0x000008u);
+}
+
 - (void)testDecibelsForWordInverts {
-    XCTAssertEqualWithAccuracy(QLMVolumeDecibelsForWord(0x7FFFFF), 0, 1e-5);
+    XCTAssertEqual(QLMVolumeDecibelsForWord(0x7FFFFF), 0);
     XCTAssertEqualWithAccuracy(QLMVolumeDecibelsForWord(0x0CCCCC), -20, 1e-4);
     XCTAssertEqualWithAccuracy(QLMVolumeDecibelsForWord(0x000008), -120.4, 0.02);
     XCTAssertEqual(QLMVolumeDecibelsForWord(0), -INFINITY);
@@ -77,6 +90,14 @@
     QLMAssertBytes(mute.payload, mute.length, 0x2B, 0x03);
     QLMMessage unmute = QLMCommandMute(0x02, QLMMuteValueUnmuted);
     QLMAssertBytes(unmute.payload, unmute.length, 0x2B, 0x04);
+
+    // mute-dim: mute all tells the adapter with `01 2B 01`, and unmute all
+    // with `01 2B 00`.
+    QLMMessage adapterMuted = QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterMuted);
+    XCTAssertEqual(adapterMuted.address, 0x01);
+    QLMAssertBytes(adapterMuted.payload, adapterMuted.length, 0x2B, 0x01);
+    QLMMessage adapterUnmuted = QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterUnmuted);
+    QLMAssertBytes(adapterUnmuted.payload, adapterUnmuted.length, 0x2B, 0x00);
 }
 
 // Section 7 and 9: `3A 03 02` then `3A 03 00` to sleep, `3A 03 7F` and
@@ -91,6 +112,13 @@
     QLMAssertBytes(wakeFirst.payload, wakeFirst.length, 0x3A, 0x03, 0x7F);
     QLMMessage wakeSecond = QLMCommandPower(QLMPowerStepWakeSecond);
     QLMAssertBytes(wakeSecond.payload, wakeSecond.length, 0x3A, 0x03, 0x01);
+
+    // The group-switch captures: the same frames to one monitor.
+    QLMMessage wakeOne = QLMCommandMonitorPower(0x08, QLMPowerStepWakeSecond);
+    XCTAssertEqual(wakeOne.address, 0x08);
+    QLMAssertBytes(wakeOne.payload, wakeOne.length, 0x3A, 0x03, 0x01);
+    QLMMessage standbyOne = QLMCommandMonitorPower(0x08, QLMPowerStepStandbyPrepare);
+    QLMAssertBytes(standbyOne.payload, standbyOne.length, 0x3A, 0x03, 0x02);
 }
 
 // Section 7: `1F` with the word big-endian on the broadcast address.
@@ -113,16 +141,76 @@
     QLMMessage under = QLMCommandVolume(-30, -20);
     QLMAssertBytes(under.payload, under.length, 0x1F, 0x04, 0x0C, 0x37);
 
+    // Dim goes 20 dB below what is playing: the ceiling, when the volume is
+    // above it.
     QLMMessage dim = QLMCommandDim(0, -20);
-    QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x0C, 0xCC, 0xCC);
+    QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x01, 0x47, 0xAE);
     QLMMessage dimUnder = QLMCommandDim(-10, 0);
     QLMAssertBytes(dimUnder.payload, dimUnder.length, 0x1F, 0x04, 0x0C, 0x37);
+    QLMMessage dimBetweenSteps = QLMCommandDim(0, -20.2);
+    QLMAssertBytes(dimBetweenSteps.payload, dimBetweenSteps.length, 0x1F, 0x01, 0x35, 0x59);
+    QLMMessage dimAboveZero = QLMCommandDim(INFINITY, INFINITY);
+    QLMAssertBytes(dimAboveZero.payload, dimAboveZero.length, 0x1F, 0x0C, 0xCC, 0xCC);
+    QLMMessage dimNoCeiling = QLMCommandDim(0, NAN);
+    QLMAssertBytes(dimNoCeiling.payload, dimNoCeiling.length, 0x1F, 0x00, 0x00, 0x08);
 
     QLMMessage duck = QLMCommandDuck();
     QLMAssertBytes(duck.payload, duck.length, 0x1F, 0x00, 0x00, 0x02);
+
+    // A ceiling between steps falls to the step below, even when the volume
+    // rounds up to the step above it.
+    QLMMessage betweenSteps = QLMCommandVolume(0, -20.2);
+    QLMAssertBytes(betweenSteps.payload, betweenSteps.length, 0x1F, 0x0C, 0x15, 0x7F);
+    QLMMessage roundsUp = QLMCommandVolume(-20.2, -20.2);
+    QLMAssertBytes(roundsUp.payload, roundsUp.length, 0x1F, 0x0C, 0x15, 0x7F);
+    QLMMessage onStep = QLMCommandVolume(-20.2, -20);
+    QLMAssertBytes(onStep.payload, onStep.length, 0x1F, 0x0C, 0xCC, 0xCC);
+    QLMMessage noCeiling = QLMCommandVolume(0, NAN);
+    QLMAssertBytes(noCeiling.payload, noCeiling.length, 0x1F, 0x00, 0x00, 0x08);
 }
 
-// Section 9: dim is the current volume 20 dB down, floored at -120.4 dB.
+static uint32_t QLMVolumeWordOf(QLMMessage message) {
+    return (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
+}
+
+// The same rule across the whole scale, on and between the steps: no word
+// passes the ceiling or 7F FF FF, and dim is 20 dB below the volume sent.
+- (void)testNoVolumeFramePassesTheCeiling {
+    const double ceilings[] = {INFINITY, 6, 0, -0.1, -0.25, -0.5, -2.5, -3, -10.2, -20, -20.2, -59.75, -99.5, -99.9, -100, -120, -INFINITY, NAN};
+    NSMutableArray<NSNumber *> *volumes = [NSMutableArray arrayWithArray:@[@(INFINITY), @(-INFINITY), @(NAN)]];
+    for (int hundredths = 1000; hundredths >= -13000; hundredths -= 5) {
+        [volumes addObject:@(hundredths / 100.0)];
+    }
+    NSUInteger failures = 0;
+    for (size_t c = 0; c < sizeof ceilings / sizeof ceilings[0]; c++) {
+        double ceiling = ceilings[c];
+        for (NSNumber *volume in volumes) {
+            double decibels = volume.doubleValue;
+            QLMMessage messages[] = {QLMCommandVolume(decibels, ceiling), QLMCommandDim(decibels, ceiling)};
+            uint32_t sent = QLMVolumeWordOf(messages[0]);
+            uint32_t dimmed = sent == QLMVolumeWordMin ? QLMVolumeWordMin
+                                                       : QLMVolumeWordForDecibels(QLMVolumeDecibelsForWord(sent) - QLMDimDecibels);
+            BOOL ok = QLMVolumeWordOf(messages[1]) == dimmed;
+            for (size_t m = 0; m < 2; m++) {
+                uint32_t word = QLMVolumeWordOf(messages[m]);
+                ok = ok && messages[m].address == QLMAddressBroadcast && messages[m].length == 4;
+                ok = ok && word <= QLMVolumeWordMax && word >= QLMVolumeWordMin;
+                if (word != QLMVolumeWordMin && !isnan(ceiling)) {
+                    ok = ok && QLMVolumeDecibelsForWord(word) <= ceiling + 1e-5;
+                }
+            }
+            if (!ok && failures++ < 5) {
+                XCTFail(@"%g dB under a ceiling of %g dB", decibels, ceiling);
+            }
+        }
+    }
+    XCTAssertEqual(failures, 0u);
+    for (uint64_t word = 0; word <= UINT32_MAX; word += 0x00FFFFFF) {
+        XCTAssertLessThanOrEqual(QLMVolumeWordOf(QLMCommandVolumeWord((uint32_t)word, UINT32_MAX)), (uint32_t)QLMVolumeWordMax);
+    }
+}
+
+// Section 9: dim is the current volume 20 dB down, floored at 00 00 08.
 - (void)testDimFloorsAtTheSlider {
     QLMMessage dim = QLMCommandDim(-110, 0);
     QLMAssertBytes(dim.payload, dim.length, 0x1F, 0x00, 0x00, 0x08);
@@ -181,8 +269,10 @@
     QLMMessage messages[] = {
         QLMCommandProbe(), QLMCommandAssignSession(hardwareID, 0x02), QLMCommandKeepAlive(), QLMCommandPoll(0x02),
         QLMCommandSerialNumber(0x02), QLMCommandSystemInfo(0x02), QLMCommandMute(0x02, QLMMuteValueMuted),
-        QLMCommandPower(QLMPowerStepWakeFirst), QLMCommandVolumeWord(0x7FFFFF, 0x7FFFFF), QLMCommandVolume(-6, 0),
-        QLMCommandDim(-6, 0), QLMCommandDuck(),
+        QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterMuted), QLMCommandPower(QLMPowerStepWakeFirst),
+        QLMCommandMonitorPower(0x02, QLMPowerStepWakeSecond), QLMCommandMonitorPower(0x02, QLMPowerStepStandbyPrepare),
+        QLMCommandVolumeWord(0x7FFFFF, 0x7FFFFF), QLMCommandVolume(-6, 0), QLMCommandDim(-6, 0), QLMCommandDuck(),
+        QLMCommandInputSync(QLMAddressBroadcast),
     };
     for (size_t i = 0; i < sizeof messages / sizeof messages[0]; i++) {
         uint8_t out[QLMFrameMax];

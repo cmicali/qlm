@@ -6,31 +6,38 @@
 
 #include "QLMFrame.h"
 
-// A volume word is 24-bit linear gain, floor(10^(dB/20) * 2^23), clipped at
-// 0 dB. GLM's slider stops at -120.4 dB. The duck under a group apply, 2,
-// is below it and is not a volume.
+// A volume word is 24-bit linear gain, with 7F FF FF at 0 dB. GLM's volume
+// runs from 0 to -99.5 dB in 0.5 dB steps. Its bottom stop, -100 dB, sends
+// QLMVolumeWordMin, about -120.4 dB. The duck under a group apply, 2, is
+// below it and is not a volume.
 enum {
     QLMVolumeWordMax = 0x7FFFFF,
     QLMVolumeWordMin = 0x000008,
     QLMVolumeWordDuck = 0x000002,
 };
-#define QLMVolumeDecibelsMin (-120.4)
-#define QLMVolumeDecibelsMax (0.0)
+#define QLMVolumeDecibelsStep (0.5)
+#define QLMVolumeDecibelsMin (-100.0)
 #define QLMDimDecibels (20.0)
 
-// Clamps to [QLMVolumeDecibelsMin, QLMVolumeDecibelsMax] before converting.
+// GLM's word for the nearest step. At or below QLMVolumeDecibelsMin, and for
+// NaN, it is QLMVolumeWordMin.
 uint32_t QLMVolumeWordForDecibels(double decibels);
 // The inverse, for display. Word 0 gives -INFINITY.
 double QLMVolumeDecibelsForWord(uint32_t word);
 
 // The values GLM sends on 2B: bit 0 is mute, bits 1 and 2 pick the LED color.
+// Mute all also sends the adapter, at QLMAddressReply, bit 0 alone.
 enum {
     QLMMuteValueMuted = 0x03,
     QLMMuteValueUnmuted = 0x04,
+    QLMMuteValueAdapterMuted = 0x01,
+    QLMMuteValueAdapterUnmuted = 0x00,
 };
 
 // The subcommands of 3A 03. Sleep is prepare twice, then off twice. Wake is
-// the first and second steps three times.
+// the first and second steps three times. A group switch then sends each
+// monitor in the new group the second step twice, and every other monitor
+// prepare once.
 typedef enum {
     QLMPowerStepPowerOff = 0x00,
     QLMPowerStepWakeSecond = 0x01,
@@ -47,12 +54,16 @@ QLMMessage QLMCommandSerialNumber(uint8_t session);
 QLMMessage QLMCommandSystemInfo(uint8_t session);
 QLMMessage QLMCommandMute(uint8_t session, uint8_t value);
 QLMMessage QLMCommandPower(QLMPowerStep step);
+QLMMessage QLMCommandMonitorPower(uint8_t session, QLMPowerStep step);
 
 // Every volume frame passes through QLMCommandVolumeWord, which caps the word
 // at the ceiling. The ceiling is the user's, at most QLMVolumeWordMax.
 QLMMessage QLMCommandVolumeWord(uint32_t word, uint32_t ceilingWord);
+// A ceiling between steps falls to the step below it.
 QLMMessage QLMCommandVolume(double decibels, double ceilingDecibels);
-// Dim is a plain volume frame QLMDimDecibels down, floored at the slider's minimum.
+// Dim is a plain volume frame QLMDimDecibels below what QLMCommandVolume
+// sends, so a volume above the ceiling dims from the ceiling. It floors at
+// QLMVolumeWordMin.
 QLMMessage QLMCommandDim(double decibels, double ceilingDecibels);
 QLMMessage QLMCommandDuck(void);
 
