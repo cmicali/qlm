@@ -1,25 +1,28 @@
 # qlm: the plan
 
-**Status: 2026-10-29. Phase 0's captures are in, and Phase 1's code is written. The HID adapter and `qlmctl info`, `discover`, and `poll` over it are built and tested without hardware. qlm itself has not touched real hardware. The first run on the adapter is next.**
+**Status: 2026-10-30. Phase 0's captures are in, and Phase 1 is done. qlm has run on the adapter: `qlmctl info`, `discover`, and `poll` seized it, found all six monitors, and sent only frames GLM sends. Phase 2, control from the CLI, is next.**
 
 ## Where things stand
 
-Built, with 153 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 172 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
-- **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply.
-- **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. A failed seize is a refusal. **It has not run on the adapter.**
-- **System:** the adapter's identity and status poll, discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Over a replay of `startup-idle`, it finds all six monitors with model, serial, firmware, temperature, and power state, and sends nothing GLM did not.
-- **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block.
+- **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply. The volume word comes from GLM's own 200 levels. The control builders match GLM's frames byte for byte.
+- **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. A failed seize is a refusal. It has run on the adapter (`qlm-first-discover`).
+- **System:** the adapter's identity and status poll, discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Over a replay of `startup-idle`, it finds all six monitors with model, serial, firmware, temperature, and power state, and sends nothing GLM did not. On the adapter, it found the same six, and its cycle matched GLM's.
+- **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block. Every DSP block is checked against GLM's captured passes.
 - **The app and `qlmctl`:** `qlmctl info`, `discover`, and `poll` drive the adapter over USB, or the fake bus with `--fake`, or a capture with `--replay`. They send only the adapter's status poll and identity queries, the probe, the leases, and the monitors' identity queries and polls. Everything else, and the app, runs over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
 - **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
-- **The captures:** every scenario in `captures/README.md`, 17 in all, xz-compressed, each with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep. The golden tests read every report in them.
+- **The captures:** every scenario in `captures/README.md`, 17 in all, and `qlm-first-discover`, qlm's own first run. Each is xz-compressed, with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep. The golden tests read every report in them.
 
 Next:
 
-- The first run on the adapter: `qlmctl info`, then `discover`, then `poll`, with GLM quit. Compare each with `startup-idle`. It answers whether the adapter takes qlm as a host, and whether IOKit lets qlm seize the adapter. qlm opens it no other way.
+- The control commands over USB. `qlmctl` sends volume, mute, dim, and power only with `--fake`. The first run of each is at a low level, one monitor first.
+- System's sequences against GLM's. The builders match GLM, but System does not yet send dim's full sequence, mute all through the adapter (`2B` to `01`), or the power steps with GLM's spacing.
+- The knob in System. The snapshot carries its position, but nothing turns a move into volume yet.
+- Monitors in standby. All six were on in the first run, so whether one in standby answers without GLM's wake is open.
+- The level the adapter applies when the host leaves. USB does not show it. It needs a listening test or the bus tap, and Phase 2's hand-back depends on it.
 - The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 - Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So the encoder refuses a `7D` or `7E` address, and System's leases skip both, and `F0`, the adapter's multicast. The question cannot arise.
-- The volume builder's scale. GLM's levels use `0x7FFFFF`, not `2²³`, and the captures hold every 0.5 dB step ([adapter-status.md](adapter-status.md)).
 
 ### What the captures showed
 
@@ -36,6 +39,16 @@ Next:
 - **Serials** are 14 or 15 characters.
 - **Opcodes GLM sends that qlm refuses:** `05 04 …` (generator stop) to every monitor in a group apply, `3C`, `3E`, and `42` to subwoofers, `43 00 02` and `4B 00 00 00 01` to the 8351B, broadcast `2D 00`, and `22` and `51 82` to the adapter. The golden tests pin this set.
 - **Questions Phase 0 asked.** GLM sends nothing special when it quits; it stops polling (`quit-glm`). So the adapter must sense a host by its traffic ([adapter-status.md](adapter-status.md)). What level it then applies is on the monitor bus, which USB does not show. It needs a listening test or the bus tap. At quit the knob read −19.8 dB, and GLM's volume was −20 dB.
+
+### What the first run showed
+
+`captures/qlm-first-discover` is qlm's first run on the adapter, with `qlmctl` built from `fce5531`.
+
+- **The adapter takes qlm as its host.** It passed every request through and returned every reply. IOKit let qlm seize it. With GLM open, `qlmctl info` refused with exit 69 and sent nothing.
+- **All six monitors answered without a wake**, in GLM's order and with GLM's session IDs. qlm matched each to `Main.sam` by hardware ID. All six were on.
+- **qlm's cycle matches GLM's:** a probe every 0.569 s, and an adapter `01 08` pair every 0.107 s. No request timed out, and every reply was readable, so no sync went out.
+- **qlm sent only frames GLM sends.** It leaves out the wake, the volume, `01 22`, `01 51 82`, `FF 2D 00`, `FF 3D 00`, and `01 2B 00`.
+- **Leases lapse when the host goes quiet.** The monitors dropped GLM's leases within 42 s of its last report, and qlm's within 23 s. USB cannot show why. The adapter's takeover, about 2.6 s after the host goes quiet, is a likely cause.
 
 The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. The 8351B rate is unverified on the wire, so a group apply that includes one is refused.
 
@@ -139,12 +152,12 @@ qlm/
 ├── qlm/            all the code, one directory per layer
 │   ├── GLMProtocol/  C, no Apple dependency
 │   ├── GLMAdapter/   the adapter protocol, HID, the fake bus, and the replay
-│   ├── Setups/       the setup file reader; filter design and the DSP block to come
+│   ├── Setups/       the setup file reader, the filter design, and the DSP block
 │   ├── System/       the engine and its snapshots
 │   ├── App/          the menu bar app: AppKit, Objective-C
 │   └── CLI/          qlmctl
 ├── Tests/          one XCTest bundle, hostless; mirrors qlm/
-├── captures/       the Phase 0 captures, one directory per scenario
+├── captures/       the captures, one directory per scenario
 ├── tools/          the inventory script and the capture converter
 ├── vibe-libs/      the shared toolbox, a git submodule
 └── .github/        CI: tests and both builds on macOS
@@ -155,19 +168,20 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 ### Behavior System must copy from GLM
 
 - **On every connect and wake, apply the active group in full**, as GLM does. Monitors may have rebooted to their flash settings, and leases are reassigned.
+- **After any gap in polling, lease again.** Monitors drop their leases within 23 to 42 s of the host going quiet (`qlm-first-discover`).
 - **A group apply ducks first and restores after.** Expect a short silence, as with GLM.
 - **On a group switch, send only the bands that changed**, as GLM does. A full apply sends all of them.
 - **Volume changes go out at once**, out of cadence. State changes are sent twice.
 - **Poll the adapter with `01 08` about every 110 ms, and never pause longer than 1.7 s.** The reply is the knob's only path. GLM's polling is likely what tells the adapter a host is present.
 - **At connect, keep the app's own level. At the knob's first move, jump to the knob's position**, under the ceiling. After that, follow the knob, but not its jitter at rest. [adapter-status.md](adapter-status.md) has what GLM does.
-- **TRAP: when the app quits, sleeps, or loses USB, the adapter takes over with its own level about 2.6 s later.** If that level differs from the app's, the volume jumps. Phase 0 must find which level the adapter uses.
+- **TRAP: when the app quits, sleeps, or loses USB, the adapter takes over with its own level about 2.6 s later.** If that level differs from the app's, the volume jumps. USB does not show which level the adapter uses, so a listening test or the bus tap must find it.
 
 ### The UI
 
 - **Menu bar popover:** volume in dB, in 0.5 dB steps; mute; dim; the group picker; power. One status dot per monitor: online, standby, or offline.
 - **Window:** each monitor's model, serial, firmware, temperature, power state, approximate input and output meters, and last reply.
 - **Settings:** the setup files, the volume range and ceiling, whether to wake the monitors at launch, and launch at login with `SMAppService`.
-- **The knob drives the app's volume**, if Phase 0 finds the path. Otherwise it works only while the app is closed.
+- **The knob drives the app's volume.** Its position rides the adapter's reply to `01 08`.
 
 ## Where vibe-libs fits
 
@@ -291,7 +305,7 @@ Each is optional:
 | A bug sends full volume | The clamp in GLMProtocol, the ceiling, and a test across every builder |
 | Filters designed at the wrong rate | Rate from the model; groups refused for unverified models; a stability check on every biquad |
 | Subwoofer LFE fields unmapped | Warn on, or refuse, a group that sets them until a capture maps them |
-| The adapter's level when the app leaves | Found in Phase 0; the app matches it before it exits, if the protocol allows |
+| The adapter's level when the app leaves | A listening test or the bus tap finds it; the app matches it before it exits, if the protocol allows |
 | GLM and the app both drive the bus | Detection and refusal |
 | A firmware update changes the protocol | A version check, a warning, and GLM kept installed |
 | GLM changes the `.sam` format | A strict reader that reports unknown keys |
