@@ -220,4 +220,43 @@
     XCTAssertEqual(QLMReplyAdapterStatus(&fromMonitor, &status), QLMAdapterStatusErrorNotStatus);
 }
 
+// docs/adapter-status.md's three shapes, and the mic without the knob, are
+// a status. The walk reads a serial as one too, and so would a lease ack
+// for session 33, but neither has a shape. QLMGoldenTests checks every reply.
+- (void)testOnlyTheStatusShapesAreAStatus {
+    QLMMessage knob = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x30, 0x36, 0xDF, 0xFF, 0xFF, 0xFC, 0x14);
+    QLMMessage micAndKnob = QLMMakeMessage(QLMAddressReply, 0x09, 0x32, 0x34, 0xDE, 0x00, 0x23, 0x10, 0x00, 0xDD, 0x00, 0x22,
+                                           0x00, 0x01, 0x30, 0x36, 0xDF, 0x00, 0x00, 0x00, 0x00);
+    QLMMessage neither = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x31);
+    QLMMessage micOnly = QLMMakeMessage(QLMAddressReply, 0x09, 0x32, 0x34, 0xDE, 0x00, 0x23, 0x10, 0x00, 0xDD, 0x00, 0x22, 0x00,
+                                        0x01, 0x31);
+    XCTAssertTrue(QLMReplyIsAdapterStatus(&knob));
+    XCTAssertTrue(QLMReplyIsAdapterStatus(&micAndKnob));
+    XCTAssertTrue(QLMReplyIsAdapterStatus(&neither));
+    XCTAssertTrue(QLMReplyIsAdapterStatus(&micOnly));
+
+    QLMMessage serial = QLMMakeMessage(QLMAddressReply, 0x09, 'H', '9', '9', '9', '9', '9', 'F', '0', '0', '0');
+    QLMAdapterStatus status;
+    XCTAssertEqual(QLMReplyAdapterStatus(&serial, &status), QLMAdapterStatusOK);
+    XCTAssertFalse(QLMReplyIsAdapterStatus(&serial));
+    QLMMessage lease = QLMMakeMessage(QLMAddressReply, 0x09, 0x33);
+    XCTAssertFalse(QLMReplyIsAdapterStatus(&lease));
+    QLMMessage trailing = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x31, 0x00);
+    XCTAssertFalse(QLMReplyIsAdapterStatus(&trailing));
+    QLMMessage truncated = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x30, 0x36, 0xDF, 0xFF, 0xFF);
+    XCTAssertFalse(QLMReplyIsAdapterStatus(&truncated));
+    QLMMessage fromMonitor = QLMMakeMessage(0x02, 0x09, 0x33, 0x31);
+    XCTAssertFalse(QLMReplyIsAdapterStatus(&fromMonitor));
+}
+
+// startup-idle, 7.30 s: the adapter's system info, and its serial.
+- (void)testOnlySystemInfoTextIsSystemInfo {
+    QLMMessage info = QLMMakeMessage(QLMAddressReply, 0x09, 'c', '-', '0', ';', 'm', 'o', 'd', 'e', 'l', '-', 'G', 'L', 'M', 0x00);
+    QLMMessage serial = QLMMakeMessage(QLMAddressReply, 0x09, 'H', '9', '9', '9', '9', '9', 'F', '0', '0', '0');
+    QLMMessage status = QLMMakeMessage(QLMAddressReply, 0x09, 0x33, 0x31);
+    XCTAssertTrue(QLMReplyIsSystemInfo(&info));
+    XCTAssertFalse(QLMReplyIsSystemInfo(&serial));
+    XCTAssertFalse(QLMReplyIsSystemInfo(&status));
+}
+
 @end

@@ -20,10 +20,21 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 - (instancetype)init NS_UNAVAILABLE;
 
 // 0.1 s. The slowest reply in the captures took 11 ms: the adapter's own
-// no-answer frame after a monitor stayed silent. After a timeout the next
-// request waits until the late reply comes or one more timeout passes.
-// TRAP: a reply later than twice the timeout would answer the wrong request.
+// no-answer frame after a monitor stayed silent.
+//
+// After a timeout, or a reply that does not read, the reply may still come.
+// TRAP: no wait makes that safe. Replies name no request, so a late one
+// would answer the next. So the link holds the next request and sends a
+// sync: the adapter's status poll, or its system info after a status poll,
+// so that the late reply cannot have the sync's shape. It drops every reply
+// until one has that shape. The adapter bridges one request at a time, so
+// it answers in order, and the late reply is then past. The held request
+// goes out. The sync waits five timeouts, since its reply queues behind the
+// late one. If none comes, the link fails.
 @property (nonatomic) NSTimeInterval replyTimeout;
+
+// Called once, on the queue, when the link fails. Every send then fails.
+@property (nonatomic, copy, nullable) void (^failureHandler)(NSError *error);
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
 
@@ -33,8 +44,8 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // Fails the request in flight, and every later send, with the error.
 - (void)closeWithError:(NSError *)error;
 
-// Input that completed a frame no request was waiting for. A reply that
-// comes after its timeout is one of these.
+// Input that completed a frame no request was waiting for, or that a sync
+// dropped. A reply that comes after its timeout is one of these.
 @property (nonatomic, readonly) NSUInteger strayReplies;
 @property (nonatomic, readonly) NSUInteger timeouts;
 

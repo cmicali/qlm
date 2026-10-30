@@ -53,6 +53,10 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
     dispatch_queue_t _queue;
     NSMutableDictionary<NSData *, NSMutableArray<QLMCaptureExchange *> *> *_unplayed;
     NSMutableArray<NSData *> *_written;
+    NSMutableArray<NSArray<NSData *> *> *_replies;  // due, in order
+    NSUInteger _repliesDue;
+    NSUInteger _repliesDelivered;
+    dispatch_time_t _lastDue;
 }
 
 - (instancetype)initWithCapture:(QLMCapture *)capture {
@@ -60,6 +64,7 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
     if (self) {
         _replyDelay = 0.001;
         _written = [NSMutableArray array];
+        _replies = [NSMutableArray array];
         _unplayed = [NSMutableDictionary dictionary];
         for (QLMCaptureExchange *exchange in capture.exchanges) {
             NSMutableArray<QLMCaptureExchange *> *same = _unplayed[exchange.outputReport];
@@ -117,13 +122,33 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
     if (exchange.replyFrame == nil || self.silent) {
         return;
     }
-    QLMReportLink *link = _link;
-    NSArray<NSData *> *inputs = [QLMCaptureDevice inputReportsForFrame:exchange.replyFrame];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(self.replyDelay * (double)NSEC_PER_SEC)), _queue, ^{
-        for (NSData *input in inputs) {
-            [link receiveReport:input.bytes length:input.length];
-        }
+    NSTimeInterval delay = self.replyDelay;
+    if (self.nextReplyDelay > 0) {
+        delay = self.nextReplyDelay;
+        self.nextReplyDelay = 0;
+    }
+    dispatch_time_t due = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * (double)NSEC_PER_SEC));
+    due = MAX(due, _lastDue);
+    _lastDue = due;
+    [_replies addObject:[QLMCaptureDevice inputReportsForFrame:exchange.replyFrame]];
+    _repliesDue += 1;
+    NSUInteger number = _repliesDue;
+    __weak QLMCaptureDevice *weakSelf = self;
+    dispatch_after(due, _queue, ^{
+        [weakSelf deliverRepliesThrough:number];
     });
+}
+
+// The replies ahead of this one are due too, since none is due before them.
+- (void)deliverRepliesThrough:(NSUInteger)number {
+    while (_repliesDelivered < number) {
+        NSArray<NSData *> *inputs = _replies.firstObject;
+        [_replies removeObjectAtIndex:0];
+        _repliesDelivered += 1;
+        for (NSData *input in inputs) {
+            [_link receiveReport:input.bytes length:input.length];
+        }
+    }
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {

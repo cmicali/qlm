@@ -266,6 +266,32 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
     }
 }
 
+// The report link's syncs rest on this. Replies name no request, but in
+// every capture a reply has the adapter status's exact shape only when it
+// answers 01 08, and reads as system info only when it answers 39. Every
+// answered 01 08 and 39 gets that shape.
+- (void)testOnlyStatusPollsAndSystemInfoQueriesGetTheirShapes {
+    NSUInteger statuses = 0;
+    NSUInteger infos = 0;
+    for (QLMCapture *capture in [self captures]) {
+        for (QLMCaptureExchange *exchange in capture.exchanges) {
+            if (!exchange.answered) {
+                continue;
+            }
+            QLMMessage message = exchange.message;
+            QLMMessage reply = exchange.reply;
+            BOOL statusPoll = message.address == QLMAddressAdapter && message.payload[0] == 0x08;
+            BOOL infoQuery = message.payload[0] == 0x39;
+            XCTAssertEqual(QLMReplyIsAdapterStatus(&reply), statusPoll, @"%@", QLMDescribeExchange(exchange));
+            XCTAssertEqual(QLMReplyIsSystemInfo(&reply), infoQuery, @"%@", QLMDescribeExchange(exchange));
+            statuses += statusPoll ? 1 : 0;
+            infos += infoQuery ? 1 : 0;
+        }
+    }
+    XCTAssertGreaterThan(statuses, 28000u);
+    XCTAssertGreaterThan(infos, 10u);
+}
+
 static NSData *QLMDataFromHex(NSString *hex) {
     NSMutableData *data = [NSMutableData data];
     for (NSString *pair in [hex componentsSeparatedByString:@" "]) {

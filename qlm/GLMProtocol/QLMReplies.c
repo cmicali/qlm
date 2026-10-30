@@ -226,3 +226,28 @@ QLMAdapterStatusResult QLMReplyAdapterStatus(const QLMMessage *message, QLMAdapt
     }
     return QLMAdapterStatusOK;
 }
+
+bool QLMReplyIsAdapterStatus(const QLMMessage *message) {
+    if (!QLMReplyIsReply(message)) {
+        return false;
+    }
+    const uint8_t *payload = message->payload;
+    size_t length = message->length;
+    size_t i = 1;
+    if (i < length && payload[i] == 0x33) {
+        i += 1;
+    } else if (i + 11 < length && payload[i] == 0x32 && payload[i + 1] == 0x34 && payload[i + 2] == 0xDE && payload[i + 7] == 0xDD) {
+        i += 12;
+    } else {
+        return false;
+    }
+    if (i + 1 == length && payload[i] == 0x31) {
+        return true;
+    }
+    return i + 7 == length && payload[i] == 0x30 && payload[i + 1] == 0x36 && payload[i + 2] == 0xDF;
+}
+
+bool QLMReplyIsSystemInfo(const QLMMessage *message) {
+    char text[QLMPayloadMax];
+    return QLMReplyText(message, text, sizeof text) && strstr(text, "model-") != NULL;
+}

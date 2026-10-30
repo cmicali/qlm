@@ -237,6 +237,16 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                                  : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
     }];
     _link.replyTimeout = _replyTimeout;
+    // A failed link closes the device, which reopens at the next host check.
+    // TRAP: a reply later than that reopen would reach the new link. It takes
+    // the adapter leaving a sync unanswered for half a second to get here.
+    __weak QLMReportLink *link = _link;
+    _link.failureHandler = ^(NSError *error) {
+        QLMHIDAdapter *strongSelf = weakSelf;
+        if (strongSelf != nil && link != nil && strongSelf->_link == link) {
+            [strongSelf closeWithError:error removed:NO];
+        }
+    };
     return nil;
 }
 

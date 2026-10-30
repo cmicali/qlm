@@ -100,4 +100,16 @@ typedef enum {
 // The tag rule lets the walk step over a tag it does not know.
 QLMAdapterStatusResult QLMReplyAdapterStatus(const QLMMessage *message, QLMAdapterStatus *status);
 
+// Replies name no request, so only a reply's shape can say what it answers.
+// These two shapes belong to one request each in every capture.
+//
+// The adapter's status, exactly: 33, or 32 34 DE DD with the mic, then 31,
+// or 30 36 DF with the knob, and nothing after. Only 01 08 gets one.
+// TRAP: QLMReplyAdapterStatus's walk reads a serial, and most other replies,
+// as a status. Use this to tell a status reply from any other.
+bool QLMReplyIsAdapterStatus(const QLMMessage *message);
+
+// System info text, with a model- field. Only 39 gets one.
+bool QLMReplyIsSystemInfo(const QLMMessage *message);
+
 #endif
