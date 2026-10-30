@@ -215,7 +215,7 @@ typedef struct {
     NSInteger weight;
 } QLMFuzzWeight;
 
-// Twice the percent of actions of each kind.
+// Each kind's weight among the actions.
 static const QLMFuzzWeight QLMFuzzWeights[] = {
     {QLMFuzzAdvance, 46}, {QLMFuzzVolume, 14},     {QLMFuzzCeiling, 10},     {QLMFuzzDim, 8},          {QLMFuzzMute, 12},
     {QLMFuzzMuteAll, 6},  {QLMFuzzRecordMuted, 2}, {QLMFuzzKnobTurn, 7},     {QLMFuzzKnobDrift, 4},    {QLMFuzzKnobJitter, 4},
@@ -243,6 +243,11 @@ static QLMFuzzKind QLMFuzzPickKind(QLMFuzzRandom *random) {
 static const NSInteger QLMFuzzMonitorCount = 6;
 static const NSInteger QLMFuzzStrayKinds = 5;
 
+// The knob must be in for these.
+static BOOL QLMFuzzMovesKnob(QLMFuzzKind kind) {
+    return kind == QLMFuzzKnobTurn || kind == QLMFuzzKnobDrift || kind == QLMFuzzKnobJitter;
+}
+
 // The action list for a seed. A rough state steers it: a stopped System
 // soon starts, an unplugged adapter soon comes back, and another host soon
 // quits. The run skips whatever does not apply when it comes.
@@ -265,7 +270,7 @@ static NSArray<QLMFuzzAction *> *QLMFuzzActionsForSeed(uint64_t seed, NSUInteger
             kind = QLMFuzzReplug;
         } else if (otherHost && QLMFuzzChance(&random, 0.25)) {
             kind = QLMFuzzHostQuits;
-        } else if (!knobIn && (kind == QLMFuzzKnobTurn || kind == QLMFuzzKnobDrift || kind == QLMFuzzKnobJitter)) {
+        } else if (!knobIn && QLMFuzzMovesKnob(kind)) {
             kind = QLMFuzzKnobIn;
         }
         NSInteger monitor = QLMFuzzBelow(&random, QLMFuzzMonitorCount);
@@ -298,35 +303,40 @@ static NSArray<QLMFuzzAction *> *QLMFuzzActionsForSeed(uint64_t seed, NSUInteger
             action.count = 5 + QLMFuzzBelow(&random, 26);
             action.index = 1 + QLMFuzzBelow(&random, 6);
             break;
-        case QLMFuzzKnobIn: action.value = -(double)QLMFuzzBelow(&random, 1005); break;
+        case QLMFuzzKnobIn:
+            action.value = -(double)QLMFuzzBelow(&random, 1005);
+            knobIn = YES;
+            break;
+        case QLMFuzzKnobOut: knobIn = NO; break;
         case QLMFuzzApply:
             action.index = QLMFuzzBelow(&random, groups);
             action.flag = QLMFuzzChance(&random, 0.3);
             break;
-        case QLMFuzzRelaunch: action.flag = QLMFuzzChance(&random, 0.8); break;
+        case QLMFuzzStop: running = NO; break;
+        case QLMFuzzStart:
+        case QLMFuzzRestart: running = YES; break;
+        case QLMFuzzRelaunch:
+            action.flag = QLMFuzzChance(&random, 0.8);
+            running = YES;
+            break;
         case QLMFuzzComeBack: action.flag = QLMFuzzChance(&random, 0.5); break;
         case QLMFuzzLapse: action.index = QLMFuzzChance(&random, 0.25) ? -1 : monitor; break;
         case QLMFuzzMonitorDrops: action.count = 1 + QLMFuzzBelow(&random, 6); break;
-        case QLMFuzzHostTakes: action.flag = QLMFuzzChance(&random, 0.7); break;
-        case QLMFuzzHostQuits: action.index = QLMFuzzBelow(&random, QLMFuzzStrayKinds); break;
+        case QLMFuzzUnplug: plugged = NO; break;
+        case QLMFuzzReplug: plugged = YES; break;
+        case QLMFuzzHostTakes:
+            action.flag = QLMFuzzChance(&random, 0.7);
+            otherHost = YES;
+            break;
+        case QLMFuzzHostQuits:
+            action.index = QLMFuzzBelow(&random, QLMFuzzStrayKinds);
+            otherHost = NO;
+            break;
         case QLMFuzzLateReplies:
             action.count = 1 + QLMFuzzBelow(&random, 4);
             action.value = QLMFuzzBetween(&random, 0.11, 0.9);
             break;
         case QLMFuzzLostReplies: action.count = 1 + QLMFuzzBelow(&random, 3); break;
-        default: break;
-        }
-        switch (kind) {
-        case QLMFuzzStop: running = NO; break;
-        case QLMFuzzStart:
-        case QLMFuzzRestart:
-        case QLMFuzzRelaunch: running = YES; break;
-        case QLMFuzzUnplug: plugged = NO; break;
-        case QLMFuzzReplug: plugged = YES; break;
-        case QLMFuzzHostTakes: otherHost = YES; break;
-        case QLMFuzzHostQuits: otherHost = NO; break;
-        case QLMFuzzKnobOut: knobIn = NO; break;
-        case QLMFuzzKnobIn: knobIn = YES; break;
         default: break;
         }
         [actions addObject:action];
@@ -338,7 +348,7 @@ static NSArray<QLMFuzzAction *> *QLMFuzzActionsForSeed(uint64_t seed, NSUInteger
 
 @interface QLMFuzzViolation : NSObject
 @property (nonatomic) NSUInteger check;
-@property (nonatomic) NSInteger action;  // -1 before the first, or as the run ends
+@property (nonatomic) NSInteger action;  // -1 before the first; the last one's as the run ends
 @property (nonatomic) NSTimeInterval time;
 @property (nonatomic, copy) NSString *text;
 // The System bug it comes from, when it is one this file names.
@@ -421,69 +431,54 @@ static NSString *const QLMFuzzKnownStaleRound = @"a round of 2B keeps the mutes 
 // that a looser ceiling, or the user's unmute, within this window explains
 // is the bug's.
 static const NSTimeInterval QLMFuzzStaleWindow = 10;
+static NSArray<NSString *> *QLMFuzzKnownBugs(void) {
+    return @[QLMFuzzKnownLateCompletion, QLMFuzzKnownStaleVolume, QLMFuzzKnownStaleRound];
+}
 static NSString *const QLMFuzzCountVolume = @"volume frames";
 static NSString *const QLMFuzzCountMutedRound = @"2B frames to a monitor the user muted";
-static NSString *const QLMFuzzCountRefused = @"sends refused for another host";
+static NSString *const QLMFuzzCountBusy = @"sends refused for another host";
 static NSString *const QLMFuzzCountLease = @"leases followed by a frame";
 static NSString *const QLMFuzzCountLate = @"late replies";
 static NSString *const QLMFuzzCountLost = @"lost replies";
-static NSString *const QLMFuzzKnownBugs = @"System bugs: a send from before a stop can complete in the next run, and a volume "
-                                          @"frame and a round of 2B keep the ceiling and the mutes they were queued under";
+static NSString *const QLMFuzzCountApplied = @"a group apply that went through";
+static NSString *const QLMFuzzCountRefused = @"a group apply refused";
 
 // A reply as the adapter frames it: the CRC over the address and payload,
 // then 7E and 7D escaped, then the flag (docs/protocol.md, Framing).
-static NSData *QLMFuzzReplyFrame(const QLMMessage *reply) {
-    uint8_t raw[1 + QLMPayloadMax];
-    raw[0] = reply->address;
-    memcpy(raw + 1, reply->payload, reply->length);
-    uint16_t crc = QLMCRC16GSM(raw, 1 + reply->length);
-    NSMutableData *frame = [NSMutableData dataWithBytes:raw length:1];
-    uint8_t tail[2] = {(uint8_t)(crc >> 8), (uint8_t)crc};
-    for (size_t i = 1; i < 1 + reply->length + 2; i++) {
-        uint8_t byte = i < 1 + reply->length ? raw[i] : tail[i - 1 - reply->length];
-        if (byte == QLMFrameFlag || byte == QLMFrameEscape) {
-            uint8_t escaped[2] = {QLMFrameEscape, (uint8_t)(byte ^ QLMFrameEscapeXor)};
-            [frame appendBytes:escaped length:2];
+static NSData *QLMFuzzReplyFrame(QLMMessage reply) {
+    uint8_t raw[1 + QLMPayloadMax + 2];
+    raw[0] = reply.address;
+    memcpy(raw + 1, reply.payload, reply.length);
+    uint16_t crc = QLMCRC16GSM(raw, 1 + reply.length);
+    raw[1 + reply.length] = (uint8_t)(crc >> 8);
+    raw[2 + reply.length] = (uint8_t)crc;
+    uint8_t frame[QLMFrameMax];
+    size_t count = 0;
+    frame[count++] = raw[0];
+    for (size_t i = 1; i < 3 + reply.length; i++) {
+        if (raw[i] == QLMFrameFlag || raw[i] == QLMFrameEscape) {
+            frame[count++] = QLMFrameEscape;
+            frame[count++] = raw[i] ^ QLMFrameEscapeXor;
         } else {
-            [frame appendBytes:&byte length:1];
+            frame[count++] = raw[i];
         }
     }
-    uint8_t flag = QLMFrameFlag;
-    [frame appendBytes:&flag length:1];
-    return frame;
+    frame[count++] = QLMFrameFlag;
+    return [NSData dataWithBytes:frame length:count];
 }
 
 // What another host may leave on the way when it lets go of the adapter
 // (QLMReportLink.h): its last status poll's reply, likeliest, or another.
+// The status and the system info are GLM's (captures/startup-idle, 7.294
+// and 7.300 s).
 static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
-    QLMMessage reply;
     switch (kind) {
-    case 1: {
-        const uint8_t status[] = {0x09, 0x33, 0x30, 0x36, 0xDF, 0xFF, 0xFF, 0xFC, 0x14};
-        reply = QLMMessageMake(QLMAddressReply, status, sizeof status);
-        break;
-    }
-    case 2: {
-        const char *text = "c-0;model-GLM Adapter;ver-1.4.0.6113;hw-0.0.202;build-2025.05.19.s  ";
-        uint8_t payload[QLMPayloadMax] = {0x09};
-        size_t length = strlen(text) + 1;
-        memcpy(payload + 1, text, length);
-        reply = QLMMessageMake(QLMAddressReply, payload, 1 + length);
-        break;
-    }
-    case 3: {
-        const uint8_t ack[] = {0x09};
-        reply = QLMMessageMake(QLMAddressReply, ack, sizeof ack);
-        break;
-    }
-    case 4: {
-        const uint8_t telemetry[] = {0x09, 0x41, 0x26, 0x47, 0x01, 0x84, 0x02, 0xB0};
-        reply = QLMMessageMake(QLMAddressReply, telemetry, sizeof telemetry);
-        break;
-    }
+    case 1: return QLMReadCapture(@"startup-idle", NULL).exchanges[0].replyFrame;
+    case 2: return QLMReadCapture(@"startup-idle", NULL).exchanges[3].replyFrame;
+    case 3: return QLMFuzzReplyFrame(QLMMakeMessage(QLMAddressReply, 0x09));
+    case 4: return QLMFuzzReplyFrame(QLMMakeMessage(QLMAddressReply, 0x09, 0x41, 0x26, 0x47, 0x01, 0x84, 0x02, 0xB0));
     default: return nil;
     }
-    return QLMFuzzReplyFrame(&reply);
 }
 
 #pragma mark - The world
@@ -494,7 +489,6 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
 // settled, and System's queue reads it, so its locks only order the two.
 @interface QLMFuzzWorld : NSObject
 - (instancetype)initWithClock:(QLMVirtualClock *)clock;
-@property (nonatomic, readonly) QLMVirtualClock *clock;
 @property (nonatomic, readonly) QLMFakeBus *bus;
 @property (atomic) NSInteger action;
 @property (atomic) BOOL plugged;
@@ -522,12 +516,13 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
 - (void)violate:(NSUInteger)check text:(NSString *)text;
 - (void)violate:(NSUInteger)check text:(NSString *)text known:(nullable NSString *)known;
 @property (nonatomic, readonly) NSArray<QLMFuzzViolation *> *violations;
-// How often each check met what it guards, so none passes for want of it.
+// What the checks met, so none passes for want of it.
 - (void)count:(NSString *)what;
-@property (nonatomic, readonly) NSCountedSet<NSString *> *counts;
+@property (nonatomic, readonly) NSSet<NSString *> *counts;
 @end
 
 @implementation QLMFuzzWorld {
+    QLMVirtualClock *_clock;
     NSMutableSet<NSData *> *_muted;
     NSMutableSet<NSData *> *_unmutedSinceAll;
     BOOL _mutingAll;
@@ -537,9 +532,8 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     NSTimeInterval _lateBy;
     NSInteger _lost;
     NSMutableArray<QLMFuzzViolation *> *_violations;
-    NSCountedSet<NSString *> *_counts;
-    double _ceiling;
-    NSMutableArray<NSArray<NSNumber *> *> *_ceilings;  // time, ceiling
+    NSMutableSet<NSString *> *_counts;
+    NSMutableArray<NSArray<NSNumber *> *> *_ceilings;  // time, ceiling, in order
 }
 
 - (instancetype)initWithClock:(QLMVirtualClock *)clock {
@@ -551,9 +545,8 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
         _mutedOnTheWire = [NSMutableSet set];
         _mutedSince = [NSMutableDictionary dictionary];
         _violations = [NSMutableArray array];
-        _counts = [[NSCountedSet alloc] init];
+        _counts = [NSMutableSet set];
         _plugged = YES;
-        _ceiling = -20;
         _ceilings = [NSMutableArray arrayWithObject:@[@0, @(-20)]];
         _action = -1;
         // The fixture's six monitors: two 8351B, two 8330A, a 7370A, and a
@@ -682,20 +675,19 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
 
 - (double)ceiling {
     @synchronized(self) {
-        return _ceiling;
+        return _ceilings.lastObject[1].doubleValue;
     }
 }
 
 - (void)setCeiling:(double)ceiling {
     @synchronized(self) {
-        _ceiling = ceiling;
         [_ceilings addObject:@[@(_clock.now), @(ceiling)]];
     }
 }
 
 - (uint32_t)loosestCeilingWordSince:(NSTimeInterval)time {
     @synchronized(self) {
-        uint32_t loosest = QLMFuzzCeilingWord(_ceiling);
+        uint32_t loosest = 0;
         double inForce = NAN;
         for (NSArray<NSNumber *> *change in _ceilings) {
             if (change[0].doubleValue <= time) {
@@ -736,7 +728,7 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     }
 }
 
-- (NSCountedSet<NSString *> *)counts {
+- (NSSet<NSString *> *)counts {
     @synchronized(self) {
         return [_counts copy];
     }
@@ -773,20 +765,17 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     NSUInteger _epoch;
     NSTimeInterval _lastDue;
     // Rule 6: System's send whose handler has not run, and the link's last
-    // write that waits for a reply.
+    // write that waits for a reply, until a reply or a close.
     NSUInteger _starts;
-    BOOL _lateCompletion;  // a handler from before the last start is running
-    // A late completion ended the send in flight, so each completion after
-    // it ends the send after its own.
+    // A handler from before the last start ended a later send, so each
+    // completion after it ends the send after its own.
     BOOL _outOfStep;
     NSUInteger _sends;
     NSUInteger _inFlight;  // 0 for none
-    NSString *_inFlightText;
-    NSUInteger _closes;
-    BOOL _waiting;  // for any reply
+    QLMMessage _inFlightMessage;
+    BOOL _waiting;
     NSTimeInterval _waitingSince;
-    NSUInteger _waitingCloses;
-    NSString *_waitingText;
+    QLMMessage _waitingMessage;
     // Rule 5: sessions just leased, whose next frame must be the volume.
     NSMutableSet<NSNumber *> *_awaitingVolume;
 }
@@ -846,8 +835,8 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
         return;
     }
     _open = NO;
-    _closes += 1;
     _inFlight = 0;
+    _waiting = NO;
     [_link closeWithError:error];
 }
 
@@ -884,30 +873,28 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
     QLMFuzzWorld *world = _world;
-    NSString *text = QLMFuzzHex(&message);
     NSString *forbidden = QLMFuzzForbidden(&message);
     if (forbidden != nil) {
-        [world violate:2 text:[NSString stringWithFormat:@"System handed over %@: %@", text, forbidden]];
+        [world violate:2 text:[NSString stringWithFormat:@"System handed over %@: %@", QLMFuzzHex(&message), forbidden]];
     }
-    [self checkVolumeFirst:&message text:text];
+    [self checkVolumeFirst:&message];
     if (_inFlight != 0) {
-        NSString *problem = [NSString stringWithFormat:@"System handed over %@ while %@ was in flight", text, _inFlightText];
-        BOOL late = _lateCompletion || _outOfStep;
-        _outOfStep = late;
-        [world violate:6 text:problem known:late ? QLMFuzzKnownLateCompletion : nil];
-        // As QLMReportLink does in a build without assertions. Each refusal
-        // ends System's send, so the next comes at once: the same bug.
+        NSString *problem = [NSString stringWithFormat:@"System handed over %@ while %@ was in flight", QLMFuzzHex(&message),
+                                                       QLMFuzzHex(&_inFlightMessage)];
+        [world violate:6 text:problem known:_outOfStep ? QLMFuzzKnownLateCompletion : nil];
+        // As QLMReportLink does in a build without assertions.
         [_clock async:_queue run:^{
-            self->_lateCompletion = late;
             handler(NULL, QLMAdapterErrorMake(QLMAdapterErrorBadReply, @"A request was already in flight."));
-            self->_lateCompletion = NO;
         }];
         return;
     }
     NSUInteger token = ++_sends;
     NSUInteger start = _starts;
     _inFlight = token;
-    _inFlightText = text;
+    _inFlightMessage = message;
+    // A handler runs a hop after the link is done, and System sends at most
+    // one frame in it. So a late handler that leads to a second send in
+    // flight finds one already in flight here.
     QLMAdapterReplyHandler wrapped = ^(const QLMMessage *reply, NSError *error) {
         if (self->_inFlight == token) {
             self->_inFlight = 0;
@@ -915,9 +902,7 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
             self->_outOfStep = YES;
         }
         [self noteReply:reply error:error to:message];
-        self->_lateCompletion = start != self->_starts;
         handler(reply, error);
-        self->_lateCompletion = NO;
     };
     [self openIfFree];
     if (_open) {
@@ -930,7 +915,7 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     if (QLMAdapterPackReport(&message, report, &error)) {
         error = [self problem];
         if (error.code == QLMAdapterErrorBusy) {
-            [world count:QLMFuzzCountRefused];
+            [world count:QLMFuzzCountBusy];
         }
     }
     [_clock async:_queue run:^{
@@ -955,7 +940,7 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     }
 }
 
-- (void)checkVolumeFirst:(const QLMMessage *)message text:(NSString *)text {
+- (void)checkVolumeFirst:(const QLMMessage *)message {
     if (_awaitingVolume.count == 0) {
         return;
     }
@@ -969,7 +954,7 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
         [_world count:QLMFuzzCountLease];
         if (!volume) {
             NSString *problem = [NSString stringWithFormat:@"the first frame to session %02X after its lease was %@, not the volume",
-                                                           session.unsignedCharValue, text];
+                                                           session.unsignedCharValue, QLMFuzzHex(message)];
             [_world violate:5 text:problem];
         }
     }
@@ -997,8 +982,7 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     if (awaits) {
         _waiting = YES;
         _waitingSince = _clock.now;
-        _waitingCloses = _closes;
-        _waitingText = QLMFuzzHex(&message);
+        _waitingMessage = message;
     }
     NSUInteger epoch = _epoch;
     if (self.stray != nil) {
@@ -1007,10 +991,11 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     }
     // A monitor that wakes from standby loses its lease
     // (docs/protocol.md, When a monitor loses its lease). The bus keeps it.
-    NSMutableArray<QLMFakeMonitor *> *asleep = [NSMutableArray array];
+    NSMutableArray<QLMFakeMonitor *> *asleep = nil;
     const uint8_t *payload = message.payload;
     if (message.address == QLMAddressBroadcast && message.length == 3 && payload[0] == 0x3A && payload[1] == 0x03 &&
         (payload[2] == QLMPowerStepWakeFirst || payload[2] == QLMPowerStepWakeSecond)) {
+        asleep = [NSMutableArray array];
         for (QLMFakeMonitor *monitor in world.bus.monitors) {
             if (monitor.present && !monitor.on) {
                 [asleep addObject:monitor];
@@ -1034,23 +1019,21 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
 // Rules 1 to 4, and the link's half of 6, on a frame as it goes out.
 - (void)checkWritten:(const QLMMessage *)message {
     QLMFuzzWorld *world = _world;
-    NSString *text = QLMFuzzHex(message);
     const uint8_t *payload = message->payload;
     if (world.bus.busyReason != nil) {
-        [world violate:3 text:[NSString stringWithFormat:@"%@ went out while another host held the adapter", text]];
+        [world violate:3 text:[NSString stringWithFormat:@"%@ went out while another host held the adapter", QLMFuzzHex(message)]];
     }
     NSString *forbidden = QLMFuzzForbidden(message);
     if (forbidden != nil) {
-        [world violate:2 text:[NSString stringWithFormat:@"%@ went out: %@", text, forbidden]];
+        [world violate:2 text:[NSString stringWithFormat:@"%@ went out: %@", QLMFuzzHex(message), forbidden]];
     }
     if (message->address == QLMAddressBroadcast && message->length == 4 && payload[0] == 0x1F) {
         uint32_t word = (uint32_t)payload[1] << 16 | (uint32_t)payload[2] << 8 | payload[3];
         double ceiling = world.ceiling;
         [world count:QLMFuzzCountVolume];
         if (word > QLMFuzzCeilingWord(ceiling)) {
-            NSString *problem = [NSString stringWithFormat:@"%@, %.2f dB, went out above the ceiling of %g dB", text,
+            NSString *problem = [NSString stringWithFormat:@"%@, %.2f dB, went out above the ceiling of %g dB", QLMFuzzHex(message),
                                                            QLMVolumeDecibelsForWord(word), ceiling];
-            // No frame waits in System's line for more than a few seconds.
             BOOL stale = word <= [world loosestCeilingWordSince:_clock.now - QLMFuzzStaleWindow];
             [world violate:1 text:problem known:stale ? QLMFuzzKnownStaleVolume : nil];
         }
@@ -1067,15 +1050,16 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
                 continue;
             }
             NSData *hardwareID = monitor.hardwareID;
-            if ([world userMuted:hardwareID]) {
+            BOOL userMuted = [world userMuted:hardwareID];
+            if (userMuted) {
                 [world count:QLMFuzzCountMutedRound];
             }
-            if (unmutes && [world mutedOnTheWire:hardwareID] && [world userMuted:hardwareID]) {
-                NSString *problem = [NSString stringWithFormat:@"%@ unmuted %@, which the user muted", text, hardwareID];
+            if (unmutes && userMuted && [world mutedOnTheWire:hardwareID]) {
+                NSString *problem = [NSString stringWithFormat:@"%@ unmuted %@, which the user muted", QLMFuzzHex(message), hardwareID];
                 BOOL stale = [world userUnmuted:hardwareID since:_clock.now - QLMFuzzStaleWindow];
                 [world violate:4 text:problem known:stale ? QLMFuzzKnownStaleRound : nil];
             }
-            [world setMutedOnTheWire:!unmutes hardwareID:monitor.hardwareID];
+            [world setMutedOnTheWire:!unmutes hardwareID:hardwareID];
         }
     }
     // A reply names no request, so the link takes the next reply as its
@@ -1083,9 +1067,9 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
     // next write waits for a reply, a close, or the timeout. The smaller
     // timeout bounds a sync's own, which is five times as long.
     NSTimeInterval now = _clock.now;
-    if (_waiting && _waitingCloses == _closes && now < _waitingSince + 0.1 - 1e-9) {
-        NSString *problem = [NSString stringWithFormat:@"the link wrote %@ %.4f s after %@, and no reply came between", text,
-                                                       now - _waitingSince, _waitingText];
+    if (_waiting && now < _waitingSince + 0.1 - 1e-9) {
+        NSString *problem = [NSString stringWithFormat:@"the link wrote %@ %.4f s after %@, and no reply came between",
+                                                       QLMFuzzHex(message), now - _waitingSince, QLMFuzzHex(&_waitingMessage)];
         [world violate:6 text:problem];
     }
     _waiting = NO;
@@ -1108,9 +1092,8 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
         delay = late;
         [world count:QLMFuzzCountLate];
     }
-    const uint8_t noAnswerPayload[] = {QLMFrameFlag};
-    QLMMessage noAnswer = QLMMessageMake(QLMAddressReply, noAnswerPayload, sizeof noAnswerPayload);
-    [self deliver:QLMFuzzReplyFrame(reply != NULL ? reply : &noAnswer) after:delay epoch:epoch];
+    QLMMessage sent = reply != NULL ? *reply : QLMMakeMessage(QLMAddressReply, QLMFrameFlag);
+    [self deliver:QLMFuzzReplyFrame(sent) after:delay epoch:epoch];
 }
 
 - (void)deliver:(NSData *)frame after:(NSTimeInterval)delay epoch:(NSUInteger)epoch {
@@ -1136,6 +1119,13 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
 @end
 
 #pragma mark - A run
+
+// On the bus's queue.
+static void QLMFuzzLapseEveryLease(QLMFakeBus *bus) {
+    for (QLMFakeMonitor *monitor in bus.monitors) {
+        monitor.session = 0;
+    }
+}
 
 // A violation's kind: the known bug it comes from, or its check.
 static NSString *QLMFuzzKindOf(QLMFuzzViolation *violation) {
@@ -1182,13 +1172,11 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
 // Runs the actions, then stops System. With `kind`, ends at its first
 // violation.
 - (void)runStoppingAt:(nullable NSString *)kind;
+@property (nonatomic, readonly) NSArray<QLMFuzzAction *> *actions;
 @property (nonatomic, readonly) QLMFuzzWorld *world;
-@property (nonatomic, readonly) NSUInteger applied;
-@property (nonatomic, readonly) NSUInteger refused;
 @end
 
 @implementation QLMFuzzRun {
-    NSArray<QLMFuzzAction *> *_actions;
     NSArray<QLMSetupGroup *> *_groups;
     QLMVirtualClock *_clock;
     QLMFuzzAdapter *_adapter;
@@ -1262,10 +1250,6 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
     _running = NO;
 }
 
-- (QLMFakeMonitor *)monitor:(NSInteger)index {
-    return _world.bus.monitors[(NSUInteger)index];
-}
-
 // On System's queue, which is the bus's.
 - (void)onBus:(dispatch_block_t)block {
     [_world.bus perform:block];
@@ -1295,7 +1279,11 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
 - (void)perform:(QLMFuzzAction *)action {
     QLMFuzzWorld *world = _world;
     QLMFakeBus *bus = world.bus;
-    QLMFakeMonitor *monitor = [self monitor:MAX(0, action.index) % QLMFuzzMonitorCount];
+    QLMFakeMonitor *monitor = bus.monitors[(NSUInteger)(MAX(0, action.index) % QLMFuzzMonitorCount)];
+    // A shrunk list may move the knob while it is out.
+    if (QLMFuzzMovesKnob(action.kind) && _knob == nil) {
+        return;
+    }
     switch (action.kind) {
     case QLMFuzzAdvance: [_clock advanceBy:action.value]; break;
     case QLMFuzzVolume:
@@ -1329,9 +1317,6 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
         [_system recordMutedHardwareIDs:[NSSet setWithObject:monitor.hardwareID]];
         break;
     case QLMFuzzKnobTurn: {
-        if (_knob == nil) {
-            break;
-        }
         NSInteger position = _knob.integerValue;
         NSInteger target = (NSInteger)action.value;
         NSInteger step = MAX(1, action.count);
@@ -1342,14 +1327,11 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
         break;
     }
     case QLMFuzzKnobDrift:
-        for (NSInteger i = 0; i < action.count && _knob != nil; i++) {
+        for (NSInteger i = 0; i < action.count; i++) {
             [self knobTo:_knob.integerValue + action.index wait:action.value];
         }
         break;
     case QLMFuzzKnobJitter: {
-        if (_knob == nil) {
-            break;
-        }
         NSInteger rest = _knob.integerValue;
         for (NSInteger i = 0; i < action.count; i++) {
             [self knobTo:rest + action.index * ((i * 7) % 3 - 1) wait:0.107];
@@ -1362,14 +1344,8 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
     case QLMFuzzWake: [_system wake]; break;
     case QLMFuzzApply: {
         QLMSetupGroup *group = _groups[(NSUInteger)action.index % _groups.count];
-        __weak QLMFuzzRun *weakSelf = self;
         void (^done)(NSError *) = ^(NSError *error) {
-            QLMFuzzRun *strongSelf = weakSelf;
-            if (strongSelf != nil && error == nil) {
-                strongSelf->_applied += 1;
-            } else if (strongSelf != nil) {
-                strongSelf->_refused += 1;
-            }
+            [world count:error == nil ? QLMFuzzCountApplied : QLMFuzzCountRefused];
         };
         if (action.flag) {
             [_system switchToGroup:group completion:done];
@@ -1402,9 +1378,7 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
         QLMSnapshot *last = _system.snapshot;
         [_clock advanceBy:30];
         [self onBus:^{
-            for (QLMFakeMonitor *each in bus.monitors) {
-                each.session = 0;
-            }
+            QLMFuzzLapseEveryLease(bus);
         }];
         world.volumeSet = NO;
         [self launchWithMuted:last.mutedHardwareIDs mutingAll:last.mutingAll];
@@ -1447,10 +1421,10 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
     case QLMFuzzLapse: {
         NSInteger index = action.index;
         [self onBus:^{
-            for (QLMFakeMonitor *each in bus.monitors) {
-                if (index < 0 || each == monitor) {
-                    each.session = 0;
-                }
+            if (index < 0) {
+                QLMFuzzLapseEveryLease(bus);
+            } else {
+                monitor.session = 0;
             }
         }];
         break;
@@ -1492,9 +1466,7 @@ static NSArray<QLMSetupGroup *> *QLMFuzzGroups(void) {
         NSData *stray = QLMFuzzStray(action.index);
         [self onBus:^{
             bus.busyReason = nil;
-            for (QLMFakeMonitor *each in bus.monitors) {
-                each.session = 0;
-            }
+            QLMFuzzLapseEveryLease(bus);
             adapter.stray = stray;
             [adapter hostChanged];
         }];
@@ -1524,6 +1496,17 @@ static NSString *_Nullable QLMFuzzEnvironment(NSString *name) {
 
 static uint64_t QLMFuzzParseSeed(NSString *text) {
     return strtoull(text.UTF8String, NULL, 0);
+}
+
+static NSUInteger QLMFuzzActionCountOr(NSUInteger fallback) {
+    NSString *text = QLMFuzzEnvironment(@"QLM_FUZZ_ACTIONS");
+    return text != nil ? (NSUInteger)text.integerValue : fallback;
+}
+
+// The list through the action at which the violation came.
+static NSArray<QLMFuzzAction *> *QLMFuzzCut(NSArray<QLMFuzzAction *> *actions, QLMFuzzViolation *violation) {
+    NSUInteger end = violation.action < 0 ? actions.count : MIN(actions.count, (NSUInteger)violation.action + 1);
+    return [actions subarrayWithRange:NSMakeRange(0, end)];
 }
 
 @implementation QLMSafetyFuzzTests
@@ -1571,54 +1554,39 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
     return [self runActions:actions name:[NSString stringWithFormat:@"seed 0x%llX", seed] replay:replay];
 }
 
-// Expects the failures of the System bugs this file names, and no other.
-// Not strict, since a run may not reach one.
-- (void)expectKnownBugs {
-    XCTExpectedFailureOptions *options = [XCTExpectedFailureOptions nonStrictOptions];
+// Expects the failures of `bugs`, as their violations name them, and no
+// other. Strict for one bug, so a fix fails its test: then drop the bug from
+// this file. Not strict for all three, since a run may not reach one.
+- (void)expectBugs:(NSArray<NSString *> *)bugs {
+    XCTExpectedFailureOptions *options =
+        bugs.count == 1 ? [[XCTExpectedFailureOptions alloc] init] : [XCTExpectedFailureOptions nonStrictOptions];
     options.issueMatcher = ^BOOL(XCTIssue *issue) {
-        return [issue.compactDescription containsString:@"[known: "];
+        for (NSString *bug in bugs) {
+            if ([issue.compactDescription containsString:[NSString stringWithFormat:@"[known: %@]", bug]]) {
+                return YES;
+            }
+        }
+        return NO;
     };
-    XCTExpectFailureWithOptions(QLMFuzzKnownBugs, options);
+    XCTExpectFailureWithOptions([@"System bugs: " stringByAppendingString:[bugs componentsJoinedByString:@"; "]], options);
 }
 
 // Each seed's run holds every rule, but for the known bugs.
 - (void)testEverySeedHoldsTheSafetyRules {
-    [self expectKnownBugs];
-    NSUInteger applied = 0;
-    NSUInteger refused = 0;
-    NSCountedSet<NSString *> *counts = [[NSCountedSet alloc] init];
+    [self expectBugs:QLMFuzzKnownBugs()];
+    NSMutableSet<NSString *> *met = [NSMutableSet set];
     for (size_t i = 0; i < sizeof QLMFuzzSeeds / sizeof QLMFuzzSeeds[0]; i++) {
-        QLMFuzzRun *run = [self runSeed:QLMFuzzSeeds[i] actions:QLMFuzzActionCount];
-        applied += run.applied;
-        refused += run.refused;
-        NSCountedSet<NSString *> *runCounts = run.world.counts;
-        for (NSString *what in runCounts) {
-            for (NSUInteger n = 0; n < [runCounts countForObject:what]; n++) {
-                [counts addObject:what];
-            }
-        }
+        [met unionSet:[self runSeed:QLMFuzzSeeds[i] actions:QLMFuzzActionCount].world.counts];
     }
     // The runs reach what each check guards, and a group apply that goes
     // through and one refused.
-    for (NSString *what in @[QLMFuzzCountVolume, QLMFuzzCountMutedRound, QLMFuzzCountRefused, QLMFuzzCountLease, QLMFuzzCountLate,
-                             QLMFuzzCountLost]) {
-        XCTAssertGreaterThan([counts countForObject:what], 0u, @"no %@", what);
+    for (NSString *what in @[QLMFuzzCountVolume, QLMFuzzCountMutedRound, QLMFuzzCountBusy, QLMFuzzCountLease, QLMFuzzCountLate,
+                             QLMFuzzCountLost, QLMFuzzCountApplied, QLMFuzzCountRefused]) {
+        XCTAssertTrue([met containsObject:what], @"no %@", what);
     }
-    XCTAssertGreaterThan(applied, 0u);
-    XCTAssertGreaterThan(refused, 0u);
 }
 
 #pragma mark The bugs the runs found
-
-// Expects `known` to break the rules, and nothing else to. Strict, so a fix
-// fails the test: then drop the bug from this file.
-- (void)expectBug:(NSString *)known {
-    XCTExpectedFailureOptions *options = [[XCTExpectedFailureOptions alloc] init];
-    options.issueMatcher = ^BOOL(XCTIssue *issue) {
-        return [issue.compactDescription containsString:known];
-    };
-    XCTExpectFailureWithOptions([NSString stringWithFormat:@"System bug: %@", known], options);
-}
 
 // The seed that found the bug, then the list it shrank to.
 - (void)runSeed:(uint64_t)seed shrunkTo:(NSArray<QLMFuzzAction *> *)actions {
@@ -1637,7 +1605,7 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 // System counts it as sent, so a volume or a mute may never go out.
 // QLMSystem.h lets a start come during a stop.
 - (void)testAStartRightAfterAStopKeepsTwoSendsInFlight {
-    [self expectBug:QLMFuzzKnownLateCompletion];
+    [self expectBugs:@[QLMFuzzKnownLateCompletion]];
     [self runSeed:QLMFuzzLateCompletionSeed shrunkTo:@[QLMFuzzMake(QLMFuzzRestart, 0, 0, 0, NO)]];
 }
 
@@ -1647,7 +1615,7 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 // ceiling caps every volume frame after it. Each frame queued at a wake,
 // a dim, a mute all, or an apply can wait behind holds and replies.
 - (void)testAVolumeQueuedBeforeACeilingDropGoesOutAboveIt {
-    [self expectBug:QLMFuzzKnownStaleVolume];
+    [self expectBugs:@[QLMFuzzKnownStaleVolume]];
     [self runSeed:QLMFuzzStaleVolumeSeed
          shrunkTo:@[
              QLMFuzzMake(QLMFuzzCeiling, -0.5, 0, 0, NO), QLMFuzzMake(QLMFuzzVolume, -0.0, 0, 0, NO),
@@ -1660,7 +1628,7 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 // than the rounds go out: the unmute's round reaches the monitor after the
 // first mute's, and unmutes it until the second's comes.
 - (void)testARoundQueuedBeforeAMuteUnmutesAMutedMonitor {
-    [self expectBug:QLMFuzzKnownStaleRound];
+    [self expectBugs:@[QLMFuzzKnownStaleRound]];
     [self runSeed:QLMFuzzStaleRoundSeed
          shrunkTo:@[
              QLMFuzzMake(QLMFuzzAdvance, 1.5, 0, 0, NO), QLMFuzzMake(QLMFuzzMute, 0, 0, 0, YES),
@@ -1673,66 +1641,57 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
 
 // TEST_RUNNER_QLM_FUZZ_SEED replays one seed. TEST_RUNNER_QLM_FUZZ_SHRINK=1
 // shrinks it to a short list that breaks the same rule: the first that no
-// known bug explains, else the first. A check's number in place of 1 picks
-// that check.
+// known bug explains, else the first. A check's number from 2 to 6 in place
+// of 1 picks that check.
 - (void)testReplaysASeed {
     NSString *seedText = QLMFuzzEnvironment(@"QLM_FUZZ_SEED");
     if (seedText == nil || QLMFuzzEnvironment(@"QLM_FUZZ_SOAK") != nil) {
         return;
     }
     uint64_t seed = QLMFuzzParseSeed(seedText);
-    NSString *countText = QLMFuzzEnvironment(@"QLM_FUZZ_ACTIONS");
-    NSUInteger count = countText != nil ? (NSUInteger)countText.integerValue : QLMFuzzActionCount;
-    NSArray<QLMFuzzAction *> *actions = QLMFuzzActionsForSeed(seed, count, (NSInteger)QLMFuzzGroups().count);
+    NSUInteger count = QLMFuzzActionCountOr(QLMFuzzActionCount);
     NSString *shrink = QLMFuzzEnvironment(@"QLM_FUZZ_SHRINK");
     if (shrink == nil) {
-        [self expectKnownBugs];
+        [self expectBugs:QLMFuzzKnownBugs()];
         QLMFuzzRun *run = [self runSeed:seed actions:count];
         NSInteger last = -1;
         for (QLMFuzzViolation *violation in run.world.violations) {
             last = MAX(last, violation.action);
         }
-        NSLog(@"QLMSafetyFuzz seed 0x%llX, through its last violation:\n%@", seed, QLMFuzzListing(actions, last));
+        NSLog(@"QLMSafetyFuzz seed 0x%llX, through its last violation:\n%@", seed, QLMFuzzListing(run.actions, last));
         return;
     }
+    NSArray<QLMFuzzAction *> *actions = QLMFuzzActionsForSeed(seed, count, (NSInteger)QLMFuzzGroups().count);
     QLMFuzzRun *run = [[QLMFuzzRun alloc] initWithActions:actions];
     [run runStoppingAt:nil];
-    NSString *kind = nil;
+    NSInteger pick = shrink.integerValue;
+    QLMFuzzViolation *target = nil;
     for (QLMFuzzViolation *violation in run.world.violations) {
-        BOOL picked = shrink.integerValue > 1 ? violation.check == (NSUInteger)shrink.integerValue : violation.known == nil;
-        if (picked) {
-            kind = QLMFuzzKindOf(violation);
+        if (pick > 1 ? violation.check == (NSUInteger)pick : violation.known == nil) {
+            target = violation;
             break;
         }
     }
-    if (kind == nil && shrink.integerValue <= 1 && run.world.violations.count > 0) {
-        kind = QLMFuzzKindOf(run.world.violations[0]);
+    if (target == nil && pick <= 1) {
+        target = run.world.violations.firstObject;
     }
-    if (kind == nil) {
+    if (target == nil) {
         NSLog(@"QLMSafetyFuzz seed 0x%llX breaks no rule to shrink", seed);
         return;
     }
-    NSArray<QLMFuzzAction *> *shrunk = [self shrink:actions kind:kind];
+    NSString *kind = QLMFuzzKindOf(target);
+    NSArray<QLMFuzzAction *> *shrunk = [self shrink:QLMFuzzCut(actions, target) kind:kind];
     QLMFuzzRun *last = [[QLMFuzzRun alloc] initWithActions:shrunk];
     [last runStoppingAt:kind];
     NSLog(@"QLMSafetyFuzz seed 0x%llX shrinks to %lu actions:\n%@%@", seed, (unsigned long)shrunk.count,
           QLMFuzzListing(shrunk, (NSInteger)shrunk.count), QLMFuzzFirstOfKind(last.world.violations, kind));
 }
 
-// Drops actions while the list still breaks the rule, in ever smaller
-// chunks, as delta debugging does, and cuts it after the violation.
+// `actions` breaks the rule, and ends at the violation. Drops actions while
+// the list still breaks it, in ever smaller chunks, as delta debugging does,
+// and cuts it after the violation.
 - (NSArray<QLMFuzzAction *> *)shrink:(NSArray<QLMFuzzAction *> *)actions kind:(NSString *)kind {
-    NSArray<QLMFuzzAction *> * (^failing)(NSArray<QLMFuzzAction *> *) = ^NSArray<QLMFuzzAction *> *(NSArray<QLMFuzzAction *> *candidate) {
-        QLMFuzzRun *run = [[QLMFuzzRun alloc] initWithActions:candidate];
-        [run runStoppingAt:kind];
-        QLMFuzzViolation *first = QLMFuzzFirstOfKind(run.world.violations, kind);
-        if (first == nil) {
-            return nil;
-        }
-        NSUInteger end = first.action < 0 ? candidate.count : MIN(candidate.count, (NSUInteger)first.action + 1);
-        return [candidate subarrayWithRange:NSMakeRange(0, end)];
-    };
-    NSArray<QLMFuzzAction *> *best = failing(actions) ?: actions;
+    NSArray<QLMFuzzAction *> *best = actions;
     NSUInteger chunk = MAX((NSUInteger)1, best.count / 2);
     while (chunk >= 1) {
         BOOL removed = NO;
@@ -1740,9 +1699,11 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
         while (start < best.count) {
             NSMutableArray<QLMFuzzAction *> *candidate = [best mutableCopy];
             [candidate removeObjectsInRange:NSMakeRange(start, MIN(chunk, best.count - start))];
-            NSArray<QLMFuzzAction *> *smaller = candidate.count > 0 ? failing(candidate) : nil;
-            if (smaller != nil) {
-                best = smaller;
+            QLMFuzzRun *run = [[QLMFuzzRun alloc] initWithActions:candidate];
+            [run runStoppingAt:kind];
+            QLMFuzzViolation *first = candidate.count > 0 ? QLMFuzzFirstOfKind(run.world.violations, kind) : nil;
+            if (first != nil) {
+                best = QLMFuzzCut(candidate, first);
                 removed = YES;
             } else {
                 start += chunk;
@@ -1766,11 +1727,10 @@ static NSString *QLMFuzzListing(NSArray<QLMFuzzAction *> *actions, NSInteger las
     if (soak == nil) {
         return;
     }
-    [self expectKnownBugs];
+    [self expectBugs:QLMFuzzKnownBugs()];
     NSString *seedText = QLMFuzzEnvironment(@"QLM_FUZZ_SEED");
     uint64_t base = seedText != nil ? QLMFuzzParseSeed(seedText) : (uint64_t)arc4random() << 32 | arc4random();
-    NSString *countText = QLMFuzzEnvironment(@"QLM_FUZZ_ACTIONS");
-    NSUInteger count = countText != nil ? (NSUInteger)countText.integerValue : 2000;
+    NSUInteger count = QLMFuzzActionCountOr(2000);
     NSInteger runs = soak.integerValue;
     for (NSInteger i = 0; i < runs; i++) {
         [self runSeed:base + (uint64_t)i actions:count];
