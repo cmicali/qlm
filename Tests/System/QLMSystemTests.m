@@ -143,6 +143,15 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     }].count;
 }
 
+// Every monitor's lease lapses, so the next probe finds it.
+- (void)lapseLeases {
+    [_bus perform:^{
+        for (QLMFakeMonitor *monitor in self->_bus.monitors) {
+            monitor.session = 0;
+        }
+    }];
+}
+
 // Waits until the condition holds, polling.
 - (void)waitUntil:(BOOL (^)(void))condition {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:5];
@@ -517,10 +526,9 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified;
     }];
     // Wait for the count, not a fixed time: under load a cycle takes longer.
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:10];
-    while (replay.playedCount <= 100 && [deadline timeIntervalSinceNow] > 0) {
-        [NSThread sleepForTimeInterval:0.01];
-    }
+    [self waitUntil:^BOOL {
+        return replay.playedCount > 100;
+    }];
     [_system stop];
     XCTAssertEqualObjects(replay.unmatchedMessages, @[]);
     XCTAssertGreaterThan(replay.playedCount, 100u);
@@ -1410,15 +1418,14 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _settings.cycleInterval = 10;
     NSArray<NSData *> *pair = @[QLMBytes((const uint8_t[]){QLMAddressBroadcast, 0x2D, 0x00}, 3),
                                 QLMBytes((const uint8_t[]){QLMAddressBroadcast, 0x3D, 0x00, 0x00}, 4)];
-    NSArray<NSNumber *> *knobs = @[@(-450), @(-150), @(1)];  // -45 dB, -15 dB above the -20 dB ceiling, and no knob
+    NSArray *knobs = @[@(-450), @(-150), NSNull.null];  // -45 dB, -15 dB above the -20 dB ceiling, and no knob
     NSArray<NSNumber *> *levels = @[@(-45), @(-20), @(QLMVolumeDecibelsMin)];
     for (NSUInteger i = 0; i < knobs.count; i++) {
-        NSNumber *knob = knobs[i].integerValue > 0 ? nil : knobs[i];
+        NSNumber *knob = knobs[i] == NSNull.null ? nil : knobs[i];
         [_bus perform:^{
             self->_bus.knobTenths = knob;
-            self->_left.session = 0;  // the last pass's leases lapse
-            self->_right.session = 0;
         }];
+        [self lapseLeases];  // the last pass's
         [self startSystem];
         [self waitForDiscovery];
         NSUInteger before = _bus.sentMessages.count;
@@ -1445,9 +1452,8 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     // off and on would.
     [_bus perform:^{
         self->_left.muteValue = QLMMuteValueUnmuted;
-        self->_left.session = 0;
-        self->_right.session = 0;
     }];
+    [self lapseLeases];
     [_system start];
     QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
@@ -1506,15 +1512,20 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
 }
 
-// Stops System, waits until it has, and returns what it sent meanwhile.
-- (NSArray<NSData *> *)stopAndCollect:(QLMSnapshot *_Nullable *_Nonnull)stopped {
-    NSUInteger before = _bus.sentMessages.count;
+// Stops System and returns its snapshot once it has.
+- (QLMSnapshot *)stopAndWait {
     QLMSystem *system = _system;
-    *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return !snapshot.running;
     } after:^{
         [system stop];
     }];
+}
+
+// The same, with what System sent meanwhile.
+- (NSArray<NSData *> *)stopAndCollect:(QLMSnapshot *_Nullable *_Nonnull)stopped {
+    NSUInteger before = _bus.sentMessages.count;
+    *stopped = [self stopAndWait];
     return [self sentFrom:before matching:^BOOL(NSData *message) {
         return YES;
     }];
@@ -1554,10 +1565,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
     XCTAssertNil(stopped.handBack.knobDecibels);
 
-    [_bus perform:^{
-        self->_left.session = 0;
-        self->_right.session = 0;
-    }];
+    [self lapseLeases];
     [self startWithKnob:@(-600) volume:nil];
     XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
     XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
@@ -1567,10 +1575,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 // A start while the stop sends the knob's level runs once the stop is done.
 - (void)testAStartDuringTheHandBackRunsAfterIt {
     [self startWithKnob:@(-600) volume:@(-40)];
-    [_bus perform:^{
-        self->_left.session = 0;
-        self->_right.session = 0;
-    }];
+    [self lapseLeases];
     QLMSystem *system = _system;
     __block BOOL stopped = NO;
     QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
