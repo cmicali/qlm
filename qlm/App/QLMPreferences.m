@@ -12,6 +12,8 @@ static NSString *const QLMLowestKey = @"QLMLowestDecibels";
 static NSString *const QLMVolumeKey = @"QLMVolumeDecibels";
 static NSString *const QLMWakesAtLaunchKey = @"QLMWakesAtLaunch";
 static NSString *const QLMUsesAdapterKey = @"QLMUsesAdapter";
+static NSString *const QLMMutedHardwareIDsKey = @"QLMMutedHardwareIDs";
+static NSString *const QLMMutingAllKey = @"QLMMutingAll";
 static NSString *const QLMSetupFileNameKey = @"QLMSetupFileName";
 
 static double QLMStepBelow(double decibels) {
@@ -100,6 +102,29 @@ double QLMNearestStepDecibels(double decibels) {
 
 - (void)setUsesAdapter:(BOOL)usesAdapter {
     [_defaults setBool:usesAdapter forKey:QLMUsesAdapterKey];
+}
+
+// Kept as a list of data, which a property list can hold.
+- (NSSet<NSData *> *)mutedHardwareIDs {
+    NSMutableSet<NSData *> *hardwareIDs = [NSMutableSet set];
+    for (id item in [_defaults arrayForKey:QLMMutedHardwareIDsKey]) {
+        if ([item isKindOfClass:[NSData class]]) {
+            [hardwareIDs addObject:item];
+        }
+    }
+    return hardwareIDs;
+}
+
+- (void)setMutedHardwareIDs:(NSSet<NSData *> *)mutedHardwareIDs {
+    [_defaults setObject:mutedHardwareIDs.allObjects forKey:QLMMutedHardwareIDsKey];
+}
+
+- (BOOL)mutingAll {
+    return [_defaults boolForKey:QLMMutingAllKey];
+}
+
+- (void)setMutingAll:(BOOL)mutingAll {
+    [_defaults setBool:mutingAll forKey:QLMMutingAllKey];
 }
 
 - (NSString *)setupFileName {

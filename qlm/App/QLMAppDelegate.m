@@ -90,6 +90,8 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     }
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.preferences.ceilingDecibels;
+    settings.mutedHardwareIDs = self.preferences.mutedHardwareIDs;
+    settings.mutingAll = self.preferences.mutingAll;
     QLMSystem *system = [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
     self.bus = bus;
     self.system = system;
@@ -157,6 +159,7 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
     if (self.fakeBusController.window.visible) {
         [self.fakeBusController refresh];
     }
+    [self keepMuteRecord:snapshot];
     // The knob moves the volume too. Keep whichever set it last.
     NSNumber *volume = snapshot.volumeDecibels;
     if (volume != nil) {
@@ -166,6 +169,20 @@ static const NSTimeInterval QLMRestartDelay = 0.6;
         }
     }
     [self renderStatusItem];
+}
+
+// TRAP: a snapshot from before System starts carries an empty record, not
+// the one System starts from. Only a running System's record is kept.
+- (void)keepMuteRecord:(QLMSnapshot *)snapshot {
+    if (!snapshot.running) {
+        return;
+    }
+    if (![snapshot.mutedHardwareIDs isEqualToSet:self.preferences.mutedHardwareIDs]) {
+        self.preferences.mutedHardwareIDs = snapshot.mutedHardwareIDs;
+    }
+    if (snapshot.mutingAll != self.preferences.mutingAll) {
+        self.preferences.mutingAll = snapshot.mutingAll;
+    }
 }
 
 - (void)renderStatusItem {

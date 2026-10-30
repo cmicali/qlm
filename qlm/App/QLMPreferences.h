@@ -25,6 +25,11 @@ extern const double QLMVolumeRangeMinimumSpan;
 // On, System drives the real monitors through the GLM adapter. Off, the
 // fake bus. Off by default.
 @property (nonatomic) BOOL usesAdapter;
+// System's mute record, kept across launches: the muted hardware IDs, and
+// whether mute all is on. No reply reports a monitor's mute, so the record
+// is the truth.
+@property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;
+@property (nonatomic) BOOL mutingAll;
 // A file name in QLMSetupDirectory(). Nil takes the first by name.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
 
