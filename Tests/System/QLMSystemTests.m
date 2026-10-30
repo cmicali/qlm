@@ -6,6 +6,7 @@
 #import "QLMHIDAdapterInternal.h"
 #import "QLMHostCheck.h"
 #import "QLMReplayAdapter.h"
+#import "QLMReportLink.h"
 #import "QLMSetupInternal.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
@@ -1984,6 +1985,40 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     for (NSData *level in levels) {
         XCTAssertEqualObjects(level, QLMAdapterRecord(&capped));
     }
+}
+
+// The same when the report link holds the frame. After a reopen, the link
+// holds the first request behind its sync, and the ceiling falls meanwhile
+// (QLMSafetyFuzzTests, seed 0xE6635237C78ED983). The frame goes out under
+// the ceiling in force when the link writes it.
+- (void)testALoweredCeilingCapsAVolumeFrameTheLinkHolds {
+    _settings.cycleInterval = 10;
+    QLMCaptureDevice *device = [[QLMCaptureDevice alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
+    [self startSystemWithAdapter:device];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
+    }];
+    // The clock stands still, so nothing else touches the link meanwhile.
+    [device.link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
+    [device.link reopen];
+    NSUInteger before = device.writtenReports.count;
+    [_system setVolumeDecibels:0];
+    [_system setCeilingDecibels:-44.5];
+    [self waitForIdle];
+    [_time advanceBy:0.1];
+    uint8_t capped[QLMReportLength];
+    QLMMessage volume = QLMCommandVolume(0, -44.5);
+    QLMReportPackOutput(&volume, capped);
+    NSArray<NSData *> *written = device.writtenReports;
+    NSUInteger volumes = 0;
+    for (NSUInteger i = before; i < written.count; i++) {
+        const uint8_t *bytes = written[i].bytes;
+        if (bytes[1] == QLMAddressBroadcast && bytes[2] == 0x1F) {
+            volumes += 1;
+            XCTAssertEqualObjects(written[i], QLMBytes(capped, sizeof capped));
+        }
+    }
+    XCTAssertEqual(volumes, 2u);  // the volume's, then the ceiling's own
 }
 
 // A stop's completion runs on the main queue once System has let go of the

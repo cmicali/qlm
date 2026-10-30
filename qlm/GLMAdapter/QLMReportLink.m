@@ -36,6 +36,8 @@ static NSError *QLMStalledError(void) {
 
 @interface QLMReportLinkRequest : NSObject
 @property (nonatomic) NSData *report;
+@property (nonatomic) QLMMessage message;
+@property (nonatomic, copy, nullable) QLMAdapterRewrite rewrite;  // run as the report is written
 @property (nonatomic) BOOL expectsReply;
 @property (nonatomic) QLMReplyShape shape;
 @property (nonatomic) BOOL sync;
@@ -95,12 +97,17 @@ static NSError *QLMStalledError(void) {
     }
     QLMReportLinkRequest *request = [[QLMReportLinkRequest alloc] init];
     request.report = [NSData dataWithBytes:report length:sizeof report];
+    request.message = *message;
     request.expectsReply = QLMReportExpectsReply(message);
     request.shape = QLMReplyShapeFor(message);
     return request;
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    [self sendMessage:message rewrite:nil replyHandler:handler];
+}
+
+- (void)sendMessage:(QLMMessage)message rewrite:(QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     if (_closed != nil) {
         [self finish:handler reply:NULL error:_closed];
         return;
@@ -121,6 +128,7 @@ static NSError *QLMStalledError(void) {
         return;
     }
     request.handler = handler;
+    request.rewrite = rewrite;
     if (_late != 0) {
         _held = request;
         if (_waiting == nil) {
@@ -131,9 +139,21 @@ static NSError *QLMStalledError(void) {
     [self write:request];
 }
 
-// A request, not a sync.
+// A request, not a sync. A held one may wait a while, so its rewrite runs
+// only now, and the allowlist checks the result again.
 - (void)write:(QLMReportLinkRequest *)request {
-    NSError *error = _writer(request.report.bytes);
+    NSData *report = request.report;
+    if (request.rewrite != nil) {
+        QLMMessage message = request.rewrite(request.message);
+        uint8_t packed[QLMReportLength];
+        NSError *refusal = nil;
+        if (!QLMAdapterPackReport(&message, packed, &refusal)) {
+            [self finish:request.handler reply:NULL error:refusal];
+            return;
+        }
+        report = [NSData dataWithBytes:packed length:sizeof packed];
+    }
+    NSError *error = _writer(report.bytes);
     if (error != nil) {
         [self finish:request.handler reply:NULL error:error];
         return;

@@ -26,6 +26,10 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
 // pointer is valid only during the call.
 typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSError *_Nullable error);
 
+// The message as it goes out, from the message as it was handed over. Run on
+// the queue just before its report is written.
+typedef QLMMessage (^QLMAdapterRewrite)(QLMMessage message);
+
 // What System drives: the GLM network adapter over HID, a replay of a capture,
 // or a fake bus. The bus is half-duplex, so a caller sends one message and
 // waits for its handler before sending the next.
@@ -38,6 +42,13 @@ typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSErro
 
 // What this adapter drives, for display. Read on the queue.
 @property (nonatomic, readonly) NSString *deviceDescription;
+
+@optional
+// The same, but `rewrite` gives the message that goes out, as its report is
+// written. The rewrite may change only the values, and the allowlist checks
+// it again. TRAP: an adapter that may hold a message before it writes it, as
+// a report link does behind its syncs, must take this.
+- (void)sendMessage:(QLMMessage)message rewrite:(QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler;
 
 @end
 

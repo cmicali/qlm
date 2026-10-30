@@ -355,10 +355,18 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    [self send:message rewrite:nil replyHandler:handler];
+}
+
+- (void)sendMessage:(QLMMessage)message rewrite:(QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
+    [self send:message rewrite:rewrite replyHandler:handler];
+}
+
+- (void)send:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
     if (_device != NULL) {
-        [_link sendMessage:message replyHandler:handler];
+        [_link sendMessage:message rewrite:rewrite replyHandler:handler];
         return;
     }
     // Through the allowlist even so, so a refusal reads the same either way.

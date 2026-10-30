@@ -23,8 +23,8 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // TRAP: two late replies, a system info and then a status, fool both steps.
 // GLM keeps one request in flight (captures/startup-idle). An earlier qlm
 // leaves more than one only when it quit while it synced: the reply that
-// timed out, and up to four syncs' (replyTimeout). It leaves a system info
-// and then a status only when its system info timed out.
+// timed out, and its syncs' (replyTimeout). Those may be a system info and
+// then a status.
 //
 // Every method runs on the queue, and so does the writer. Each handler is
 // called once, asynchronously, on the queue.
@@ -58,6 +58,8 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 @property (nonatomic) NSTimeInterval replyTimeout;
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
+// The rewrite runs as the report is written, after any sync that held it.
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler;
 
 // One input report, as the device delivered it.
 - (void)receiveReport:(const uint8_t *)report length:(size_t)length;

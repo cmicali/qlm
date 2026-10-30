@@ -491,18 +491,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             }];
             return;
         }
-        // TRAP: a volume frame waits in line, and the ceiling may fall
-        // meanwhile. So it is capped again as it goes out.
-        QLMMessage sent = message;
-        if (QLMIsVolumeFrame(&sent)) {
-            sent = QLMCommandVolumeWord(QLMVolumeFrameWord(&sent), QLMCeilingWord(strongSelf.settings.ceilingDecibels));
-            sent.address = message.address;
-        }
-        // TRAP: the same for a 2B, while the mutes change. It says the mute
-        // as it is when it goes out.
-        [strongSelf restate:&sent];
+        // TRAP: a frame waits in line, and then in a report link behind its
+        // syncs, while the ceiling and the mutes change. So each volume
+        // frame is capped, and each 2B says the mutes, as it goes out.
+        QLMMessage sent = [strongSelf asItGoesOut:message];
         NSUInteger run = strongSelf->_run;
-        [strongSelf->_adapter sendMessage:sent replyHandler:^(const QLMMessage *reply, NSError *error) {
+        QLMAdapterReplyHandler handler = ^(const QLMMessage *reply, NSError *error) {
             QLMSystem *system = weakSelf;
             // TRAP: a stop ends the item in flight, and a start may follow at
             // once. A reply from before the stop must not end an item of the
@@ -517,12 +511,35 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [system finishItem:completion == nil ? nil : ^{
                 completion(reply, error);
             }];
-        }];
+        };
+        id<QLMAdapter> adapter = strongSelf->_adapter;
+        if (![adapter respondsToSelector:@selector(sendMessage:rewrite:replyHandler:)]) {
+            [adapter sendMessage:sent replyHandler:handler];
+            return;
+        }
+        [adapter sendMessage:sent
+                     rewrite:^QLMMessage(QLMMessage held) {
+                         QLMSystem *system = weakSelf;
+                         return system != nil ? [system asItGoesOut:held] : held;
+                     }
+                replyHandler:handler];
     };
 }
 
+// The frame as it goes out: a volume frame capped at the ceiling now, and a
+// 2B with the mutes now.
+- (QLMMessage)asItGoesOut:(QLMMessage)message {
+    if (QLMIsVolumeFrame(&message)) {
+        QLMMessage capped = QLMCommandVolumeWord(QLMVolumeFrameWord(&message), QLMCeilingWord(self.settings.ceilingDecibels));
+        capped.address = message.address;
+        return capped;
+    }
+    [self restate:&message];
+    return message;
+}
+
 // A 2B in the group says the monitor's mute now, and the adapter's 2B says
-// mute all now. Outside the group, a 2B carries no mute.
+// its own mute now. Outside the group, a 2B carries no mute.
 - (void)restate:(QLMMessage *)state {
     if (state->length != 2 || state->payload[0] != 0x2B) {
         return;

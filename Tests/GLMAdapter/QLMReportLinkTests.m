@@ -495,6 +495,46 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertEqualObjects([self written], sent);
 }
 
+// The open holds the first request behind its sync, so the rewrite runs as
+// the report is written, after the sync, and sees what holds then. The
+// allowlist checks what it gives: a rewrite to 05 fails, and writes nothing.
+- (void)testARewriteRunsAsTheReportIsWritten {
+    [self startDevice];
+    QLMReportLink *link = _device.link;
+    __block uint8_t word = 0x7F;
+    __block BOOL sent = NO;
+    [self run:^{
+        [link sendMessage:QLMCommandVolumeWord(0x7FFFFF, 0x7FFFFF)
+                  rewrite:^QLMMessage(QLMMessage message) {
+                      return QLMCommandVolumeWord((uint32_t)word << 16, 0x7FFFFF);
+                  }
+             replyHandler:^(const QLMMessage *reply, NSError *error) {
+                 XCTAssertNil(error);
+                 sent = YES;
+             }];
+        word = 0x01;
+    } until:^BOOL {
+        return sent;
+    }];
+    NSArray<NSData *> *opening = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter))];
+    XCTAssertEqualObjects([self written], [opening arrayByAddingObject:QLMReportFor(QLMCommandVolumeWord(0x010000, 0x7FFFFF))]);
+
+    __block BOOL refused = NO;
+    [self run:^{
+        [link sendMessage:QLMCommandKeepAlive()
+                  rewrite:^QLMMessage(QLMMessage message) {
+                      return QLMMakeMessage(0x02, 0x05, 0x04, 0x00);
+                  }
+             replyHandler:^(const QLMMessage *reply, NSError *refusal) {
+                 XCTAssertEqual(refusal.code, QLMAdapterErrorForbidden);
+                 refused = YES;
+             }];
+    } until:^BOOL {
+        return refused;
+    }];
+    XCTAssertEqual([self written].count, 3u);
+}
+
 - (void)testRefusesWhatTheAllowlistRefusesAndWritesNothing {
     NSError *error = nil;
     QLMMessage generator = QLMMakeMessage(0x02, 0x05, 0x04, 0x00);
