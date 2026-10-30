@@ -20,6 +20,7 @@ const double QLMCeilingLimit = -30;
 @property (nonatomic, readwrite) BOOL on;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
 @property (nonatomic, readwrite, nullable) NSString *serial;
+@property (nonatomic, readwrite) NSArray<NSString *> *mutedSerials;
 @property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) NSTimeInterval seconds;
 @end
@@ -43,7 +44,7 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
 + (instancetype)optionsForCommand:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments problem:(NSString **)problem {
     *problem = nil;
     NSMutableSet<NSString *> *flags = [NSMutableSet setWithObjects:@"--fake", @"--dry-run", nil];
-    NSMutableSet<NSString *> *valued = [NSMutableSet setWithObjects:@"--replay", @"--seconds", nil];
+    NSMutableSet<NSString *> *valued = [NSMutableSet setWithObjects:@"--replay", @"--seconds", @"--muted", nil];
     BOOL takesPositional = YES;
     switch (command) {
     case QLMControlCommandVolume:
@@ -98,6 +99,20 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
     options.replayPath = given[@"--replay"];
     options.dryRun = given[@"--dry-run"] != nil;
     options.serial = given[@"--serial"];
+    options.mutedSerials = @[];
+    NSString *muted = given[@"--muted"];
+    if (muted != nil) {
+        NSMutableArray<NSString *> *serials = [NSMutableArray array];
+        for (NSString *item in [muted componentsSeparatedByString:@","]) {
+            NSString *serial = [item stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            if (serial.length == 0) {
+                *problem = @"--muted takes serials separated by commas, with none empty";
+                return nil;
+            }
+            [serials addObject:serial];
+        }
+        options.mutedSerials = serials;
+    }
     if (options.fake && options.replayPath != nil) {
         *problem = @"--fake and --replay name different buses";
         return nil;
@@ -255,6 +270,38 @@ static BOOL QLMIsDiscovery(NSData *record) {
     }
     // A lease: the address, then 02, the hardware ID, and the session.
     return record.length == 6 && QLMRecordIs(record, QLMCommandAssignSession(bytes + 2, bytes[5]));
+}
+
+NSSet<NSData *> *QLMHardwareIDsForSerials(NSArray<NSString *> *serials, QLMSnapshot *discovered, NSString **problem) {
+    *problem = nil;
+    NSMutableSet<NSData *> *hardwareIDs = [NSMutableSet set];
+    for (NSString *serial in serials) {
+        NSMutableArray<QLMMonitorState *> *matches = [NSMutableArray array];
+        for (QLMMonitorState *monitor in discovered.monitors) {
+            if ([monitor.serialNumber containsString:serial]) {
+                [matches addObject:monitor];
+            }
+        }
+        if (matches.count != 1) {
+            *problem = [NSString stringWithFormat:@"%lu monitors match '%@'", (unsigned long)matches.count, serial];
+            return nil;
+        }
+        [hardwareIDs addObject:matches[0].hardwareID];
+    }
+    return hardwareIDs;
+}
+
+QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction action) {
+    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        NSString *problem = nil;
+        NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(serials, discovered, &problem);
+        if (hardwareIDs == nil) {
+            fprintf(stderr, "qlmctl: --muted: %s\n", problem.UTF8String);
+            return EX_DATAERR;
+        }
+        [system recordMutedHardwareIDs:hardwareIDs];
+        return action(system, discovered);
+    };
 }
 
 QLMControlAction QLMDimAction(BOOL on, NSNumber *volumeDecibels) {

@@ -53,6 +53,9 @@ static void QLMPrintUsage(FILE *stream) {
             "                                 send. Nothing more is sent.\n"
             "  --seconds N                    stay the host for N seconds after the change shows. The volume goes\n"
             "                                 out again every cycle.\n"
+            "  --muted TEXT[,TEXT...]         the monitors already muted, as in GLM, each named by text its serial\n"
+            "                                 contains. qlm cannot read a mute, so without this, its rounds of mute\n"
+            "                                 state restate them as unmuted.\n"
             "\n"
             "The controls over USB:\n"
             "  - volume, dim, and wake --volume need --ceiling. GLMProtocol caps every volume frame at it. It may\n"
@@ -60,7 +63,8 @@ static void QLMPrintUsage(FILE *stream) {
             "  - dim needs --volume, the level to dim from. qlm cannot read the level.\n"
             "  - wake without --volume sends no level, so each monitor comes back at the level it kept.\n"
             "  - One monitor first. mute --serial changes one monitor. As GLM does, it also restates every other\n"
-            "    monitor as unmuted, and so do dim and a turn of the knob. A monitor muted in GLM plays again.\n"
+            "    monitor, and so do dim and a turn of the knob: as unmuted, unless --muted names it. A monitor\n"
+            "    muted in GLM and left out of --muted plays again.\n"
             "    volume, dim, sleep, and wake are broadcasts, and every monitor obeys them.\n"
             "    To try one on a single monitor, put the others in standby in GLM, then quit GLM. wake wakes\n"
             "    them all, so try it last.\n"
@@ -498,6 +502,9 @@ static int QLMRunControlCommand(QLMControlOptions *options, QLMControlAction act
     QLMSystem *system = QLMMakeSystemOn(options.fake, options.replayPath, options.settings);
     if (system == nil) {
         return EX_UNAVAILABLE;
+    }
+    if (options.mutedSerials.count > 0) {
+        action = QLMWithMuted(options.mutedSerials, action);
     }
     return QLMRunControl(system, options, action, effect);
 }
