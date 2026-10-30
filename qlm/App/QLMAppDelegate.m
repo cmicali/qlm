@@ -36,6 +36,7 @@ static const NSTimeInterval QLMStopAllowance = 3;
 @property (nonatomic, nullable) QLMFakeBus *bus;
 @property (nonatomic, nullable) QLMSystem *system;
 @property (nonatomic) BOOL restarting;
+@property (nonatomic) BOOL terminating;  // a reply to applicationShouldTerminate: is due
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
@@ -93,16 +94,24 @@ static const NSTimeInterval QLMStopAllowance = 3;
             return NSTerminateCancel;
         }
     }
-    __block BOOL replied = NO;
-    dispatch_block_t reply = ^{
-        if (!replied) {
-            replied = YES;
-            [NSApp replyToApplicationShouldTerminate:YES];
-        }
-    };
-    [system stopWithCompletion:reply];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(QLMStopAllowance * (double)NSEC_PER_SEC)), dispatch_get_main_queue(), reply);
+    self.terminating = YES;
+    __weak QLMAppDelegate *weakSelf = self;
+    [system stopWithCompletion:^{
+        [weakSelf finishTerminating];
+    }];
+    // TRAP: a quit begun inside a block on the main queue blocks the queue's
+    // other blocks, the completion included, until it returns. A run loop
+    // timer still fires in quit's modal loop, so quit ends either way.
+    [self performSelector:@selector(finishTerminating) withObject:nil afterDelay:QLMStopAllowance
+                  inModes:@[NSModalPanelRunLoopMode, NSDefaultRunLoopMode]];
     return NSTerminateLater;
+}
+
+- (void)finishTerminating {
+    if (self.terminating) {
+        self.terminating = NO;
+        [NSApp replyToApplicationShouldTerminate:YES];
+    }
 }
 
 // Nil unless the take-over would raise the level. Cancel is the default.
@@ -179,7 +188,9 @@ static const NSTimeInterval QLMStopAllowance = 3;
                                  body:QLMHandBackRiseText(handBack)];
     }
     // The Mac waits for this handler, though not without limit. The
-    // completion runs on the main queue, so the run loop turns until then.
+    // completion runs on the main queue, so the run loop turns until then,
+    // or until the deadline should the handler run inside a block on the
+    // main queue, which holds back the completion.
     __block BOOL stopped = NO;
     [self.system stopWithCompletion:^{
         stopped = YES;
