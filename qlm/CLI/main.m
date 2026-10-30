@@ -316,10 +316,10 @@ static int QLMPoll(int argc, const char *argv[]) {
         fflush(stdout);
     } queue:printing];
     [system start];
-    long early = dispatch_semaphore_wait(failed, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)));
+    BOOL early = [system.settings.clock wait:failed timeout:seconds];
     [system stop];
     dispatch_sync(printing, ^{});
-    return early == 0 ? EX_UNAVAILABLE : 0;
+    return early ? EX_UNAVAILABLE : 0;
 }
 
 #pragma mark - The controls

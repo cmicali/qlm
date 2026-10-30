@@ -20,7 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 // Runs the block on the queue, as dispatch_async does.
 - (void)async:(dispatch_queue_t)queue run:(dispatch_block_t)block;
 // Runs the block on the queue once, `seconds` from now.
-- (id<QLMTimer>)after:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block;
+- (void)after:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block;
 // Runs the block on the queue every `seconds`, the first `seconds` from now.
 - (id<QLMTimer>)every:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block;
 // Waits for the semaphore, at most `seconds`. NO when the time ran out.

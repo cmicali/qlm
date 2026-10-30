@@ -29,8 +29,7 @@
                                            systemInfo:@"c-1;model-7350A" deviceClass:QLMTelemetryClassSubwoofer];
     _time = [[QLMVirtualClock alloc] init];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _sub]];
-    _bus.clock = _time;
-    [_bus startOnQueue:_queue];
+    [_bus startOnQueue:_queue clock:_time];
 }
 
 - (BOOL)send:(QLMMessage)message reply:(QLMMessage *)reply error:(NSError **)error {

@@ -45,6 +45,7 @@ static NSError *QLMStalledError(void) {
 
 @implementation QLMReportLink {
     dispatch_queue_t _queue;
+    id<QLMClock> _clock;
     QLMReportWriter _writer;
     QLMReportAssembly _assembly;
     QLMReportLinkRequest *_waiting;
@@ -59,13 +60,13 @@ static NSError *QLMStalledError(void) {
     NSError *_closed;  // while the device is closed
 }
 
-- (instancetype)initWithQueue:(dispatch_queue_t)queue writer:(QLMReportWriter)writer {
+- (instancetype)initWithQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock writer:(QLMReportWriter)writer {
     self = [super init];
     if (self) {
         _queue = queue;
+        _clock = clock;
         _writer = [writer copy];
         _replyTimeout = 0.1;
-        _clock = QLMRealClock.shared;
         _late = QLMReplyShapeAny;
         QLMReportAssemblyReset(&_assembly);
     }

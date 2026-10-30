@@ -1,13 +1,12 @@
 #import <Foundation/Foundation.h>
 
 #import "QLMAdapter.h"
-#import "QLMClock.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
 // The GLM adapter over IOKit HID: vendor 1781, product 0E39, usage page FFA0.
 // Each message goes out as one output report, and input reports reach the
-// report link on System's queue, which is the queue given to startOnQueue:.
+// report link on System's queue, the queue given to startOnQueue:clock:.
 // Call every method on that queue.
 //
 // It never opens the adapter while another host has it: GLM 5 running, or
@@ -24,8 +23,6 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMHIDAdapter : NSObject <QLMAdapter>
 
 @property (nonatomic) NSTimeInterval replyTimeout;  // the report link's, 0.1 s
-// The host watch's timer and the report link's. Set it before start.
-@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 
 // Whether a device is open, which it is only seized.
 @property (nonatomic, readonly) BOOL seized;

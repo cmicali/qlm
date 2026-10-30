@@ -2,6 +2,7 @@
 
 @implementation QLMReplayAdapter {
     dispatch_queue_t _queue;
+    id<QLMClock> _clock;
     // For each distinct output report, its unplayed exchanges, in order.
     NSMutableDictionary<NSData *, NSMutableArray<QLMCaptureExchange *> *> *_unplayed;
     NSMutableArray<NSData *> *_unmatched;
@@ -13,7 +14,6 @@
     if (self) {
         _unmatched = [NSMutableArray array];
         _unplayed = [NSMutableDictionary dictionary];
-        _clock = QLMRealClock.shared;
         for (QLMCaptureExchange *exchange in capture.exchanges) {
             NSMutableArray<QLMCaptureExchange *> *same = _unplayed[exchange.outputReport];
             if (same == nil) {
@@ -42,8 +42,9 @@
     }
 }
 
-- (void)startOnQueue:(dispatch_queue_t)queue {
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
     _queue = queue;
+    _clock = clock;
 }
 
 - (void)stop {
@@ -57,7 +58,7 @@
     uint8_t report[QLMReportLength];
     NSError *refusal = nil;
     if (!QLMAdapterPackReport(&message, report, &refusal)) {
-        [self.clock async:queue run:^{
+        [_clock async:queue run:^{
             handler(NULL, refusal);
         }];
         return;
@@ -76,7 +77,7 @@
 
     BOOL answered = exchange.answered;
     QLMMessage reply = answered ? exchange.reply : QLMMessageMake(0, NULL, 0);
-    [self.clock async:queue run:^{
+    [_clock async:queue run:^{
         handler(answered ? &reply : NULL, nil);
     }];
 }

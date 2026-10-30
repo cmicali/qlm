@@ -1,7 +1,6 @@
 #import <Foundation/Foundation.h>
 
 #import "QLMAdapter.h"
-#import "QLMClock.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -29,7 +28,10 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // called once, asynchronously, on the queue.
 @interface QLMReportLink : NSObject
 
-- (instancetype)initWithQueue:(dispatch_queue_t)queue writer:(QLMReportWriter)writer NS_DESIGNATED_INITIALIZER;
+// The clock runs the timeouts, and the hop that hands a reply over.
+- (instancetype)initWithQueue:(dispatch_queue_t)queue
+                        clock:(id<QLMClock>)clock
+                       writer:(QLMReportWriter)writer NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 // 0.1 s. The slowest reply in the captures took 11 ms: the adapter's own
@@ -46,8 +48,6 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // timeouts the link stalls: it fails the held request, and every send, until
 // the sync's reply comes.
 @property (nonatomic) NSTimeInterval replyTimeout;
-// The timeouts' clock, and the hop that hands a reply over.
-@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
 

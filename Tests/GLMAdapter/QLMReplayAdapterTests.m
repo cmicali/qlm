@@ -25,8 +25,7 @@
     XCTAssertNotNil(capture, @"%@", error);
     _time = [[QLMVirtualClock alloc] init];
     _adapter = [[QLMReplayAdapter alloc] initWithCapture:capture];
-    _adapter.clock = _time;
-    [_adapter startOnQueue:_queue];
+    [_adapter startOnQueue:_queue clock:_time];
 }
 
 - (BOOL)send:(QLMMessage)message reply:(QLMMessage *)reply error:(NSError **)error {

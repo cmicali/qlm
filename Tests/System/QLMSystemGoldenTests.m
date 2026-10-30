@@ -18,9 +18,10 @@
 @interface QLMSystemGoldenTests : XCTestCase
 @end
 
-// An adapter that notes when each message reaches it, then passes it on.
+// An adapter that notes when each message reaches it, on System's clock,
+// then passes it on.
 @interface QLMClockedAdapter : NSObject <QLMAdapter>
-- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter clock:(id<QLMClock>)clock;
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
 @property (nonatomic, readonly) NSArray<NSNumber *> *sendTimes;  // on the clock, in seconds
 @end
 
@@ -30,11 +31,10 @@
     NSMutableArray<NSNumber *> *_times;
 }
 
-- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter clock:(id<QLMClock>)clock {
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
     self = [super init];
     if (self) {
         _adapter = adapter;
-        _clock = clock;
         _times = [NSMutableArray array];
     }
     return self;
@@ -50,8 +50,9 @@
     }
 }
 
-- (void)startOnQueue:(dispatch_queue_t)queue {
-    [_adapter startOnQueue:queue];
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
+    _clock = clock;
+    [_adapter startOnQueue:queue clock:clock];
 }
 
 - (void)stop {
@@ -86,8 +87,7 @@
     }
     _time = [[QLMVirtualClock alloc] init];
     _bus = [[QLMFakeBus alloc] initWithMonitors:monitors];
-    _bus.clock = _time;
-    _clocked = [[QLMClockedAdapter alloc] initWithAdapter:_bus clock:_time];
+    _clocked = [[QLMClockedAdapter alloc] initWithAdapter:_bus];
     _settings = [[QLMSystemSettings alloc] init];
     _settings.clock = _time;
     // No cycle may fire inside an action.

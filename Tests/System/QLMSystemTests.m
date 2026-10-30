@@ -41,7 +41,6 @@
                                              systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay];
     _time = [[QLMVirtualClock alloc] init];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
-    _bus.clock = _time;
     _settings = [[QLMSystemSettings alloc] init];
     _settings.clock = _time;
     _settings.cycleInterval = 0.02;
@@ -72,36 +71,10 @@
     }];
 }
 
-// Waits for the work started so far, then for the snapshots and main-queue
-// completions it sent, and for any work those start.
-- (void)settle {
-    XCTAssertTrue([_time settle]);
-    dispatch_sync(_snapshots, ^{
-    });
-    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, false);
-    XCTAssertTrue([_time settle]);
-    dispatch_sync(_snapshots, ^{
-    });
-}
-
-// Moves the clock on, running every timer due meanwhile.
-- (void)advance:(NSTimeInterval)seconds {
-    [_time advanceBy:seconds];
-    [self settle];
-}
-
 // Moves the clock one timer at a time until the condition holds. A minute
 // on the clock is a hang.
 - (void)waitUntil:(BOOL (^)(void))condition {
-    NSTimeInterval limit = _time.now + 60;
-    [self settle];
-    while (!condition()) {
-        if (_time.now > limit || ![_time advanceToNext]) {
-            XCTFail(@"the condition never held");
-            return;
-        }
-        [self settle];
-    }
+    XCTAssertTrue([_time runUntil:condition within:60], @"the condition never held");
 }
 
 - (void)startSystem {
@@ -289,7 +262,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _settings.adapterPollInterval = 0.01;
     [self startSystem];
     [self waitForDiscovery];
-    [self advance:0.3];
+    [_time advanceBy:0.3];
     NSArray<NSData *> *sent = _bus.sentMessages;
     XCTAssertGreaterThan(sent.count, 40u);
     for (NSData *record in sent) {
@@ -306,7 +279,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
         return received.adapter.identified;
     }];
-    [self advance:0.1];
+    [_time advanceBy:0.1];
     XCTAssertEqual(snapshot.monitors.count, 0u);
     for (NSData *record in _bus.sentMessages) {
         XCTAssertEqual(((const uint8_t *)record.bytes)[0], QLMAddressAdapter, @"%@", record);
@@ -458,7 +431,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(busy.adapterError.domain, QLMAdapterErrorDomain);
     XCTAssertEqual(busy.adapterError.code, QLMAdapterErrorBusy);
     XCTAssertEqualObjects(busy.adapterError.localizedDescription, @"GLM is running (pid 1). Quit GLM first.");
-    [self advance:0.1];
+    [_time advanceBy:0.1];
     XCTAssertEqual(_bus.sentMessages.count, 0u);
     XCTAssertEqual(_system.snapshot.monitors.count, 0u);
 
@@ -560,7 +533,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _settings.cycleInterval = 0.05;
     _settings.adapterPollInterval = 0.02;
     QLMReplayAdapter *replay = [[QLMReplayAdapter alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
-    replay.clock = _time;
     [self startSystemWithAdapter:replay];
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified;
@@ -580,7 +552,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _settings.cycleInterval = 0.05;
     _settings.adapterPollInterval = 0.02;
     QLMCaptureDevice *device = [[QLMCaptureDevice alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
-    device.clock = _time;
     [self startSystemWithAdapter:device];
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
         BOOL known = received.monitors.count == 6 && received.allIdentified && received.adapter.identified;
@@ -796,7 +767,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
                                                             systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay]];
     }
     _bus = [[QLMFakeBus alloc] initWithMonitors:monitors];
-    _bus.clock = _time;
     _settings.cycleInterval = 10;
     [self startSystem];
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
@@ -821,7 +791,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertNotNil(capture, @"%@", error);
     _settings.cycleInterval = 0.05;
     QLMReplayAdapter *replay = [[QLMReplayAdapter alloc] initWithCapture:capture];
-    replay.clock = _time;
     [self startSystemWithAdapter:replay];
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
         BOOL known = received.monitors.count == 6 && received.allIdentified;
@@ -886,7 +855,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return [snapshot.volumeDecibels isEqual:@(-10)];
     }];
-    [self advance:0.1];
+    [_time advanceBy:0.1];
     NSArray<NSData *> *sent = _bus.sentMessages;
     const uint8_t clamped[] = {QLMAddressBroadcast, 0x1F, 0x0C, 0xCC, 0xCC};
     XCTAssertTrue([sent containsObject:[NSData dataWithBytes:clamped length:sizeof clamped]]);
@@ -898,7 +867,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return [snapshot.volumeDecibels isEqual:@(-40)];
     }];
-    [self advance:0.15];
+    [_time advanceBy:0.15];
     NSMutableArray<NSData *> *volumes = [NSMutableArray array];
     sent = _bus.sentMessages;
     for (NSUInteger i = before; i < sent.count; i++) {
@@ -1064,7 +1033,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     } after:^{
         [system setDimmed:YES];
     }];
-    [self advance:0.05];
+    [_time advanceBy:0.05];
     XCTAssertEqual(_bus.sentMessages.count, before);
 }
 
@@ -1158,7 +1127,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _right = [[QLMFakeMonitor alloc] initWithHardwareID:rightID serialNumber:rightSerial systemInfo:@"c-1;model-8330A"
                                             deviceClass:QLMTelemetryClassTwoWay];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
-    _bus.clock = _time;
 }
 
 // Two 8330A whose hardware IDs are the fixture's 1000005 and 1000004.
@@ -1233,7 +1201,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMFakeMonitor *sub = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(subID, 3) serialNumber:@"7370AP21009012"
                                                          systemInfo:@"c-1;model-7370A" deviceClass:QLMTelemetryClassSubwoofer];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right, sub]];
-    _bus.clock = _time;
     return sub;
 }
 
@@ -1277,7 +1244,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitUntil:^BOOL {
         return [self applyFramesFrom:start].count >= count;
     }];
-    [self advance:0.1];
+    [_time advanceBy:0.1];
     return [self applyFramesFrom:start];
 }
 
@@ -1645,16 +1612,14 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     __block NSUInteger fewest = 2;
     __block BOOL anyMissed = NO;
     QLMSystem *system = _system;
-    NSTimeInterval until = _time.now + 0.5;
-    while (_time.now < until) {
+    [_time runUntil:^BOOL {
         QLMSnapshot *snapshot = system.snapshot;
         fewest = MIN(fewest, snapshot.monitors.count);
         for (QLMMonitorState *monitor in snapshot.monitors) {
             anyMissed = anyMissed || monitor.missedPolls > 0 || monitor.offline;
         }
-        XCTAssertTrue([_time advanceToNext]);
-        [self settle];
-    }
+        return NO;
+    } within:0.5];
     XCTAssertNotNil(system.snapshot.adapterError);
     [_bus perform:^{
         self->_bus.busyReason = nil;
@@ -1709,14 +1674,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitUntil:^BOOL {
         return stopped;
     }];
-
-    __block BOOL again = NO;
-    [_system stopWithCompletion:^{
-        again = YES;
-    }];
-    [self waitUntil:^BOOL {
-        return again;
-    }];
+    [self stopSystem];
 }
 
 // After a restart, a monitor that still holds its lease never answers the
@@ -1843,7 +1801,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     _left = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(leftID, 3) serialNumber:@"8351BP21001234"
                                             systemInfo:@"c-3;model-8351B" deviceClass:QLMTelemetryClassTwoWay];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left]];
-    _bus.clock = _time;
     QLMSetupGroup *source = QLMReadFixtureSetup().groups[0];
     QLMSetupGroup *left = [self groupNamed:@"Left" from:source nodes:@[source.nodes[1]]];
     for (NSNumber *allowed in @[@NO, @YES]) {

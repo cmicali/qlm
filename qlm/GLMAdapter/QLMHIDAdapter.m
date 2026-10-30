@@ -55,6 +55,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     // a reopen knows which replies may still come. A replug is a new
     // registry entry, and gets a new link.
     QLMReportLink *_link;
+    id<QLMClock> _clock;
     uint64_t _linkEntry;
     uint8_t _input[QLMReportLength];
     id<QLMTimer> _watch;
@@ -66,7 +67,6 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     self = [super init];
     if (self) {
         _replyTimeout = 0.1;
-        _clock = QLMRealClock.shared;
         _checkQueue = dispatch_queue_create("com.commonwealthrecordings.qlm.hostcheck", DISPATCH_QUEUE_SERIAL);
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
         _deviceDescription = @"the GLM adapter over USB, not open";
@@ -92,11 +92,12 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 #pragma mark - Lifecycle
 
-- (void)startOnQueue:(dispatch_queue_t)queue {
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
     if (_running) {
         return;
     }
     _queue = queue;
+    _clock = clock;
     _running = YES;
     _runningSelf = CFBridgingRetain(self);
     _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
@@ -246,13 +247,12 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return nil;
     }
     __weak QLMHIDAdapter *weakSelf = self;
-    _link = [[QLMReportLink alloc] initWithQueue:_queue writer:^NSError *(const uint8_t *report) {
+    _link = [[QLMReportLink alloc] initWithQueue:_queue clock:_clock writer:^NSError *(const uint8_t *report) {
         QLMHIDAdapter *strongSelf = weakSelf;
         return strongSelf != nil ? [strongSelf writeReport:report]
                                  : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
     }];
     _link.replyTimeout = _replyTimeout;
-    _link.clock = _clock;
     return nil;
 }
 

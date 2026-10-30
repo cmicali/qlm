@@ -29,8 +29,7 @@
     QLMCapture *capture = QLMReadCapture(@"startup-idle", &error);
     XCTAssertNotNil(capture, @"%@", error);
     _device = [[QLMCaptureDevice alloc] initWithCapture:capture];
-    _device.clock = _time;
-    [_device startOnQueue:_queue];
+    [_device startOnQueue:_queue clock:_time];
     _device.link.replyTimeout = 0.05;
     _opening = 0;
 }
@@ -54,10 +53,7 @@
 // until `done` holds.
 - (void)run:(dispatch_block_t)block until:(BOOL (^)(void))done {
     [_time async:_queue run:block];
-    [_time settle];
-    while (!done() && [_time advanceToNext]) {
-    }
-    XCTAssertTrue(done());
+    XCTAssertTrue([_time runUntil:done within:60]);
 }
 
 // Every output report since the opening.
@@ -314,12 +310,16 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 // between tries. While the link stalls, a send fails at once and writes
 // nothing.
 - (BOOL)sendOnceInStep:(QLMMessage)message reply:(QLMMessage *)reply error:(NSError **)error {
-    for (;;) {
-        BOOL answered = [self send:message reply:reply error:error];
-        if ((*error).code != QLMAdapterErrorDisconnected || ![_time advanceToNext]) {
-            return answered;
-        }
-    }
+    __block BOOL answered = NO;
+    __block NSError *failure = nil;
+    [_time runUntil:^BOOL {
+        NSError *sendError = nil;
+        answered = [self send:message reply:reply error:&sendError];
+        failure = sendError;
+        return failure.code != QLMAdapterErrorDisconnected;
+    } within:60];
+    *error = failure;
+    return answered;
 }
 
 // The system info comes 800 ms late, and the sync's reply queues behind it,
@@ -394,8 +394,9 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertEqualObjects(failure.localizedDescription,
                           @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");
 
-    while ([self deliveredReplies] < before + 2 && [_time advanceToNext]) {
-    }
+    XCTAssertTrue([_time runUntil:^BOOL {
+        return [self deliveredReplies] >= before + 2;
+    } within:60]);
     XCTAssertEqual([self deliveredReplies], before + 2);
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
     XCTAssertEqualObjects(error, failure);

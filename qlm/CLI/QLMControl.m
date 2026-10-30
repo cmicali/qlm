@@ -364,7 +364,6 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     QLMFakeBus *bus = QLMMirrorBus(discovered);
     QLMSystemSettings *mirrorSettings = [settings copy];
     mirrorSettings.adapterPollInterval = 0;
-    bus.clock = mirrorSettings.clock;
     QLMSystem *mirror = [[QLMSystem alloc] initWithAdapter:bus settings:mirrorSettings];
     [mirror start];
     NSUInteger count = discovered.monitors.count;

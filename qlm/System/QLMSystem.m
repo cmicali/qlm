@@ -181,6 +181,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
+    id<QLMClock> _clock;  // the settings', which every replacement keeps
     id<QLMTimer> _cycleTimer;
     BOOL _cycleQueued;
     QLMTrackedAdapter *_adapterRecord;
@@ -214,6 +215,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _queue = dispatch_queue_create("com.commonwealthrecordings.qlm.system", DISPATCH_QUEUE_SERIAL);
         _adapter = adapter;
         _settings = [settings copy];
+        _clock = _settings.clock;
         _lastVolumeSend = -INFINITY;
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
@@ -236,7 +238,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // Every public method's work runs here, so the publishing rule holds after it.
 - (void)onQueue:(dispatch_block_t)block {
-    [self.settings.clock async:_queue run:^{
+    [_clock async:_queue run:^{
         block();
         [self publishIfSettled];
     }];
@@ -249,7 +251,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_snapshotQueue = queue;
         if (copied != nil) {
             QLMSnapshot *latest = self.snapshot;
-            [self.settings.clock async:queue run:^{
+            [self->_clock async:queue run:^{
                 copied(latest);
             }];
         }
@@ -273,7 +275,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)beginRunning {
     _running = YES;
     _stoppedHandBack = nil;
-    [_adapter startOnQueue:_queue];
+    [_adapter startOnQueue:_queue clock:_clock];
     _dirty = YES;
     // GLM's opening, less what qlm never sends: the adapter's status, its
     // system info, its serial, then the cycle (captures/startup-idle,
@@ -284,18 +286,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self runCycle];
 
     __weak QLMSystem *weakSelf = self;
-    _cycleTimer = [self timerEvery:self.settings.cycleInterval run:^{
+    _cycleTimer = [_clock every:self.settings.cycleInterval queue:_queue run:^{
         [weakSelf runCycle];
     }];
     if (self.settings.adapterPollInterval > 0) {
-        _adapterTimer = [self timerEvery:self.settings.adapterPollInterval run:^{
+        _adapterTimer = [_clock every:self.settings.adapterPollInterval queue:_queue run:^{
             [weakSelf pollAdapter];
         }];
     }
-}
-
-- (id<QLMTimer>)timerEvery:(NSTimeInterval)seconds run:(dispatch_block_t)block {
-    return [self.settings.clock every:seconds queue:_queue run:block];
 }
 
 - (void)stop {
@@ -373,7 +371,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSArray<dispatch_block_t> *completions = [_stopCompletions copy];
     [_stopCompletions removeAllObjects];
     for (dispatch_block_t completion in completions) {
-        dispatch_async(dispatch_get_main_queue(), completion);
+        [_clock async:dispatch_get_main_queue() run:completion];
     }
 }
 
@@ -470,7 +468,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)hold:(NSTimeInterval)seconds {
     NSUInteger run = _run;
     dispatch_queue_t queue = _queue;
-    id<QLMClock> clock = self.settings.clock;
+    id<QLMClock> clock = _clock;
     __weak QLMSystem *weakSelf = self;
     [self enqueue:^{
         [clock after:seconds queue:queue run:^{
@@ -795,7 +793,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_knob reset];
         return;
     }
-    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:self.settings.clock.now volume:_volumeDecibels];
+    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:_clock.now volume:_volumeDecibels];
     if (volume == nil) {
         return;
     }
@@ -905,14 +903,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return;
     }
     NSTimeInterval interval = self.settings.volumeInterval;
-    NSTimeInterval since = self.settings.clock.now - _lastVolumeSend;
+    NSTimeInterval since = _clock.now - _lastVolumeSend;
     if (since >= interval) {
         [self sendVolume];
         return;
     }
     _volumeSendPending = YES;
     __weak QLMSystem *weakSelf = self;
-    [self.settings.clock after:interval - since queue:_queue run:^{
+    [_clock after:interval - since queue:_queue run:^{
         QLMSystem *strongSelf = weakSelf;
         if (strongSelf == nil) {
             return;
@@ -931,7 +929,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (dispatch_block_t)volumeItem {
-    _lastVolumeSend = self.settings.clock.now;
+    _lastVolumeSend = _clock.now;
     return [self itemSending:[self volumeMessage] then:nil];
 }
 
@@ -1165,10 +1163,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // `switching`: GLM's switch even when no group is active yet.
 - (void)applyGroup:(QLMSetupGroup *)group switching:(BOOL)switching completion:(void (^)(NSError *_Nullable error))completion {
+    id<QLMClock> clock = _clock;
     void (^finish)(NSError *) = ^(NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        [clock async:dispatch_get_main_queue() run:^{
             completion(error);
-        });
+        }];
     };
     [self onQueue:^{
         NSError *refusal = nil;
@@ -1263,7 +1262,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     };
 
     if (switching) {
-        _lastVolumeSend = self.settings.clock.now;
+        _lastVolumeSend = _clock.now;
         for (QLMMonitorRecord *monitor in _monitors) {
             monitor.configured = YES;
         }
@@ -1376,7 +1375,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;
     if (handler != nil && _snapshotQueue != NULL) {
-        [self.settings.clock async:_snapshotQueue run:^{
+        [_clock async:_snapshotQueue run:^{
             handler(snapshot);
         }];
     }

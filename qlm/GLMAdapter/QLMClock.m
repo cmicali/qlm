@@ -1,25 +1,5 @@
 #import "QLMClock.h"
 
-#include <stdatomic.h>
-
-// A dispatch_after that can be cancelled before it runs.
-@interface QLMRealOnce : NSObject <QLMTimer>
-@end
-
-@implementation QLMRealOnce {
-    atomic_bool _cancelled;
-}
-
-- (void)cancel {
-    atomic_store(&_cancelled, true);
-}
-
-- (BOOL)cancelled {
-    return atomic_load(&_cancelled);
-}
-
-@end
-
 @interface QLMRealRepeat : NSObject <QLMTimer>
 - (instancetype)initWithSource:(dispatch_source_t)source;
 @end
@@ -37,10 +17,6 @@
 }
 
 - (void)cancel {
-    dispatch_source_cancel(_source);
-}
-
-- (void)dealloc {
     dispatch_source_cancel(_source);
 }
 
@@ -65,14 +41,8 @@
     dispatch_async(queue, block);
 }
 
-- (id<QLMTimer>)after:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block {
-    QLMRealOnce *timer = [[QLMRealOnce alloc] init];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), queue, ^{
-        if (![timer cancelled]) {
-            block();
-        }
-    });
-    return timer;
+- (void)after:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), queue, block);
 }
 
 - (id<QLMTimer>)every:(NSTimeInterval)seconds queue:(dispatch_queue_t)queue run:(dispatch_block_t)block {

@@ -69,10 +69,8 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
 - (instancetype)initWithCapture:(QLMCapture *)capture;
 
-@property (nonatomic, readonly, nullable) QLMReportLink *link;  // made by startOnQueue:
+@property (nonatomic, readonly, nullable) QLMReportLink *link;  // made by startOnQueue:clock:
 @property (atomic) NSTimeInterval replyDelay;                   // 1 ms
-// The reply delays' clock, and its link's. Set it before start.
-@property (nonatomic) id<QLMClock> clock;                       // QLMRealClock.shared
 @property (atomic) NSTimeInterval nextReplyDelay;               // above 0: the next reply's delay, once
 @property (atomic) BOOL silent;
 // Every output report written, as 64 bytes. Read on the queue.
@@ -95,16 +93,19 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 // Time and order then depend on the test alone, never on the host.
 @interface QLMVirtualClock : NSObject <QLMClock>
 
-// Runs each timer due by now + seconds, in order of time, the earlier first
-// when two are due together, with now set to its time. Before each, and at
-// the end, it waits for the work started so far. Then now is now + seconds.
+// Runs the hops waiting, and the work they start, with time still. A hop to
+// the main queue runs in place when the main thread settles. Raises if the
+// work is not done within a generous deadline, which only a hang would reach.
+- (void)settle;
+// Settles, then runs each timer due within `seconds`, one at a time, until
+// the condition holds. Timers run in order of time, the earlier first when
+// two are due together, with now at each one's time, and each one's work
+// settles before the condition is checked again. When the condition never
+// holds, now ends `seconds` on, and this returns NO.
+- (BOOL)runUntil:(BOOL (^)(void))condition within:(NSTimeInterval)seconds;
+// Runs every timer due within `seconds`, as runUntil:within: does. Now ends
+// `seconds` on.
 - (void)advanceBy:(NSTimeInterval)seconds;
-// Runs the hops waiting, and the work they start, with time still. NO if it
-// is not done within a generous deadline, which only a hang would reach.
-- (BOOL)settle;
-// Runs the next timer due, with now at its time, and waits for the work it
-// starts. NO when no timer is pending.
-- (BOOL)advanceToNext;
 // Moves now on by `seconds` with no timer run, as when the queues stall.
 // Then each timer that came due runs once, in order, as GCD runs a missed
 // timer once when its queue frees up. A repeating one keeps its beat.

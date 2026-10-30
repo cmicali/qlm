@@ -24,6 +24,7 @@
 
 @implementation QLMFakeBus {
     dispatch_queue_t _queue;
+    id<QLMClock> _clock;
     NSMutableArray<NSData *> *_sent;
 }
 
@@ -33,7 +34,6 @@
         _monitors = [monitors copy];
         _sent = [NSMutableArray array];
         _recordsSentMessages = YES;
-        _clock = QLMRealClock.shared;
         // The shape of the adapter's own replies in captures/startup-idle.
         _adapterSystemInfo = @"c-0;model-GLM Adapter;ver-1.4.0.6113;hw-0.0.202;build-2025.05.19.s  ";
         _adapterSerialNumber = @"H00000F001";
@@ -89,8 +89,9 @@
     }
 }
 
-- (void)startOnQueue:(dispatch_queue_t)queue {
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
     _queue = queue;
+    _clock = clock;
 }
 
 - (void)stop {
@@ -104,13 +105,13 @@
     uint8_t report[QLMReportLength];
     NSError *refusal = nil;
     if (!QLMAdapterPackReport(&message, report, &refusal)) {
-        [self.clock async:queue run:^{
+        [_clock async:queue run:^{
             handler(NULL, refusal);
         }];
         return;
     }
 
-    [self.clock async:queue run:^{
+    [_clock async:queue run:^{
         NSString *busy = self.busyReason;
         if (busy != nil) {
             handler(NULL, QLMAdapterErrorMake(QLMAdapterErrorBusy, busy));

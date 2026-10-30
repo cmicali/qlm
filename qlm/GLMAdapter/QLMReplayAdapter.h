@@ -2,7 +2,6 @@
 
 #import "QLMAdapter.h"
 #import "QLMCapture.h"
-#import "QLMClock.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -17,8 +16,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init NS_UNAVAILABLE;
 
 @property (nonatomic, readonly) NSUInteger playedCount;
-// The hop that hands each reply over. Set it before start.
-@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 // Every message no exchange matched, as QLMAdapterRecord gives it.
 @property (nonatomic, readonly) NSArray<NSData *> *unmatchedMessages;
 
