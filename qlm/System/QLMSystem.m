@@ -498,6 +498,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             sent = QLMCommandVolumeWord(QLMVolumeFrameWord(&sent), QLMCeilingWord(strongSelf.settings.ceilingDecibels));
             sent.address = message.address;
         }
+        // TRAP: the same for a 2B, while the mutes change. It says the mute
+        // as it is when it goes out.
+        [strongSelf restate:&sent];
         NSUInteger run = strongSelf->_run;
         [strongSelf->_adapter sendMessage:sent replyHandler:^(const QLMMessage *reply, NSError *error) {
             QLMSystem *system = weakSelf;
@@ -516,6 +519,23 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             }];
         }];
     };
+}
+
+// A 2B in the group says the monitor's mute now, and the adapter's 2B says
+// mute all now. Outside the group, a 2B carries no mute.
+- (void)restate:(QLMMessage *)state {
+    if (state->length != 2 || state->payload[0] != 0x2B) {
+        return;
+    }
+    uint8_t value = state->payload[1];
+    if (state->address == QLMAddressAdapter) {
+        state->payload[1] = _adapterMuted ? QLMMuteValueAdapterMuted : QLMMuteValueAdapterUnmuted;
+        return;
+    }
+    QLMMonitorRecord *monitor = QLMAddressIsLeasable(state->address) ? [self monitorAtSession:state->address] : nil;
+    if (monitor != nil && (value == QLMMuteValueMuted || value == QLMMuteValueUnmuted)) {
+        state->payload[1] = [_mutedIDs containsObject:monitor.hardwareID] ? QLMMuteValueMuted : QLMMuteValueUnmuted;
+    }
 }
 
 // A 2B that did not go out leaves its monitor needing its state, after its

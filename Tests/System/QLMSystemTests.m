@@ -1253,6 +1253,29 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
 }
 
+// A round waits in line, and the mutes may change meanwhile. Here the user
+// mutes the left, lifts mute all, and mutes the left again, quicker than
+// the rounds go out (QLMSafetyFuzzTests, seed 0x2095). Each 2B says the
+// mute as it is when it goes out, so none lifts the left's.
+- (void)testARoundSaysTheMutesAsTheyAreWhenItGoesOut {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    QLMSnapshot *discovered = [self waitForDiscovery];
+    uint8_t left = QLMFindMonitor(discovered, _left.hardwareID).session;
+    NSUInteger before = _bus.sentMessages.count;
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [_system setAllMuted:NO];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForIdle];
+    NSArray<NSData *> *mutes = [self mutesFrom:before to:[NSIndexSet indexSetWithIndex:left]];
+    XCTAssertEqual(mutes.count, 6u);
+    for (NSData *mute in mutes) {
+        XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
+    const uint8_t adapterUnmuted[] = {QLMAddressAdapter, 0x2B, QLMMuteValueAdapterUnmuted};
+    XCTAssertEqual([self countSent:QLMBytes(adapterUnmuted, 3) from:before], 1u);
+}
+
 #pragma mark - Dim
 
 // Section 7, 1F, and section 9, "Mute, Solo & Dim": no dim command, a plain
