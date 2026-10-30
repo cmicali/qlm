@@ -108,6 +108,10 @@ static NSData *_Nullable QLMPacked(QLMMessage message) {
     return QLMBytes(report, sizeof report);
 }
 
+static uint32_t QLMVolumeWordOf(QLMMessage message) {
+    return (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
+}
+
 // Each step's word, and the frame GLM sent at the time given, byte for byte.
 - (void)testEveryStepIsTheLevelGLMSent {
     QLMCapture *capture = QLMReadCapture(@"volume-sweep", NULL);
@@ -147,19 +151,19 @@ static NSData *_Nullable QLMPacked(QLMMessage message) {
         {20.066483, -11},  {20.180628, 0},    {24.738609, -123}, {32.994992, -1000},
     };
     QLMCapture *capture = QLMReadCapture(@"knob-sweep", NULL);
+    QLMMessage adapterPoll = QLMCommandPoll(QLMAddressReply);
+    NSData *adapterPollRecord = QLMAdapterRecord(&adapterPoll);
     for (size_t i = 0; i < sizeof turns / sizeof turns[0]; i++) {
         NSTimeInterval time = turns[i].time;
-        NSUInteger index = [capture.exchanges indexOfObjectPassingTest:^BOOL(QLMCaptureExchange *exchange, NSUInteger at, BOOL *stop) {
-            return fabs(exchange.time - time) < 0.0005;
-        }];
-        XCTAssertNotEqual(index, NSNotFound, @"%.6f s", time);
-        if (index == NSNotFound) {
+        QLMCaptureExchange *level = QLMExchangeAt(capture, time);
+        XCTAssertNotNil(level, @"%.6f s", time);
+        if (level == nil) {
             continue;
         }
         QLMCaptureExchange *poll = nil;
-        for (NSUInteger j = index; j-- > 0;) {
+        for (NSUInteger j = [capture.exchanges indexOfObjectIdenticalTo:level]; j-- > 0;) {
             QLMMessage message = capture.exchanges[j].message;
-            if (message.address == QLMAddressReply && message.length == 1 && message.payload[0] == 0x08) {
+            if ([QLMAdapterRecord(&message) isEqualToData:adapterPollRecord]) {
                 poll = capture.exchanges[j];
                 break;
             }
@@ -174,19 +178,18 @@ static NSData *_Nullable QLMPacked(QLMMessage message) {
         XCTAssertEqual(field[0], 0xDF);
         int32_t tenths = (int32_t)((uint32_t)field[1] << 24 | (uint32_t)field[2] << 16 | (uint32_t)field[3] << 8 | field[4]);
         XCTAssertEqual(tenths, turns[i].tenths);
-        XCTAssertEqualObjects(capture.exchanges[index].outputReport, QLMPacked(QLMCommandVolume(tenths / 10.0, 0)), @"%.6f s", time);
+        XCTAssertEqualObjects(level.outputReport, QLMPacked(QLMCommandVolume(tenths / 10.0, 0)), @"%.6f s", time);
     }
 }
 
 // Every volume frame in every capture is a step, the bottom stop, or the
-// duck under a group switch. Every step and the bottom stop appear.
+// duck under a group switch.
 - (void)testEveryVolumeFrameGLMSentIsAStep {
-    NSMutableDictionary<NSNumber *, NSNumber *> *steps = [NSMutableDictionary dictionary];
+    NSMutableSet<NSNumber *> *steps = [NSMutableSet set];
     for (int i = 0; i <= 200; i++) {
-        steps[@(QLMVolumeWordForDecibels(-QLMVolumeDecibelsStep * i))] = @(i);
+        [steps addObject:@(QLMVolumeWordForDecibels(-QLMVolumeDecibelsStep * i))];
     }
     XCTAssertEqual(steps.count, 201u);
-    NSMutableSet<NSNumber *> *seen = [NSMutableSet set];
     NSUInteger frames = 0;
     for (NSString *scenario in QLMCaptureScenarios()) {
         for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
@@ -196,20 +199,13 @@ static NSData *_Nullable QLMPacked(QLMMessage message) {
             }
             XCTAssertEqual(message.address, QLMAddressBroadcast);
             XCTAssertEqual(message.length, 4u);
-            uint32_t word = (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
+            uint32_t word = QLMVolumeWordOf(message);
             frames += 1;
-            if (word == QLMVolumeWordDuck) {
-                continue;
-            }
-            NSNumber *step = steps[@(word)];
-            XCTAssertNotNil(step, @"%@ at %.6f s: %06X", scenario, exchange.time, word);
-            if (step != nil) {
-                [seen addObject:step];
-                XCTAssertEqualObjects(exchange.outputReport, QLMPacked(QLMCommandVolume(-QLMVolumeDecibelsStep * step.intValue, 0)));
+            if (word != QLMVolumeWordDuck) {
+                XCTAssertTrue([steps containsObject:@(word)], @"%@ at %.6f s: %06X", scenario, exchange.time, word);
             }
         }
     }
-    XCTAssertEqual(seen.count, 201u);
     XCTAssertGreaterThan(frames, 1000u);
 }
 

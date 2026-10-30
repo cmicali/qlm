@@ -20,13 +20,15 @@ static const uint8_t QLMMuteDimMonitors[] = {0x03, 0x06, 0x0D, 0x0C, 0x05, 0x0B}
 // `count` frames of captures/<scenario>, from the one at `time` to the half
 // millisecond. Nil, after a failure, when the capture has fewer.
 - (nullable NSArray<QLMCaptureExchange *> *)frames:(NSUInteger)count of:(NSString *)scenario from:(NSTimeInterval)time {
+    QLMMessage adapterPoll = QLMCommandPoll(QLMAddressReply);
+    NSData *adapterPollRecord = QLMAdapterRecord(&adapterPoll);
     NSMutableArray<QLMCaptureExchange *> *run = [NSMutableArray array];
     for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
         if (run.count == 0 && fabs(exchange.time - time) >= 0.0005) {
             continue;
         }
         QLMMessage message = exchange.message;
-        if (message.address == QLMAddressReply && message.length == 1 && message.payload[0] == 0x08) {
+        if ([QLMAdapterRecord(&message) isEqualToData:adapterPollRecord]) {
             continue;
         }
         [run addObject:exchange];
@@ -47,8 +49,7 @@ static const uint8_t QLMMuteDimMonitors[] = {0x03, 0x06, 0x0D, 0x0C, 0x05, 0x0B}
 // A frame GLM sent that the allowlist refuses, so qlm never packs it.
 - (void)assertExchange:(QLMCaptureExchange *)exchange isRefused:(QLMMessage)message {
     QLMMessage sent = exchange.message;
-    XCTAssertEqual(sent.address, message.address, @"%.6f s", exchange.time);
-    XCTAssertEqualObjects(QLMBytes(sent.payload, sent.length), QLMBytes(message.payload, message.length), @"%.6f s", exchange.time);
+    XCTAssertEqualObjects(QLMAdapterRecord(&sent), QLMAdapterRecord(&message), @"%.6f s", exchange.time);
     uint8_t report[QLMReportLength];
     XCTAssertEqual(QLMReportPackOutput(&message, report), QLMReportErrorForbidden, @"%.6f s", exchange.time);
 }
