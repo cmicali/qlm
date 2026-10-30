@@ -75,9 +75,10 @@ fi
 
 echo "usb-proxy"
 checkout https://github.com/AristoChen/usb-proxy "$opt/usb-proxy" "$usb_proxy_commit"
-# The patch fixes two relay bugs. usb-proxy held back every output report of
-# exactly 64 bytes, so GLM hung waiting for a reply. And it sent the host a
-# zero-length input report on each idle read timeout, once a second.
+# The patch fixes three relay bugs. usb-proxy held back every output report of
+# exactly 64 bytes, so GLM hung waiting for a reply. It sent the host a
+# zero-length input report on each idle read timeout, once a second. And
+# after an unplug it hung instead of exiting, so systemd never restarted it.
 git -C "$opt/usb-proxy" apply "$here/usb-proxy.patch"
 make -C "$opt/usb-proxy"
 install -m 755 "$opt/usb-proxy/usb-proxy" /usr/local/bin/usb-proxy

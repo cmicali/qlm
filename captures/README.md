@@ -86,19 +86,19 @@ python3 -I tools/pcapng-to-reports.py --device 1:2 captures/<scenario>/capture.p
 
 ## Scenarios
 
-Record each one on its own. Start every capture with the monitors on and GLM closed unless the scenario says otherwise.
+Record each one on its own. Start every capture with the monitors on and GLM closed unless the scenario says otherwise. Unplug the calibration mic from the adapter first. Its live readings ride in the adapter's status replies, which normal use never has.
 
 | Directory | What to do |
 | --- | --- |
 | `startup-idle` | Open GLM. Wait two minutes. |
-| `volume-sweep` | Drag the volume from 0 dB down to the bottom and back, slowly. |
-| `knob-sweep` | Turn the 9310 knob down and up. Press it, if it has a press. |
+| `volume-sweep` | Drag the volume in GLM's window from 0 dB down to the bottom and back, slowly. Unplug the volume knob first: while it is attached, GLM locks its own volume control. |
+| `knob-sweep` | Turn the volume knob on the adapter down and up. Press it, if it has a press. |
 | `group-switch-<a>-<b>` | Switch from group `a` to group `b`. One capture per ordered pair. |
 | `mute-dim` | Mute and unmute each monitor, then all. Dim on, dim off. |
 | `standby-wake` | Put the system in standby from GLM, wait ten seconds, wake it. |
 | `quit-glm` | With GLM open and the volume at −20 dB, quit GLM. Wait ten seconds. |
 | `unplug` | With GLM open, unplug the adapter. Wait ten seconds. Plug it back in. |
-| `sleep-wake` | With GLM open, sleep the computer, wait a minute, wake it. |
+| `sleep-wake` | With GLM open, sleep the computer, wait a minute, wake it. Then check `pmset -g log` for an `Entering Sleep` line. A sleep that reaches only DarkWake leaves GLM running. |
 
 ## What Phase 0 must answer
 

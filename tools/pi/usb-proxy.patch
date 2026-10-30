@@ -40,3 +40,20 @@ index bafa47e..f0f5c3b 100644
  				io.inner.length = usb_endpoint_maxp(&ep);
  			else
  				io.inner.length = sizeof(io.data);
+diff --git a/usb-proxy.cpp b/usb-proxy.cpp
+index f2fdaac..69a47db 100644
+--- a/usb-proxy.cpp
++++ b/usb-proxy.cpp
+@@ -652,10 +652,8 @@ int main(int argc, char **argv)
+ 	if (context && callback_handle != -1) {
+ 		libusb_hotplug_deregister_callback(context, callback_handle);
+ 	}
+-	if (hotplug_monitor_thread &&
+-		pthread_join(hotplug_monitor_thread, NULL)) {
+-		fprintf(stderr, "Error join hotplug_monitor_thread\n");
+-	}
++	// hotplug_monitor loops forever, so joining it would hang the exit
++	// after every unplug. Returning from main ends it.
+ 
+ 	return 0;
+ }
