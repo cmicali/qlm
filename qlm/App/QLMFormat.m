@@ -1,8 +1,5 @@
 #import "QLMFormat.h"
 
-#import "QLMAdapter.h"
-#import "QLMSnapshot.h"
-
 NSString *const QLMEmDash = @"—";
 
 // A no-break space keeps the unit on the number's line.
@@ -46,27 +43,58 @@ NSString *QLMReplyAgeText(NSDate *date) {
     return [formatter stringFromDate:date];
 }
 
-BOOL QLMAdapterErrorIsBusy(NSError *error) {
-    return [error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorBusy;
+// The knob above qlm's level, and the rise, to follow "Now: ".
+// "<lead> reads −10.0 dB, above qlm's −50.0 dB.": the knob against the
+// level qlm sends.
+static NSString *QLMKnobText(NSString *lead, NSString *relation, QLMHandBack *handBack) {
+    return [NSString stringWithFormat:@"%@ reads %@, %@ qlm's %@.", lead, QLMDecibelsText(handBack.knobDecibels.doubleValue),
+                                      relation, QLMDecibelsText(handBack.volumeDecibels.doubleValue)];
 }
 
-NSString *QLMAdapterErrorTitle(NSError *error) {
-    if (QLMAdapterErrorIsBusy(error)) {
-        return @"Another host has the adapter";
-    }
-    if ([error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorDisconnected) {
-        return @"No adapter";
-    }
-    return @"The adapter failed";
+static NSString *QLMRiseText(NSString *lead, QLMHandBack *handBack) {
+    double rise = handBack.knobDecibels.doubleValue - handBack.volumeDecibels.doubleValue;
+    return [NSString stringWithFormat:@"%@ At the take-over, the level would rise %@.", QLMKnobText(lead, @"above", handBack),
+                                      QLMDecibelsText(rise)];
 }
 
-NSString *QLMAdapterErrorDetail(NSError *error) {
-    NSString *description = error.userInfo[NSLocalizedDescriptionKey];
-    if (description != nil) {
-        return description;
+NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
+    QLMHandBack *handBack = snapshot.handBack;
+    switch (handBack.kind) {
+    case QLMHandBackKnobLevel:
+        return [NSString stringWithFormat:@"%@ qlm sends the knob's level as it stops, so the take-over changes nothing.",
+                                          QLMKnobText(@"Now: the knob", @"at or below", handBack)];
+    case QLMHandBackLouder:
+        return QLMRiseText(@"Now: the knob", handBack);
+    case QLMHandBackUnknown:
+        break;
     }
-    if ([error.domain isEqualToString:QLMAdapterErrorDomain] && error.code == QLMAdapterErrorDisconnected) {
-        return @"No GLM adapter is connected.";
+    if (snapshot.adapter.hasStatus && handBack.knobDecibels == nil) {
+        return @"Now: no knob is in, so the level at the take-over is unknown.";
     }
-    return error.localizedDescription;
+    return nil;
+}
+
+NSString *QLMHandBackRiseText(QLMHandBack *handBack) {
+    return QLMRiseText(@"The knob", handBack);
+}
+
+NSString *QLMBusProblemTitle(QLMBusProblem problem) {
+    switch (problem) {
+    case QLMBusProblemNoAdapter: return @"No adapter";
+    case QLMBusProblemGLM: return @"GLM has the adapter";
+    case QLMBusProblemOtherHost: return @"Another app has the adapter";
+    case QLMBusProblemNone: break;
+    }
+    return nil;
+}
+
+// The error's sentence only names the other host. Nothing decides by it.
+NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
+    switch (snapshot.busProblem) {
+    case QLMBusProblemNoAdapter: return @"Connect the GLM adapter by USB.";
+    case QLMBusProblemGLM: return @"qlm drives nothing while GLM runs. Quit GLM to hand the monitors to qlm.";
+    case QLMBusProblemOtherHost:
+    case QLMBusProblemNone: break;
+    }
+    return snapshot.adapterError.localizedDescription ?: @"Another process holds the GLM adapter.";
 }

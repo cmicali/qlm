@@ -5,7 +5,6 @@
 #include "QLMCommands.h"
 #import "QLMBannerView.h"
 #import "QLMFormat.h"
-#import "QLMHostCheck.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMPopoverWidth = 320;
@@ -21,11 +20,11 @@ static NSTextField *QLMSmallLabel(NSString *text) {
     return label;
 }
 
-// GLM 5, when it runs: an app whose executable QLMHostCheck counts as GLM.
+// GLM 5, when it runs: an app from a GLMv5.app bundle, wherever it lies, as
+// GLMAdapter's host check counts it.
 static NSRunningApplication *_Nullable QLMRunningGLM(void) {
     for (NSRunningApplication *app in NSWorkspace.sharedWorkspace.runningApplications) {
-        NSString *path = app.executableURL.path;
-        if (path != nil && QLMHostCheckIsGLMExecutable(path)) {
+        if ([app.bundleURL.lastPathComponent isEqualToString:@"GLMv5.app"]) {
             return app;
         }
     }
@@ -70,10 +69,10 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry, as the list only appends
 @property (nonatomic) NSTimeInterval sliderMovedAt;
 @property (nonatomic) BOOL askedGLMToQuit;  // until GLM lets go of the adapter
-// GLM holds the adapter, as of checkedError. GLM starts and quits rarely, so
-// the app list is scanned only when System's error changes.
+// GLM holds the adapter and runs, as of checkedProblem. GLM starts and
+// quits rarely, so the app list is scanned only when the problem changes.
 @property (nonatomic) BOOL glmHolds;
-@property (nonatomic, nullable) NSError *checkedError;
+@property (nonatomic) QLMBusProblem checkedProblem;
 // The snapshot says an apply is running, not which group.
 @property (nonatomic, copy, nullable) NSString *applyingGroupName;
 @property (nonatomic, copy, nullable) NSString *message;  // the last apply's error
@@ -403,7 +402,7 @@ static NSView *QLMSpacer(void) {
 
 - (void)render {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
-    [self renderBanner:snapshot.adapterError];
+    [self renderBanner:snapshot];
     NSString *changed = self.changedSetupName;
     [self.setupBanner showTitle:changed == nil ? nil : [NSString stringWithFormat:@"GLM saved %@", changed]
                          detail:@"Read it again for its new groups."];
@@ -434,11 +433,12 @@ static NSView *QLMSpacer(void) {
     [self renderMonitors:self.monitorList.entries snapshot:snapshot];
 }
 
-- (void)renderBanner:(nullable NSError *)error {
-    [self.banner showError:error];
-    if (error != self.checkedError) {
-        self.checkedError = error;
-        self.glmHolds = QLMAdapterErrorIsBusy(error) && [self runningGLM] != nil;
+- (void)renderBanner:(nullable QLMSnapshot *)snapshot {
+    [self.banner showBusProblemOf:snapshot];
+    QLMBusProblem problem = snapshot.busProblem;
+    if (problem != self.checkedProblem) {
+        self.checkedProblem = problem;
+        self.glmHolds = problem == QLMBusProblemGLM && [self runningGLM] != nil;
     }
     if (!self.glmHolds) {
         self.askedGLMToQuit = NO;
@@ -449,10 +449,12 @@ static NSView *QLMSpacer(void) {
     quit.title = self.askedGLMToQuit ? @"Asked GLM to Quit" : @"Quit GLM";
 }
 
+// With a volume set, the snapshot is a published one, so its ceiling is the
+// one System caps at. Before that, the preferences say it.
 - (void)renderVolume:(nullable QLMSnapshot *)snapshot {
-    double ceiling = self.preferences.ceilingDecibels;
-    NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
     NSNumber *volume = snapshot.volumeDecibels;
+    double ceiling = volume != nil ? snapshot.ceilingDecibels : self.preferences.ceilingDecibels;
+    NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
     self.volumeSlider.enabled = snapshot.running;
     if (volume == nil) {
         self.volumeLabel.stringValue = QLMEmDash;
@@ -460,7 +462,7 @@ static NSView *QLMSpacer(void) {
         return;
     }
     double decibels = volume.doubleValue;
-    double sent = [self.preferences cappedDecibels:decibels];
+    double sent = fmin(decibels, ceiling);
     self.volumeLabel.stringValue = QLMDecibelsText(sent);
     BOOL held = NSProcessInfo.processInfo.systemUptime - self.sliderMovedAt < QLMSliderHoldInterval;
     if (!held) {
@@ -473,7 +475,7 @@ static NSView *QLMSpacer(void) {
         [parts addObject:ceilingText];
     }
     if (snapshot.dimmed) {
-        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText([self.preferences sentDecibels:decibels dimmed:YES])]];
+        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText(snapshot.handBack.volumeDecibels.doubleValue)]];
     }
     if (snapshot.allMuted) {
         [parts addObject:@"muted"];

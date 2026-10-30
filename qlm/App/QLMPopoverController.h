@@ -24,8 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList;
 
 @property (nonatomic, weak, nullable) id<QLMPopoverControllerDelegate> delegate;
-// The System it drives. A new one replaces it when the ceiling or the
-// adapter setting changes.
+// The System it drives. A new one replaces it when the adapter setting
+// changes.
 @property (nonatomic, nullable) QLMSystem *system;
 // Nil disables the group picker.
 @property (nonatomic, nullable) QLMSetup *setup;

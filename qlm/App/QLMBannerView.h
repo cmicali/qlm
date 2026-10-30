@@ -1,5 +1,7 @@
 #import <Cocoa/Cocoa.h>
 
+@class QLMSnapshot;
+
 NS_ASSUME_NONNULL_BEGIN
 
 typedef NS_ENUM(NSInteger, QLMBannerStyle) {
@@ -16,8 +18,8 @@ typedef NS_ENUM(NSInteger, QLMBannerStyle) {
 
 - (void)showTitle:(nullable NSString *)title detail:(nullable NSString *)detail;
 
-// System's adapterError: why nothing reaches the bus.
-- (void)showError:(nullable NSError *)error;
+// Why nothing reaches the bus, from the snapshot's busProblem.
+- (void)showBusProblemOf:(nullable QLMSnapshot *)snapshot;
 
 // Under the text, hidden until a caller sets it up and shows it.
 @property (nonatomic, readonly) NSButton *actionButton;

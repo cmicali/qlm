@@ -74,7 +74,7 @@ NSString *QLMEntryStatusText(QLMMonitorEntry *entry) {
         QLMMonitorEntry *entry = [[QLMMonitorEntry alloc] init];
         entry.state = _lastStates[hardwareID];
         entry.tracked = [tracked containsObject:hardwareID];
-        if (!entry.tracked || entry.state.missedPolls > 0) {
+        if (!entry.tracked || entry.state.offline) {
             entry.presence = QLMMonitorPresenceOffline;
         } else if (entry.state.status == QLMMonitorStatusOn) {
             entry.presence = QLMMonitorPresenceOnline;

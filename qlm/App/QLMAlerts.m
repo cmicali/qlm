@@ -61,7 +61,7 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
 
 - (void)updateWithMonitorList:(QLMMonitorList *)list {
     QLMSnapshot *snapshot = list.snapshot;
-    BOOL healthy = snapshot.running && snapshot.adapterError == nil;
+    BOOL healthy = snapshot.running && snapshot.busProblem == QLMBusProblemNone;
     if (healthy && _wasHealthy) {
         [self alertDrops:list.dropped];
     }

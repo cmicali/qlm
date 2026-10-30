@@ -8,7 +8,7 @@ typedef NS_ENUM(NSInteger, QLMMonitorPresence) {
     QLMMonitorPresenceIdentifying = 0,  // leased, with no telemetry yet
     QLMMonitorPresenceOnline,
     QLMMonitorPresenceStandby,
-    QLMMonitorPresenceOffline,          // missing polls, or dropped by System
+    QLMMonitorPresenceOffline,          // offline by System's rule, or dropped by System
 };
 
 NSColor *QLMPresenceColor(QLMMonitorPresence presence);
@@ -25,7 +25,7 @@ NSString *QLMPresenceName(QLMMonitorPresence presence);
 
 @end
 
-// "Not answering (3)" for a tracked monitor that misses polls, else the
+// "Not answering (4)" for a tracked monitor System calls offline, else the
 // presence's name.
 NSString *QLMEntryStatusText(QLMMonitorEntry *entry);
 

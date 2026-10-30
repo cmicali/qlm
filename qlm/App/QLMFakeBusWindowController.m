@@ -5,7 +5,8 @@
 #import "QLMFormat.h"
 #import "QLMViews.h"
 
-// The shape of QLMHostCheck's description, so the banner reads as it will.
+// The shape of QLMHostCheck's sentence for GLM, so System reads it as GLM
+// holding the adapter.
 static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applications/GLMv5.app/Contents/MacOS/GLMv5). Quit GLM first.";
 static const NSInteger QLMKnobBottomTenths = -1004;
 
@@ -184,12 +185,6 @@ static const NSInteger QLMKnobBottomTenths = -1004;
     }];
 }
 
-void QLMFakeBusDropLeases(QLMFakeBus *bus) {
-    for (QLMFakeMonitor *monitor in bus.monitors) {
-        monitor.session = 0;
-    }
-}
-
 #pragma mark - Actions
 
 - (void)knobAttachedClicked:(NSButton *)checkbox {
@@ -210,9 +205,6 @@ void QLMFakeBusDropLeases(QLMFakeBus *bus) {
     BOOL busy = checkbox.state == NSControlStateValueOn;
     [self change:^(QLMFakeBus *bus) {
         bus.busyReason = busy ? QLMFakeBusyReason : nil;
-        if (!busy) {
-            QLMFakeBusDropLeases(bus);
-        }
     }];
 }
 
@@ -220,9 +212,6 @@ void QLMFakeBusDropLeases(QLMFakeBus *bus) {
     BOOL unplugged = checkbox.state == NSControlStateValueOn;
     [self change:^(QLMFakeBus *bus) {
         bus.disconnected = unplugged;
-        if (!unplugged) {
-            QLMFakeBusDropLeases(bus);
-        }
     }];
 }
 
