@@ -13,6 +13,7 @@
     if (self) {
         _unmatched = [NSMutableArray array];
         _unplayed = [NSMutableDictionary dictionary];
+        _clock = QLMRealClock.shared;
         for (QLMCaptureExchange *exchange in capture.exchanges) {
             NSMutableArray<QLMCaptureExchange *> *same = _unplayed[exchange.outputReport];
             if (same == nil) {
@@ -56,9 +57,9 @@
     uint8_t report[QLMReportLength];
     NSError *refusal = nil;
     if (!QLMAdapterPackReport(&message, report, &refusal)) {
-        dispatch_async(queue, ^{
+        [self.clock async:queue run:^{
             handler(NULL, refusal);
-        });
+        }];
         return;
     }
     QLMCaptureExchange *exchange = nil;
@@ -75,9 +76,9 @@
 
     BOOL answered = exchange.answered;
     QLMMessage reply = answered ? exchange.reply : QLMMessageMake(0, NULL, 0);
-    dispatch_async(queue, ^{
+    [self.clock async:queue run:^{
         handler(answered ? &reply : NULL, nil);
-    });
+    }];
 }
 
 @end

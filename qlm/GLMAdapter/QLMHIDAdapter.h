@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #import "QLMAdapter.h"
+#import "QLMClock.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -23,6 +24,8 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMHIDAdapter : NSObject <QLMAdapter>
 
 @property (nonatomic) NSTimeInterval replyTimeout;  // the report link's, 0.1 s
+// The host watch's timer and the report link's. Set it before start.
+@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 
 // Whether a device is open, which it is only seized.
 @property (nonatomic, readonly) BOOL seized;

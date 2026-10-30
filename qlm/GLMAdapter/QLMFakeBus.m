@@ -33,6 +33,7 @@
         _monitors = [monitors copy];
         _sent = [NSMutableArray array];
         _recordsSentMessages = YES;
+        _clock = QLMRealClock.shared;
         // The shape of the adapter's own replies in captures/startup-idle.
         _adapterSystemInfo = @"c-0;model-GLM Adapter;ver-1.4.0.6113;hw-0.0.202;build-2025.05.19.s  ";
         _adapterSerialNumber = @"H00000F001";
@@ -103,13 +104,13 @@
     uint8_t report[QLMReportLength];
     NSError *refusal = nil;
     if (!QLMAdapterPackReport(&message, report, &refusal)) {
-        dispatch_async(queue, ^{
+        [self.clock async:queue run:^{
             handler(NULL, refusal);
-        });
+        }];
         return;
     }
 
-    dispatch_async(queue, ^{
+    [self.clock async:queue run:^{
         NSString *busy = self.busyReason;
         if (busy != nil) {
             handler(NULL, QLMAdapterErrorMake(QLMAdapterErrorBusy, busy));
@@ -125,7 +126,7 @@
         QLMMessage reply;
         BOOL answered = [self replyTo:&message into:&reply];
         handler(answered ? &reply : NULL, nil);
-    });
+    }];
 }
 
 static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated) {

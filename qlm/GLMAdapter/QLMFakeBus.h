@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #import "QLMAdapter.h"
+#import "QLMClock.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -41,6 +42,8 @@ NS_ASSUME_NONNULL_BEGIN
 // recordsSentMessages is YES (the default).
 @property (nonatomic, readonly) NSArray<NSData *> *sentMessages;
 @property (atomic) BOOL recordsSentMessages;
+// The hop that hands each reply over. Set it before start.
+@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 @property (nonatomic) BOOL disconnected;  // every send fails
 // Set: another host has the adapter. Every send fails with
 // QLMAdapterErrorBusy and this description, and none is recorded, as the

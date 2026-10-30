@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #import "QLMAdapter.h"
+#import "QLMClock.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -45,6 +46,8 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // timeouts the link stalls: it fails the held request, and every send, until
 // the sync's reply comes.
 @property (nonatomic) NSTimeInterval replyTimeout;
+// The timeouts' clock, and the hop that hands a reply over.
+@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
 

@@ -57,7 +57,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     QLMReportLink *_link;
     uint64_t _linkEntry;
     uint8_t _input[QLMReportLength];
-    dispatch_source_t _watch;
+    id<QLMTimer> _watch;
     NSError *_problem;  // why a send fails while no device is open
     NSString *_deviceDescription;
 }
@@ -66,6 +66,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     self = [super init];
     if (self) {
         _replyTimeout = 0.1;
+        _clock = QLMRealClock.shared;
         _checkQueue = dispatch_queue_create("com.commonwealthrecordings.qlm.hostcheck", DISPATCH_QUEUE_SERIAL);
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
         _deviceDescription = @"the GLM adapter over USB, not open";
@@ -112,13 +113,9 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     }
 
     __weak QLMHIDAdapter *weakSelf = self;
-    uint64_t interval = (uint64_t)(QLMHIDWatchInterval * (double)NSEC_PER_SEC);
-    _watch = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-    dispatch_source_set_timer(_watch, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), interval, interval / 10);
-    dispatch_source_set_event_handler(_watch, ^{
+    _watch = [_clock every:QLMHIDWatchInterval queue:queue run:^{
         [weakSelf checkHosts];
-    });
-    dispatch_resume(_watch);
+    }];
 }
 
 - (void)stop {
@@ -126,8 +123,8 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return;
     }
     _running = NO;
-    dispatch_source_cancel(_watch);
-    _watch = NULL;
+    [_watch cancel];
+    _watch = nil;
     [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is stopped.") removed:NO];
     if (_arrivals != IO_OBJECT_NULL) {
         IOObjectRelease(_arrivals);
@@ -255,6 +252,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                                  : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
     }];
     _link.replyTimeout = _replyTimeout;
+    _link.clock = _clock;
     return nil;
 }
 

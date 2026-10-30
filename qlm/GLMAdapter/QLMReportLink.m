@@ -65,6 +65,7 @@ static NSError *QLMStalledError(void) {
         _queue = queue;
         _writer = [writer copy];
         _replyTimeout = 0.1;
+        _clock = QLMRealClock.shared;
         _late = QLMReplyShapeAny;
         QLMReportAssemblyReset(&_assembly);
     }
@@ -74,9 +75,9 @@ static NSError *QLMStalledError(void) {
 - (void)finish:(QLMAdapterReplyHandler)handler reply:(const QLMMessage *_Nullable)reply error:(NSError *_Nullable)error {
     BOOL answered = reply != NULL;
     QLMMessage copy = answered ? *reply : QLMMessageMake(0, NULL, 0);
-    dispatch_async(_queue, ^{
+    [_clock async:_queue run:^{
         handler(answered ? &copy : NULL, error);
-    });
+    }];
 }
 
 // Through the allowlist, or nil with why not.
@@ -147,12 +148,12 @@ static NSError *QLMStalledError(void) {
     uint64_t generation = _generation;
     NSTimeInterval timeout = request.sync ? _replyTimeout * QLMSyncTimeouts : _replyTimeout;
     __weak QLMReportLink *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * (double)NSEC_PER_SEC)), _queue, ^{
+    [_clock after:timeout queue:_queue run:^{
         QLMReportLink *strongSelf = weakSelf;
         if (strongSelf != nil && strongSelf->_generation == generation) {
             [strongSelf timeOut];
         }
-    });
+    }];
 }
 
 - (void)timeOut {
