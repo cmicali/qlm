@@ -56,6 +56,13 @@ NSArray<NSString *> *QLMCaptureScenarios(void);
 // captures/<scenario>/reports.txt, read once and shared.
 QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
+// A frame that controls the monitors: none of a poll, a serial, system info,
+// the probe, or a lease.
+BOOL QLMIsControl(QLMMessage message);
+
+// Each output report in captures/<scenario> whose payload starts with `opcode`.
+NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
+
 @class QLMReportLink;
 
 // The GLM adapter as a capture saw it, at the level of reports, behind a

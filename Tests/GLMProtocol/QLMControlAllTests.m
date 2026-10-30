@@ -21,22 +21,11 @@ static const double QLMAllVolume = -50;
 static const double QLMAllCeiling = -35;
 
 static BOOL QLMSentByQLM(NSTimeInterval time) {
-    return (time > 20 && time < 378) || time > 410;
+    return time >= 17.5 && (time < 378.5 || time >= 405.5);
 }
 
-static BOOL QLMIsControl(QLMMessage message) {
-    if (message.address == QLMAddressMulticast || message.length == 0) {
-        return NO;
-    }
-    switch (message.payload[0]) {
-    case 0x08:  // a poll
-    case 0x19:  // a serial
-    case 0x39:  // system info
-    case 0xFE:  // the probe
-        return NO;
-    default:
-        return YES;
-    }
+static QLMMessage QLMAllLevel(void) {
+    return QLMCommandVolume(QLMAllVolume, QLMAllCeiling);
 }
 
 static BOOL QLMIsLease(QLMMessage message) {
@@ -44,16 +33,16 @@ static BOOL QLMIsLease(QLMMessage message) {
 }
 
 // `count` frames of `scenario`, from the one at `time` to the half
-// millisecond, each one `keep` passes. Nil, after a failure, when there are
-// fewer.
+// millisecond, each one `keep` passes, or every one when it is NULL. Nil,
+// after a failure, when there are fewer.
 - (nullable NSArray<QLMCaptureExchange *> *)frames:(NSUInteger)count of:(NSString *)scenario from:(NSTimeInterval)time
-                                              keep:(BOOL (^)(QLMMessage message))keep {
+                                              keep:(BOOL (*_Nullable)(QLMMessage))keep {
     NSMutableArray<QLMCaptureExchange *> *run = [NSMutableArray array];
     for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
         if (run.count == 0 && fabs(exchange.time - time) >= 0.0005) {
             continue;
         }
-        if (!keep(exchange.message)) {
+        if (keep != NULL && !keep(exchange.message)) {
             continue;
         }
         [run addObject:exchange];
@@ -66,9 +55,7 @@ static BOOL QLMIsLease(QLMMessage message) {
 }
 
 - (nullable NSArray<QLMCaptureExchange *> *)controls:(NSUInteger)count of:(NSString *)scenario from:(NSTimeInterval)time {
-    return [self frames:count of:scenario from:time keep:^BOOL(QLMMessage message) {
-        return QLMIsControl(message);
-    }];
+    return [self frames:count of:scenario from:time keep:QLMIsControl];
 }
 
 - (void)assertExchange:(QLMCaptureExchange *)exchange is:(QLMMessage)message {
@@ -81,7 +68,7 @@ static BOOL QLMIsLease(QLMMessage message) {
     XCTAssertEqualObjects(exchange.outputReport, glm.outputReport, @"%.6f s against GLM's at %.6f s", exchange.time, glm.time);
 }
 
-// A lease the monitor acked, and the level next, within 2 ms of the ack.
+// A lease the monitor acked, and the level next, within 4 ms of the lease.
 - (void)assertLease:(QLMCaptureExchange *)lease thenLevel:(QLMCaptureExchange *)level {
     XCTAssertTrue(QLMIsLease(lease.message), @"%.6f s", lease.time);
     XCTAssertTrue(lease.answered, @"%.6f s", lease.time);
@@ -89,7 +76,7 @@ static BOOL QLMIsLease(QLMMessage message) {
     uint8_t session = 0;
     XCTAssertTrue(QLMReplySessionAck(&reply, &session), @"%.6f s", lease.time);
     XCTAssertEqual(session, lease.message.payload[4], @"%.6f s", lease.time);
-    [self assertExchange:level is:QLMCommandVolume(QLMAllVolume, QLMAllCeiling)];
+    [self assertExchange:level is:QLMAllLevel()];
     XCTAssertLessThan(level.time - lease.time, 0.004, @"%.6f s", lease.time);
 }
 
@@ -99,13 +86,7 @@ static BOOL QLMIsLease(QLMMessage message) {
 // dimmed, and -41.5 dB in step 6.
 - (void)testTheRunSentOnlyControlsUnderTheCeiling {
     NSSet<NSNumber *> *allowed = [NSSet setWithArray:@[@0x1F, @0x2B, @0x2D, @0x3A, @0x3D]];
-    NSMutableSet<NSData *> *glm = [NSMutableSet set];
-    for (QLMCaptureExchange *exchange in QLMReadCapture(@"volume-sweep", NULL).exchanges) {
-        QLMMessage message = exchange.message;
-        if (message.length > 0 && message.payload[0] == 0x1F) {
-            [glm addObject:exchange.outputReport];
-        }
-    }
+    NSSet<NSData *> *glm = QLMOutputReports(@"volume-sweep", 0x1F);
     NSUInteger controls = 0;
     NSMutableSet<NSData *> *levels = [NSMutableSet set];
     for (QLMCaptureExchange *exchange in QLMReadCapture(QLMAllScenario, NULL).exchanges) {
@@ -137,9 +118,7 @@ static BOOL QLMIsLease(QLMMessage message) {
 // its 39. In qlm-control-first, a monitor switched on played at its own
 // level until a host sent one.
 - (void)testANewMonitorGetsTheLevelFirst {
-    NSArray<QLMCaptureExchange *> *run = [self frames:3 of:QLMAllScenario from:214.773938 keep:^BOOL(QLMMessage message) {
-        return YES;
-    }];
+    NSArray<QLMCaptureExchange *> *run = [self frames:3 of:QLMAllScenario from:214.773938 keep:NULL];
     if (run == nil) {
         return;
     }
@@ -158,7 +137,10 @@ static BOOL QLMIsLease(QLMMessage message) {
         NSUInteger leases = 0;
         for (NSUInteger i = 0; i + 1 < exchanges.count; i++) {
             QLMCaptureExchange *exchange = exchanges[i];
-            if (exchange.time < wake.doubleValue || exchange.time > wake.doubleValue + 0.2 || !QLMIsLease(exchange.message)) {
+            if (exchange.time > wake.doubleValue + 0.2) {
+                break;
+            }
+            if (exchange.time < wake.doubleValue || !QLMIsLease(exchange.message)) {
                 continue;
             }
             XCTAssertEqual(exchange.message.payload[4], 0x09 + leases, @"%.6f s", exchange.time);
@@ -179,20 +161,19 @@ static BOOL QLMIsLease(QLMMessage message) {
         return;
     }
     XCTAssertEqual(glm[2].message.payload[0], 0x1F);
-    QLMMessage level = QLMCommandVolume(QLMAllVolume, QLMAllCeiling);
     for (NSNumber *time in @[@575.095543, @8481.937046]) {
         NSArray<QLMCaptureExchange *> *run = [self controls:10 of:QLMAllScenario from:time.doubleValue];
         if (run == nil) {
             continue;
         }
-        [self assertExchange:run[0] is:level];
+        [self assertExchange:run[0] is:QLMAllLevel()];
         for (NSUInteger pair = 0; pair < 3; pair++) {
             [self assertExchange:run[1 + pair * 2] is:QLMCommandPower(QLMPowerStepWakeFirst)];
             [self assertExchange:run[2 + pair * 2] is:QLMCommandPower(QLMPowerStepWakeSecond)];
         }
         [self assertExchange:run[5] isExchange:glm[0]];
         [self assertExchange:run[6] isExchange:glm[1]];
-        [self assertExchange:run[7] is:level];
+        [self assertExchange:run[7] is:QLMAllLevel()];
         [self assertExchange:run[8] isExchange:glm[3]];
         [self assertExchange:run[9] isExchange:glm[4]];
         XCTAssertEqualWithAccuracy(run[7].time - run[6].time, glm[2].time - glm[1].time, 0.03, @"%@ s", time);
@@ -208,20 +189,21 @@ static BOOL QLMIsLease(QLMMessage message) {
     if (glm == nil) {
         return;
     }
-    QLMMessage volume = QLMCommandVolume(QLMAllVolume, QLMAllCeiling);
+    QLMMessage level = QLMAllLevel();
     QLMMessage dimmed = QLMCommandDim(QLMAllVolume, QLMAllCeiling);
     const struct {
         NSTimeInterval time;
-        BOOL on;
-    } runs[] = {{432.032738, YES}, {451.792971, NO}, {8400.569307, YES}, {8420.349259, NO}};
+        QLMMessage from;
+        QLMMessage to;
+    } runs[] = {{432.032738, level, dimmed}, {451.792971, dimmed, level}, {8400.569307, level, dimmed}, {8420.349259, dimmed, level}};
     for (size_t r = 0; r < sizeof runs / sizeof runs[0]; r++) {
         NSArray<QLMCaptureExchange *> *run = [self controls:11 of:QLMAllScenario from:runs[r].time];
         if (run == nil) {
             continue;
         }
-        [self assertExchange:run[0] is:runs[r].on ? volume : dimmed];
-        [self assertExchange:run[1] is:runs[r].on ? dimmed : volume];
-        [self assertExchange:run[2] is:runs[r].on ? dimmed : volume];
+        [self assertExchange:run[0] is:runs[r].from];
+        [self assertExchange:run[1] is:runs[r].to];
+        [self assertExchange:run[2] is:runs[r].to];
         XCTAssertLessThan(run[1].time - run[0].time, 0.002, @"%.6f s", runs[r].time);
         for (uint8_t i = 0; i < 6; i++) {
             QLMCaptureExchange *mute = run[3 + i];
