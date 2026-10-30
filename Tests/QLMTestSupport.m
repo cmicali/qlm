@@ -112,12 +112,15 @@ QLMCapture *QLMReadCapture(NSString *scenario, NSError **error) {
 
 - (void)answer:(NSData *)report {
     [_written addObject:report];
-    QLMCaptureExchange *exchange = _unplayed[report].firstObject;
+    NSMutableArray<QLMCaptureExchange *> *same = _unplayed[report];
+    QLMCaptureExchange *exchange = same.firstObject;
     if (exchange == nil) {
         _unmatchedReports += 1;
         return;
     }
-    [_unplayed[report] removeObjectAtIndex:0];
+    if (same.count > 1) {
+        [same removeObjectAtIndex:0];
+    }
     if (exchange.replyFrame == nil || self.silent) {
         return;
     }
