@@ -45,8 +45,8 @@ user=${SUDO_USER:-root}
 home=$(getent passwd "$user" | cut -d: -f6)
 dir="$home/captures/$scenario"
 file="$dir/capture.pcapng"
-if [ -e "$file" ]; then
-    echo "$file exists. Move it away first." >&2
+if [ -e "$file" ] || [ -e "$file.xz" ]; then
+    echo "$dir already holds a capture. Move it away first." >&2
     exit 1
 fi
 mkdir -p "$dir"
@@ -54,13 +54,17 @@ mkdir -p "$dir"
 echo "Recording usbmon$bus to $file. The adapter is device $bus:$devnum."
 echo "Started at $(date '+%Y-%m-%d %H:%M:%S %Z'). Press Ctrl-C to stop."
 # Ctrl-C stops dumpcap, which then exits 0. This trap keeps the script alive
-# to fix ownership.
+# to compress the file and fix ownership.
 # TRAP: dumpcap as root drops every capability but capture, so it cannot
 # enter a 0700 home. This shell opens the file instead.
 trap ':' INT
 status=0
 dumpcap -q -i "usbmon$bus" -w - > "$file" || status=$?
 trap - INT
+if [ "$status" -eq 0 ]; then
+    # The repository stores captures xz-compressed.
+    xz -9 "$file"
+fi
 chown -R "$user:" "$home/captures"
 if [ "$status" -ne 0 ]; then
     echo "dumpcap failed with status $status. $file is incomplete." >&2
@@ -69,4 +73,4 @@ fi
 echo "Stopped at $(date '+%Y-%m-%d %H:%M:%S %Z')."
 echo "On the Mac, from the repository:"
 echo "  scp -r $user@$(hostname).local:captures/$scenario captures/"
-echo "  python3 -I tools/pcapng-to-reports.py --device $bus:$devnum captures/$scenario/capture.pcapng > captures/$scenario/reports.txt"
+echo "  python3 -I tools/pcapng-to-reports.py --device $bus:$devnum captures/$scenario/capture.pcapng.xz > captures/$scenario/reports.txt"

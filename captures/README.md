@@ -14,7 +14,7 @@ captures/
 │   ├── hidutil.txt             hidutil's list, for the adapter's usage page
 │   └── setups/*.sam            a copy of every GLM setup file
 └── <scenario>/
-    ├── capture.pcapng          what usbmon or USBPcap recorded, untouched
+    ├── capture.pcapng.xz       what usbmon or USBPcap recorded, xz-compressed but otherwise untouched
     ├── reports.txt             tools/pcapng-to-reports.py's text form of it
     └── notes.md                what you did, when, and what you saw
 ```
@@ -73,15 +73,15 @@ Pi route caveats:
 1. Install GLM 5, Wireshark, and USBPcap on a Windows PC, or in a VM with the adapter passed through.
 2. Plug in the adapter and open GLM once, so the driver and the setup file are in place.
 3. In Wireshark, start a capture on the USBPcap interface that lists the adapter. The adapter is vendor `0x1781`, product `0x0E39`. Filter on `usb.idVendor == 0x1781` to check.
-4. Run one scenario. Save the capture as pcapng into a directory named for it.
+4. Run one scenario. Save the capture as pcapng into a directory named for it. Compress it with `xz -9 capture.pcapng`.
 5. Write `notes.md` next to it: the time of each action and what GLM showed.
 
 ### Converting
 
-The converter reads both routes' captures. `--device BUS:DEV` keeps the adapter's traffic and drops the hub's. `capture.sh` prints the adapter's number.
+The converter reads both routes' captures, plain or xz-compressed. The repository stores them compressed, about a tenth the size. `--device BUS:DEV` keeps the adapter's traffic and drops the hub's. `capture.sh` prints the adapter's number.
 
 ```
-python3 -I tools/pcapng-to-reports.py --device 1:2 captures/<scenario>/capture.pcapng > captures/<scenario>/reports.txt
+python3 -I tools/pcapng-to-reports.py --device 1:2 captures/<scenario>/capture.pcapng.xz > captures/<scenario>/reports.txt
 ```
 
 ## Scenarios

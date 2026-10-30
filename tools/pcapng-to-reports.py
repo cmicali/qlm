@@ -6,9 +6,10 @@ Reads a pcap or pcapng file whose link type is USBPcap (249) or Linux usbmon
 seconds from the first packet, `out` or `in`, then the bytes in hex. Reports
 come from interrupt transfers, HID SET_REPORT Output, and HID GET_REPORT
 Input. Every other control transfer becomes a `#` line with its setup packet
-and data. Everything else is skipped.
+and data. Everything else is skipped. A capture may be xz-compressed, as the
+repository stores them.
 
-    python3 -I tools/pcapng-to-reports.py capture.pcapng > reports.txt
+    python3 -I tools/pcapng-to-reports.py capture.pcapng.xz > reports.txt
     python3 -I tools/pcapng-to-reports.py --device 1:5 capture.pcap > reports.txt
     python3 -I tools/pcapng-to-reports.py --self-test
 
@@ -18,6 +19,7 @@ a new number. Without it, a capture of more than one device converts with a
 warning.
 """
 import argparse
+import lzma
 import struct
 import sys
 
@@ -28,6 +30,8 @@ LINKTYPES = (LINKTYPE_USB_LINUX, LINKTYPE_USB_LINUX_MMAPPED, LINKTYPE_USBPCAP)
 
 INTERRUPT = 1
 CONTROL = 2
+
+XZ_MAGIC = b"\xfd7zXZ\x00"
 
 # USBPcap's packet header, packed. The direction is bit 0 of info: 1 is
 # device to host. The transfer is 0 iso, 1 interrupt, 2 control, 3 bulk. A
@@ -106,6 +110,8 @@ def packets_pcapng(data):
 
 
 def packets(data):
+    if data[:6] == XZ_MAGIC:
+        data = lzma.decompress(data)
     if data[:4] == b"\x0a\x0d\x0d\x0a":
         return packets_pcapng(data)
     return packets_pcap(data)
@@ -302,6 +308,7 @@ def self_test():
     captures = [
         ("usbmon pcap", pcap(LINKTYPE_USB_LINUX_MMAPPED, synthetic_usbmon(LINKTYPE_USB_LINUX_MMAPPED))),
         ("usbmon pcapng", pcapng(LINKTYPE_USB_LINUX, synthetic_usbmon(LINKTYPE_USB_LINUX))),
+        ("usbmon pcapng xz", lzma.compress(pcapng(LINKTYPE_USB_LINUX, synthetic_usbmon(LINKTYPE_USB_LINUX)))),
     ]
     for name, capture in captures:
         warnings = []
