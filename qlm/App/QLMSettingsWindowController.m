@@ -85,8 +85,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     ceilingRow.spacing = 4;
     NSTextField *ceilingNote = QLMNoteLabel(
         @"No volume goes out above the ceiling. qlm's protocol layer caps every volume frame at it, "
-        @"whether the level comes from the slider, the knob, dim, or a group. 0 dB is the monitors' full level. "
-        @"A change reconnects to the monitors.",
+        @"whether the level comes from the slider, the knob, dim, or a group. 0 dB is the monitors' full level.",
         QLMSettingsTextWidth);
 
     self.wakeCheckbox = [NSButton checkboxWithTitle:@"Wake the monitors" target:self action:@selector(wakeClicked:)];

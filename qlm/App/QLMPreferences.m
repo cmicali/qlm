@@ -83,11 +83,6 @@ double QLMNearestStepDecibels(double decibels) {
     return fmin(decibels, self.ceilingDecibels);
 }
 
-- (double)sentDecibels:(double)decibels dimmed:(BOOL)dimmed {
-    double capped = [self cappedDecibels:decibels];
-    return dimmed ? fmax(QLMVolumeDecibelsMin, capped - QLMDimDecibels) : capped;
-}
-
 - (BOOL)wakesAtLaunch {
     return [_defaults boolForKey:QLMWakesAtLaunchKey];
 }

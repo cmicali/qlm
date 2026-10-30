@@ -473,7 +473,7 @@ static NSView *QLMSpacer(void) {
         [parts addObject:ceilingText];
     }
     if (snapshot.dimmed) {
-        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText([self.preferences sentDecibels:decibels dimmed:YES])]];
+        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText(snapshot.handBack.volumeDecibels.doubleValue)]];
     }
     if (snapshot.allMuted) {
         [parts addObject:@"muted"];

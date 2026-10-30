@@ -17,8 +17,6 @@
 #import "QLMSetupWatcher.h"
 #import "QLMSystem.h"
 
-// A ceiling change restarts System. Steps closer together than this make one.
-static const NSTimeInterval QLMRestartDelay = 0.6;
 // How long quit and sleep wait for System to let go, well within the Mac's
 // allowance for a sleep. A stop sends at most the hand-back level, then
 // closes the adapter.
@@ -199,9 +197,8 @@ static const NSTimeInterval QLMStopAllowance = 3;
     [self.system start];
 }
 
-// System copies its settings when made, so a new ceiling or adapter setting
-// takes a new System, with a new adapter: a stopped one is not handed to
-// another. The new System starts once the old has let go, so the two never
+// A new adapter setting takes a new System, with a new adapter: a stopped
+// one is not handed to another. The new System starts once the old has let go, so the two never
 // hold the adapter at once. Mutes carry over through the saved record, and
 // dim by hand. The active group and the fake bus's state do not.
 - (void)restartSystem {
@@ -383,20 +380,11 @@ static const NSTimeInterval QLMStopAllowance = 3;
 
 #pragma mark - Settings
 
+// System caps every frame at once, and sends a volume already set again
+// under the new ceiling. Mutes and the active group are untouched.
 - (void)settingsDidChangeVolumeRange:(QLMSettingsWindowController *)controller {
     [self.popoverController reloadVolumeRange];
-    double ceiling = self.preferences.ceilingDecibels;
-    QLMSystem *system = self.system;
-    if (system == nil || system.settings.ceilingDecibels == ceiling) {
-        return;
-    }
-    // Until the restart, keep the level under the new ceiling.
-    NSNumber *volume = self.monitorList.snapshot.volumeDecibels;
-    if (volume != nil && volume.doubleValue > ceiling) {
-        [system setVolumeDecibels:ceiling];
-    }
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(restartSystem) object:nil];
-    [self performSelector:@selector(restartSystem) withObject:nil afterDelay:QLMRestartDelay];
+    [self.system setCeilingDecibels:self.preferences.ceilingDecibels];
 }
 
 - (void)settingsDidChooseSetupFile:(QLMSettingsWindowController *)controller {
@@ -404,7 +392,6 @@ static const NSTimeInterval QLMStopAllowance = 3;
 }
 
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
-    [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(restartSystem) object:nil];
     [self restartSystem];
 }
 
