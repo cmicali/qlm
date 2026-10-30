@@ -3,6 +3,7 @@
 #include "QLMCommands.h"
 #include "QLMReplies.h"
 #import "QLMDSPBlock.h"
+#import "QLMKnob.h"
 #import "QLMSnapshotInternal.h"
 
 NSErrorDomain const QLMSystemErrorDomain = @"com.commonwealthrecordings.qlm.system";
@@ -48,6 +49,10 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
 
 // GLM polls the adapter in pairs, 2.4 ms apart (docs/adapter-status.md).
 static const NSUInteger QLMAdapterPollsPerRound = 2;
+
+// GLM's spacing between the power steps.
+static const NSTimeInterval QLMSleepStepSpacing = 0.022;
+static const NSTimeInterval QLMWakePairSpacing = 0.2;
 
 // A monitor System is tracking. Touched only on the queue.
 @interface QLMMonitorRecord : NSObject
@@ -128,6 +133,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableArray<dispatch_block_t> *_sends;
     BOOL _inFlight;
     BOOL _running;
+    NSUInteger _run;  // counts stops
     BOOL _dirty;
     dispatch_source_t _cycleTimer;
     BOOL _cycleQueued;
@@ -135,10 +141,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSError *_adapterError;
     dispatch_source_t _adapterTimer;
     NSUInteger _adapterPollsQueued;
+    QLMKnob *_knob;
     NSNumber *_volumeDecibels;
     BOOL _volumeSendPending;
     NSDate *_lastVolumeSend;
     BOOL _dimmed;
+    BOOL _adapterMuted;
     NSString *_activeGroupName;
     void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
     QLMSnapshotHandler _snapshotHandler;
@@ -155,6 +163,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
+        _knob = [[QLMKnob alloc] init];
         _snapshot = [[QLMSnapshot alloc] init];
     }
     return self;
@@ -235,6 +244,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             return;
         }
         self->_running = NO;
+        self->_run += 1;
         if (self->_cycleTimer != NULL) {
             dispatch_source_cancel(self->_cycleTimer);
             self->_cycleTimer = NULL;
@@ -250,6 +260,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_adapterPollsQueued = 0;
         [self->_adapter stop];
         [self->_monitors removeAllObjects];
+        self->_adapterMuted = NO;
+        [self->_knob reset];
         self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
         self->_adapterError = nil;
         if (self->_applyFinish != nil) {
@@ -301,6 +313,24 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _adapterError = nil;
         _dirty = YES;
     }
+}
+
+// Not a send: holds the line, so the next item goes out `seconds` after the
+// one before it ends. Nothing else goes out meanwhile.
+- (void)hold:(NSTimeInterval)seconds {
+    NSUInteger run = _run;
+    dispatch_queue_t queue = _queue;
+    __weak QLMSystem *weakSelf = self;
+    [self enqueue:^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), queue, ^{
+            QLMSystem *strongSelf = weakSelf;
+            // TRAP: a stop empties the line. A hold from before it must not
+            // end an item of the next start.
+            if (strongSelf != nil && strongSelf->_run == run) {
+                [strongSelf finishItem:nil];
+            }
+        });
+    }];
 }
 
 // Not a send: the block runs when the line reaches it, after every item
@@ -553,8 +583,29 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             adapter.hasStatus = YES;
             adapter.missedPolls = 0;
             adapter.lastReply = [NSDate date];
+            [self followKnob:&status];
         }];
     }
+}
+
+// A volume the knob sets goes out as GLM sends it: the level three times,
+// the mute state, then the level again (captures/standby-wake, 0.99 s).
+- (void)followKnob:(const QLMAdapterStatus *)status {
+    if (!status->knob || !status->hasKnobPosition) {
+        [_knob reset];
+        return;
+    }
+    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:NSProcessInfo.processInfo.systemUptime volume:_volumeDecibels];
+    if (volume == nil) {
+        return;
+    }
+    _volumeDecibels = volume;
+    _dirty = YES;
+    for (int i = 0; i < 3; i++) {
+        [self sendVolume];
+    }
+    [self sendMuteState];
+    [self sendVolume];
 }
 
 #pragma mark - Polling
@@ -662,6 +713,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Dim
 
+// GLM's dim: the level twice, one round of 2B, then broadcast 2D 00 and
+// 3D 00 00 (captures/mute-dim, 51.24 s). 2D is not on the allowlist, so qlm
+// leaves it out.
 - (void)setDimmed:(BOOL)dimmed {
     [self onQueue:^{
         if (self->_dimmed == dimmed) {
@@ -669,9 +723,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         self->_dimmed = dimmed;
         self->_dirty = YES;
-        if (self->_volumeDecibels != nil) {
-            [self scheduleVolumeSend];
+        if (!self->_running || self->_volumeDecibels == nil) {
+            return;
         }
+        // Part of the sequence, so it skips the coalescing timer.
+        [self sendVolume];
+        [self sendVolume];
+        [self sendMuteRounds:1];
+        [self send:QLMCommandInputSync(QLMAddressBroadcast) then:nil];
     }];
 }
 
@@ -686,7 +745,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
         if (monitor != nil) {
             monitor.muted = muted;
-            [self sendMuteRounds];
+            [self sendMuteRounds:2];
         }
     }];
 }
@@ -699,19 +758,28 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         for (QLMMonitorRecord *monitor in self->_monitors) {
             monitor.muted = muted;
         }
+        self->_adapterMuted = muted;
         if (self->_volumeDecibels != nil) {
             // Part of the sequence, so it skips the coalescing timer.
             [self sendVolume];
         }
-        [self sendMuteRounds];
+        [self sendMuteState];
     }];
 }
 
-// Two rounds, each restating every monitor's mute state. A 2B reply is a
-// bare ack, and a missed one is a lost send, not a missed poll.
-- (void)sendMuteRounds {
+// The adapter's own mute at 01, then two rounds to the monitors
+// (captures/mute-dim, 46.19 s). Only mute all changes the adapter's.
+- (void)sendMuteState {
+    uint8_t value = _adapterMuted ? QLMMuteValueAdapterMuted : QLMMuteValueAdapterUnmuted;
+    [self send:QLMCommandMute(QLMAddressAdapter, value) then:nil];
+    [self sendMuteRounds:2];
+}
+
+// Each round restates every monitor's mute state. A 2B reply is a bare ack,
+// and a missed one is a lost send, not a missed poll.
+- (void)sendMuteRounds:(NSUInteger)rounds {
     NSArray<QLMMonitorRecord *> *monitors = [_monitors copy];
-    for (NSUInteger round = 0; round < 2; round++) {
+    for (NSUInteger round = 0; round < rounds; round++) {
         for (QLMMonitorRecord *monitor in monitors) {
             [self send:QLMCommandMute(monitor.session, QLMMuteValueFor(monitor)) then:nil];
         }
@@ -723,7 +791,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Power
 
-// Sent back to back. GLM spaces them about 22 ms apart.
+// GLM's four steps, about 22 ms apart (captures/standby-wake, 34.86 s).
 - (void)sleep {
     [self onQueue:^{
         if (!self->_running) {
@@ -731,18 +799,26 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         }
         const QLMPowerStep steps[] = {QLMPowerStepStandbyPrepare, QLMPowerStepStandbyPrepare, QLMPowerStepPowerOff, QLMPowerStepPowerOff};
         for (size_t i = 0; i < sizeof steps / sizeof steps[0]; i++) {
+            if (i > 0) {
+                [self hold:QLMSleepStepSpacing];
+            }
             [self send:QLMCommandPower(steps[i]) then:nil];
         }
     }];
 }
 
-// The monitors come back under new sessions, and the probe finds them.
+// GLM's three pairs, back to back within a pair and about 0.2 s apart
+// (captures/startup-idle, 7.33 s). The monitors come back under new
+// sessions, and the probe finds them.
 - (void)wake {
     [self onQueue:^{
         if (!self->_running) {
             return;
         }
         for (int pair = 0; pair < 3; pair++) {
+            if (pair > 0) {
+                [self hold:QLMWakePairSpacing];
+            }
             [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
         }

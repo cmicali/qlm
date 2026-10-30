@@ -56,19 +56,24 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)stop;
 
 // Goes out at once, coalesced to one frame per volumeInterval, and again
-// every cycle. Clamped to the ceiling in the builder.
+// every cycle. Clamped to the ceiling in the builder. Once one is set, a turn
+// of the adapter's knob sets it too, as GLM lets it (QLMKnob). At start the
+// knob sets nothing.
 - (void)setVolumeDecibels:(double)decibels;
 
-// While dimmed, every volume frame is the volume less QLMDimDecibels.
+// While dimmed, every volume frame is the volume less QLMDimDecibels. A
+// change sends GLM's dim sequence, or nothing while no volume is set.
 - (void)setDimmed:(BOOL)dimmed;
 
 // Each sends two rounds of 2B to every leased monitor, restating each one's
-// mute state. Mute-all re-sends the volume first.
+// mute state. Mute all also re-sends the volume and sets the adapter's own
+// mute, as GLM does.
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
 
-// Broadcasts the power sequences. The monitors' power state comes back in
-// their telemetry.
+// Broadcasts the power sequences, with GLM's spacing between the steps.
+// Nothing else goes out between them. The monitors' power state comes back
+// in their telemetry.
 - (void)sleep;
 - (void)wake;
 

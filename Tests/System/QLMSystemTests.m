@@ -154,6 +154,14 @@ static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID
     }
 }
 
+// Waits for `count` more of the adapter's polls, each a reading of the knob.
+- (void)waitForAdapterPolls:(NSUInteger)count {
+    NSUInteger start = _bus.sentMessages.count;
+    [self waitUntil:^BOOL {
+        return [self countSentTo:QLMAddressAdapter opcode:0x08 from:start] >= count;
+    }];
+}
+
 - (void)testDiscoversLeasesAndIdentifiesEveryMonitor {
     [self startSystem];
     QLMSnapshot *snapshot = [self waitForDiscovery];
@@ -306,6 +314,88 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertNil(unplugged.adapter.knobTenths);
     XCTAssertFalse(unplugged.adapter.micPresent);
+}
+
+#pragma mark - The knob
+
+// The plan's "Behavior System must copy from GLM": at connect, keep qlm's own
+// level. docs/adapter-status.md: GLM opens at its own level, and the knob's
+// position moves nothing until the knob turns.
+- (void)testTheKnobLeavesTheVolumeAtStart {
+    _settings.cycleInterval = 10;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [self waitForAdapterPolls:10];
+    XCTAssertEqualObjects(_system.snapshot.volumeDecibels, @(-30));
+    XCTAssertEqual([self countSentTo:QLMAddressAdapter opcode:0x2B from:0], 0u);
+}
+
+// A turn sets the volume to the knob's nearest step. The ceiling still caps
+// it. Jitter after the turn sends nothing. QLMSystemGoldenTests checks the
+// frames a turn sends against GLM's.
+- (void)testATurnOfTheKnobSetsTheVolume {
+    _settings.cycleInterval = 10;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-30)];
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-503);
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-50.5)];
+    }];
+    QLMMessage levelMessage = QLMCommandVolume(-50.5, _settings.ceilingDecibels);
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertGreaterThan(levels.count, 0u);
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, QLMAdapterRecord(&levelMessage));
+    }
+
+    before = _bus.sentMessages.count;
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-505);
+    }];
+    [self waitForAdapterPolls:10];
+    XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
+
+    // The top stop: 0 dB, capped at the -20 dB ceiling.
+    [_bus perform:^{
+        self->_bus.knobTenths = @(0);
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(0)];
+    }];
+    const uint8_t ceiling[] = {QLMAddressBroadcast, 0x1F, 0x0C, 0xCC, 0xCC};
+    levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertGreaterThan(levels.count, 0u);
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, QLMBytes(ceiling, sizeof ceiling));
+    }
+}
+
+// qlmctl info, discover, and poll set no volume, and send only discovery and
+// polls. A turn of the knob changes that for none of them.
+- (void)testTheKnobSetsNoVolumeWhenNoneIsSet {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-300);
+    }];
+    [self waitForAdapterPolls:10];
+    XCTAssertNil(_system.snapshot.volumeDecibels);
+    XCTAssertEqualObjects(_system.snapshot.adapter.knobTenths, @(-300));
+    for (NSData *record in _bus.sentMessages) {
+        XCTAssertTrue(QLMIsDiscoveryOrPoll(record), @"%@", record);
+    }
 }
 
 // Never drive the bus while GLM runs: while the adapter is busy, the
@@ -484,6 +574,58 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertEqual(snapshot.monitors.count, 2u);
     XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
+}
+
+// The plan: after any gap in polling, lease again. captures/qlm-first-discover:
+// the monitors drop their leases within 23 to 42 s of the host going quiet,
+// then answer the probe. Here System's queue stalls, as in a sleep, and both
+// monitors drop their leases meanwhile. The next cycle's probe finds them,
+// and each gets the next session.
+- (void)testAGapInPollingLeasesAgain {
+    [self startSystem];
+    [self waitForDiscovery];
+    NSUInteger before = _bus.sentMessages.count;
+    // perform: runs on System's queue, so nothing goes out while it sleeps.
+    [_bus perform:^{
+        [NSThread sleepForTimeInterval:0.05];
+        self->_left.session = 0;
+        self->_right.session = 0;
+    }];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *left = QLMFindMonitor(snapshot, self->_left.hardwareID);
+        QLMMonitorState *right = QLMFindMonitor(snapshot, self->_right.hardwareID);
+        return snapshot.monitors.count == 2 && left.session > 0x03 && right.session > 0x03 && snapshot.allIdentified;
+    }];
+    NSMutableIndexSet *sessions = [NSMutableIndexSet indexSet];
+    for (QLMMonitorState *monitor in again.monitors) {
+        [sessions addIndex:monitor.session];
+        XCTAssertEqual(monitor.status, QLMMonitorStatusOn);
+    }
+    XCTAssertEqualObjects(sessions, [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0x04, 2)]);
+
+    NSArray<NSData *> *probes = [self sentFrom:before matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return bytes[0] == QLMAddressBroadcast && bytes[1] == 0xFE;
+    }];
+    XCTAssertGreaterThanOrEqual(probes.count, 2u);
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 2u);
+}
+
+// A gap the monitors ride out keeps every lease.
+- (void)testAShortGapKeepsTheLeases {
+    [self startSystem];
+    [self waitForDiscovery];
+    NSUInteger before = _bus.sentMessages.count;
+    [_bus perform:^{
+        [NSThread sleepForTimeInterval:0.05];
+    }];
+    [self waitUntil:^BOOL {
+        return [self countSentTo:0x02 opcode:0x08 from:before] >= 3;
+    }];
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 0u);
+    QLMSnapshot *snapshot = _system.snapshot;
+    XCTAssertEqual(QLMFindMonitor(snapshot, _left.hardwareID).session, 0x02);
+    XCTAssertEqual(QLMFindMonitor(snapshot, _right.hardwareID).session, 0x03);
 }
 
 // A crowded bus runs the leases past 7C in one discovery. They skip 7D and
@@ -670,6 +812,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 }
 
 // Section 7, 2B: mute-all is preceded by a volume re-broadcast.
+// QLMSystemGoldenTests checks the whole sequence against GLM's.
 - (void)testMuteAllRebroadcastsTheVolumeFirst {
     _settings.cycleInterval = 10;
     _settings.ceilingDecibels = 0;
@@ -696,13 +839,13 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         const uint8_t mute[] = {monitor.session, 0x2B, QLMMuteValueMuted};
         XCTAssertEqual([self countSent:QLMBytes(mute, 3) from:before], 2u);
     }
-    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 4u);
 }
 
 #pragma mark - Dim
 
 // Section 7, 1F, and section 9, "Mute, Solo & Dim": no dim command, a plain
 // volume frame 20 dB down. Dim off restores with an ordinary volume frame.
+// captures/mute-dim, 51.24 s: GLM sends each twice.
 - (void)testDimSendsAPlainVolumeFrameTwentyDecibelsDown {
     _settings.cycleInterval = 10;
     _settings.ceilingDecibels = 0;
@@ -731,13 +874,13 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertEqualObjects(dimmed.volumeDecibels, @(-10));
     [self waitUntil:^BOOL {
-        return [self countSent:minus30 from:before] == 1;
+        return [self countSent:minus30 from:before] == 2;
     }];
 
     before = _bus.sentMessages.count;
     [_system setDimmed:NO];
     [self waitUntil:^BOOL {
-        return [self countSent:minus10 from:before] == 1 && !self->_system.snapshot.dimmed;
+        return [self countSent:minus10 from:before] == 2 && !self->_system.snapshot.dimmed;
     }];
 
     // A volume change while dimmed stores the volume and sends it dimmed.
@@ -747,6 +890,22 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         QLMSnapshot *snapshot = self->_system.snapshot;
         return [self countSent:minus40 from:before] == 1 && [snapshot.volumeDecibels isEqual:@(-20)] && snapshot.dimmed;
     }];
+}
+
+// With no volume set, as in qlmctl dim over a replay, dim sends nothing.
+- (void)testDimWithNoVolumeSendsNothing {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSystem *system = _system;
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.dimmed && snapshot.idle;
+    } after:^{
+        [system setDimmed:YES];
+    }];
+    [NSThread sleepForTimeInterval:0.05];
+    XCTAssertEqual(_bus.sentMessages.count, before);
 }
 
 // Section 7, 1F: the cycle re-sends the volume, and while dimmed that is the
