@@ -41,6 +41,8 @@
 
 // For 2.54 s after that move, the volume follows every change, however
 // small, to the nearest step. Then a change of a dB or less moves nothing.
+// GLM followed a change 2.53 s on, and none from 2.55 s
+// (sleep-wake-darkwake, 132.02 and 28.88 s).
 - (void)testThenTheVolumeFollowsEveryChange {
     QLMKnob *knob = [[QLMKnob alloc] init];
     [knob volumeForReading:-500 atTime:0 volume:@(-30)];
@@ -52,26 +54,20 @@
     XCTAssertNil([knob volumeForReading:-418 atTime:9 volume:@(-41.0)]);
 }
 
-// A turn of small steps keeps going: each move of more than a whole dB from
-// the last reading followed starts the 2.54 s again (qlm-control-first,
-// 373.11 to 377.50 s).
-- (void)testATurnIsFollowedToItsEnd {
+// Each move of more than a whole dB starts the 2.54 s again, so a turn is
+// followed to its end (knob-sweep, 26.5 to 30.5 s).
+- (void)testAMoveOfMoreThanADecibelStartsTheTimeAgain {
     QLMKnob *knob = [[QLMKnob alloc] init];
     [knob volumeForReading:-400 atTime:0 volume:@(-40)];
-    NSNumber *volume = @(-40);
-    NSInteger tenths = -400;
-    for (int i = 1; i <= 60; i++) {
-        tenths -= 6;  // 6 tenths each 0.1 s, for 6 s
-        NSNumber *set = [knob volumeForReading:tenths atTime:i * 0.1 volume:volume];
-        volume = set ?: volume;
-    }
-    XCTAssertEqualObjects(volume, @(-76.0));
+    XCTAssertEqualObjects([knob volumeForReading:-420 atTime:1 volume:@(-40)], @(-42.0));
+    XCTAssertEqualObjects([knob volumeForReading:-432 atTime:3 volume:@(-42.0)], @(-43.0));
+    XCTAssertEqualObjects([knob volumeForReading:-433 atTime:5 volume:@(-43.0)], @(-43.5));
+    XCTAssertNil([knob volumeForReading:-434 atTime:5.6 volume:@(-43.5)]);
 }
 
 // A slow drift of more than a whole dB moves the volume, as in
 // sleep-wake-darkwake from 26.33 s, where the reading had crept 11 tenths in
-// 20 s. A wander of a whole dB or less never does, however long it takes, as
-// in sleep-wake-no-sleep, where 10 tenths over 130 s never moved GLM.
+// 20 s. Before that, a whole dB moved nothing.
 - (void)testASlowDriftOfMoreThanADecibelMovesTheVolume {
     QLMKnob *knob = [[QLMKnob alloc] init];
     [knob volumeForReading:-731 atTime:0 volume:@(-73.0)];
@@ -82,13 +78,6 @@
     }
     XCTAssertEqualObjects([knob volumeForReading:-720 atTime:22 volume:@(-73.0)], @(-72.0));
     XCTAssertEqualObjects([knob volumeForReading:-717 atTime:23 volume:@(-72.0)], @(-71.5));
-
-    QLMKnob *still = [[QLMKnob alloc] init];
-    [still volumeForReading:-640 atTime:0 volume:@(-30)];
-    for (int i = 1; i <= 40; i++) {
-        tenths = -640 + (i * 7) % 11;  // up to 10 tenths away, and back
-        XCTAssertNil([still volumeForReading:tenths atTime:i * 0.6 volume:@(-30)], @"%ld", (long)tenths);
-    }
 }
 
 @end

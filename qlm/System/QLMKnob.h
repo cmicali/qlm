@@ -2,20 +2,11 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// Turns the knob's readings into volume, as GLM does. Touched only on
-// System's queue.
-//
-// - A reading more than a whole dB from the last one the volume followed
-//   moves the volume to the knob's nearest step, however slowly the knob
-//   got there.
-// - Then, for 2.54 s, the volume follows every change in the reading. Each
-//   move of more than a whole dB starts that time again, so the volume
-//   follows a turn to its end.
-// - Outside that time, a change of a whole dB or less moves nothing, so
-//   jitter at rest moves nothing.
-// - The first reading is where the knob rests, so the volume stays put at
-//   connect. GLM follows its first change of any size after it opens; qlm
-//   waits for more than a whole dB, so jitter at connect moves nothing.
+// Turns the knob's readings into volume, by GLM's rule (docs/protocol.md,
+// "Volume and the knob"). A reading more than a whole dB from the last one
+// the volume followed moves the volume to the knob's nearest step, and for
+// 2.54 s after each such move, every change does. The first reading is
+// where the knob rests. Touched only on System's queue.
 @interface QLMKnob : NSObject
 
 // The volume for this reading, in dB at the nearest step, or nil to leave

@@ -26,7 +26,6 @@ static double QLMKnobStep(NSInteger tenths) {
 
 - (void)reset {
     _resting = NO;
-    _followUntil = 0;
 }
 
 - (NSNumber *)volumeForReading:(NSInteger)tenths atTime:(NSTimeInterval)time volume:(NSNumber *)volume {
@@ -34,6 +33,7 @@ static double QLMKnobStep(NSInteger tenths) {
         _resting = YES;
         _followed = tenths;
         _last = tenths;
+        _followUntil = 0;
         return nil;
     }
     if (tenths == _last) {
