@@ -505,6 +505,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (reply == NULL && !QLMSendWentOut(error)) {
             return;
         }
+        // TRAP: a monitor just switched on plays at its own stored level
+        // until a host sends one, and that can be loud
+        // (captures/qlm-control-first/notes.md, after the capture). So once
+        // a volume is set, it goes out ahead of everything queued, before
+        // anything else reaches the new monitor.
+        if (self->_volumeDecibels != nil) {
+            self->_lastVolumeSend = [NSDate date];
+            [self->_sends insertObject:[self itemSending:[self volumeMessage] then:nil] atIndex:0];
+        }
         QLMMonitorRecord *monitor = [[QLMMonitorRecord alloc] init];
         monitor.hardwareID = identity;
         monitor.session = session;
