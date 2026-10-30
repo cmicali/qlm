@@ -428,9 +428,8 @@ static int QLMDryRunControl(QLMControlOptions *options, QLMSnapshot *discovered,
 }
 
 // Runs the action once every monitor is identified, and stops as poll does.
-// A dry run stops the bus after discovery. Nil options, for apply-group's
-// fake bus, mean no dry run, no hold, and no USB.
-static int QLMRunControl(QLMSystem *system, QLMControlOptions *_Nullable options, QLMControlAction action, QLMSnapshotTest effect) {
+// A dry run stops the bus after discovery.
+static int QLMRunControl(QLMSystem *system, QLMControlOptions *options, QLMControlAction action, QLMSnapshotTest effect) {
     [system start];
     QLMSnapshot *discovered = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.adapterError != nil || snapshot.allIdentified;
@@ -764,12 +763,12 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
         return EX_DATAERR;
     }
+    BOOL allowed = YES;
+    for (QLMDSPBlock *block in blocks.allValues) {
+        allowed = allowed && block.rateVerified;
+    }
     if (!options.dryRun) {
-        BOOL unverified = NO;
-        for (QLMDSPBlock *block in blocks.allValues) {
-            unverified = unverified || !block.rateVerified;
-        }
-        if (unverified && !options.unverifiedRate) {
+        if (!allowed && !options.unverifiedRate) {
             fputs("qlmctl: the group has a model whose filter design rate is unverified, the 8351B. Its supervised test "
                   "takes --unverified-rate.\nqlmctl: nothing was sent.\n",
                   stderr);
@@ -784,7 +783,6 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
 
     double volume = options.volumeDecibels != nil ? options.volumeDecibels.doubleValue : setup.volume;
     double ceiling = options.ceilingDecibels;
-    BOOL allowed = YES;
     uint8_t session = QLMAddressSessionFirst;
     NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
     for (QLMSetupNode *node in group.nodes) {
@@ -800,7 +798,6 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         for (NSString *warning in block.warnings) {
             printf("  ! %s\n", warning.UTF8String);
         }
-        allowed = allowed && block.rateVerified;
         QLMApplyMonitor *monitor = [[QLMApplyMonitor alloc] initWithHardwareID:node.hardwareID session:session++];
         monitor.on = YES;
         [monitors addObject:monitor];
