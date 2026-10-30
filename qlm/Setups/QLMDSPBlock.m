@@ -32,7 +32,7 @@ static BOOL QLMRateVerified(QLMSetupNodeClass nodeClass, double designRate) {
 
 // The slot a band takes. Two-way monitors: low shelves in 0 and 1, high
 // shelves in 2 and 3, peaks in 4 to 19. Subwoofers: twenty peaks. A
-// three-way is laid out like a two-way, since its file is, but unverified.
+// three-way is laid out like a two-way, as the 8351B's captured passes show.
 static NSInteger QLMSlotForBand(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
     if (nodeClass == QLMSetupNodeClassSubwoofer) {
         return band.type == QLMSetupBandPeak ? band.index - 1 : -1;
