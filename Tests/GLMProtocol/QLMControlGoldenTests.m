@@ -46,14 +46,6 @@ static const uint8_t QLMMuteDimMonitors[] = {0x03, 0x06, 0x0D, 0x0C, 0x05, 0x0B}
     XCTAssertEqualObjects(exchange.outputReport, QLMBytes(report, sizeof report), @"%.6f s", exchange.time);
 }
 
-// A frame GLM sent that the allowlist refuses, so qlm never packs it.
-- (void)assertExchange:(QLMCaptureExchange *)exchange isRefused:(QLMMessage)message {
-    QLMMessage sent = exchange.message;
-    XCTAssertEqualObjects(QLMAdapterRecord(&sent), QLMAdapterRecord(&message), @"%.6f s", exchange.time);
-    uint8_t report[QLMReportLength];
-    XCTAssertEqual(QLMReportPackOutput(&message, report), QLMReportErrorForbidden, @"%.6f s", exchange.time);
-}
-
 // One round of mute state, from `index` in `run`: 2B to every monitor in
 // mute-dim's order, `muted` with 03 and the rest with 04.
 - (void)assertRun:(NSArray<QLMCaptureExchange *> *)run at:(NSUInteger)index mutes:(uint8_t)muted all:(BOOL)all {
@@ -75,7 +67,7 @@ static const uint8_t QLMMuteDimMonitors[] = {0x03, 0x06, 0x0D, 0x0C, 0x05, 0x0B}
 
 // Dim, mute-dim, 51.24 s on and 54.77 s off: the level 20 dB down, twice,
 // from -56.5 to -76.5 dB. Then one round of 2B 04, then broadcast `2D 00`
-// and `3D 00 00`. qlm builds all but `2D 00`, which the allowlist refuses.
+// and `3D 00 00`.
 - (void)testDimIsGLMs {
     NSArray<QLMCaptureExchange *> *on = [self frames:10 of:@"mute-dim" from:51.240592];
     NSArray<QLMCaptureExchange *> *off = [self frames:10 of:@"mute-dim" from:54.774959];
@@ -90,7 +82,7 @@ static const uint8_t QLMMuteDimMonitors[] = {0x03, 0x06, 0x0D, 0x0C, 0x05, 0x0B}
         [self assertExchange:run[0] is:levels[r]];
         [self assertExchange:run[1] is:levels[r]];
         [self assertRun:run at:2 mutes:0 all:NO];
-        [self assertExchange:run[8] isRefused:QLMMakeMessage(QLMAddressBroadcast, 0x2D, 0x00)];
+        [self assertExchange:run[8] is:QLMCommandInputPreamble()];
         [self assertExchange:run[9] is:QLMCommandInputSync(QLMAddressBroadcast)];
     }
 }
