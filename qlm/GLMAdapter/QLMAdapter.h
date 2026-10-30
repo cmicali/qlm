@@ -10,6 +10,7 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
     QLMAdapterErrorForbidden = 1, // the allowlist refused the message
     QLMAdapterErrorDisconnected,  // no adapter
     QLMAdapterErrorTimeout,       // the adapter never answered
+    QLMAdapterErrorCapture,       // a capture does not read; the description names the line
 };
 
 // One handler call per send, on the queue given to startOnQueue:. `reply` is

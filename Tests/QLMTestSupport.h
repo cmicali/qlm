@@ -5,6 +5,7 @@
 
 #include <string.h>
 
+#import "QLMCapture.h"
 #include "QLMFrame.h"
 #import "QLMSetup.h"
 
@@ -34,6 +35,12 @@ NSString *QLMFixturePath(NSString *name);
 
 // Fixtures/Main.sam, parsed once and shared. Never change it.
 QLMSetup *QLMReadFixtureSetup(void);
+
+// Every directory under captures/ with a reports.txt, sorted.
+NSArray<NSString *> *QLMCaptureScenarios(void);
+
+// captures/<scenario>/reports.txt, read once and shared.
+QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 
 NS_ASSUME_NONNULL_END
 
