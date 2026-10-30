@@ -1581,6 +1581,39 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertTrue([_bus.sentMessages containsObject:QLMAdapterRecord(&knob)]);
 }
 
+// A poll that never went out, while another host held the adapter, says
+// nothing of a monitor. So a short outage drops no monitor, and none shows
+// offline or a missed poll.
+- (void)testPollsThatNeverWentOutDoNotCount {
+    [self startSystem];
+    [self waitForDiscovery];
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running.";
+    }];
+    __block NSUInteger fewest = 2;
+    __block BOOL anyMissed = NO;
+    QLMSystem *system = _system;
+    NSDate *until = [NSDate dateWithTimeIntervalSinceNow:0.5];
+    while ([until timeIntervalSinceNow] > 0) {
+        QLMSnapshot *snapshot = system.snapshot;
+        fewest = MIN(fewest, snapshot.monitors.count);
+        for (QLMMonitorState *monitor in snapshot.monitors) {
+            anyMissed = anyMissed || monitor.missedPolls > 0 || monitor.offline;
+        }
+        [NSThread sleepForTimeInterval:0.01];
+    }
+    XCTAssertNotNil(system.snapshot.adapterError);
+    [_bus perform:^{
+        self->_bus.busyReason = nil;
+    }];
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError == nil && snapshot.monitors.count == 2;
+    }];
+    XCTAssertEqual(fewest, 2u);
+    XCTAssertFalse(anyMissed);
+    XCTAssertEqual(back.adapter.missedPolls, 0u);
+}
+
 // Mute all holds for a monitor that first appears after it: it hears 2B 03
 // after its first poll, and every 2B after says muted, while the other
 // monitor's mute is lifted and set again.

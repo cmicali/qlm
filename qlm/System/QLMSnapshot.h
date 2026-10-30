@@ -34,7 +34,13 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly) NSInteger hfMeter;
 @property (nonatomic, readonly) NSInteger lfMeter;
 @property (nonatomic, readonly) NSInteger subMeter;
+// Polls in a row that went out and got no reply. A poll that never went
+// out, while the bus was refused or gone, does not count.
 @property (nonatomic, readonly) NSUInteger missedPolls;
+// System's rule for presence: missedPollsLimit polls in a row missed. System
+// then polls a burst, and drops the monitor if every poll goes out and none
+// is answered.
+@property (nonatomic, readonly) BOOL offline;
 @property (nonatomic, readonly, nullable) NSDate *lastReply;
 @property (nonatomic, readonly) BOOL muted;  // as System last set it; telemetry does not show mute
 // The serial number, the system info, and the power status are known.
@@ -57,7 +63,7 @@ extern const NSInteger QLMMonitorValueAbsent;
 // The knob's position in tenths of a dB: 0 at the top, about -1004 at the
 // bottom. Nil without the knob.
 @property (nonatomic, readonly, nullable) NSNumber *knobTenths;
-@property (nonatomic, readonly) NSUInteger missedPolls;  // since the last reply to 01 08
+@property (nonatomic, readonly) NSUInteger missedPolls;  // that went out, since the last reply to 01 08
 @property (nonatomic, readonly, nullable) NSDate *lastReply;
 // The system info, the serial number, and the status are known.
 @property (nonatomic, readonly) BOOL identified;

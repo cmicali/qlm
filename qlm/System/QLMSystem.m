@@ -701,7 +701,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             self->_adapterPollsQueued -= 1;
             QLMAdapterStatus status;
             if (reply == NULL || QLMReplyAdapterStatus(reply, &status) != QLMAdapterStatusOK) {
-                adapter.missedPolls += 1;
+                adapter.missedPolls += QLMSendWentOut(error) ? 1 : 0;
                 self->_dirty = YES;
                 return;
             }
@@ -747,7 +747,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self send:QLMCommandPoll(monitor.session) then:^(const QLMMessage *reply, NSError *error) {
         if (reply != NULL) {
             [self monitor:monitor replied:reply];
-        } else {
+        } else if (QLMSendWentOut(error)) {
+            // A poll that never went out, while the bus was refused or gone,
+            // says nothing of the monitor.
             monitor.missedPolls += 1;
             self->_dirty = YES;
             if (monitor.missedPolls >= self.settings.missedPollsLimit) {
@@ -785,16 +787,18 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     monitor.retrying = YES;
     __block NSUInteger remaining = self.settings.retryBurst;
     __block BOOL answered = NO;
+    __block BOOL allWentOut = YES;
     for (NSUInteger i = 0; i < self.settings.retryBurst; i++) {
         [self send:QLMCommandPoll(monitor.session) then:^(const QLMMessage *reply, NSError *error) {
             if (reply != NULL && !answered) {
                 answered = YES;
                 [self monitor:monitor replied:reply];
             }
+            allWentOut = allWentOut && (reply != NULL || QLMSendWentOut(error));
             remaining -= 1;
             if (remaining == 0) {
                 monitor.retrying = NO;
-                if (!answered) {
+                if (!answered && allWentOut) {
                     [self->_monitors removeObject:monitor];
                     self->_dirty = YES;
                     [self probe];
@@ -1247,6 +1251,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         state.model = monitor.model;
         state.firmwareVersion = monitor.firmwareVersion;
         state.missedPolls = monitor.missedPolls;
+        state.offline = monitor.missedPolls >= self.settings.missedPollsLimit;
         state.lastReply = monitor.lastReply;
         state.muted = [_mutedIDs containsObject:monitor.hardwareID];
         if (monitor.hasTelemetry) {

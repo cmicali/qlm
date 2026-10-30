@@ -20,6 +20,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) NSInteger lfMeter;
 @property (nonatomic, readwrite) NSInteger subMeter;
 @property (nonatomic, readwrite) NSUInteger missedPolls;
+@property (nonatomic, readwrite) BOOL offline;
 @property (nonatomic, readwrite, nullable) NSDate *lastReply;
 @property (nonatomic, readwrite) BOOL muted;
 @property (nonatomic, readwrite) BOOL identified;
