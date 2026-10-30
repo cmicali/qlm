@@ -31,6 +31,20 @@ const NSInteger QLMMonitorValueAbsent = -1;
 
 @end
 
+@implementation QLMKnownLease
+
+- (instancetype)initWithHardwareID:(NSData *)hardwareID serialNumber:(NSString *)serialNumber session:(uint8_t)session {
+    self = [super init];
+    if (self) {
+        _hardwareID = [hardwareID copy];
+        _serialNumber = [serialNumber copy];
+        _session = session;
+    }
+    return self;
+}
+
+@end
+
 @implementation QLMHandBack
 @end
 
@@ -42,6 +56,7 @@ const NSInteger QLMMonitorValueAbsent = -1;
         _adapter = [[QLMAdapterState alloc] init];
         _monitors = @[];
         _mutedHardwareIDs = [NSSet set];
+        _knownLeases = @[];
         _handBack = [[QLMHandBack alloc] init];
     }
     return self;

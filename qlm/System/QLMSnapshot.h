@@ -92,6 +92,14 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
     QLMHandBackLouder,
 };
 
+// The session an identified monitor last held, as System knew it. Immutable.
+@interface QLMKnownLease : NSObject
+- (instancetype)initWithHardwareID:(NSData *)hardwareID serialNumber:(NSString *)serialNumber session:(uint8_t)session;
+@property (nonatomic, readonly) NSData *hardwareID;
+@property (nonatomic, readonly) NSString *serialNumber;  // from 19 01
+@property (nonatomic, readonly) uint8_t session;
+@end
+
 // Immutable.
 @interface QLMHandBack : NSObject
 @property (nonatomic, readonly) QLMHandBackKind kind;
@@ -125,6 +133,10 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // mute all is on. Give both back through QLMSystemSettings to start from it.
 @property (nonatomic, readonly) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readonly) BOOL mutingAll;
+// The session each monitor System identified last held, in session order,
+// kept across a stop. Give them back through QLMSystemSettings, so a new
+// System checks them before it leases anything.
+@property (nonatomic, readonly) NSArray<QLMKnownLease *> *knownLeases;
 // Each is NO when there are no monitors.
 @property (nonatomic, readonly) BOOL allIdentified;
 @property (nonatomic, readonly) BOOL allMuted;

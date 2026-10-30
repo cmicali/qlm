@@ -31,6 +31,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
         _adapterPollInterval = 0.107;
         _discoversMonitors = YES;
         _mutedHardwareIDs = [NSSet set];
+        _knownLeases = @[];
         _clock = QLMRealClock.shared;
     }
     return self;
@@ -47,6 +48,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.discoversMonitors = self.discoversMonitors;
     copy.mutedHardwareIDs = self.mutedHardwareIDs;
     copy.mutingAll = self.mutingAll;
+    copy.knownLeases = self.knownLeases;
     copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
     copy.clock = self.clock;
     return copy;
@@ -90,15 +92,6 @@ static const NSTimeInterval QLMWakeVolumeDelay = 0.235;
     return self.hasTelemetry && telemetry.status == QLMTelemetryStatusOn;
 }
 
-@end
-
-// An identified monitor's last lease, kept across a stop.
-@interface QLMKnownLease : NSObject
-@property (nonatomic) uint8_t session;
-@property (nonatomic, copy) NSString *serial;
-@end
-
-@implementation QLMKnownLease
 @end
 
 // The adapter itself, at 01. Touched only on the queue.
@@ -196,7 +189,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     BOOL _startAfterStop;  // a start that came while stopping
     NSMutableArray<dispatch_block_t> *_stopCompletions;
     // Each identified monitor's last session and serial, by hardware ID,
-    // kept across a stop to take its lease back at the next start.
+    // from the settings and every serial read, kept across a stop to take
+    // its lease back at the next start.
     NSMutableDictionary<NSData *, QLMKnownLease *> *_knownLeases;
     // Sessions whose serial check another monitor answered. None is leased.
     NSMutableIndexSet *_foreignSessions;
@@ -248,6 +242,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
         _stopCompletions = [NSMutableArray array];
         _knownLeases = [NSMutableDictionary dictionary];
+        for (QLMKnownLease *lease in settings.knownLeases) {
+            if (lease.hardwareID.length == 3 && lease.serialNumber.length > 0 && QLMAddressIsLeasable(lease.session)) {
+                _knownLeases[lease.hardwareID] = lease;
+            }
+        }
         _foreignSessions = [NSMutableIndexSet indexSet];
         _adapterMuted = settings.mutingAll;
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
@@ -753,7 +752,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)session:(uint8_t)session answered:(NSString *)serial expecting:(NSArray<NSData *> *)identities stating:(BOOL)stating {
     for (NSData *identity in identities) {
-        if (![_knownLeases[identity].serial isEqualToString:serial]) {
+        if (![_knownLeases[identity].serialNumber isEqualToString:serial]) {
             continue;
         }
         if ([self monitorWithHardwareID:identity] == nil && [self monitorAtSession:session] == nil) {
@@ -830,10 +829,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (monitor.serialNumber == nil) {
         [self ask:QLMCommandSerialNumber(monitor.session) then:^(const char *text) {
             monitor.serialNumber = @(text);
-            QLMKnownLease *known = [[QLMKnownLease alloc] init];
-            known.session = monitor.session;
-            known.serial = monitor.serialNumber;
-            self->_knownLeases[monitor.hardwareID] = known;
+            self->_knownLeases[monitor.hardwareID] = [[QLMKnownLease alloc] initWithHardwareID:monitor.hardwareID
+                                                                                    serialNumber:monitor.serialNumber
+                                                                                         session:monitor.session];
         }];
     }
     [self afterSends:^{
@@ -1512,6 +1510,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.handBack = _running && !_stopping ? [self handBack] : (_stoppedHandBack ?: [[QLMHandBack alloc] init]);
     snapshot.mutedHardwareIDs = [_mutedIDs copy];
     snapshot.mutingAll = _adapterMuted;
+    snapshot.knownLeases = [_knownLeases.allValues sortedArrayUsingComparator:^NSComparisonResult(QLMKnownLease *a, QLMKnownLease *b) {
+        if (a.session != b.session) {
+            return a.session < b.session ? NSOrderedAscending : NSOrderedDescending;
+        }
+        return [a.serialNumber compare:b.serialNumber];
+    }];
     snapshot.anyOn = anyOn;
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;

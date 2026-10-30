@@ -39,6 +39,12 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // System's record is the truth, and its rounds restate it.
 @property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;  // empty
 @property (nonatomic) BOOL mutingAll;                           // NO
+// The leases to check at start, as a snapshot gave them. A monitor still
+// holds its lease for 23 s or more after a host goes quiet, and never
+// answers a probe meanwhile. So at start System asks each session for its
+// serial, takes back each monitor whose own serial answers, and leases
+// nothing to a session another monitor answers.
+@property (nonatomic, copy) NSArray<QLMKnownLease *> *knownLeases;  // empty
 // TRAP: AGENTS.md's Safety rule refuses a group apply for any model whose
 // filter design rate is unverified, such as the 8351B. Only qlmctl's
 // supervised test sets this, behind --unverified-rate. The app never does.

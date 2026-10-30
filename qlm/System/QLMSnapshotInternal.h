@@ -67,6 +67,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) BOOL allMuted;
 @property (nonatomic, readwrite) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readwrite) BOOL mutingAll;
+@property (nonatomic, readwrite) NSArray<QLMKnownLease *> *knownLeases;
 @property (nonatomic, readwrite) QLMHandBack *handBack;
 @property (nonatomic, readwrite) BOOL anyOn;
 

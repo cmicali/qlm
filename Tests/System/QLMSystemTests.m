@@ -1948,6 +1948,47 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 0u);
 }
 
+// The app makes a new System at each launch, which knows no leases of its
+// own, so it gives the new one the last snapshot's. Across a quick relaunch
+// here, the right's lease lapses, and the muted left still holds its own.
+// The new System takes the left back at its session, and leases the right
+// another, so no 2B reaches both.
+- (void)testANewSystemChecksTheLeasesItIsGivenBeforeLeasing {
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+    QLMSnapshot *stopped = [self stopAndWait];
+    XCTAssertEqual(stopped.knownLeases.count, 2u);
+    uint8_t lastSession = 0;
+    for (QLMKnownLease *lease in stopped.knownLeases) {
+        QLMMonitorState *monitor = QLMFindMonitor(first, lease.hardwareID);
+        XCTAssertEqual(lease.session, monitor.session);
+        XCTAssertEqualObjects(lease.serialNumber, monitor.serialNumber);
+        XCTAssertGreaterThan(lease.session, lastSession);
+        lastSession = lease.session;
+    }
+    uint8_t leftSession = QLMFindMonitor(first, _left.hardwareID).session;
+    [_bus perform:^{
+        self->_right.session = 0;
+    }];
+
+    _settings.knownLeases = stopped.knownLeases;
+    _settings.mutedHardwareIDs = stopped.mutedHardwareIDs;
+    NSUInteger before = _bus.sentMessages.count;
+    [self startSystem];
+    QLMSnapshot *again = [self waitForDiscovery];
+    XCTAssertEqual(QLMFindMonitor(again, _left.hardwareID).session, leftSession);
+    XCTAssertNotEqual(QLMFindMonitor(again, _right.hardwareID).session, leftSession);
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 1u);
+    [_bus perform:^{
+        XCTAssertNotEqual(self->_right.session, self->_left.session);
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+    }];
+}
+
 // The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or
 // another host. GLM's case is pinned to the sentence QLMHostCheck writes.
 - (void)testTheSnapshotSaysWhoHoldsTheBus {
