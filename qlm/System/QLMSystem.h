@@ -38,6 +38,10 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // System's record is the truth, and its rounds restate it.
 @property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;  // empty
 @property (nonatomic) BOOL mutingAll;                           // NO
+// TRAP: AGENTS.md's Safety rule refuses a group apply for any model whose
+// filter design rate is unverified, such as the 8351B. Only qlmctl's
+// supervised test sets this, behind --unverified-rate. The app never does.
+@property (nonatomic) BOOL allowsUnverifiedRates;  // NO
 
 @end
 
@@ -105,6 +109,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // is unverified, for a node that is on with no leased monitor, and while no
 // volume is set. The completion runs on the main queue.
 - (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
+// GLM's group switch, even as the first apply. The rest is as applyGroup:.
+- (void)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
 
 @end
 

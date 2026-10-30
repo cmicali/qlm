@@ -1624,6 +1624,66 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
 }
 
+// AGENTS.md's Safety rule refuses a group with an unverified model, the
+// 8351B, but for qlmctl's supervised test, which sets allowsUnverifiedRates.
+- (void)testOnlyTheSupervisedSettingAppliesAnUnverifiedRate {
+    _settings.cycleInterval = 10;
+    const uint8_t leftID[3] = {0x0F, 0x42, 0x42};  // the fixture's 1000002, the Left 8351B
+    _left = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(leftID, 3) serialNumber:@"8351BP21001234"
+                                            systemInfo:@"c-3;model-8351B" deviceClass:QLMTelemetryClassTwoWay];
+    _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left]];
+    QLMSetupGroup *source = QLMReadFixtureSetup().groups[0];
+    QLMSetupGroup *left = [self groupNamed:@"Left" from:source nodes:@[source.nodes[1]]];
+    for (NSNumber *allowed in @[@NO, @YES]) {
+        _settings.allowsUnverifiedRates = allowed.boolValue;
+        [_bus perform:^{
+            self->_left.session = 0;
+        }];
+        [self startSystem];
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.monitors.count == 1 && snapshot.allIdentified;
+        }];
+        [_system setVolumeDecibels:-40];
+        NSUInteger before = _bus.sentMessages.count;
+        NSError *error = [self applyGroup:left];
+        if (allowed.boolValue) {
+            XCTAssertNil(error);
+            XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 1u);
+        } else {
+            XCTAssertEqual(error.code, QLMSystemErrorUnverifiedRate);
+            XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 0u);
+        }
+        [_system stop];
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return !snapshot.running;
+        }];
+    }
+}
+
+// switchToGroup: sends GLM's switch even as the first apply.
+- (void)testSwitchToGroupSendsTheSwitchFirstTime {
+    _settings.cycleInterval = 10;
+    _settings.ceilingDecibels = 0;
+    [self useMainsMonitors];
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-10];
+    QLMSnapshot *ready = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    QLMSetupGroup *group = [self mainsGroup];
+    NSArray<NSData *> *expected = [[self sequenceFor:group snapshot:ready] switchWithBlocks:[self blocksOf:group]
+                                                                                    volume:QLMCommandVolume(-10, 0)];
+    NSUInteger before = _bus.sentMessages.count;
+    XCTestExpectation *done = [self expectationWithDescription:@"switch"];
+    [_system switchToGroup:group completion:^(NSError *error) {
+        XCTAssertNil(error);
+        [done fulfill];
+    }];
+    [self waitForExpectations:@[done] timeout:5];
+    XCTAssertEqualObjects([self waitForApplyFrames:expected.count from:before], expected);
+}
+
 // A second apply while one runs is refused.
 - (void)testASecondApplyIsRefusedWhileOneRuns {
     _settings.cycleInterval = 10;

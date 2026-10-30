@@ -46,6 +46,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.discoversMonitors = self.discoversMonitors;
     copy.mutedHardwareIDs = self.mutedHardwareIDs;
     copy.mutingAll = self.mutingAll;
+    copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
     return copy;
 }
 
@@ -1066,6 +1067,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 #pragma mark - Group apply
 
 - (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
+    [self applyGroup:group switching:NO completion:completion];
+}
+
+- (void)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
+    [self applyGroup:group switching:YES completion:completion];
+}
+
+// `switching`: GLM's switch even when no group is active yet.
+- (void)applyGroup:(QLMSetupGroup *)group switching:(BOOL)switching completion:(void (^)(NSError *_Nullable error))completion {
     void (^finish)(NSError *) = ^(NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             completion(error);
@@ -1078,13 +1088,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             finish(refusal);
             return;
         }
-        [self sendGroup:group blocks:blocks finish:finish];
+        [self sendGroup:group blocks:blocks switching:switching || self->_activeGroup != nil finish:finish];
     }];
 }
 
 // Every check runs before the first frame. Every block a monitor can get
-// must build at a verified rate, on or off, leased or not. On success, a
-// block for every node, keyed by hardware ID.
+// must build, at a verified rate unless the settings allow otherwise for
+// qlmctl's supervised test, on or off, leased or not. On success, a block
+// for every node, keyed by hardware ID.
 - (nullable NSDictionary<NSData *, QLMDSPBlock *> *)checkGroup:(QLMSetupGroup *)group error:(NSError **)error {
     if (_applyFinish != nil) {
         *error = QLMSystemErrorMake(QLMSystemErrorAlreadyApplying, @"A group apply is already running.", nil);
@@ -1102,7 +1113,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     for (QLMSetupNode *node in group.nodes) {
         QLMDSPBlock *block = node.hardwareID != nil ? blocks[node.hardwareID] : nil;
-        if (block != nil && !block.rateVerified) {
+        if (block != nil && !block.rateVerified && !self.settings.allowsUnverifiedRates) {
             NSString *description = [NSString stringWithFormat:@"The design rate of node %@ (%@) is unverified.", node.serial, node.className];
             *error = QLMSystemErrorMake(QLMSystemErrorUnverifiedRate, description, nil);
             return nil;
@@ -1130,9 +1141,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // (docs/adapter-status.md: its longest gap, 1.70 s).
 - (void)sendGroup:(QLMSetupGroup *)group
            blocks:(NSDictionary<NSData *, QLMDSPBlock *> *)blocks
+        switching:(BOOL)switching
            finish:(void (^)(NSError *_Nullable error))finish {
     _applyFinish = finish;
-    BOOL switching = _activeGroup != nil;
     _activeGroup = group;
     _activeBlocks = blocks;
     QLMApplySequence *sequence = [self sequenceFor:group];
