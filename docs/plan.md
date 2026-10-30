@@ -11,7 +11,8 @@ Built, with 103 tests, every protocol fact named by its section of hlm's spec or
 - **System:** discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Over a replay of `startup-idle`, it finds all six monitors with model, serial, firmware, temperature, and power state.
 - **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block.
 - **The app and `qlmctl`:** both run over the fake bus. `qlmctl setup` and `apply-group --dry-run` run on a real setup file.
-- **The captures:** 17 scenarios in `captures/`, recorded through the Pi proxy. The golden tests read every report in them.
+- **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
+- **The captures:** every scenario in `captures/README.md`, 17 in all, xz-compressed, each with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep. The golden tests read every report in them.
 
 Next:
 
@@ -29,7 +30,7 @@ Next:
 - **Telemetry.** Real replies carry tags the spec does not list: `49` (one byte, counting up with each reply), and `82`, `88`, `89`, and `8A` (two bytes). The 8351B sends `82`, `88`, and `89`. A poll often gets a bare `09`. About 20 replies in 17,000 lack the leading `41` and temperature.
 - **Serials** are 14 or 15 characters.
 - **Opcodes GLM sends that qlm refuses:** `05 04 …` (generator stop) to every monitor in a group apply, `3C`, `3E`, and `42` to subwoofers, `43 00 02` and `4B 00 00 00 01` to the 8351B, broadcast `2D 00`, and `22` and `51 82` to the adapter. The golden tests pin this set.
-- **Questions Phase 0 asked.** GLM sends nothing special when it quits; it stops polling (`quit-glm`). So the adapter must sense a host by its traffic. What level it then applies is on the monitor bus, which USB does not show. At quit the knob read −19.8 dB, and GLM's volume was −20 dB.
+- **Questions Phase 0 asked.** GLM sends nothing special when it quits; it stops polling (`quit-glm`). So the adapter must sense a host by its traffic. What level it then applies is on the monitor bus, which USB does not show. It needs a listening test or the bus tap. At quit the knob read −19.8 dB, and GLM's volume was −20 dB.
 
 The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. The 8351B rate is unverified on the wire, so a group apply that includes one is refused.
 
@@ -110,7 +111,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Open, for you to decide
 
-1. **The knob.** Is there a 9310 on the adapter? Its path to the host is unknown.
+1. **The knob.** Decided: no 9310. The adapter has its own optional volume knob. While it is attached, GLM locks its on-screen volume. Its position rides the adapter's reply to `01 08` (see What the captures showed).
 2. **Capture machine.** Decided: a Raspberry Pi 5 inline between the Mac and the adapter. [captures/README.md](../captures/README.md) has the steps.
 
 ## Architecture
