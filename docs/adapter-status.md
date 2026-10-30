@@ -91,7 +91,7 @@ GLM resends the level several times in every cycle, changed or not (`startup-idl
 
 ### What GLM does with the knob
 
-GLM opens at its own level, not the knob's: `00 31 07`, −56.5 dB. It did so with the knob at −1004 in `startup-idle`, and at −775 in `startup-idle-mic`.[^opens] From then on, it follows the knob by one rule. GLM keeps the last reading it followed. A reading more than a whole dB from it, 11 tenths or more, moves the level to that reading's nearest step, however slowly the knob got there. For about 2.5 s after, GLM follows every change, even a single tenth, and each further move of more than a whole dB starts the 2.5 s again. Outside that time, a change of a whole dB or less moves nothing. When GLM opens, it has followed nothing yet, so the knob's first change of any size moves the level.[^first-change] The jump can go as high as 0 dB, if the knob sits at the top. qlm's ceiling still clamps it.
+GLM opens at its own level, not the knob's: `00 31 07`, −56.5 dB. It did so with the knob at −1004 in `startup-idle`, and at −775 in `startup-idle-mic`.[^opens] From then on, it follows the knob by one rule. GLM keeps the last reading it followed. A reading more than a whole dB from it, 11 tenths or more, moves the level to that reading's nearest step, however slowly the knob got there. For about 2.5 s after, GLM follows every change, even a single tenth, and each further move of more than a whole dB starts the 2.5 s again. Outside that time, a change of a whole dB or less moves nothing. When GLM opens, the knob's first reading is where it rests. In `startup-idle`, a move of 6 tenths from the bottom moved nothing, and the next reading, 17 tenths up, did.[^first-move] The jump can go as high as 0 dB, if the knob sits at the top. qlm's ceiling still clamps it.
 
 The rule explains three captures that looked different. In `knob-sweep`, a turn moves the reading more than a whole dB a poll, again and again, so GLM follows every step. It jumps from −56.5 dB to −73.0 dB at the first one, at 18.95 s.[^sweep] In `sleep-wake-no-sleep`, `DF` wanders between −647 and −637 for 130 s, a span of a whole dB at most. The level stays at `00 13 84`, −64.5 dB, though −637 rounds to −63.5 dB.[^no-sleep] In `sleep-wake-darkwake`, `DF` creeps from −734 to −665 over 600 s, mostly a tenth at a time. GLM follows it in 2.5 s spells. Each starts when the reading has crept 11 tenths from the one GLM followed last. That makes 37 level changes between −73.0 and −66.5 dB.[^darkwake] The notes don't say whether anyone touched the knob.
 
@@ -99,19 +99,20 @@ The 2.5 s is tight. A change 2.53 s after the move that started a spell still mo
 
 Each change GLM follows brings a burst of `2B` frames, to every monitor and as `01 2B 00` to address `01`, even when the level stays. Changes it doesn't follow bring none.[^bursts] **Guess:** GLM refreshes the mute and LED state on every change it follows.
 
-Two things don't fit cleanly. Now and then, GLM's burst carries the level of the change before, and GLM catches up at its next change.[^lag] And in `standby-wake`, which starts with the knob just plugged in, GLM bursts on the first change, a single tenth, then skips three changes inside what should be its spell.[^plugged]
+A few things don't fit cleanly. Now and then, GLM's burst carries the level of the change before, and GLM catches up at its next change.[^lag] After a reconnect, GLM can be slow: in `unplug-proxy-hang`, it followed the knob's 55 dB move 0.7 s after the adapter came back.[^reconnect] And in `standby-wake`, which starts with the knob just plugged in, GLM sends a burst for a change of a single tenth, without moving its level. Nothing else in that capture breaks the rule.[^plugged]
 
-qlm follows the same rule, but takes its first reading as where the knob rests, so jitter at connect moves nothing ([protocol.md](protocol.md#volume-and-the-knob)).
+qlm follows the same rule ([protocol.md](protocol.md#volume-and-the-knob)).
 
 [^opens]: `startup-idle`, 7.99 s; `startup-idle-mic`, 7.99 s.
-[^first-change]: `startup-idle`, 38.49 s, where a move of 6 tenths took GLM from −56.5 dB to `00 00 08`.
+[^first-move]: `startup-idle`: −998 at 38.48 s, then −987 at 38.59 s, from −1004. GLM's first level there is `00 00 08`, the level of the change before, as below.
 [^sweep]: `knob-sweep`, 18.95 to 20.17 s, and 26.5 to 30.5 s.
 [^no-sleep]: `sleep-wake-no-sleep`, the whole capture.
 [^darkwake]: `sleep-wake-darkwake`. Spells start at 26.33, 29.82, 37.33, and 53.99 s, among others. The capture starts with GLM already running, so the reading GLM last followed before it is inferred: −731, the only value that fits the first spell and GLM's −73.0 dB level.
 [^spell]: `sleep-wake-darkwake`, 132.02 s, followed, and 28.88 s, not.
 [^bursts]: `knob-sweep`, where 168 of the 169 `01 2B` frames come within 150 ms of a `DF` change, and the other as GLM opens (7.20 s); `sleep-wake-darkwake`, where the changes outside a spell bring none.
 [^lag]: `sleep-wake-darkwake`, 138.96 s, where GLM followed −665 but sent −67.5 dB, then −66.5 dB at 141.36 s. Also at 181.59, 196.11, and 461.49 s.
-[^plugged]: `standby-wake`, 0.98 to 1.77 s.
+[^reconnect]: `unplug-proxy-hang`, 106.24 and 106.94 s.
+[^plugged]: `standby-wake`, 0.98 s.
 
 ## How the adapter knows a host is present
 
@@ -150,7 +151,7 @@ qlm follows the same rule, but takes its first reading as where the knob rests, 
 
 ## Open
 
-- Whether plugging the knob in resets the reading GLM last followed, as `standby-wake` hints at 0.98 s, and why GLM's level sometimes lags a change it followed. The rule itself is in [What GLM does with the knob](#what-glm-does-with-the-knob).
+- Why GLM's level sometimes lags a change it followed, and why a knob just plugged in brings a burst for a single tenth (`standby-wake`, 0.98 s). The rule itself is in [What GLM does with the knob](#what-glm-does-with-the-knob).
 - What `DE` and `DD` measure, and their scale. Nobody recorded GLM's displayed readings.
 - The adapter's host timeout, and which frames reset it: any report, or only `01 08`. The takeover happens on the monitor bus, which USB cannot see. The bus tap can.
 - Whether one poll per cycle holds the adapter as well as GLM's pairs.

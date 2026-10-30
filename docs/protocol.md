@@ -714,7 +714,7 @@ That burst is GLM's: the level three times, `01 2B 00`, two rounds of `2B`, then
 
 With the knob in, GLM locks its on-screen volume. With the knob out, the reply carries `31`, and GLM unlocks it.[^knob-lock]
 
-GLM doesn't follow every change, though. It keeps the last reading it followed, and moves the level only when a new reading is more than a whole dB from it: 11 tenths or more. How slowly the knob got there doesn't matter. Then, for about 2.5 s, GLM follows every change, even a single tenth. Each further move of more than a whole dB starts the 2.5 s again, so a turn is followed to its end. Outside that time, a change of a whole dB or less moves nothing.[^knob-rule]
+GLM doesn't follow every change, though. It keeps the last reading it followed, and moves the level only when a new reading is more than a whole dB from it: 11 tenths or more. How slowly the knob got there doesn't matter. Then, for about 2.5 s, GLM follows every change, even a single tenth. Each further move of more than a whole dB starts the 2.5 s again, so a turn is followed to its end. Outside that time, a change of a whole dB or less moves nothing. When GLM opens, the knob's first reading is where it rests.[^knob-rule]
 
 ```mermaid
 stateDiagram-v2
@@ -724,22 +724,21 @@ stateDiagram-v2
     Following --> Resting: 2.5 s after the last move of more than a whole dB
 ```
 
-That one rule covers everything we've seen. A turn moves the reading many tenths a poll, so GLM follows it step by step.[^knob-turn] At rest the reading wanders a tenth or two, and GLM ignores it. In `sleep-wake-no-sleep` it wanders 10 tenths over 130 s, never more than a whole dB, and the level never moves.[^knob-wander] A slow drift moves the level in spells. In `sleep-wake-darkwake`, the reading creeps 7 dB over 600 s, mostly a tenth at a time. Each time it has crept more than a whole dB from the reading GLM last followed, GLM follows for 2.5 s, then lets go. That makes 37 level changes in all.[^knob-drift] When GLM opens, it has followed nothing yet, so its first change of any size moves the level.[^knob-first]
+That rule covers nearly everything we've seen. A turn moves the reading more than a whole dB a poll, again and again, so GLM follows it step by step. Jitter at rest never strays that far, so GLM ignores it. And a slow drift, like the 7 dB in `sleep-wake-darkwake`, moves the level in short spells, each time the reading has crept more than a whole dB. [adapter-status.md](adapter-status.md#what-glm-does-with-the-knob) walks through the captures.
 
-GLM's bursts mark the changes it followed. The rule predicts them for 637 of the 641 changes in seven captures. Of the other four, two are GLM acting a cycle late, one sits at the edge of the 2.5 s, and one comes from a knob just plugged in.[^knob-fit] GLM's level has one quirk. Now and then, a burst carries the level of the change before. In `sleep-wake-darkwake` at 138.96 s, GLM followed −665 but sent −67.5 dB, and only sent −66.5 dB at its next change, 2.4 s later.[^knob-lag]
+GLM's bursts mark the changes it followed, and they fit the rule in the seven captures we checked, but for three changes. One sits at the edge of the 2.5 s. One came after a reconnect, and GLM followed it 0.7 s late. One came from a knob just plugged in.[^knob-fit] GLM's level has a quirk, too. Now and then, a burst carries the level of the change before, and GLM catches up at its next change.[^knob-lag]
 
 qlm follows the same rule, with a few differences:
 
 | | GLM | qlm |
 | --- | --- | --- |
-| At the start | Its first change of any size moves the level | Takes the first reading as where the knob rests. Only a move of more than a whole dB from it moves the level, so jitter at connect moves nothing. |
-| How long it follows | About 2.5 s | 2.54 s. GLM followed a change 2.53 s after the move that started it, and none from 2.55 s. |
+| How long it follows | About 2.5 s | 2.54 s |
 | With no volume set | | The knob sets none. |
 | The burst | On every change it follows | Only when its volume changes |
 | The level | Now and then, the level of the change before | The reading's nearest step, under the ceiling |
 | Source | [adapter-status.md](adapter-status.md#what-glm-does-with-the-knob); #18 | `QLMKnob`; `QLMKnobTests`; `QLMKnobGoldenTests` |
 
-We replayed the knob readings of seven captures through qlm, on the virtual clock, with the app's polls. At every rest point where GLM's level is the knob's, qlm's level is GLM's. qlm's old rule needed a whole dB within half a second, so it missed `sleep-wake-darkwake`'s drift until a real turn at 165.7 s.[^knob-golden]
+We replayed the knob readings of those seven captures through qlm, on the virtual clock, with the app's polls. At every rest point but five, where GLM's level lagged, qlm's level is GLM's.[^knob-golden]
 
 In `qlm-control-first`, qlm jumped to the knob at its first real turn, then followed it. The highest level it sent was −41.5 dB, under a −35 dB ceiling.[^control-run-knob]
 
@@ -929,14 +928,10 @@ No apply by qlm has run on the monitors or been measured yet. [measurement.md](m
 [^knob-burst]: `standby-wake`, 0.99 s; `testAKnobTurnIsGLMs`; `knob-sweep`, 19.24 s.
 [^knob-round]: [adapter-status.md](adapter-status.md#the-mapping); `testTheKnobNamesTheSteps`.
 [^burst-every-change]: #18; `sleep-wake-darkwake`, where the changes GLM doesn't follow bring no burst.
-[^knob-rule]: `sleep-wake-darkwake`, 26.33 s, where the reading had crept 11 tenths from −731, and 29.82, 37.33, and 53.99 s, each 11 tenths from the reading GLM last followed. The 2.5 s: a change 2.53 s after the move that started it still moved GLM (`sleep-wake-darkwake`, 132.02 s), and from 2.55 s none did (28.88 s).
-[^knob-turn]: `knob-sweep`, 18.95 to 20.17 s, and 26.5 to 30.5 s.
-[^knob-wander]: `sleep-wake-no-sleep`; [adapter-status.md](adapter-status.md#what-glm-does-with-the-knob).
-[^knob-drift]: `sleep-wake-darkwake`; [adapter-status.md](adapter-status.md#what-glm-does-with-the-knob).
-[^knob-first]: `startup-idle`, 38.49 s, a move of 6 tenths.
-[^knob-fit]: The captures are `sleep-wake-darkwake`, `standby-wake`, `knob-sweep`, `startup-idle`, `startup-idle-mic`, `sleep-wake-no-sleep`, and `unplug-proxy-hang`. A cycle late: `startup-idle`, 38.49 s, and `unplug-proxy-hang`, 106.24 s. The edge: `knob-sweep`, 30.81 s. The plug: `standby-wake`, 0.98 s. Four of the captures start with GLM already running, so the reading GLM last followed before each is fitted. In `sleep-wake-darkwake` it's −731: the only value that fits GLM's first follow, at 26.33 s, and its −73.0 dB level.
-[^knob-lag]: `sleep-wake-darkwake`, 138.96 and 141.36 s. The same happens at 181.59, 196.11, and 461.49 s.
-[^knob-golden]: `QLMKnobGoldenTests`. In `sleep-wake-darkwake`, 96 rest points match, and 5 are skipped, where GLM sent the level of the change before.
+[^knob-rule]: The whole dB: `sleep-wake-no-sleep` and `sleep-wake-darkwake`. The 2.5 s: `sleep-wake-darkwake`, 132.02 and 28.88 s. The rest point: `startup-idle`, 38.48 and 38.59 s.
+[^knob-fit]: The captures are `sleep-wake-darkwake`, `sleep-wake-no-sleep`, `knob-sweep`, `startup-idle`, `startup-idle-mic`, `standby-wake`, and `unplug-proxy-hang`. The three changes: `knob-sweep`, 30.81 s; `unplug-proxy-hang`, 106.24 s; `standby-wake`, 0.98 s.
+[^knob-lag]: `sleep-wake-darkwake`, 138.96 s, and four more there.
+[^knob-golden]: `QLMKnobGoldenTests`. The five are in `sleep-wake-darkwake`.
 [^knob-lock]: `volume-sweep`, 25.44 s; its notes.
 [^control-run-knob]: `qlm-control-first`, 373.12 s; `testEveryLevelIsGLMsAndUnderTheCeiling`.
 [^dim-volume]: hlm §9; `mute-dim`, 51.24 s.
@@ -1026,7 +1021,7 @@ On or in standby, monitors drop a quiet host's leases, within 23 s to 210 s ([Wh
 | 10 | What does the adapter do with `01 2B 01`, and does it keep a mute of its own through the hand-back? | [refused-frames.md](refused-frames.md#open) |
 | 11 | What does `82` select in `01 51 82`, and what is `219000`? | [refused-frames.md](refused-frames.md#open) |
 | 12 | What is the 8351B's design rate? | Its bands match 96 kHz on the wire, and a measurement must confirm it ([measurement.md](measurement.md)). |
-| 13 | Does plugging the knob in reset the reading GLM last followed? Why does GLM's level sometimes lag a change it followed? | The rule itself is in [Volume and the knob](#volume-and-the-knob). `standby-wake`, 0.98 s; `sleep-wake-darkwake`, 138.96 s; [adapter-status.md](adapter-status.md#open) |
+| 13 | Why does GLM's level sometimes lag a change it followed? Why does a knob just plugged in bring a burst for a single tenth? | The rule itself is in [Volume and the knob](#volume-and-the-knob). `sleep-wake-darkwake`, 138.96 s; `standby-wake`, 0.98 s; [adapter-status.md](adapter-status.md#open) |
 | 14 | Does a woken monitor stay muted until a host sends its state? | [telemetry.md](telemetry.md#open-questions) |
 | 15 | What does `c-` mean in the system info, given that `84` reads `02` for the 8351B? | [System info](#system-info) |
 | 16 | What does the adapter do when the host's USB suspends? | The proxy does not forward suspend, and no capture caught a true sleep ([captures/README.md](../captures/README.md)). |
