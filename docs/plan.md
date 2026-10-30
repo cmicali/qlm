@@ -4,11 +4,11 @@
 
 ## Where things stand
 
-Built, with 205 tests, every protocol fact named by its section of hlm's spec or by its capture:
+Built, with 214 tests, every protocol fact named by its section of hlm's spec or by its capture:
 
 - **GLMProtocol:** framing, the allowlist, the builders with the volume clamp, the reply parsers, the adapter's status reply, and the USB report layer: packing an output report, assembling a reply across input reports, and which messages get a reply. The volume word comes from GLM's own 200 levels, and the DSP block's level word floors, as GLM's does. The control builders match GLM's frames byte for byte.
-- **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. A failed seize is a refusal. It has run on the adapter (`qlm-first-discover`, `qlm-standby-discover`).
-- **System:** the adapter's identity and status poll, discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Dim, mute all, and the power steps go out as GLM sends them, but for `2D 00` in dim. System follows the knob: its first turn jumps the volume to the knob's position, under the ceiling, and the volume follows after. A gap in polling leads to new leases. On the adapter, System found all six monitors, on and in standby, and its cycle matched GLM's.
+- **GLMAdapter:** the adapter protocol, the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter that answers as a capture did. The HID adapter refuses the adapter while GLM runs, or while another process holds its HID device or has opened its USB device. A process that only enumerates it does not count. It opens the adapter only seized, so a failed seize is a refusal. It has run on the adapter (`qlm-first-discover`, `qlm-standby-discover`).
+- **System:** the adapter's identity and status poll, discovery, leases, the poll cycle, volume, mute, dim, power, the group apply, and snapshots. Dim, mute all, and the power steps go out as GLM sends them. The user's mutes are kept by hardware ID, so a monitor leased again comes back muted. System follows the knob: its first turn jumps the volume to the knob's position, under the ceiling, and the volume follows after. A gap in polling leads to new leases. On the adapter, System found all six monitors, on and in standby, and its cycle matched GLM's.
 - **Setups:** a strict reader for GLM 5 setup files, the filter design, and the DSP block. Every DSP block is checked against GLM's captured passes.
 - **`qlmctl`:** `info`, `discover`, and `poll` have run on the adapter. `volume`, `mute`, `dim`, `sleep`, and `wake` run over USB too, behind gates: a ceiling the user states, at most −30 dB without `--allow-high-ceiling`, a `--dry-run` that sends only discovery, and a warning about the hand-back at exit. They have not run on the monitors. Each also runs on the fake bus with `--fake`, or a capture with `--replay`. `qlmctl setup` and `apply-group --dry-run` run on a real setup file, and `apply-group` never reaches USB.
 - **The app:** a menu bar item and a popover, on the fake bus only.
@@ -19,14 +19,11 @@ Built, with 205 tests, every protocol fact named by its section of hlm's spec or
 Decided since Phase 1:
 
 - **qlm matches GLM byte for byte.** So the allowlist takes exactly `2D 00`, as a broadcast right before `FF 3D 00 00`, and dim sends it.
-- **qlm refuses the adapter only for GLM, or for a process that holds it the way GLM does.** A process that only enumerates it does not count. Spotify's client on the adapter made qlm refuse in `qlm-standby-discover`, though GLM runs alongside it.
+- **qlm refuses the adapter only for GLM, or for a process that holds it the way GLM does.** A process that only enumerates it does not count. Spotify puts a USB device client on every USB device, the adapter among them, and that made qlm refuse in `qlm-standby-discover`. GLM's client is an HID library client that has opened the HID device.
 
 Next:
 
-- The first control run, in Phase 2 below. Three changes come first:
-  - Keep each monitor's mute by hardware ID, so a monitor leased again stays muted.
-  - Send `2D 00` in dim.
-  - The host check, as decided.
+- The first control run, in Phase 2 below.
 - The level the adapter applies when the host leaves. The user reports that the knob sets the active monitors' volume with GLM closed, so it is likely the knob's position. USB does not show it. The control run checks it by ear.
 - A monitor that first appears while all are muted joins unmuted. Mute all mutes only the monitors leased at that moment.
 - Group membership. GLM sends `2B 05` and `2B 07` to monitors outside the active group. System does not track membership, so it sends each its own mute.
@@ -288,7 +285,7 @@ One group switch must also decode to the sequence espgensam documents, for your 
 
 #### The first control run
 
-It runs from main once the three changes in Next are in, with the Pi recording it as `qlm-control-first`. The user approves each step and listens. The levels are chosen so that every expected change is a few dB, and nothing can pass −35 dB while qlm is the host.
+It runs from main, with the Pi recording it as `qlm-control-first`. The user approves each step and listens. The levels are chosen so that every expected change is a few dB, and nothing can pass −35 dB while qlm is the host.
 
 Before the first step:
 
