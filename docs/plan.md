@@ -15,6 +15,7 @@ Built, with 234 tests, every protocol fact named by its section of hlm's spec or
 - **The capture kit:** `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`.
 - **The captures:** every scenario in `captures/README.md`, 17 in all, and qlm's own runs: `qlm-first-discover`, `qlm-standby-discover`, and `qlm-control-first`. Each is xz-compressed, with `reports.txt` and `notes.md`. `sleep-wake` never caught a true sleep. The golden tests read every report in them.
 - **The frames qlm does not send:** [refused-frames.md](refused-frames.md) says what each one does, and whether qlm needs it.
+- **The protocol reference:** [protocol.md](protocol.md) holds every protocol fact qlm knows, with its source.
 
 Decided since Phase 1:
 
@@ -38,53 +39,21 @@ Next:
 - The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 - Whether the address byte is escaped. The code sends it bare. No capture settles it, because GLM's session IDs never passed `19`. So the encoder refuses a `7D` or `7E` address, and System's leases skip both, and `F0`, the adapter's multicast. The question cannot arise.
 
-### What the captures showed
+### What the captures and runs showed
 
-- **Reports.** Every output report is `80` plus the frame's length, the frame, and zeros. Every input report starts with `3F`. A reply spans two reports at most. No report carries more than one frame.
-- **One reply per request.** The adapter answers every probe and unicast with exactly one frame: the monitor's reply, or `01 7E` when none answered. genlc's guess is right. Broadcasts get no reply.
-- **The idle cycle.** About every 0.57 s, GLM sends the probe, then the volume, then one `08` to each monitor (`startup-idle`, from 10 s). It sends no `04` keep-alive while idle. `04` comes only in a DSP pass: the apply at launch, the one after a wake, and a group switch.
-- **The adapter itself is address `01`.** GLM polls it with `01 08` about every 110 ms, in pairs. It also sends it `19 01`, `22`, `39`, `51 82`, and `2B 00` or `2B 01` for mute-all. Its system info is 74 bytes, across two reports.
-- **The knob rides the adapter's reply to `01 08`.** The reply is `09`, a byte that is `33` without the mic and `32` with it, and then the fields. With the mic, `34` and two values tagged `DE` and `DD` follow. With the knob, `30 36 DF` and a signed 32-bit position in tenths of a dB follow: −1004 at the bottom, near 0 at the top. Without it, `31` follows. GLM turns each change into a volume frame (`knob-sweep`). Unplugging the knob drops the field (`volume-sweep`). [adapter-status.md](adapter-status.md) decodes the reply.
-- **Leases.** GLM counts session IDs up from `02` at each launch. A monitor that wakes from standby, or that joins a group from standby, loses its lease and gets the next ID. An 8351B in standby still answers probes, and GLM leases it again every 3 s. The 3-byte hardware ID maps one-to-one to the serial in every capture, so match monitors by hardware ID.
-- **A setup node's `Serial` is its monitor's hardware ID**: the three bytes of its discovery reply and its `F0 02` lease, read big-endian, in decimal (`startup-idle`). The serial from `19 01` does not end in it. The setup reader decodes it, and System matches nodes to monitors by it.
-- **A monitor's delay is `Time-of-flight_Compensation` in milliseconds**, at 48 kHz: 6 is 288 samples, and 1.23 is 59 (`group-switch-main-2x1-main-4x2`). A subwoofer's is its phase at the crossover, rounded (the same capture, and `startup-idle`).
-- **Inputs 1 to 3 route as AES3**, `40 00 02 00` and the channel (`group-switch-main-2x1-main-4x2`).
-- **Telemetry.** Real replies carry tags the spec does not list: `49` (one byte, counting up with each reply), and `82`, `88`, `89`, and `8A` (two bytes). The 8351B sends `82`, `88`, and `89`. A poll often gets a bare `09`. About 20 replies in 17,000 lack the leading `41` and temperature.
-- **Serials** are 14 or 15 characters.
-- **Opcodes GLM sends that qlm refuses:** `05 04 …` (generator stop) to every monitor in a group apply, `3C`, `3E`, and `42` to subwoofers, `43 00 02` and `4B 00 00 00 01` to the 8351B, broadcast `2D 00`, and `22` and `51 82` to the adapter. The golden tests pin this set.
-- **Questions Phase 0 asked.** GLM sends nothing special when it quits; it stops polling (`quit-glm`). So the adapter must sense a host by its traffic ([adapter-status.md](adapter-status.md)). What level it then applies is on the monitor bus, which USB does not show. It needs a listening test or the bus tap. At quit the knob read −19.8 dB, and GLM's volume was −20 dB.
+[protocol.md](protocol.md) holds every protocol fact qlm knows, each with its source. Each run's `notes.md` has its timeline. In short:
 
-### What the first run showed
-
-`captures/qlm-first-discover` is qlm's first run on the adapter, with `qlmctl` built from `fce5531`.
-
-- **The adapter takes qlm as its host.** It passed every request through and returned every reply. IOKit let qlm seize it. With GLM open, `qlmctl info` refused with exit 69 and sent nothing.
-- **All six monitors answered without a wake**, in GLM's order and with GLM's session IDs. qlm matched each to `Main.sam` by hardware ID. All six were on.
-- **qlm's cycle matches GLM's:** a probe every 0.569 s, and an adapter `01 08` pair every 0.107 s. No request timed out, and every reply was readable, so no sync went out.
-- **qlm sent only frames GLM sends.** It leaves out the wake, the volume, `01 22`, `01 51 82`, `FF 2D 00`, `FF 3D 00`, and `01 2B 00`.
-- **Leases lapse when the host goes quiet.** The monitors dropped GLM's leases within 42 s of its last report, and qlm's within 23 s. USB cannot show why. The adapter's takeover, about 2.6 s after the host goes quiet, is a likely cause.
-
-### What the standby run showed
-
-`captures/qlm-standby-discover` is qlm's discovery with all six monitors in standby, put there by GLM before it quit.
-
-- **Monitors in standby answer qlm without a wake.** All six answered the probe, the lease, `39`, `19 01`, and `08`, and stayed in standby. The 8351B answered as the others did. `discover` printed each as in standby, with its temperature.
-- **A monitor in standby misses a request at times.** Six times the adapter answered `01 7E`, and the monitor answered the next try. GLM's polls in standby get the same reply.
-- **Leases in standby last longer.** The monitors dropped GLM's within 210 s, and qlm's within 88 s and 68 s.
-
-### What the control run showed
-
-`captures/qlm-control-first` is qlm's first control run, on the Right 8351B, with the user listening. Its notes have each step.
-
-- **The adapter hands back at the knob's position, about 2.6 s after qlm stops.** After `volume -60`, the level rose back to the knob's −40 dB 2 to 3 s after qlm let go. When qlm stopped at the knob's level, no one heard a change. With no host, the knob sets the level.
-- **qlm follows the knob, and the ceiling held.** At the knob's first real turn, qlm jumped to its position, then followed it to the nearest 0.5 dB step. The highest level it sent was −41.5 dB.
-- **A mute outlasts qlm.** The monitor stayed muted after qlm's exit.
-- **Every control frame qlm sent is one GLM sends** (`QLMControlRunTests`). No request timed out, and no sync went out.
-- **A 5 dB step is too small to hear** in a quick test. The hand-back and the knob ran at −60 dB.
-- **A monitor that is switched on plays at its own stored level until a host sends one.** When GLM relaunched after the run, two 8330A just switched on played very loud for about a second, until GLM's −56.5 dB reached them.
-- **`mute --serial` unmutes the others**, as GLM does, so the sub muted in GLM started playing.
-- **qlm's wake sends no volume**, so the woken monitors kept their level.
-- **`qlmctl dim` sends only the dimmed level**, because it sets dim before the volume.
+- **The adapter is a thin bridge.** It answers each probe and unicast with one frame: the monitor's reply, or its own `01 7E` when none answered. A broadcast gets none.
+- **GLM's cycle:** about every 0.57 s, the probe, the volume, and one `08` to each monitor. Between cycles, it polls the adapter with a pair of `01 08` about every 107 ms. qlm's cycle matches it (`qlm-first-discover`).
+- **The knob rides the adapter's reply to `01 08`.** The host turns its position into a volume frame ([adapter-status.md](adapter-status.md)).
+- **Leases.** A monitor that holds a lease ignores the probe. A monitor that wakes from standby loses its lease. Monitors drop a quiet host's leases within 23 to 42 s, and within 68 to 210 s in standby (`qlm-first-discover`, `qlm-standby-discover`).
+- **Monitors in standby answer qlm without a wake** (`qlm-standby-discover`).
+- **The adapter hands back at the knob's position, about 2.6 s after the host stops** (`qlm-control-first`). With no host, the knob sets the level.
+- **A monitor that is switched on plays at its own stored level until a host sends one** (`qlm-control-first`).
+- **A mute outlasts the host, and no reply reports it** (`qlm-control-first`; #27).
+- **Every frame qlm has sent on the adapter is one GLM sends** (`qlm-first-discover`, `qlm-standby-discover`, and `qlm-control-first`; `QLMControlRunTests`). [refused-frames.md](refused-frames.md) covers the frames GLM sends that qlm does not.
+- **A 5 dB step is too small to hear** in a quick test, so the control run tested the hand-back and the knob at −60 dB (`qlm-control-first`).
+- **Phase 0's three questions are answered.** GLM sends nothing when it quits, so the adapter senses a host by its traffic. Knob turns reach the host in the adapter's reply to `01 08`. When the host leaves, the adapter applies the knob's position.
 
 The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. On the wire, every 8351B band GLM sends matches qlm's 96 kHz design to the bit (`QLMDSPBlockGoldenTests`). No measurement confirms the rate yet, so a group apply that includes an 8351B is still refused.
 
@@ -104,53 +73,24 @@ Most of the protocol is public. Three independent projects mapped it, and two of
 
 ### The adapter is a thin bridge
 
-- **USB:** a HID device, VID `0x1781`, PID `0x0E39`, on vendor page `0xFFA0`. It has no report IDs, 64-byte input and output reports, and a 1-byte feature report. The captures confirm all of it.
-- **Host to adapter:** one output report of `0x80 + length`, then the escaped frame, then zeros. genlc's leading `0x00` is hidapi's report-ID byte, not data.
-- **Adapter to host:** 64-byte input reports, each starting with `3F`. genlc allows a reply three reports; the captures need two at most. After reassembly, the reply is a normal bus frame. A bare `7E` from `01` means no monitor answered, as genlc guessed.
-- **Bus frame:** address, command, data, CRC-16/GSM (big-endian), then `0x7E`. HDLC escaping applies to `0x7E` and `0x7D` after the CRC is computed. The adapter adds the RS-485 ninth bit itself.
-- **Size:** the largest frame the app sends, a PEQ band, is 28 bytes. Fully escaped, it still fits one report.
+While a host is connected, the adapter passes each request to the monitor bus and returns one reply. [protocol.md](protocol.md#usb-and-hid) has the USB side, and its [Framing](protocol.md#framing) the bus frame.
 
 ### The host is the bus master
 
-While a host is connected, the adapter only bridges. The host runs discovery, address leases, the keep-alive, polls, volume, and configuration. The adapter broadcasts `F0 1F 00 00 00` about every 610 ms to say it defers. About 2.6 s after the host goes quiet, the adapter takes over as a standalone volume master with its own level.
-
-### Each feature on the wire
-
-| Feature | Mechanism | Confidence |
-| --- | --- | --- |
-| Find monitors | `FF FE` probe, `F0 02` lease, `09` ack; re-discover after 4 missed polls | High, both projects |
-| Identify | `19 01` serial; `39` model, firmware, hardware | Medium to high |
-| Status | `08` poll returns `41` TLVs: temperature, power state (`47`), device class (`84`), input and output meters | High for state and temperature; meter scale is approximate |
-| Volume | `FF 1F` + 24-bit linear gain, `floor(10^(dB/20) × 0x7FFFFF)` within one count ([adapter-status.md](adapter-status.md)); fire and forget, sent at once on change | High |
-| Dim | A plain volume frame 20 dB down; there is no dim command | High |
-| Mute | `2B` bitfield per monitor; bit 0 is mute, other bits drive the LED | High. Telemetry does not show mute, so the app tracks it. |
-| Power | `3A 03 02` ×2 then `3A 03 00` ×2 to sleep; `3A 03 7F` / `3A 03 01` ×3 to wake | High |
-| Group switch | duck, wake, routing pass, DSP pass (`17 01`, `10 02` delay, `10 01 00` level, `10 01 09`, `10 0E` PEQ ×20, `3B` crossover, `3D`, `40` routing), tail, restore | High for two-way monitors; medium for subwoofers (from captures, not measured); the 8351B's pass is captured but not measured |
-| The knob, while a host owns the bus | The adapter's reply to `01 08` carries its position in tenths of a dB; GLM sends the volume ([adapter-status.md](adapter-status.md)) | High, from `knob-sweep` |
-| How the adapter decides a host is present | GLM sends nothing on quit, so by traffic; the timeout is on the bus side ([adapter-status.md](adapter-status.md)) | Medium |
-
-The six group-switch captures decode to espgensam's sequence, with these differences for this system:
-
-- **Wake is per monitor.** After the broadcast `3A 03 7F` ×2, monitors in the new group get unicast `3A 03 01` twice, and every other monitor gets `3A 03 02` once. A monitor leaving the group gets `2B 05` and `2B 07` in place of `2B 04`.
-- **Every slot goes out.** Each monitor in the new group got all 20 PEQ slots, not only the changed ones. Subwoofers got 23 PEQ frames, slot 0 four times.
-- **The 8330A's DSP pass is espgensam's:** `17 01`, `10 02`, `10 01 00`, `10 01 09`, `10 0E` ×20, `3B`, `3D`, `40`.
-- **The 8351B adds two frames:** `43 00 02` after the level pair, and `4B 00 00 00 01` after `3B`. espgensam does not cover the 8351B.
-- **The subwoofer pass follows espgensam's order,** with `40`, `3E`, `3C`, `10 0E` slot 0, and `10 02` repeated.
-- **The tail** sends `01 2B 00` to the adapter, then `2B` to every monitor twice. The volume returns on the next cycle.
-
-The 9310 knob plugs into the adapter's 3.5 mm jack. Standalone, the adapter reads it and broadcasts the volume itself. The adapter's own knob reaches GLM in the reply to `01 08`.
+While a host is connected, it runs discovery, the leases, the polls, the volume, and the configuration. About 2.6 s after the host goes quiet, the adapter takes over at its knob's position ([protocol.md](protocol.md#what-the-adapter-and-the-monitors-do-on-their-own)). [protocol.md](protocol.md#sequences) has each feature on the wire, step by step, with GLM's two kinds of group apply.
 
 ### The setup file
 
 GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Documents/Genelec/GLM5/Setup Files/`. espgensam's importer documents the mapping:
 
 - **PEQ:** 20 slots per device. A two-way monitor has two low shelves, two high shelves, and 16 peaking bands. A subwoofer has 20 peaking bands.
-- **Design rate:** 48 kHz for two-way monitors and 12 kHz for subwoofers. The wrong rate moves every filter by 4×. The rate for 83x1 models is unresolved.
-- **Shelves:** RBJ formulas in Q form, with Q 0.3 for low shelves and 0.5 for high shelves. The wire carries `b0 b1 b2 −a1 −a2`, normalized by `a0`, as little-endian floats. A band at exactly 0 dB goes out as `1, 0, 0, 0, 0`.
-- **Level:** `Level_Sensitivity` plus `Group_Sensitivity`, sent as one word scaled by 2²³ − 1.
-- **Delay:** in 48 kHz samples on every device. On a subwoofer it is the AutoPhase angle turned into a delay.
+- **Design rate:** 48 kHz for two-way monitors and 12 kHz for subwoofers. The wrong rate moves every filter by 4×. The 8351B's bands match a 96 kHz design on the wire (#10), but no measurement confirms it yet.
+- **Shelves:** RBJ formulas in Q form, with Q 0.3 for low shelves and 0.5 for high shelves. A three-way's high shelf is Q 0.3 (#10). The wire carries `b0 b1 b2 −a1 −a2`, normalized by `a0`, as little-endian floats. A band at exactly 0 dB goes out as `1, 0, 0, 0, 0`.
+- **Level:** `Level_Sensitivity` plus `Group_Sensitivity`, sent as one word scaled by 2²³ − 1 and floored (#15).
+- **Delay:** in 48 kHz samples on every device. A monitor's is its `Time-of-flight_Compensation` in milliseconds. On a subwoofer it is the AutoPhase angle turned into a delay, rounded (#8).
 - **Crossover:** `1` means full band.
-- **Not mapped yet:** `Optional_Gain`, `Time-of-flight_Compensation`, `Video_Delay`, `SubwooferGroupID`, and the LFE crossover.
+- **A node's `Serial`** is its monitor's hardware ID, in decimal (#8).
+- **Not mapped yet:** `Optional_Gain`, `Video_Delay`, `SubwooferGroupID`, and the LFE crossover.
 
 ## Decided
 
@@ -165,7 +105,7 @@ GLM 5 saves setups as `.sam` files. espgensam's README shows them under `~/Docum
 
 ## Open, for you to decide
 
-1. **The knob.** Decided: no 9310. The adapter has its own optional volume knob. While it is attached, GLM locks its on-screen volume. Its position rides the adapter's reply to `01 08` (see What the captures showed).
+1. **The knob.** Decided: no 9310. The adapter has its own optional volume knob. While it is attached, GLM locks its on-screen volume. Its position rides the adapter's reply to `01 08` ([protocol.md](protocol.md#volume-and-the-knob)).
 2. **Capture machine.** Decided: a Raspberry Pi 5 inline between the Mac and the adapter. [captures/README.md](../captures/README.md) has the steps.
 
 ## Architecture
@@ -208,7 +148,7 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 - **Keep the user's mutes by hardware ID.** A monitor leased again comes back muted, if the user muted it.
 - **Send the volume to each monitor the moment it is leased.** A monitor that is switched on plays at its own stored level until a host sends one (`qlm-control-first`).
 - **A group apply ducks first and restores after.** Expect a short silence, as with GLM.
-- **On a group switch, send only the bands that changed**, as GLM does. A full apply sends all of them.
+- **Every apply sends all twenty bands to each monitor**, changed or not, as GLM does ([protocol.md](protocol.md#payloads)).
 - **Volume changes go out at once**, out of cadence. State changes are sent twice.
 - **Poll the adapter with `01 08` about every 110 ms, and never pause longer than 1.7 s.** The reply is the knob's only path. GLM's polling is likely what tells the adapter a host is present.
 - **At connect, keep the app's own level. At the knob's first move, jump to the knob's position**, under the ceiling. After that, follow the knob, but not its jitter at rest. [adapter-status.md](adapter-status.md) has what GLM does.
@@ -379,6 +319,7 @@ Each is optional:
 
 ## Sources
 
+- [protocol.md](protocol.md): every protocol fact qlm knows, with its source
 - [genlc](https://github.com/markbergsma/genlc): `transport.py`, `gnet.py`, `const.py`, and `sam.py`
 - [hlm](https://github.com/robcazzaro/hlm): `docs/Genelec GLM Protocol.13.md`
 - [espgensam](https://github.com/markbergsma/espgensam): `README.md`, `docs/glm-group-apply.md`, and `components/gensam/sam_import.py`
