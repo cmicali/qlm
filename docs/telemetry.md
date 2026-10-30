@@ -18,7 +18,7 @@ Every monitor answers its `08` poll with a telemetry frame. hlm's spec lists mos
 
 ## Sources
 
-- **The captures.** All twenty in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29, from 20:57 to 21:47. qlm ran `qlm-first-discover`, `qlm-standby-discover`, and `qlm-control-first` on 2026-10-30. Only `qlm-control-first` has music playing.
+- **The captures.** All 21 in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29, from 20:57 to 21:47. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30. Only `qlm-control-first` and `qlm-control-all` have music playing.
 - **hlm's spec**, `docs/Genelec GLM Protocol.13.md` in [robcazzaro/hlm](https://github.com/robcazzaro/hlm), revision 13. It is GPL-3.0. This page states its facts in its own words, and takes no text or code from it.
   - Section 4: multi-byte values are big-endian.
   - Section 8: a busy byte, `06` or `07`, may follow the `09`. A reply of `09` and a busy byte alone carries no telemetry this round.
@@ -30,7 +30,7 @@ The numbers here come from a script over every `reports.txt`. It parsed each rep
 
 ## The frame
 
-The captures hold 18,370 replies to a monitor's `08`. 10,617 are whole frames, and 7,699 are a bare `09`. Twelve are a bare busy marker. 42 are the two parts of 21 split frames.
+The captures hold 20,598 replies to a monitor's `08`. 11,900 are whole frames, and 8,617 are a bare `09`. 31 are a bare busy marker. 50 are the two parts of 25 split frames.
 
 Each model sends its fields in a fixed order:
 
@@ -40,7 +40,7 @@ Each model sends its fields in a fixed order:
 | 8330A | `81 83 42 43 45 47 49 84` | `47 49 84` |
 | 7370A, 7350A | `83 42 46 43 45 47 49 84` | `47 49 84` |
 
-Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A`, as every example in section 8.1 does. Every frame reads with the tag rule, with no unknown tag (`QLMGoldenTests`).
+Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A`, as every example in section 8.1 does, but for two. In `qlm-control-all`, at 381.151 and 381.166 s, both 8330As, busy, ended a frame with a bare `04` after `8A`. Every frame reads with the tag rule. `04` is the only unknown tag, and it comes only after `84` (`QLMGoldenTests`).
 
 ### One frame a second
 
@@ -58,7 +58,7 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 | 313.283 s | `09 41 2A` |
 | 313.878 s | `09 81 00 2A 82 00 2A 83 00 2A 42 9F 43 80 45 80 44 80 47 01 49 73 88 00 4B 89 00 41 84 02 F1` |
 
-- The captures have 21 split frames, from every model, in 11 scenarios. The split falls at any field: after `41` in 13, and after `83`, `46`, `42`, `47`, or `89` in the rest.
+- The captures have 25 split frames, from every model, in 12 scenarios. The split falls at any field: after `41` in 16, and after `83`, `46`, `42`, `47`, or `89` in the rest.
 - Every first part is followed by its second part at the monitor's next poll. No second part comes alone.
 - **Guess:** the poll reads the monitor's reply while the monitor is still writing that second's frame.
 

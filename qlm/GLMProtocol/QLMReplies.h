@@ -82,9 +82,10 @@ typedef enum {
 // before it are valid and unknownTag names it.
 //
 // TRAP: a monitor sometimes splits a frame in two, at a field, across two
-// polls. Every whole frame ends with 84, or 84 and 8A. The first part has no
-// 84 and reads as QLMTelemetryErrorPartial, with its fields filled. The
-// second has no 41 and reads as QLMTelemetryErrorNotTelemetry.
+// polls. Every whole frame has 84, and ends with it, or with 84 and 8A. Two
+// in the captures then add a bare 04, and read as an unknown tag. The first
+// part has no 84 and reads as QLMTelemetryErrorPartial, with its fields
+// filled. The second has no 41 and reads as QLMTelemetryErrorNotTelemetry.
 QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *telemetry);
 
 // The adapter's reply to 01 08: 09, then fields with no length byte. The top

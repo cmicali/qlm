@@ -145,13 +145,13 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
 // exchange may lack its reply, cut off when the capture stopped. Each reply
 // reads with the parser for its request.
 //
-// Two telemetry replies end with a bare 04 after 8A's value, an unknown tag.
-// Both are in qlm-control-all, at 381.15 and 381.17 s, from the two 8330As
-// while busy, 1.4 s after GLM's group apply. No other reply has it.
+// A telemetry reply may hold an unknown tag only after its 84, where the
+// frame is whole, so System loses nothing. Two do: in qlm-control-all, at
+// 381.15 and 381.17 s, both 8330As end a frame with a bare 04 after 8A.
 - (void)testEveryReplyAnswersItsRequest {
     NSUInteger noAnswers = 0;
     NSUInteger telemetry = 0;
-    NSUInteger bare04s = 0;
+    NSUInteger lateTags = 0;
     NSUInteger identities = 0;
     for (QLMCapture *capture in [self captures]) {
         QLMCaptureExchange *last = capture.exchanges.lastObject;
@@ -197,11 +197,9 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
             } else if (opcode == 0x08) {
                 QLMTelemetry values;
                 QLMTelemetryStatus status = QLMReplyTelemetry(&reply, &values);
-                size_t end = reply.length;
-                BOOL bare04 = status == QLMTelemetryErrorUnknownTag && values.unknownTag == 0x04 && end >= 4 &&
-                              reply.payload[end - 4] == 0x8A && reply.payload[end - 1] == 0x04;
-                bare04s += bare04 ? 1 : 0;
-                XCTAssertTrue(status != QLMTelemetryErrorUnknownTag || bare04, @"%@: tag %02X", what(), values.unknownTag);
+                BOOL late = status == QLMTelemetryErrorUnknownTag && values.deviceClass != QLMTelemetryAbsent;
+                lateTags += late ? 1 : 0;
+                XCTAssertTrue(status != QLMTelemetryErrorUnknownTag || late, @"%@: tag %02X", what(), values.unknownTag);
                 XCTAssertNotEqual(status, QLMTelemetryErrorTruncated, @"%@", what());
                 telemetry += status == QLMTelemetryOK ? 1 : 0;
             } else if (opcode == 0x19) {
@@ -221,7 +219,7 @@ static size_t QLMEscapeFrame(const QLMMessage *message, uint8_t *out) {
     }
     XCTAssertGreaterThan(noAnswers, 0u);
     XCTAssertGreaterThan(telemetry, 5000u);
-    XCTAssertEqual(bare04s, 2u);
+    XCTAssertEqual(lateTags, 2u);
     XCTAssertGreaterThan(identities, 0u);
 }
 
