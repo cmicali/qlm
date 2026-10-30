@@ -12,6 +12,7 @@
 
 @implementation QLMFakeBusTests {
     dispatch_queue_t _queue;
+    QLMVirtualClock *_time;
     QLMFakeMonitor *_left;
     QLMFakeMonitor *_sub;
     QLMFakeBus *_bus;
@@ -26,12 +27,13 @@
                                             systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay];
     _sub = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:subID length:3] serialNumber:@"7350apm21005678"
                                            systemInfo:@"c-1;model-7350A" deviceClass:QLMTelemetryClassSubwoofer];
+    _time = [[QLMVirtualClock alloc] init];
     _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _sub]];
-    [_bus startOnQueue:_queue];
+    [_bus startOnQueue:_queue clock:_time];
 }
 
 - (BOOL)send:(QLMMessage)message reply:(QLMMessage *)reply error:(NSError **)error {
-    return [self qlm_send:message to:_bus queue:_queue reply:reply error:error];
+    return [self qlm_send:message to:_bus queue:_queue clock:_time reply:reply error:error];
 }
 
 - (void)testDiscoveryFollowsSection9 {

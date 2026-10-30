@@ -5,6 +5,7 @@
 #include "QLMCommands.h"
 #import "QLMBannerView.h"
 #import "QLMFormat.h"
+#import "QLMHostCheck.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMPopoverWidth = 320;
@@ -18,6 +19,17 @@ static NSTextField *QLMSmallLabel(NSString *text) {
     label.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     label.textColor = NSColor.secondaryLabelColor;
     return label;
+}
+
+// GLM 5, when it runs: an app whose executable QLMHostCheck counts as GLM.
+static NSRunningApplication *_Nullable QLMRunningGLM(void) {
+    for (NSRunningApplication *app in NSWorkspace.sharedWorkspace.runningApplications) {
+        NSString *path = app.executableURL.path;
+        if (path != nil && QLMHostCheckIsGLMExecutable(path)) {
+            return app;
+        }
+    }
+    return nil;
 }
 
 static NSView *QLMSpacer(void) {
@@ -42,6 +54,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMBannerView *banner;
+@property (nonatomic) QLMBannerView *setupBanner;
 @property (nonatomic) NSTextField *deviceLabel;
 @property (nonatomic) NSTextField *messageLabel;
 @property (nonatomic) NSSlider *volumeSlider;
@@ -50,11 +63,17 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSButton *muteButton;
 @property (nonatomic) NSButton *dimButton;
 @property (nonatomic) NSButton *powerButton;
+@property (nonatomic) NSButton *fakeBusButton;
 @property (nonatomic) NSPopUpButton *groupPicker;
 @property (nonatomic) NSTextField *summaryLabel;
 @property (nonatomic) NSStackView *monitorsStack;
 @property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry, as the list only appends
 @property (nonatomic) NSTimeInterval sliderMovedAt;
+@property (nonatomic) BOOL askedGLMToQuit;  // until GLM lets go of the adapter
+// GLM holds the adapter, as of checkedError. GLM starts and quits rarely, so
+// the app list is scanned only when System's error changes.
+@property (nonatomic) BOOL glmHolds;
+@property (nonatomic, nullable) NSError *checkedError;
 // The snapshot says an apply is running, not which group.
 @property (nonatomic, copy, nullable) NSString *applyingGroupName;
 @property (nonatomic, copy, nullable) NSString *message;  // the last apply's error
@@ -123,6 +142,16 @@ static NSView *QLMSpacer(void) {
     return self;
 }
 
+- (void)setShowsFakeBus:(BOOL)showsFakeBus {
+    _showsFakeBus = showsFakeBus;
+    self.fakeBusButton.hidden = !showsFakeBus;
+}
+
+- (void)setChangedSetupName:(NSString *)changedSetupName {
+    _changedSetupName = [changedSetupName copy];
+    [self refresh];
+}
+
 - (void)setSetup:(QLMSetup *)setup {
     _setup = setup;
     if (self.isViewLoaded) {
@@ -135,7 +164,14 @@ static NSView *QLMSpacer(void) {
     NSView *view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, QLMPopoverWidth, 10)];
     CGFloat contentWidth = QLMPopoverWidth - 2 * QLMPopoverInset;
 
-    self.banner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50];
+    self.banner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50 style:QLMBannerStyleWarning];
+    self.banner.actionButton.target = self;
+    self.banner.actionButton.action = @selector(quitGLMClicked:);
+    self.setupBanner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50 style:QLMBannerStyleNotice];
+    self.setupBanner.actionButton.title = @"Read Again";
+    self.setupBanner.actionButton.target = self;
+    self.setupBanner.actionButton.action = @selector(readSetupAgainClicked:);
+    self.setupBanner.actionButton.hidden = NO;
 
     NSTextField *title = [NSTextField labelWithString:@"qlm"];
     title.font = [NSFont systemFontOfSize:NSFont.systemFontSize + 1 weight:NSFontWeightSemibold];
@@ -204,17 +240,17 @@ static NSView *QLMSpacer(void) {
     self.monitorsStack.alignment = NSLayoutAttributeLeading;
     self.monitorsStack.spacing = 5;
 
-    NSButton *monitorsButton = [self footerButtonWithTitle:@"Monitors…" action:@selector(showMonitorsClicked:)];
-    NSButton *settingsButton = [self footerButtonWithTitle:@"Settings…" action:@selector(showSettingsClicked:)];
-    NSButton *fakeBusButton = [self footerButtonWithTitle:@"Fake Bus…" action:@selector(showFakeBusClicked:)];
-    NSButton *quit = [self footerButtonWithTitle:@"Quit" action:@selector(terminate:)];
-    quit.target = NSApp;
-    NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, fakeBusButton, QLMSpacer(), quit]];
+    NSButton *monitorsButton = QLMSmallButton(@"Monitors…", self, @selector(showMonitorsClicked:));
+    NSButton *settingsButton = QLMSmallButton(@"Settings…", self, @selector(showSettingsClicked:));
+    self.fakeBusButton = QLMSmallButton(@"Fake Bus…", self, @selector(showFakeBusClicked:));
+    self.fakeBusButton.hidden = !self.showsFakeBus;
+    NSButton *quit = QLMSmallButton(@"Quit", NSApp, @selector(terminate:));
+    NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, self.fakeBusButton, QLMSpacer(), quit]];
     footer.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     footer.spacing = 6;
 
     NSArray<NSView *> *fullWidth = @[
-        self.banner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
+        self.banner, self.setupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
         [self separator], monitorsHeader, self.monitorsStack, [self separator], footer,
     ];
     NSStackView *stack = [NSStackView stackViewWithViews:fullWidth];
@@ -238,13 +274,6 @@ static NSView *QLMSpacer(void) {
     NSButton *button = [NSButton buttonWithTitle:title image:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]
                                           target:self action:action];
     button.buttonType = NSButtonTypePushOnPushOff;
-    return button;
-}
-
-- (NSButton *)footerButtonWithTitle:(NSString *)title action:(SEL)action {
-    NSButton *button = [NSButton buttonWithTitle:title target:self action:action];
-    button.controlSize = NSControlSizeSmall;
-    button.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     return button;
 }
 
@@ -321,6 +350,22 @@ static NSView *QLMSpacer(void) {
     }];
 }
 
+// Asks politely, as the Dock's Quit does. GLM may ask to save first, and it
+// is never forced. The adapter opens on its own once GLM lets go.
+- (void)quitGLMClicked:(id)sender {
+    self.askedGLMToQuit = [[self runningGLM] terminate];
+    [self refresh];
+}
+
+- (void)readSetupAgainClicked:(id)sender {
+    [self.delegate popoverControllerReadSetupAgain:self];
+}
+
+// A method, so a check can stand in for GLM.
+- (nullable NSRunningApplication *)runningGLM {
+    return QLMRunningGLM();
+}
+
 - (void)showMonitorsClicked:(id)sender {
     [self.delegate popoverControllerShowMonitors:self];
 }
@@ -358,7 +403,10 @@ static NSView *QLMSpacer(void) {
 
 - (void)render {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
-    [self.banner showError:snapshot.adapterError];
+    [self renderBanner:snapshot.adapterError];
+    NSString *changed = self.changedSetupName;
+    [self.setupBanner showTitle:changed == nil ? nil : [NSString stringWithFormat:@"GLM saved %@", changed]
+                         detail:@"Read it again for its new groups."];
     self.deviceLabel.stringValue = snapshot.adapter.device ?: @"";
     self.deviceLabel.toolTip = snapshot.adapter.systemInfo;
     [self renderVolume:snapshot];
@@ -386,6 +434,21 @@ static NSView *QLMSpacer(void) {
     [self renderMonitors:self.monitorList.entries snapshot:snapshot];
 }
 
+- (void)renderBanner:(nullable NSError *)error {
+    [self.banner showError:error];
+    if (error != self.checkedError) {
+        self.checkedError = error;
+        self.glmHolds = QLMAdapterErrorIsBusy(error) && [self runningGLM] != nil;
+    }
+    if (!self.glmHolds) {
+        self.askedGLMToQuit = NO;
+    }
+    NSButton *quit = self.banner.actionButton;
+    quit.hidden = !self.glmHolds;
+    quit.enabled = !self.askedGLMToQuit;
+    quit.title = self.askedGLMToQuit ? @"Asked GLM to Quit" : @"Quit GLM";
+}
+
 - (void)renderVolume:(nullable QLMSnapshot *)snapshot {
     double ceiling = self.preferences.ceilingDecibels;
     NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
@@ -410,7 +473,7 @@ static NSView *QLMSpacer(void) {
         [parts addObject:ceilingText];
     }
     if (snapshot.dimmed) {
-        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText(fmax(QLMVolumeDecibelsMin, sent - QLMDimDecibels))]];
+        [parts addObject:[NSString stringWithFormat:@"dimmed to %@", QLMDecibelsText([self.preferences sentDecibels:decibels dimmed:YES])]];
     }
     if (snapshot.allMuted) {
         [parts addObject:@"muted"];

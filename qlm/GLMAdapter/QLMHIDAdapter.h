@@ -6,7 +6,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 // The GLM adapter over IOKit HID: vendor 1781, product 0E39, usage page FFA0.
 // Each message goes out as one output report, and input reports reach the
-// report link on System's queue, which is the queue given to startOnQueue:.
+// report link on System's queue, the queue given to startOnQueue:clock:.
 // Call every method on that queue.
 //
 // It never opens the adapter while another host has it: GLM 5 running, or

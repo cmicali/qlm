@@ -13,6 +13,7 @@
 
 @implementation QLMReplayAdapterTests {
     dispatch_queue_t _queue;
+    QLMVirtualClock *_time;
     QLMReplayAdapter *_adapter;
 }
 
@@ -22,12 +23,13 @@
     NSError *error = nil;
     QLMCapture *capture = QLMReadCapture(@"startup-idle", &error);
     XCTAssertNotNil(capture, @"%@", error);
+    _time = [[QLMVirtualClock alloc] init];
     _adapter = [[QLMReplayAdapter alloc] initWithCapture:capture];
-    [_adapter startOnQueue:_queue];
+    [_adapter startOnQueue:_queue clock:_time];
 }
 
 - (BOOL)send:(QLMMessage)message reply:(QLMMessage *)reply error:(NSError **)error {
-    return [self qlm_send:message to:_adapter queue:_queue reply:reply error:error];
+    return [self qlm_send:message to:_adapter queue:_queue clock:_time reply:reply error:error];
 }
 
 - (void)testAnswersDiscoveryAsTheCaptureDid {

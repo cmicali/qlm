@@ -16,6 +16,8 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
     QLMControlCommandDim,
     QLMControlCommandSleep,
     QLMControlCommandWake,
+    // Its file and group come before these options, and are not parsed here.
+    QLMControlCommandApplyGroup,
 };
 
 // A control command's arguments, read and checked before any bus opens.
@@ -35,6 +37,14 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
 // The volume's level, or dim's --volume. Nil for dim without it.
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;
 @property (nonatomic, readonly, nullable) NSString *serial;  // mute's --serial
+// --muted, a comma list: each names by text its serial contains a monitor
+// already muted elsewhere, as in GLM. Empty when not given.
+@property (nonatomic, readonly) NSArray<NSString *> *mutedSerials;
+@property (nonatomic, readonly) BOOL launch;  // apply-group's --launch
+// apply-group's --unverified-rate: the supervised test of a group with a
+// model whose filter design rate is unverified, the 8351B. It sets the
+// settings' allowsUnverifiedRates.
+@property (nonatomic, readonly) BOOL unverifiedRate;
 // The stated --ceiling, or QLMCeilingLimit.
 @property (nonatomic, readonly) double ceilingDecibels;
 @property (nonatomic, readonly) NSTimeInterval seconds;  // --seconds, or 0
@@ -45,12 +55,19 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
 
 typedef BOOL (^QLMSnapshotTest)(QLMSnapshot *snapshot);
 
-// The first snapshot that passes, or nil after the timeout.
-QLMSnapshot *_Nullable QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSnapshotTest test);
+// Puts a snapshot handler in place, then runs the action, so the handler
+// sees every snapshot the action causes. Returns the first snapshot that
+// passes, or nil after the timeout. An action that returns NO sent nothing,
+// and the wait ends at once with nil.
+// TRAP: an action run before the handler is in place can finish first. The
+// handler then sees only the end state, as its replay, which a test made by
+// QLMAfterReplay skips, and the wait runs out.
+QLMSnapshot *_Nullable QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, BOOL (^_Nullable action)(void),
+                                          QLMSnapshotTest test);
 
-// TRAP: the snapshot replayed when a handler is installed may predate an
-// action just taken, and a no-op can leave it already passing. This test
-// skips it, so only a snapshot published after the action counts.
+// TRAP: the snapshot replayed when a handler is put in place predates the
+// action, and a no-op can leave it already passing. This test skips it, so
+// only a snapshot published after the action counts.
 QLMSnapshotTest QLMAfterReplay(QLMSnapshotTest test);
 
 // Runs a command on System, given what discovery found. Returns an exit
@@ -74,6 +91,20 @@ QLMControlAction QLMDimAction(BOOL on, NSNumber *_Nullable volumeDecibels);
 // The wake. A volume, when given, is set first, so the wake ends with it, as
 // GLM's does.
 QLMControlAction QLMWakeAction(NSNumber *_Nullable volumeDecibels);
+
+// The hardware ID of the one monitor in `discovered` whose serial contains
+// each text. Nil, with the reason, when a text matches none or several.
+NSSet<NSData *> *_Nullable QLMHardwareIDsForSerials(NSArray<NSString *> *serials, QLMSnapshot *discovered,
+                                                   NSString *_Nullable *_Nonnull problem);
+
+// Records the monitors `serials` name as muted, sending nothing, then runs
+// the action, so its rounds restate them as muted. qlm cannot read a mute.
+// A text that names no single monitor sends nothing and returns EX_DATAERR.
+QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction action);
+
+// What System's stop did about the adapter's take-over, for qlmctl to print
+// at exit. It is a warning but for QLMHandBackKnobLevel.
+NSString *QLMHandBackText(QLMHandBack *handBack);
 
 // The word a volume frame carries. The frame is rebuilt from it, so only a
 // true volume frame passes.

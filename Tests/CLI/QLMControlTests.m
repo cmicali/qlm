@@ -7,6 +7,7 @@
 #import "QLMControl.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMSystem.h"
+#import "QLMTestSupport.h"
 
 // qlmctl's gates before a control goes over USB, and its dry run. AGENTS.md's
 // Safety rules set the gates. The dry run's frames are System's own, so these
@@ -15,7 +16,20 @@
 @interface QLMControlTests : XCTestCase
 @end
 
-@implementation QLMControlTests
+@implementation QLMControlTests {
+    QLMVirtualClock *_time;
+}
+
+- (void)setUp {
+    [super setUp];
+    _time = [[QLMVirtualClock alloc] init];
+}
+
+// Runs what the dry runs left on the clock, their stops among it.
+- (void)tearDown {
+    [_time settle];
+    [super tearDown];
+}
 
 - (QLMControlOptions *)read:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments {
     NSString *problem = nil;
@@ -152,11 +166,33 @@ static NSData *QLMRecord(QLMMessage message) {
     return QLMAdapterRecord(&message);
 }
 
+// The dry run's waits move the test's clock, so its time is the test's own.
+- (QLMSystemSettings *)dryRunSettings {
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.clock = _time;
+    return settings;
+}
+
+// An action that is done before it returns, as when qlmctl's thread is slow
+// to come back from it. The wait's handler is in place first, so it sees the
+// mute land, and the dry run does not run out.
+- (void)testAnActionDoneBeforeItReturnsStillShows {
+    NSData *target = QLMDiscovered().monitors[0].hardwareID;  // at 09
+    NSArray<NSData *> *records = [self recordsOf:^int(QLMSystem *system, QLMSnapshot *found) {
+        [system setMuted:YES forMonitorWithHardwareID:target];
+        [self->_time settle];
+        return 0;
+    } effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && [snapshot.mutedHardwareIDs containsObject:target];
+    })];
+    XCTAssertTrue([records containsObject:QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))], @"%@", records);
+}
+
 - (void)testADryRunAddressesEachMonitorAsDiscoveryFoundIt {
     QLMSnapshot *discovered = QLMDiscovered();
     NSData *target = discovered.monitors[0].hardwareID;
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {
+    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [self dryRunSettings], ^int(QLMSystem *system, QLMSnapshot *found) {
         [system setMuted:YES forMonitorWithHardwareID:target];
         return 0;
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
@@ -178,7 +214,7 @@ static NSData *QLMRecord(QLMMessage message) {
 }
 
 - (void)testADryRunLeavesOutDiscoveryAndKeepsTheCeiling {
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    QLMSystemSettings *settings = [self dryRunSettings];
     settings.ceilingDecibels = -40;
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, ^int(QLMSystem *system, QLMSnapshot *found) {
@@ -217,7 +253,7 @@ static NSData *QLMRecord(QLMMessage message) {
 // What `action` sends on the dry run's mirror of QLMDiscovered, its monitors
 // at 09 and 05, with no cycle inside it.
 - (NSArray<NSData *> *)recordsOf:(QLMControlAction)action effect:(QLMSnapshotTest)effect {
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    QLMSystemSettings *settings = [self dryRunSettings];
     settings.ceilingDecibels = -35;
     settings.cycleInterval = 10;
     int status = -1;
@@ -278,9 +314,105 @@ static NSArray<NSData *> *QLMPair(void) {
     XCTAssertNil([self read:QLMControlCommandWake arguments:@[]].volumeDecibels);
 }
 
+// --muted is a comma list, on every control. An empty item is refused.
+- (void)testMutedTakesACommaList {
+    QLMControlOptions *options = [self read:QLMControlCommandMute arguments:@[@"on", @"--fake", @"--muted", @"2717, 9012"]];
+    XCTAssertEqualObjects(options.mutedSerials, (@[@"2717", @"9012"]));
+    XCTAssertEqualObjects([self read:QLMControlCommandSleep arguments:@[@"--fake"]].mutedSerials, @[]);
+    for (NSNumber *command in @[@(QLMControlCommandVolume), @(QLMControlCommandDim), @(QLMControlCommandSleep), @(QLMControlCommandWake)]) {
+        NSArray<NSString *> *arguments = @[@"--fake", @"--muted", @"2717"];
+        if (command.integerValue == QLMControlCommandVolume) {
+            arguments = [@[@"-50"] arrayByAddingObjectsFromArray:arguments];
+        } else if (command.integerValue == QLMControlCommandDim) {
+            arguments = [@[@"on"] arrayByAddingObjectsFromArray:arguments];
+        }
+        XCTAssertEqualObjects([self read:(QLMControlCommand)command.integerValue arguments:arguments].mutedSerials, @[@"2717"]);
+    }
+    [self refuse:QLMControlCommandMute arguments:@[@"on", @"--fake", @"--muted", @"2717,,9012"] mentions:@"--muted"];
+    [self refuse:QLMControlCommandMute arguments:@[@"on", @"--fake", @"--muted", @","] mentions:@"--muted"];
+}
+
+// Each text names the one monitor whose serial contains it, or none at all.
+- (void)testMutedSerialsNameOneMonitorEach {
+    QLMSnapshot *discovered = QLMDiscovered();
+    NSString *problem = nil;
+    NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(@[@"5678"], discovered, &problem);
+    XCTAssertEqualObjects(hardwareIDs, [NSSet setWithObject:discovered.monitors[0].hardwareID]);
+    XCTAssertNil(QLMHardwareIDsForSerials(@[@"8330"], discovered, &problem));
+    XCTAssertTrue([problem containsString:@"2 monitors"], @"%@", problem);
+    XCTAssertNil(QLMHardwareIDsForSerials(@[@"5678", @"9999"], discovered, &problem));
+    XCTAssertTrue([problem containsString:@"0 monitors"], @"%@", problem);
+}
+
+// mute --serial restates the monitors --muted names as muted, so a monitor
+// muted in GLM stays muted (captures/qlm-control-first/notes.md, 638.7 s).
+- (void)testMuteKeepsTheMonitorsMutedElsewhereMuted {
+    QLMSnapshot *discovered = QLMDiscovered();
+    NSData *target = discovered.monitors[1].hardwareID;  // at 05
+    QLMControlAction mute = ^int(QLMSystem *system, QLMSnapshot *found) {
+        [system setMuted:YES forMonitorWithHardwareID:target];
+        return 0;
+    };
+    NSArray<NSData *> *records = [self recordsOf:QLMWithMuted(@[@"5678"], mute) effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.allMuted;
+    })];
+    NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueMuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))];
+    XCTAssertEqualObjects(records, [round arrayByAddingObjectsFromArray:round]);
+
+    int status = -1;
+    XCTAssertNil(QLMDryRunRecords(discovered, [self dryRunSettings], QLMWithMuted(@[@"9999"], mute), ^BOOL(QLMSnapshot *snapshot) {
+        return YES;
+    }, &status));
+    XCTAssertEqual(status, EX_DATAERR);
+}
+
+static QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume) {
+    QLMHandBack *handBack = [[QLMHandBack alloc] init];
+    handBack.kind = kind;
+    handBack.knobDecibels = knob;
+    handBack.volumeDecibels = volume;
+    return handBack;
+}
+
+// qlmctl's note at exit says what the stop did. A louder take-over names
+// both levels.
+- (void)testTheHandBackNoteSaysWhatTheStopDid {
+    NSString *text = QLMHandBackText(QLMMakeHandBack(QLMHandBackKnobLevel, @(-43.3), @(-40)));
+    XCTAssertTrue([text containsString:@"-43.3 dB"], @"%@", text);
+
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackLouder, @(-30), @(-40)));
+    XCTAssertTrue([text containsString:@"-30.0 dB"] && [text containsString:@"-40.0 dB"], @"%@", text);
+
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, nil, @(-40)));
+    XCTAssertTrue([text containsString:@"no knob"], @"%@", text);
+    text = QLMHandBackText(QLMMakeHandBack(QLMHandBackUnknown, @(-40), nil));
+    XCTAssertTrue([text containsString:@"no volume"], @"%@", text);
+}
+
+// apply-group's options follow its file and group. Over USB it is a
+// supervised test: it needs the level to restore and a ceiling, and only
+// --unverified-rate lets System apply a model whose rate is unverified.
+// Its dry run reads only the setup file, so it needs neither.
+- (void)testApplyGroupOverUSBIsGated {
+    [self refuse:QLMControlCommandApplyGroup arguments:@[] mentions:@"--volume"];
+    [self refuse:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-50"] mentions:@"--ceiling"];
+    [self refuse:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-30", @"--ceiling", @"-40"] mentions:@"ceiling"];
+    QLMControlOptions *options = [self read:QLMControlCommandApplyGroup arguments:@[@"--volume", @"-50", @"--ceiling", @"-40"]];
+    XCTAssertFalse(options.settings.allowsUnverifiedRates);
+    XCTAssertFalse(options.launch);
+    options = [self read:QLMControlCommandApplyGroup
+               arguments:@[@"--volume", @"-50", @"--ceiling", @"-40", @"--unverified-rate", @"--launch"]];
+    XCTAssertTrue(options.settings.allowsUnverifiedRates);
+    XCTAssertTrue(options.launch);
+    XCTAssertTrue([self read:QLMControlCommandApplyGroup arguments:@[@"--dry-run"]].dryRun);
+    [self refuse:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-40", @"--unverified-rate"] mentions:@"unknown"];
+    QLMControlOptions *volume = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--ceiling", @"-40"]];
+    XCTAssertFalse(volume.settings.allowsUnverifiedRates);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [[QLMSystemSettings alloc] init], ^int(QLMSystem *system, QLMSnapshot *found) {
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [self dryRunSettings], ^int(QLMSystem *system, QLMSnapshot *found) {
         return EX_DATAERR;
     }, ^BOOL(QLMSnapshot *snapshot) {
         return YES;

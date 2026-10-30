@@ -38,6 +38,9 @@ NSString *QLMEntryStatusText(QLMMonitorEntry *entry);
 
 @property (nonatomic, readonly, nullable) QLMSnapshot *snapshot;
 @property (nonatomic, readonly) NSArray<QLMMonitorEntry *> *entries;
+// The monitors System tracked in the snapshot before this one and dropped in
+// this one, as last seen.
+@property (nonatomic, readonly) NSArray<QLMMonitorState *> *dropped;
 
 @end
 

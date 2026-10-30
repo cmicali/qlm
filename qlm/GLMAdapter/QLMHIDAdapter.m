@@ -55,9 +55,10 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     // a reopen knows which replies may still come. A replug is a new
     // registry entry, and gets a new link.
     QLMReportLink *_link;
+    id<QLMClock> _clock;
     uint64_t _linkEntry;
     uint8_t _input[QLMReportLength];
-    dispatch_source_t _watch;
+    id<QLMTimer> _watch;
     NSError *_problem;  // why a send fails while no device is open
     NSString *_deviceDescription;
 }
@@ -91,11 +92,12 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 #pragma mark - Lifecycle
 
-- (void)startOnQueue:(dispatch_queue_t)queue {
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
     if (_running) {
         return;
     }
     _queue = queue;
+    _clock = clock;
     _running = YES;
     _runningSelf = CFBridgingRetain(self);
     _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
@@ -112,13 +114,9 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     }
 
     __weak QLMHIDAdapter *weakSelf = self;
-    uint64_t interval = (uint64_t)(QLMHIDWatchInterval * (double)NSEC_PER_SEC);
-    _watch = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-    dispatch_source_set_timer(_watch, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), interval, interval / 10);
-    dispatch_source_set_event_handler(_watch, ^{
+    _watch = [_clock every:QLMHIDWatchInterval queue:queue run:^{
         [weakSelf checkHosts];
-    });
-    dispatch_resume(_watch);
+    }];
 }
 
 - (void)stop {
@@ -126,8 +124,8 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return;
     }
     _running = NO;
-    dispatch_source_cancel(_watch);
-    _watch = NULL;
+    [_watch cancel];
+    _watch = nil;
     [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is stopped.") removed:NO];
     if (_arrivals != IO_OBJECT_NULL) {
         IOObjectRelease(_arrivals);
@@ -249,7 +247,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return nil;
     }
     __weak QLMHIDAdapter *weakSelf = self;
-    _link = [[QLMReportLink alloc] initWithQueue:_queue writer:^NSError *(const uint8_t *report) {
+    _link = [[QLMReportLink alloc] initWithQueue:_queue clock:_clock writer:^NSError *(const uint8_t *report) {
         QLMHIDAdapter *strongSelf = weakSelf;
         return strongSelf != nil ? [strongSelf writeReport:report]
                                  : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");

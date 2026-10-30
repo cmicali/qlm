@@ -39,13 +39,14 @@ These rules protect the monitors and the listener. They outrank any feature.
 - **Send only opcodes on GLMProtocol's allowlist.** Never send `15` (flash commit), `05` (test signals), or the standalone settings `3A 01`, `3A 02`, and `3A 06`.
 - **GLMProtocol clamps every volume frame to the user's ceiling.** `7F FF FF` is 0 dB. A test covers every builder.
 - **Never drive the bus while GLM runs.**
-- **Refuse a group apply for any model whose filter design rate is unverified.**
+- **Refuse a group apply for any model whose filter design rate is unverified, except in qlmctl's supervised test behind its flag, `--unverified-rate`.**
 - **Test against real monitors at a low level, one monitor first.**
 
 ## The protocol and licensing
 
 - qlm is Apache 2.0. The protocol comes from genlc, hlm, and espgensam, and all three are GPL-3.0, so **port no code from them.** Write from the protocol's facts and from captures.
 - **Every protocol fact in code names its source** in a test: a capture in this repo, or a section of hlm's spec.
+- **A new protocol fact lands in [docs/protocol.md](docs/protocol.md), with its source, in the same PR.** The doc is qlm's one reference for the protocol.
 - **Genelec, GLM, and SAM are Genelec's marks.** Use them only to say what qlm works with.
 
 ## vibe-libs

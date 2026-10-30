@@ -1,6 +1,7 @@
 #import <Foundation/Foundation.h>
 
 #import "QLMAdapter.h"
+#import "QLMClock.h"
 #import "QLMSetup.h"
 #import "QLMSnapshot.h"
 
@@ -33,6 +34,18 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // YES: the cycle probes, leases, and polls monitors. NO talks to the adapter
 // alone, and sends the volume only once one is set.
 @property (nonatomic) BOOL discoversMonitors;
+// The mute record to start from, as a snapshot gave it: the muted hardware
+// IDs, and whether mute all is on. No reply reports a monitor's mute, so
+// System's record is the truth, and its rounds restate it.
+@property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;  // empty
+@property (nonatomic) BOOL mutingAll;                           // NO
+// TRAP: AGENTS.md's Safety rule refuses a group apply for any model whose
+// filter design rate is unverified, such as the 8351B. Only qlmctl's
+// supervised test sets this, behind --unverified-rate. The app never does.
+@property (nonatomic) BOOL allowsUnverifiedRates;  // NO
+// Every timer and hop of System and its adapter goes through it, and so do
+// qlmctl's waits. Tests give a virtual clock.
+@property (nonatomic) id<QLMClock> clock;  // QLMRealClock.shared
 
 @end
 
@@ -46,20 +59,31 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter settings:(QLMSystemSettings *)settings;
 
-@property (nonatomic, readonly) QLMSystemSettings *settings;
+@property (atomic, readonly) QLMSystemSettings *settings;  // replaced whole when the ceiling changes
 @property (atomic, readonly) QLMSnapshot *snapshot;  // the latest
 
 // The handler gets the latest snapshot at once, then every one published.
 - (void)setSnapshotHandler:(nullable QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue;
 
 - (void)start;
+// Before it lets go, sends the knob's level when the knob is at or below the
+// level System sends, so the adapter's take-over changes nothing. The
+// snapshot's handBack says what it did. A start while that goes out runs
+// once the stop is done.
 - (void)stop;
+// The same. The completion runs on the main queue once System has let go of
+// the adapter, or at once when it is not running.
+- (void)stopWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every
 // cycle, and ahead of everything else when a monitor is leased. Clamped to
 // the ceiling in the builder. Once one is set, a turn of the adapter's knob
 // sets it too, as GLM lets it (QLMKnob). At start the knob sets nothing.
 - (void)setVolumeDecibels:(double)decibels;
+
+// Caps every volume frame after this. A volume already set goes out again at
+// once, under the new ceiling.
+- (void)setCeilingDecibels:(double)ceilingDecibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A
 // change sends GLM's dim sequence, or nothing while no volume is set.
@@ -68,17 +92,21 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Each sends two rounds of 2B, restating the state of every monitor that is
 // on: its mute in the active group, and GLM's 05 and 07 outside it. Mute all
 // also re-sends the volume and sets the adapter's own mute, as GLM does. A
-// mute holds by hardware ID until the user lifts it or System stops, across
-// a lease that lapses, and for a monitor that first appears while all are
-// muted. A muted monitor leased again, or one that was not on, hears its
+// mute holds by hardware ID until the user lifts it, across a lease that
+// lapses, a stop and a start, and for a monitor that first appears while all
+// are muted. A muted monitor leased again, or one that was not on, hears its
 // state after its next poll that says on. No 2B System sends unmutes it.
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
+// Adds to the record monitors already muted elsewhere, as in GLM, and sends
+// nothing. The next rounds restate them as muted.
+- (void)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs;
 
 // Broadcasts the power sequences, with GLM's spacing between the steps.
-// Nothing else goes out between them. Once a volume is set, the wake ends
-// with it, as GLM's does. The monitors' power state comes back in their
-// telemetry.
+// Nothing else goes out between them. The wake ends with a level, as GLM's
+// does: the volume once one is set, else the knob's position under the
+// ceiling, else the bottom level. The monitors' power state comes back in
+// their telemetry.
 - (void)sleep;
 - (void)wake;
 
@@ -92,6 +120,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // is unverified, for a node that is on with no leased monitor, and while no
 // volume is set. The completion runs on the main queue.
 - (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
+// GLM's group switch, even as the first apply. The rest is as applyGroup:.
+- (void)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
 
 @end
 

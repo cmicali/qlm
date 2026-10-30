@@ -30,6 +30,8 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
         _retryBurst = 4;
         _adapterPollInterval = 0.107;
         _discoversMonitors = YES;
+        _mutedHardwareIDs = [NSSet set];
+        _clock = QLMRealClock.shared;
     }
     return self;
 }
@@ -43,6 +45,10 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.retryBurst = self.retryBurst;
     copy.adapterPollInterval = self.adapterPollInterval;
     copy.discoversMonitors = self.discoversMonitors;
+    copy.mutedHardwareIDs = self.mutedHardwareIDs;
+    copy.mutingAll = self.mutingAll;
+    copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
+    copy.clock = self.clock;
     return copy;
 }
 
@@ -86,6 +92,15 @@ static const NSTimeInterval QLMWakeVolumeDelay = 0.235;
 
 @end
 
+// An identified monitor's last lease, kept across a stop.
+@interface QLMKnownLease : NSObject
+@property (nonatomic) uint8_t session;
+@property (nonatomic, copy) NSString *serial;
+@end
+
+@implementation QLMKnownLease
+@end
+
 // The adapter itself, at 01. Touched only on the queue.
 @interface QLMTrackedAdapter : NSObject
 @property (nonatomic) NSString *serialNumber;
@@ -112,6 +127,21 @@ static BOOL QLMSendWentOut(NSError *_Nullable error) {
                             (error.code == QLMAdapterErrorTimeout || error.code == QLMAdapterErrorBadReply));
 }
 
+// TRAP: GLMAdapter says that GLM holds the adapter only in its error's
+// sentence, which QLMHostCheck writes. QLMSystemTests pins the sentence.
+static QLMBusProblem QLMBusProblemFor(NSError *_Nullable error) {
+    if (error == nil || ![error.domain isEqualToString:QLMAdapterErrorDomain]) {
+        return QLMBusProblemNone;
+    }
+    if (error.code == QLMAdapterErrorDisconnected) {
+        return QLMBusProblemNoAdapter;
+    }
+    if (error.code != QLMAdapterErrorBusy) {
+        return QLMBusProblemNone;
+    }
+    return [error.localizedDescription hasPrefix:@"GLM is running"] ? QLMBusProblemGLM : QLMBusProblemOtherHost;
+}
+
 static QLMMonitorStatus QLMMonitorStatusFor(const QLMTelemetry *telemetry) {
     if (telemetry->status == QLMTelemetryStatusOn) {
         return QLMMonitorStatusOn;
@@ -131,6 +161,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 @interface QLMSystem ()
 @property (atomic, readwrite) QLMSnapshot *snapshot;
+@property (atomic, readwrite) QLMSystemSettings *settings;
 @end
 
 @implementation QLMSystem {
@@ -141,18 +172,27 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableArray<dispatch_block_t> *_sends;
     BOOL _inFlight;
     BOOL _running;
+    BOOL _stopping;        // sending the hand-back level before it lets go
+    BOOL _startAfterStop;  // a start that came while stopping
+    NSMutableArray<dispatch_block_t> *_stopCompletions;
+    // Each identified monitor's last session and serial, by hardware ID,
+    // kept across a stop to take its lease back at the next start.
+    NSMutableDictionary<NSData *, QLMKnownLease *> *_knownLeases;
+    QLMHandBack *_stoppedHandBack;
     NSUInteger _run;  // counts stops
     BOOL _dirty;
-    dispatch_source_t _cycleTimer;
+    id<QLMClock> _clock;  // the settings', which every replacement keeps
+    id<QLMTimer> _cycleTimer;
     BOOL _cycleQueued;
+    BOOL _probing;  // a lease chain runs
     QLMTrackedAdapter *_adapterRecord;
     NSError *_adapterError;
-    dispatch_source_t _adapterTimer;
+    id<QLMTimer> _adapterTimer;
     NSUInteger _adapterPollsQueued;
     QLMKnob *_knob;
     NSNumber *_volumeDecibels;
     BOOL _volumeSendPending;
-    NSDate *_lastVolumeSend;
+    NSTimeInterval _lastVolumeSend;  // on the clock; -INFINITY before the first
     BOOL _dimmed;
     // The hardware IDs the user muted. Kept by ID, so a mute outlives a
     // lease that lapses and the monitor's next lease.
@@ -176,10 +216,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _queue = dispatch_queue_create("com.commonwealthrecordings.qlm.system", DISPATCH_QUEUE_SERIAL);
         _adapter = adapter;
         _settings = [settings copy];
+        _clock = _settings.clock;
+        _lastVolumeSend = -INFINITY;
         _monitors = [NSMutableArray array];
         _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
-        _mutedIDs = [NSMutableSet set];
+        _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
+        _stopCompletions = [NSMutableArray array];
+        _knownLeases = [NSMutableDictionary dictionary];
+        _adapterMuted = settings.mutingAll;
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
         _snapshot = [[QLMSnapshot alloc] init];
@@ -188,20 +233,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (void)dealloc {
-    if (_cycleTimer != NULL) {
-        dispatch_source_cancel(_cycleTimer);
-    }
-    if (_adapterTimer != NULL) {
-        dispatch_source_cancel(_adapterTimer);
-    }
+    [_cycleTimer cancel];
+    [_adapterTimer cancel];
 }
 
 // Every public method's work runs here, so the publishing rule holds after it.
 - (void)onQueue:(dispatch_block_t)block {
-    dispatch_async(_queue, ^{
+    [_clock async:_queue run:^{
         block();
         [self publishIfSettled];
-    });
+    }];
 }
 
 - (void)setSnapshotHandler:(QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue {
@@ -211,9 +252,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_snapshotQueue = queue;
         if (copied != nil) {
             QLMSnapshot *latest = self.snapshot;
-            dispatch_async(queue, ^{
+            [self->_clock async:queue run:^{
                 copied(latest);
-            });
+            }];
         }
     }];
 }
@@ -222,72 +263,136 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)start {
     [self onQueue:^{
-        if (self->_running) {
+        if (self->_stopping) {
+            self->_startAfterStop = YES;
             return;
         }
-        self->_running = YES;
-        [self->_adapter startOnQueue:self->_queue];
-        self->_dirty = YES;
-        // GLM's opening, less what qlm never sends: the adapter's status,
-        // its system info, its serial, then the cycle (captures/startup-idle,
-        // 7.29 s). GLM's 01 22, 01 51 82, and wake are left out.
-        [self pollAdapter];
-        [self identifyAdapter];
-        [self runCycle];
-
-        __weak QLMSystem *weakSelf = self;
-        self->_cycleTimer = [self timerEvery:self.settings.cycleInterval run:^{
-            [weakSelf runCycle];
-        }];
-        if (self.settings.adapterPollInterval > 0) {
-            self->_adapterTimer = [self timerEvery:self.settings.adapterPollInterval run:^{
-                [weakSelf pollAdapter];
-            }];
+        if (!self->_running) {
+            [self beginRunning];
         }
     }];
 }
 
-- (dispatch_source_t)timerEvery:(NSTimeInterval)seconds run:(dispatch_block_t)block {
-    dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, _queue);
-    uint64_t interval = (uint64_t)(seconds * (double)NSEC_PER_SEC);
-    dispatch_source_set_timer(timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)interval), interval, interval / 10);
-    dispatch_source_set_event_handler(timer, block);
-    dispatch_resume(timer);
-    return timer;
+- (void)beginRunning {
+    _running = YES;
+    _stoppedHandBack = nil;
+    [_adapter startOnQueue:_queue clock:_clock];
+    _dirty = YES;
+    // GLM's opening, less what qlm never sends: the adapter's status, its
+    // system info, its serial, then the cycle (captures/startup-idle,
+    // 7.29 s). GLM's 01 22, 01 51 82, and wake are left out.
+    [self pollAdapter];
+    [self identifyAdapter];
+    [self takeBackKnownLeases];
+    [self runCycle];
+
+    __weak QLMSystem *weakSelf = self;
+    _cycleTimer = [_clock every:self.settings.cycleInterval queue:_queue run:^{
+        [weakSelf runCycle];
+    }];
+    if (self.settings.adapterPollInterval > 0) {
+        _adapterTimer = [_clock every:self.settings.adapterPollInterval queue:_queue run:^{
+            [weakSelf pollAdapter];
+        }];
+    }
 }
 
 - (void)stop {
+    [self stopWithCompletion:nil];
+}
+
+- (void)stopWithCompletion:(dispatch_block_t)completion {
+    dispatch_block_t copied = [completion copy];
     [self onQueue:^{
+        self->_startAfterStop = NO;
+        if (copied != nil) {
+            [self->_stopCompletions addObject:copied];
+        }
         if (!self->_running) {
+            [self callStopCompletions];
             return;
         }
-        self->_running = NO;
-        self->_run += 1;
-        if (self->_cycleTimer != NULL) {
-            dispatch_source_cancel(self->_cycleTimer);
-            self->_cycleTimer = NULL;
+        if (self->_stopping) {
+            return;
         }
-        if (self->_adapterTimer != NULL) {
-            dispatch_source_cancel(self->_adapterTimer);
-            self->_adapterTimer = NULL;
-        }
+        QLMHandBack *handBack = [self handBack];
+        self->_stoppedHandBack = handBack;
+        [self cancelTimers];
         [self->_sends removeAllObjects];
-        // A reply that never comes must not stall the next start.
-        self->_inFlight = NO;
-        self->_cycleQueued = NO;
-        self->_adapterPollsQueued = 0;
-        [self->_adapter stop];
-        [self->_monitors removeAllObjects];
-        [self->_mutedIDs removeAllObjects];
-        self->_adapterMuted = NO;
-        [self->_knob reset];
-        self->_adapterRecord = [[QLMTrackedAdapter alloc] init];
-        self->_adapterError = nil;
-        if (self->_applyFinish != nil) {
-            [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System stopped during the apply.", nil)];
+        if (handBack.kind != QLMHandBackKnobLevel) {
+            [self finishStop];
+            return;
         }
-        [self publish];
+        // TRAP: the adapter takes over at the knob's position about 2.6 s
+        // after the host goes quiet (captures/qlm-control-first/notes.md).
+        // The knob is at or below the level qlm sends, so qlm sends the
+        // knob's level first, and the take-over changes nothing.
+        self->_stopping = YES;
+        [self send:[self knobOrBottomLevel] then:nil];
+        [self afterSends:^{
+            [self finishStop];
+        }];
     }];
+}
+
+- (void)cancelTimers {
+    [_cycleTimer cancel];
+    _cycleTimer = nil;
+    [_adapterTimer cancel];
+    _adapterTimer = nil;
+}
+
+// Timers are cancelled already. Drops what was queued during a hand-back.
+- (void)finishStop {
+    _running = NO;
+    _stopping = NO;
+    _run += 1;
+    [_sends removeAllObjects];
+    // A reply that never comes must not stall the next start.
+    _inFlight = NO;
+    _cycleQueued = NO;
+    _probing = NO;
+    _adapterPollsQueued = 0;
+    [_adapter stop];
+    [_monitors removeAllObjects];
+    [_knob reset];
+    _adapterRecord = [[QLMTrackedAdapter alloc] init];
+    _adapterError = nil;
+    if (_applyFinish != nil) {
+        [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System stopped during the apply.", nil)];
+    }
+    [self publish];
+    [self callStopCompletions];
+    if (_startAfterStop) {
+        _startAfterStop = NO;
+        [self beginRunning];
+    }
+}
+
+- (void)callStopCompletions {
+    NSArray<dispatch_block_t> *completions = [_stopCompletions copy];
+    [_stopCompletions removeAllObjects];
+    for (dispatch_block_t completion in completions) {
+        [_clock async:dispatch_get_main_queue() run:completion];
+    }
+}
+
+// What a stop would do to the level now: the knob's position against the
+// level System sends.
+- (QLMHandBack *)handBack {
+    QLMHandBack *handBack = [[QLMHandBack alloc] init];
+    handBack.knobDecibels = [self knobDecibels];
+    if (_volumeDecibels == nil) {
+        return handBack;
+    }
+    QLMMessage sent = [self volumeMessage];
+    uint32_t word = (uint32_t)sent.payload[1] << 16 | (uint32_t)sent.payload[2] << 8 | sent.payload[3];
+    handBack.volumeDecibels = @(QLMVolumeDecibelsForWord(word));
+    if (handBack.knobDecibels != nil) {
+        BOOL atOrBelow = QLMVolumeWordForDecibels(handBack.knobDecibels.doubleValue) <= word;
+        handBack.kind = atOrBelow ? QLMHandBackKnobLevel : QLMHandBackLouder;
+    }
+    return handBack;
 }
 
 #pragma mark - Sending
@@ -365,16 +470,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)hold:(NSTimeInterval)seconds {
     NSUInteger run = _run;
     dispatch_queue_t queue = _queue;
+    id<QLMClock> clock = _clock;
     __weak QLMSystem *weakSelf = self;
     [self enqueue:^{
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * (double)NSEC_PER_SEC)), queue, ^{
+        [clock after:seconds queue:queue run:^{
             QLMSystem *strongSelf = weakSelf;
             // TRAP: a stop empties the line. A hold from before it must not
             // end an item of the next start.
             if (strongSelf != nil && strongSelf->_run == run) {
                 [strongSelf finishItem:nil];
             }
-        });
+        }];
     }];
 }
 
@@ -450,14 +556,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!QLMAddressIsLeasable(candidate)) {
             continue;
         }
-        BOOL used = NO;
-        for (QLMMonitorRecord *monitor in _monitors) {
-            if (monitor.session == candidate) {
-                used = YES;
-                break;
-            }
-        }
-        if (!used) {
+        if ([self monitorAtSession:candidate] == nil) {
             return candidate;
         }
     }
@@ -476,12 +575,24 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // A probe is answered by one monitor without a lease. It gets the next
 // session ID, then its identity is read, and the probe repeats for the next.
 // Once no monitor answers, the new ones get the active group's blocks.
+// TRAP: only one lease chain runs. A second probe, from a cycle inside the
+// chain, would reach the monitor the chain's probe found before its lease
+// goes out, and that monitor would answer both and get two leases.
 - (void)probe {
+    if (_probing) {
+        return;
+    }
+    _probing = YES;
+    [self probeNext];
+}
+
+- (void)probeNext {
     [self send:QLMCommandProbe() then:^(const QLMMessage *reply, NSError *error) {
         uint8_t hardwareID[3];
         if (reply != NULL && QLMReplyHardwareID(reply, hardwareID)) {
             [self assignSessionTo:hardwareID];
         } else {
+            self->_probing = NO;
             [self applyToNewMonitors];
         }
     }];
@@ -498,44 +609,86 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     uint8_t session = [self takeSession];
     if (session == 0) {
+        _probing = NO;
         return;
     }
     [self send:QLMCommandAssignSession(hardwareID, session) then:^(const QLMMessage *reply, NSError *error) {
         uint8_t acked = 0;
         if (reply != NULL && (!QLMReplySessionAck(reply, &acked) || acked != session)) {
+            self->_probing = NO;
             return;
         }
         // A lost ack may hide a lease the monitor took, and then it never
         // answers a probe again. So it is tracked anyway. If it holds the
         // lease its polls answer; if not, the next probe finds it.
         if (reply == NULL && !QLMSendWentOut(error)) {
+            self->_probing = NO;
             return;
         }
-        // TRAP: a monitor just switched on plays at its own stored level
-        // until a host sends one, and that can be loud
-        // (captures/qlm-control-first/notes.md, after the capture).
-        if (self->_volumeDecibels != nil) {
-            [self enqueueNext:@[[self volumeItem]]];
-        }
-        QLMMonitorRecord *monitor = [[QLMMonitorRecord alloc] init];
-        monitor.hardwareID = identity;
-        monitor.session = session;
-        monitor.lastReply = [NSDate date];
-        [self->_monitors addObject:monitor];
-        self->_dirty = YES;
-        // Mute all holds for a monitor that first appears after it.
-        if (self->_adapterMuted) {
-            [self->_mutedIDs addObject:identity];
-        }
-        // A monitor may come back unmuted, so a muted one hears its state
-        // after its first poll, as GLM sends it. One that gets a block
-        // hears it after the block instead.
-        monitor.configured = self->_activeGroup == nil;
-        monitor.needsState = monitor.configured && [self->_mutedIDs containsObject:identity];
-        [self identify:monitor];
-        [self pollMonitor:monitor];
-        [self probe];
+        [self track:identity session:session serial:nil];
+        [self probeNext];
     }];
+}
+
+// TRAP: a monitor that still holds its lease never answers a probe, so after
+// a restart or a short gap it stays hidden until the lease lapses, 23 s or
+// more (docs/plan.md). So each monitor System knew is asked for its serial
+// at its old session. A reply with the same serial is that monitor, and its
+// lease is taken back at once. The probe finds the rest.
+- (void)takeBackKnownLeases {
+    [_knownLeases enumerateKeysAndObjectsUsingBlock:^(NSData *identity, QLMKnownLease *known, BOOL *stop) {
+        uint8_t session = known.session;
+        NSString *serial = known.serial;
+        [self send:QLMCommandSerialNumber(session) then:^(const QLMMessage *reply, NSError *error) {
+            char text[QLMPayloadMax];
+            BOOL same = reply != NULL && QLMReplyText(reply, text, sizeof text) && [@(text) isEqualToString:serial];
+            if (same && [self monitorWithHardwareID:identity] == nil && [self monitorAtSession:session] == nil) {
+                [self track:identity session:session serial:serial];
+            }
+        }];
+    }];
+}
+
+- (nullable QLMMonitorRecord *)monitorAtSession:(uint8_t)session {
+    for (QLMMonitorRecord *monitor in _monitors) {
+        if (monitor.session == session) {
+            return monitor;
+        }
+    }
+    return nil;
+}
+
+// A monitor that holds `session`, from a lease or one taken back. It
+// replaces any record of the same monitor, whose lease is gone.
+- (void)track:(NSData *)identity session:(uint8_t)session serial:(nullable NSString *)serial {
+    QLMMonitorRecord *stale = [self monitorWithHardwareID:identity];
+    if (stale != nil) {
+        [_monitors removeObject:stale];
+    }
+    // TRAP: a monitor just switched on plays at its own stored level until a
+    // host sends one, and that can be loud
+    // (captures/qlm-control-first/notes.md, after the capture).
+    if (_volumeDecibels != nil) {
+        [self enqueueNext:@[[self volumeItem]]];
+    }
+    QLMMonitorRecord *monitor = [[QLMMonitorRecord alloc] init];
+    monitor.hardwareID = identity;
+    monitor.session = session;
+    monitor.serialNumber = serial;
+    monitor.lastReply = [NSDate date];
+    [_monitors addObject:monitor];
+    _dirty = YES;
+    // Mute all holds for a monitor that first appears after it.
+    if (_adapterMuted) {
+        [_mutedIDs addObject:identity];
+    }
+    // A monitor may come back unmuted, so a muted one hears its state after
+    // its first poll, as GLM sends it. One that gets a block hears it after
+    // the block instead.
+    monitor.configured = _activeGroup == nil;
+    monitor.needsState = monitor.configured && [_mutedIDs containsObject:identity];
+    [self identify:monitor];
+    [self pollMonitor:monitor];
 }
 
 // Asks for whichever of the system info and the serial is still unknown.
@@ -558,6 +711,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (monitor.serialNumber == nil) {
         [self ask:QLMCommandSerialNumber(monitor.session) then:^(const char *text) {
             monitor.serialNumber = @(text);
+            QLMKnownLease *known = [[QLMKnownLease alloc] init];
+            known.session = monitor.session;
+            known.serial = monitor.serialNumber;
+            self->_knownLeases[monitor.hardwareID] = known;
         }];
     }
     [self afterSends:^{
@@ -634,7 +791,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             self->_adapterPollsQueued -= 1;
             QLMAdapterStatus status;
             if (reply == NULL || QLMReplyAdapterStatus(reply, &status) != QLMAdapterStatusOK) {
-                adapter.missedPolls += 1;
+                adapter.missedPolls += QLMSendWentOut(error) ? 1 : 0;
                 self->_dirty = YES;
                 return;
             }
@@ -658,7 +815,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_knob reset];
         return;
     }
-    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:NSProcessInfo.processInfo.systemUptime volume:_volumeDecibels];
+    NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:_clock.now volume:_volumeDecibels];
     if (volume == nil) {
         return;
     }
@@ -680,7 +837,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     [self send:QLMCommandPoll(monitor.session) then:^(const QLMMessage *reply, NSError *error) {
         if (reply != NULL) {
             [self monitor:monitor replied:reply];
-        } else {
+        } else if (QLMSendWentOut(error)) {
+            // A poll that never went out, while the bus was refused or gone,
+            // says nothing of the monitor.
             monitor.missedPolls += 1;
             self->_dirty = YES;
             if (monitor.missedPolls >= self.settings.missedPollsLimit) {
@@ -718,16 +877,18 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     monitor.retrying = YES;
     __block NSUInteger remaining = self.settings.retryBurst;
     __block BOOL answered = NO;
+    __block BOOL allWentOut = YES;
     for (NSUInteger i = 0; i < self.settings.retryBurst; i++) {
         [self send:QLMCommandPoll(monitor.session) then:^(const QLMMessage *reply, NSError *error) {
             if (reply != NULL && !answered) {
                 answered = YES;
                 [self monitor:monitor replied:reply];
             }
+            allWentOut = allWentOut && (reply != NULL || QLMSendWentOut(error));
             remaining -= 1;
             if (remaining == 0) {
                 monitor.retrying = NO;
-                if (!answered) {
+                if (!answered && allWentOut) {
                     [self->_monitors removeObject:monitor];
                     self->_dirty = YES;
                     [self probe];
@@ -747,19 +908,31 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }];
 }
 
+- (void)setCeilingDecibels:(double)ceilingDecibels {
+    [self onQueue:^{
+        QLMSystemSettings *settings = [self.settings copy];
+        settings.ceilingDecibels = ceilingDecibels;
+        self.settings = settings;
+        self->_dirty = YES;
+        if (self->_running && !self->_stopping && self->_volumeDecibels != nil) {
+            [self sendVolume];
+        }
+    }];
+}
+
 - (void)scheduleVolumeSend {
     if (_volumeSendPending || !_running) {
         return;
     }
     NSTimeInterval interval = self.settings.volumeInterval;
-    NSTimeInterval since = _lastVolumeSend == nil ? interval : -[_lastVolumeSend timeIntervalSinceNow];
+    NSTimeInterval since = _clock.now - _lastVolumeSend;
     if (since >= interval) {
         [self sendVolume];
         return;
     }
     _volumeSendPending = YES;
     __weak QLMSystem *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((interval - since) * (double)NSEC_PER_SEC)), _queue, ^{
+    [_clock after:interval - since queue:_queue run:^{
         QLMSystem *strongSelf = weakSelf;
         if (strongSelf == nil) {
             return;
@@ -768,7 +941,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (strongSelf->_running) {
             [strongSelf sendVolume];
         }
-    });
+    }];
 }
 
 - (QLMMessage)volumeMessage {
@@ -778,12 +951,26 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (dispatch_block_t)volumeItem {
-    _lastVolumeSend = [NSDate date];
+    _lastVolumeSend = _clock.now;
     return [self itemSending:[self volumeMessage] then:nil];
 }
 
 - (void)sendVolume {
     [self enqueue:[self volumeItem]];
+}
+
+// The knob's position under the ceiling, or with no knob read, the bottom
+// level.
+- (QLMMessage)knobOrBottomLevel {
+    NSNumber *knob = [self knobDecibels];
+    return QLMCommandVolume(knob != nil ? knob.doubleValue : QLMVolumeDecibelsMin, self.settings.ceilingDecibels);
+}
+
+// The knob's position from the last reply to 01 08, or nil with no knob read.
+- (nullable NSNumber *)knobDecibels {
+    QLMTrackedAdapter *adapter = _adapterRecord;
+    QLMAdapterStatus status = adapter.status;
+    return adapter.hasStatus && status.knob && status.hasKnobPosition ? @(status.knobTenths / 10.0) : nil;
 }
 
 - (void)sendInputPair {
@@ -832,6 +1019,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             monitor.needsState = monitor.needsState || !monitor.isOn;
             [self sendMuteRounds:2];
         }
+    }];
+}
+
+- (void)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs {
+    NSSet<NSData *> *copied = [hardwareIDs copy];
+    [self onQueue:^{
+        [self->_mutedIDs unionSet:copied];
+        self->_dirty = YES;
     }];
 }
 
@@ -949,11 +1144,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // GLM's three pairs, back to back within a pair and about 0.2 s apart
-// (captures/startup-idle, 7.33 s). Once a volume is set, it follows 0.235 s
-// later, then broadcast 2D 00 and 3D 00 00 (captures/standby-wake, 47.24 s).
-// A woken monitor keeps its own level until a host sends one
-// (captures/qlm-control-first/notes.md). The monitors come back under new
-// sessions, and the probe finds them.
+// (captures/startup-idle, 7.33 s). A level follows 0.235 s later, then
+// broadcast 2D 00 and 3D 00 00 (captures/standby-wake, 47.24 s). A woken
+// monitor keeps its own level until a host sends one
+// (captures/qlm-control-first/notes.md), so with no volume set the level is
+// the knob's, which the adapter applies once qlm lets go, or with no knob
+// the bottom level. The monitors come back under new sessions, and the
+// probe finds them.
 - (void)wake {
     [self onQueue:^{
         if (!self->_running) {
@@ -966,21 +1163,33 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
         }
+        [self hold:QLMWakeVolumeDelay];
         if (self->_volumeDecibels != nil) {
-            [self hold:QLMWakeVolumeDelay];
             [self sendVolume];
-            [self sendInputPair];
+        } else {
+            [self send:[self knobOrBottomLevel] then:nil];
         }
+        [self sendInputPair];
     }];
 }
 
 #pragma mark - Group apply
 
 - (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
+    [self applyGroup:group switching:NO completion:completion];
+}
+
+- (void)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
+    [self applyGroup:group switching:YES completion:completion];
+}
+
+// `switching`: GLM's switch even when no group is active yet.
+- (void)applyGroup:(QLMSetupGroup *)group switching:(BOOL)switching completion:(void (^)(NSError *_Nullable error))completion {
+    id<QLMClock> clock = _clock;
     void (^finish)(NSError *) = ^(NSError *error) {
-        dispatch_async(dispatch_get_main_queue(), ^{
+        [clock async:dispatch_get_main_queue() run:^{
             completion(error);
-        });
+        }];
     };
     [self onQueue:^{
         NSError *refusal = nil;
@@ -989,13 +1198,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             finish(refusal);
             return;
         }
-        [self sendGroup:group blocks:blocks finish:finish];
+        [self sendGroup:group blocks:blocks switching:switching || self->_activeGroup != nil finish:finish];
     }];
 }
 
 // Every check runs before the first frame. Every block a monitor can get
-// must build at a verified rate, on or off, leased or not. On success, a
-// block for every node, keyed by hardware ID.
+// must build, at a verified rate unless the settings allow otherwise for
+// qlmctl's supervised test, on or off, leased or not. On success, a block
+// for every node, keyed by hardware ID.
 - (nullable NSDictionary<NSData *, QLMDSPBlock *> *)checkGroup:(QLMSetupGroup *)group error:(NSError **)error {
     if (_applyFinish != nil) {
         *error = QLMSystemErrorMake(QLMSystemErrorAlreadyApplying, @"A group apply is already running.", nil);
@@ -1013,7 +1223,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     for (QLMSetupNode *node in group.nodes) {
         QLMDSPBlock *block = node.hardwareID != nil ? blocks[node.hardwareID] : nil;
-        if (block != nil && !block.rateVerified) {
+        if (block != nil && !block.rateVerified && !self.settings.allowsUnverifiedRates) {
             NSString *description = [NSString stringWithFormat:@"The design rate of node %@ (%@) is unverified.", node.serial, node.className];
             *error = QLMSystemErrorMake(QLMSystemErrorUnverifiedRate, description, nil);
             return nil;
@@ -1041,9 +1251,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // (docs/adapter-status.md: its longest gap, 1.70 s).
 - (void)sendGroup:(QLMSetupGroup *)group
            blocks:(NSDictionary<NSData *, QLMDSPBlock *> *)blocks
+        switching:(BOOL)switching
            finish:(void (^)(NSError *_Nullable error))finish {
     _applyFinish = finish;
-    BOOL switching = _activeGroup != nil;
     _activeGroup = group;
     _activeBlocks = blocks;
     QLMApplySequence *sequence = [self sequenceFor:group];
@@ -1074,7 +1284,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     };
 
     if (switching) {
-        _lastVolumeSend = [NSDate date];
+        _lastVolumeSend = _clock.now;
         for (QLMMonitorRecord *monitor in _monitors) {
             monitor.configured = YES;
         }
@@ -1147,6 +1357,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         state.model = monitor.model;
         state.firmwareVersion = monitor.firmwareVersion;
         state.missedPolls = monitor.missedPolls;
+        state.offline = monitor.missedPolls >= self.settings.missedPollsLimit;
         state.lastReply = monitor.lastReply;
         state.muted = [_mutedIDs containsObject:monitor.hardwareID];
         if (monitor.hasTelemetry) {
@@ -1169,21 +1380,26 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.running = _running;
     snapshot.adapter = [self adapterState];
     snapshot.adapterError = _adapterError;
+    snapshot.busProblem = QLMBusProblemFor(_adapterError);
     snapshot.monitors = states;
     snapshot.volumeDecibels = _volumeDecibels;
+    snapshot.ceilingDecibels = self.settings.ceilingDecibels;
     snapshot.dimmed = _dimmed;
     snapshot.applying = _applyFinish != nil;
     snapshot.activeGroupName = _activeGroupName;
     snapshot.idle = [self isIdle];
     snapshot.allIdentified = allIdentified;
     snapshot.allMuted = allMuted;
+    snapshot.handBack = _running && !_stopping ? [self handBack] : (_stoppedHandBack ?: [[QLMHandBack alloc] init]);
+    snapshot.mutedHardwareIDs = [_mutedIDs copy];
+    snapshot.mutingAll = _adapterMuted;
     snapshot.anyOn = anyOn;
     self.snapshot = snapshot;
     QLMSnapshotHandler handler = _snapshotHandler;
     if (handler != nil && _snapshotQueue != NULL) {
-        dispatch_async(_snapshotQueue, ^{
+        [_clock async:_snapshotQueue run:^{
             handler(snapshot);
-        });
+        }];
     }
 }
 

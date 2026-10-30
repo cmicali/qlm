@@ -154,7 +154,7 @@ static const double QLMMeterBarCounts = 48;
 - (void)buildContent {
     NSView *content = self.window.contentView;
 
-    self.banner = [[QLMBannerView alloc] initWithTextWidth:820];
+    self.banner = [[QLMBannerView alloc] initWithTextWidth:820 style:QLMBannerStyleWarning];
 
     self.adapterLabel = [NSTextField labelWithString:@""];
     self.adapterLabel.selectable = YES;

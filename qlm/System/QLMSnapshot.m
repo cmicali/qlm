@@ -31,6 +31,9 @@ const NSInteger QLMMonitorValueAbsent = -1;
 
 @end
 
+@implementation QLMHandBack
+@end
+
 @implementation QLMSnapshot
 
 - (instancetype)init {
@@ -38,6 +41,8 @@ const NSInteger QLMMonitorValueAbsent = -1;
     if (self) {
         _adapter = [[QLMAdapterState alloc] init];
         _monitors = @[];
+        _mutedHardwareIDs = [NSSet set];
+        _handBack = [[QLMHandBack alloc] init];
     }
     return self;
 }

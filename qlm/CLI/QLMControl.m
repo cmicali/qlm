@@ -20,6 +20,9 @@ const double QLMCeilingLimit = -30;
 @property (nonatomic, readwrite) BOOL on;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
 @property (nonatomic, readwrite, nullable) NSString *serial;
+@property (nonatomic, readwrite) NSArray<NSString *> *mutedSerials;
+@property (nonatomic, readwrite) BOOL launch;
+@property (nonatomic, readwrite) BOOL unverifiedRate;
 @property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) NSTimeInterval seconds;
 @end
@@ -43,7 +46,7 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
 + (instancetype)optionsForCommand:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments problem:(NSString **)problem {
     *problem = nil;
     NSMutableSet<NSString *> *flags = [NSMutableSet setWithObjects:@"--fake", @"--dry-run", nil];
-    NSMutableSet<NSString *> *valued = [NSMutableSet setWithObjects:@"--replay", @"--seconds", nil];
+    NSMutableSet<NSString *> *valued = [NSMutableSet setWithObjects:@"--replay", @"--seconds", @"--muted", nil];
     BOOL takesPositional = YES;
     switch (command) {
     case QLMControlCommandVolume:
@@ -62,6 +65,11 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         break;
     case QLMControlCommandWake:
         [flags addObject:@"--allow-high-ceiling"];
+        [valued addObjectsFromArray:@[@"--ceiling", @"--volume"]];
+        takesPositional = NO;
+        break;
+    case QLMControlCommandApplyGroup:
+        [flags addObjectsFromArray:@[@"--allow-high-ceiling", @"--launch", @"--unverified-rate"]];
         [valued addObjectsFromArray:@[@"--ceiling", @"--volume"]];
         takesPositional = NO;
         break;
@@ -98,6 +106,22 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
     options.replayPath = given[@"--replay"];
     options.dryRun = given[@"--dry-run"] != nil;
     options.serial = given[@"--serial"];
+    options.launch = given[@"--launch"] != nil;
+    options.unverifiedRate = given[@"--unverified-rate"] != nil;
+    options.mutedSerials = @[];
+    NSString *muted = given[@"--muted"];
+    if (muted != nil) {
+        NSMutableArray<NSString *> *serials = [NSMutableArray array];
+        for (NSString *item in [muted componentsSeparatedByString:@","]) {
+            NSString *serial = [item stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+            if (serial.length == 0) {
+                *problem = @"--muted takes serials separated by commas, with none empty";
+                return nil;
+            }
+            [serials addObject:serial];
+        }
+        options.mutedSerials = serials;
+    }
     if (options.fake && options.replayPath != nil) {
         *problem = @"--fake and --replay name different buses";
         return nil;
@@ -151,14 +175,19 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         options.ceilingDecibels = number;
     }
 
+    // apply-group's dry run reads only the setup file.
+    BOOL reachesUSB = options.overUSB && !(command == QLMControlCommandApplyGroup && options.dryRun);
     BOOL sendsVolume = command == QLMControlCommandDim || options.volumeDecibels != nil;
-    if (options.overUSB && sendsVolume && ceiling == nil) {
-        NSString *name = command == QLMControlCommandVolume ? @"volume" : (command == QLMControlCommandDim ? @"dim" : @"wake --volume");
-        *problem = [NSString stringWithFormat:@"over USB, %@ needs --ceiling, at most %.0f dB", name, QLMCeilingLimit];
+    if (reachesUSB && sendsVolume && ceiling == nil) {
+        *problem = [NSString stringWithFormat:@"over USB, a command that sends a level needs --ceiling, at most %.0f dB", QLMCeilingLimit];
         return nil;
     }
     if (options.overUSB && command == QLMControlCommandDim && options.volumeDecibels == nil) {
         *problem = @"over USB, dim needs --volume, the level to dim from";
+        return nil;
+    }
+    if (!options.dryRun && command == QLMControlCommandApplyGroup && options.volumeDecibels == nil) {
+        *problem = @"apply-group needs --volume, the level to restore";
         return nil;
     }
     if (options.volumeDecibels != nil && options.volumeDecibels.doubleValue > options.ceilingDecibels) {
@@ -176,6 +205,7 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
 - (QLMSystemSettings *)settings {
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.ceilingDecibels;
+    settings.allowsUnverifiedRates = self.unverifiedRate;
     return settings;
 }
 
@@ -183,7 +213,7 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
 
 #pragma mark - Waiting
 
-QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSnapshotTest test) {
+QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, BOOL (^action)(void), QLMSnapshotTest test) {
     dispatch_semaphore_t passed = dispatch_semaphore_create(0);
     dispatch_queue_t queue = dispatch_queue_create("qlmctl.wait", DISPATCH_QUEUE_SERIAL);
     __block QLMSnapshot *result = nil;
@@ -193,7 +223,9 @@ QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMSn
             dispatch_semaphore_signal(passed);
         }
     } queue:queue];
-    dispatch_semaphore_wait(passed, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeout * (double)NSEC_PER_SEC)));
+    if (action == nil || action()) {
+        [system.settings.clock wait:passed timeout:timeout];
+    }
     [system setSnapshotHandler:nil queue:queue];
     __block QLMSnapshot *found = nil;
     dispatch_sync(queue, ^{
@@ -257,6 +289,57 @@ static BOOL QLMIsDiscovery(NSData *record) {
     return record.length == 6 && QLMRecordIs(record, QLMCommandAssignSession(bytes + 2, bytes[5]));
 }
 
+NSSet<NSData *> *QLMHardwareIDsForSerials(NSArray<NSString *> *serials, QLMSnapshot *discovered, NSString **problem) {
+    *problem = nil;
+    NSMutableSet<NSData *> *hardwareIDs = [NSMutableSet set];
+    for (NSString *serial in serials) {
+        NSMutableArray<QLMMonitorState *> *matches = [NSMutableArray array];
+        for (QLMMonitorState *monitor in discovered.monitors) {
+            if ([monitor.serialNumber containsString:serial]) {
+                [matches addObject:monitor];
+            }
+        }
+        if (matches.count != 1) {
+            *problem = [NSString stringWithFormat:@"%lu monitors match '%@'", (unsigned long)matches.count, serial];
+            return nil;
+        }
+        [hardwareIDs addObject:matches[0].hardwareID];
+    }
+    return hardwareIDs;
+}
+
+QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction action) {
+    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        NSString *problem = nil;
+        NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(serials, discovered, &problem);
+        if (hardwareIDs == nil) {
+            fprintf(stderr, "qlmctl: --muted: %s\n", problem.UTF8String);
+            return EX_DATAERR;
+        }
+        [system recordMutedHardwareIDs:hardwareIDs];
+        return action(system, discovered);
+    };
+}
+
+NSString *QLMHandBackText(QLMHandBack *handBack) {
+    switch (handBack.kind) {
+    case QLMHandBackKnobLevel:
+        return [NSString stringWithFormat:@"qlm sent the knob's level, %.1f dB, as it stopped, so the adapter's take-over "
+                                          @"about 2.6 s later changes nothing.",
+                                          handBack.knobDecibels.doubleValue];
+    case QLMHandBackLouder:
+        return [NSString stringWithFormat:@"about 2.6 s after qlm stops, the adapter takes over at the knob's %.1f dB, "
+                                          @"louder than qlm's %.1f dB. Turn the knob down.",
+                                          handBack.knobDecibels.doubleValue, handBack.volumeDecibels.doubleValue];
+    case QLMHandBackUnknown:
+        break;
+    }
+    NSString *why = handBack.knobDecibels == nil ? @"no knob is in" : @"no volume was set";
+    return [NSString stringWithFormat:@"about 2.6 s after qlm stops, the adapter takes over with its own level, unknown "
+                                      @"here because %@.",
+                                      why];
+}
+
 QLMControlAction QLMDimAction(BOOL on, NSNumber *volumeDecibels) {
     return ^int(QLMSystem *system, QLMSnapshot *discovered) {
         [system setDimmed:!on];
@@ -284,9 +367,11 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     QLMSystemSettings *mirrorSettings = [settings copy];
     mirrorSettings.adapterPollInterval = 0;
     QLMSystem *mirror = [[QLMSystem alloc] initWithAdapter:bus settings:mirrorSettings];
-    [mirror start];
     NSUInteger count = discovered.monitors.count;
-    QLMSnapshot *found = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL(QLMSnapshot *snapshot) {
+    QLMSnapshot *found = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL {
+        [mirror start];
+        return YES;
+    }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.allIdentified && snapshot.monitors.count == count;
     });
     if (found == nil) {
@@ -307,12 +392,15 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     }
 
     NSUInteger start = bus.sentMessages.count;
-    *status = action(mirror, found);
+    QLMSnapshot *effected = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL {
+        *status = action(mirror, found);
+        return *status == 0;
+    }, effect);
     if (*status != 0) {
         [mirror stop];
         return nil;
     }
-    if (QLMWaitForSnapshot(mirror, QLMMirrorTimeout, effect) == nil) {
+    if (effected == nil) {
         *status = EX_TEMPFAIL;
     }
     // Read before the stop, which may land while a send is still on the queue.
