@@ -68,9 +68,11 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Owns the bus on one serial queue. It reads the adapter's identity and polls
 // its status. It runs discovery, the session leases, the poll cycle, and
 // volume. After a change it publishes an immutable snapshot once nothing is
-// queued for the bus or in flight. Every method may be called from any thread.
+// queued for the bus, in flight, or held by the volume's coalescing timer.
+// Every method may be called from any thread.
 // Each command returns its call's number. Once the call has run on System's
-// queue, a snapshot that carries it follows (QLMSnapshot's lastCall).
+// queue, a snapshot that carries it follows, with its frames out, queued,
+// failed, or dropped by a stop (QLMSnapshot's lastCall).
 // While the bus is refused or gone, no frame goes to a session. Once it comes
 // back, System drops every monitor, and takes each back only where its own
 // serial answers at the session it last held.
@@ -85,7 +87,7 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)setSnapshotHandler:(nullable QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue;
 
 // The snapshot System would publish now. The latest one may lag, since
-// System publishes only once nothing is queued for the bus or in flight.
+// System publishes only once it is idle.
 // Decide from this one what must not miss a change, such as whether a stop
 // makes the monitors louder. Nil when System's queue is still busy after
 // `seconds`: it waits up to 5 s on each report an adapter does not take.

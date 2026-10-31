@@ -439,6 +439,36 @@ static NSArray<NSData *> *QLMPair(void) {
     [system stop];
 }
 
+// A volume set within volumeInterval of the last frame waits on a timer,
+// with nothing queued for the bus. qlmctl volume's wait still ends only once
+// its frame is out.
+- (void)testAVolumeWaitEndsOnlyOnceACoalescedFrameIsOut {
+    QLMFakeBus *bus = nil;
+    QLMSystem *system = [self startedSystemOn:&bus];
+    QLMSnapshotTest (^volumeTest)(double) = ^QLMSnapshotTest(double decibels) {
+        return ^BOOL(QLMSnapshot *snapshot) {  // main.m's, for qlmctl volume
+            return snapshot.idle && [snapshot.volumeDecibels isEqualToNumber:@(decibels)];
+        };
+    };
+    int status = -1;
+    XCTAssertNotNil(QLMWaitForEffect(system, system.snapshot, @[], QLMVolumeAction(-50, NO), volumeTest(-50), 5, &status));
+    NSTimeInterval firstSent = _time.now;
+    NSData *frame = QLMRecord(QLMCommandVolume(-40, system.settings.ceilingDecibels));
+    __block BOOL outWhenShown = NO;
+    QLMSnapshotTest test = volumeTest(-40);
+    QLMWaitForEffect(system, system.snapshot, @[], QLMVolumeAction(-40, NO), ^BOOL(QLMSnapshot *snapshot) {
+        if (!test(snapshot)) {
+            return NO;
+        }
+        outWhenShown = [bus.sentMessages containsObject:frame];
+        return YES;
+    }, 5, &status);
+    XCTAssertEqual(status, 0);
+    XCTAssertTrue(outWhenShown);
+    XCTAssertGreaterThanOrEqual(_time.now - firstSent, system.settings.volumeInterval - 1e-9);  // the timer ran
+    [system stop];
+}
+
 // The demo bus's two monitors, found, with no cycle or adapter poll to come.
 - (QLMSystem *)startedSystemOn:(QLMFakeBus *__autoreleasing *)busOut {
     QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
