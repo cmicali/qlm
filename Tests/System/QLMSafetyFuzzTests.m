@@ -872,15 +872,11 @@ static NSData *_Nullable QLMFuzzStray(NSInteger kind) {
 #pragma mark System's side
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
-    [self send:message rewrite:nil replyHandler:handler];
+    [self sendMessage:message rewrite:nil replyHandler:handler];
 }
 
 // As QLMHIDAdapter: the link runs System's rewrite as it writes the report.
-- (void)sendMessage:(QLMMessage)message rewrite:(QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
-    [self send:message rewrite:rewrite replyHandler:handler];
-}
-
-- (void)send:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     QLMFuzzWorld *world = _world;
     NSString *forbidden = QLMFuzzForbidden(&message);
     if (forbidden != nil) {

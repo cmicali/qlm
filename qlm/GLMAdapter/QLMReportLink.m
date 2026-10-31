@@ -90,13 +90,18 @@ static NSError *QLMStalledError(void) {
 }
 
 // Through the allowlist, or nil with why not.
-- (nullable QLMReportLinkRequest *)requestFor:(const QLMMessage *)message error:(NSError **)error {
+static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **error) {
     uint8_t report[QLMReportLength];
-    if (!QLMAdapterPackReport(message, report, error)) {
+    return QLMAdapterPackReport(message, report, error) ? [NSData dataWithBytes:report length:sizeof report] : nil;
+}
+
+- (nullable QLMReportLinkRequest *)requestFor:(const QLMMessage *)message error:(NSError **)error {
+    NSData *report = QLMReportData(message, error);
+    if (report == nil) {
         return nil;
     }
     QLMReportLinkRequest *request = [[QLMReportLinkRequest alloc] init];
-    request.report = [NSData dataWithBytes:report length:sizeof report];
+    request.report = report;
     request.message = *message;
     request.expectsReply = QLMReportExpectsReply(message);
     request.shape = QLMReplyShapeFor(message);
@@ -107,7 +112,7 @@ static NSError *QLMStalledError(void) {
     [self sendMessage:message rewrite:nil replyHandler:handler];
 }
 
-- (void)sendMessage:(QLMMessage)message rewrite:(QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     if (_closed != nil) {
         [self finish:handler reply:NULL error:_closed];
         return;
@@ -145,13 +150,12 @@ static NSError *QLMStalledError(void) {
     NSData *report = request.report;
     if (request.rewrite != nil) {
         QLMMessage message = request.rewrite(request.message);
-        uint8_t packed[QLMReportLength];
         NSError *refusal = nil;
-        if (!QLMAdapterPackReport(&message, packed, &refusal)) {
+        report = QLMReportData(&message, &refusal);
+        if (report == nil) {
             [self finish:request.handler reply:NULL error:refusal];
             return;
         }
-        report = [NSData dataWithBytes:packed length:sizeof packed];
     }
     NSError *error = _writer(report.bytes);
     if (error != nil) {
@@ -193,11 +197,7 @@ static NSError *QLMStalledError(void) {
     _timeouts += 1;
     if (!_stalled) {
         _stalled = YES;
-        QLMReportLinkRequest *held = _held;
-        _held = nil;
-        if (held != nil) {
-            [self finish:held.handler reply:NULL error:QLMStalledError()];
-        }
+        [self failHeld:QLMStalledError()];
     }
     if (_syncAttempts < QLMSyncAttempts) {
         [self writeSync:_waiting.shape];
@@ -219,11 +219,7 @@ static NSError *QLMStalledError(void) {
     NSTimeInterval wait = _replyTimeout * QLMSyncTimeouts * (double)(1u << (_syncAttempts - 1));
     NSError *error = _writer(sync.report.bytes);
     if (error != nil) {
-        QLMReportLinkRequest *held = _held;
-        _held = nil;
-        if (held != nil) {
-            [self finish:held.handler reply:NULL error:error];
-        }
+        [self failHeld:error];
         if (_syncsOut == 0) {
             _syncAttempts = 0;
             return;
@@ -236,6 +232,14 @@ static NSError *QLMStalledError(void) {
     [self after:wait run:^(QLMReportLink *link) {
         [link syncOverdue];
     }];
+}
+
+- (void)failHeld:(NSError *)error {
+    QLMReportLinkRequest *held = _held;
+    _held = nil;
+    if (held != nil) {
+        [self finish:held.handler reply:NULL error:error];
+    }
 }
 
 // The request in flight ends without its reply, which may still come.
@@ -332,10 +336,7 @@ static NSError *QLMStalledError(void) {
             [self finish:waiting.handler reply:NULL error:error];
         }
     }
-    if (_held != nil) {
-        [self finish:_held.handler reply:NULL error:error];
-        _held = nil;
-    }
+    [self failHeld:error];
     if ((_late & QLMReplyShapeSyncs) == QLMReplyShapeSyncs) {
         _failure = QLMAdapterErrorMake(QLMAdapterErrorLostTrack,
                                        @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");

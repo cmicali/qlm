@@ -44,11 +44,13 @@ typedef QLMMessage (^QLMAdapterRewrite)(QLMMessage message);
 @property (nonatomic, readonly) NSString *deviceDescription;
 
 @optional
-// The same, but `rewrite` gives the message that goes out, as its report is
-// written. The rewrite may change only the values, and the allowlist checks
-// it again. TRAP: an adapter that may hold a message before it writes it, as
-// a report link does behind its syncs, must take this.
-- (void)sendMessage:(QLMMessage)message rewrite:(QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler;
+// The same, but `rewrite`, when given, gives the message that goes out, as
+// its report is written. The rewrite may change only the values, and the
+// allowlist checks it again. TRAP: an adapter that may hold a message before
+// it writes it, as a report link does behind its syncs, must take this.
+- (void)sendMessage:(QLMMessage)message
+            rewrite:(nullable QLMAdapterRewrite)rewrite
+       replyHandler:(QLMAdapterReplyHandler)handler;
 
 @end
 

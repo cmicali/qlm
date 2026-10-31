@@ -190,7 +190,7 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     [_link sendMessage:message replyHandler:handler];
 }
 
-- (void)sendMessage:(QLMMessage)message rewrite:(QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     [_link sendMessage:message rewrite:rewrite replyHandler:handler];
 }
 
