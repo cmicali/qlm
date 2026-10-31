@@ -63,6 +63,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) BOOL dimmed;
 @property (nonatomic, readwrite) BOOL applying;
 @property (nonatomic, readwrite, nullable) NSString *activeGroupName;
+@property (nonatomic, readwrite) BOOL wokeWithoutGroup;
 @property (nonatomic, readwrite) BOOL idle;
 @property (nonatomic, readwrite) BOOL allIdentified;
 @property (nonatomic, readwrite) BOOL allMuted;

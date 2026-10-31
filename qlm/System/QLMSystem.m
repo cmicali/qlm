@@ -251,6 +251,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // stop, so the next start applies it in full.
     QLMSetupGroup *_activeGroup;
     NSDictionary<NSData *, QLMDSPBlock *> *_activeBlocks;  // its blocks, by hardware ID
+    BOOL _wokeWithoutGroup;  // see QLMSnapshot
     void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
     QLMSnapshotHandler _snapshotHandler;
     dispatch_queue_t _snapshotQueue;
@@ -603,6 +604,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     BOOL gone = noBus && QLMAdapterProblemFor(error) == QLMAdapterProblemNone;
     if (gone) {
         [self forgetAdapter];
+    }
+    // GLM's launch applies its group.
+    if (QLMBusProblemFor(error) == QLMBusProblemGLM) {
+        _wokeWithoutGroup = NO;
     }
     if (noBus && ![_adapterError isEqual:error]) {
         _adapterError = error;
@@ -1418,11 +1423,20 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!self->_running) {
             return;
         }
+        // A woken monitor plays on its stored settings until a host applies
+        // its group (captures/qlm-app-first/notes.md). Under a group, each
+        // one leased again gets its block.
+        QLMSendCompletion woke = ^(const QLMMessage *reply, NSError *error) {
+            if (QLMSendWentOut(error) && self->_activeGroup == nil) {
+                self->_wokeWithoutGroup = YES;
+                self->_dirty = YES;
+            }
+        };
         for (int pair = 0; pair < 3; pair++) {
             if (pair > 0) {
                 [self hold:QLMWakePairSpacing];
             }
-            [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:nil];
+            [self send:QLMCommandPower(QLMPowerStepWakeFirst) then:pair == 0 ? woke : nil];
             [self send:QLMCommandPower(QLMPowerStepWakeSecond) then:nil];
         }
         [self hold:QLMWakeVolumeDelay];
@@ -1568,6 +1582,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _applyFinish = nil;
     if (error == nil) {
         _activeGroupName = name;
+        _wokeWithoutGroup = NO;
     }
     _dirty = YES;
     if (finish != nil) {
@@ -1674,6 +1689,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.dimmed = _dimmed;
     snapshot.applying = _applyFinish != nil;
     snapshot.activeGroupName = _activeGroupName;
+    snapshot.wokeWithoutGroup = _wokeWithoutGroup;
     snapshot.idle = [self isIdle];
     snapshot.allIdentified = allIdentified;
     snapshot.allMuted = allMuted;

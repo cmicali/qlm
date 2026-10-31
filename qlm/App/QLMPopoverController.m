@@ -54,6 +54,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMBannerView *banner;
 @property (nonatomic) QLMBannerView *setupBanner;
+@property (nonatomic) QLMBannerView *groupBanner;
 @property (nonatomic) NSTextField *deviceLabel;
 @property (nonatomic) NSTextField *messageLabel;
 @property (nonatomic) NSSlider *volumeSlider;
@@ -177,6 +178,7 @@ static NSView *QLMSpacer(void) {
     self.setupBanner.actionButton.target = self;
     self.setupBanner.actionButton.action = @selector(readSetupAgainClicked:);
     self.setupBanner.actionButton.hidden = NO;
+    self.groupBanner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50 style:QLMBannerStyleNotice];
 
     NSTextField *title = [NSTextField labelWithString:@"qlm"];
     title.font = [NSFont systemFontOfSize:NSFont.systemFontSize + 1 weight:NSFontWeightSemibold];
@@ -255,7 +257,7 @@ static NSView *QLMSpacer(void) {
     footer.spacing = 6;
 
     NSArray<NSView *> *fullWidth = @[
-        self.banner, self.setupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
+        self.banner, self.setupBanner, self.groupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
         [self separator], monitorsHeader, self.monitorsStack, [self separator], footer,
     ];
     NSStackView *stack = [NSStackView stackViewWithViews:fullWidth];
@@ -429,6 +431,9 @@ static NSView *QLMSpacer(void) {
     NSString *changed = self.changedSetupName;
     [self.setupBanner showTitle:changed == nil ? nil : [NSString stringWithFormat:@"GLM saved %@", changed]
                          detail:@"Read it again for its new groups."];
+    [self.groupBanner showTitle:snapshot.wokeWithoutGroup ? @"The monitors play without their group's settings" : nil
+                         detail:@"qlm woke them, and applies no group with a model whose filter design rate is unverified. "
+                                @"They play on their stored settings until GLM applies the group."];
     self.deviceLabel.stringValue = snapshot.adapter.device ?: @"";
     self.deviceLabel.toolTip = snapshot.adapter.systemInfo;
     [self renderVolume:snapshot];

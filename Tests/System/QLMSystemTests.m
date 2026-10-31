@@ -1813,6 +1813,67 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// In qlm-app-first, the app's wake brought the monitors back without the
+// group's settings, since it had none active: it refuses every group with
+// an 8351B. Both 8330As played hotter until GLM applied the group
+// (captures/qlm-app-first/notes.md, Surprises). So the snapshot says so,
+// until a group applies, or GLM holds the adapter, whose launch applies its
+// group.
+- (void)testAWakeWithNoGroupActiveSaysSo {
+    [self startWithKnob:nil volume:@(-40)];
+    XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
+    [_system wake];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.wokeWithoutGroup && snapshot.idle;
+    }];
+    [self stopSystem];
+    XCTAssertTrue(_system.snapshot.wokeWithoutGroup);  // kept across a stop
+    [_system start];
+
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.busProblem == QLMBusProblemGLM && !snapshot.wokeWithoutGroup;
+    }];
+}
+
+- (void)testAGroupAppliedAfterAWakeEndsIt {
+    _settings.cycleInterval = 0.3;
+    _settings.ceilingDecibels = 0;
+    [self useMainsAndSub];
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 3 && snapshot.allIdentified && snapshot.idle;
+    }];
+    [_system setVolumeDecibels:-10];
+    [_system wake];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.wokeWithoutGroup && snapshot.idle;
+    }];
+    XCTAssertNil([self applyGroup:[self mainsAndSubOf:0 named:@"Mains"]]);
+    XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
+
+    // Under a group, each monitor leased again gets its block.
+    [_system wake];
+    QLMSnapshot *woken = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle;
+    }];
+    XCTAssertFalse(woken.wokeWithoutGroup);
+}
+
+// A wake that can't go out wakes nothing.
+- (void)testAWakeWhileGLMHoldsTheAdapterSaysNothing {
+    _bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.busProblem == QLMBusProblemGLM;
+    }];
+    [_system wake];
+    [_time advanceBy:1];
+    XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
+}
+
 // A monitor just switched on plays at its own stored level until a host
 // sends one (captures/qlm-control-first/notes.md, after the capture). So
 // once a volume is set, it goes out right after a lease, before anything
