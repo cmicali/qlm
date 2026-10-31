@@ -58,7 +58,8 @@ static NSString *QLMDescribeExchange(QLMCaptureExchange *exchange) {
 
 // Every output report GLM sent unpacks and decodes. qlm packs every one the
 // allowlist accepts to the same 64 bytes, and refuses the rest. The refused
-// set is exactly the opcodes GLM sends that qlm never does.
+// set is exactly the opcodes GLM sends that qlm never does. The broadcast
+// 03 is in setup-b-peq-8351b only, twice at 22.461 s.
 - (void)testEveryOutputReportRepacksByteForByte {
     NSMutableSet<NSString *> *refused = [NSMutableSet set];
     NSUInteger repacked = 0;
@@ -85,7 +86,7 @@ static NSString *QLMDescribeExchange(QLMCaptureExchange *exchange) {
     }
     XCTAssertEqual(mismatches, 0u);
     XCTAssertGreaterThan(repacked, 50000u);
-    NSSet<NSString *> *glmOnly = [NSSet setWithArray:@[@"05", @"43", @"4B", @"adapter 22", @"adapter 51"]];
+    NSSet<NSString *> *glmOnly = [NSSet setWithArray:@[@"05", @"43", @"4B", @"adapter 22", @"adapter 51", @"FF 03"]];
     XCTAssertEqualObjects(refused, glmOnly);
 }
 

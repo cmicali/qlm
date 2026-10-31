@@ -26,6 +26,9 @@ extern const int QLMCompareApplyDiffers;
 @property (nonatomic, readonly, nullable) NSString *model;
 // From the last lease of the session in the capture, where it holds one.
 @property (nonatomic, readonly, nullable) NSData *hardwareID;
+// GLM sent no 3D: its next 17 01, or the capture's end, came first. GLM cuts
+// a pass short when it leases the monitor again mid-pass.
+@property (nonatomic, readonly) BOOL cutShort;
 @end
 
 // A generator stop GLM sent a session.
@@ -49,7 +52,8 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
 
 // How a captured pass differs from a block. Payloads are compared by the
 // setting each names: a PEQ slot, a level subcommand, a routing input, or
-// the opcode alone.
+// the opcode alone. A pass cut short is compared with the block's start, as
+// far as GLM got.
 @interface QLMBlockComparison : NSObject
 
 + (instancetype)comparisonOfBlock:(QLMDSPBlock *)block withPass:(QLMCapturedPass *)pass;

@@ -8,13 +8,13 @@
 // y = b0 x + b1 x1 + b2 x2 - a1 y1 - a2 y2. The wire wants a1 and a2 with
 // their signs flipped; QLMBiquadPack does that. GLM designs in double and
 // normalizes in single precision, so each coefficient is the float the wire
-// carries.
+// carries. A shelf's w0 is a float too.
 typedef struct {
     double b0, b1, b2, a1, a2;
 } QLMBiquad;
 
 // GLM designs the shelves in Q form with fixed Qs. A three-way's high
-// shelf takes 0.3, not 0.5. No capture shows a low shelf.
+// shelf takes 0.3, not 0.5. Only the 8351B's low shelves are captured.
 #define QLMBiquadLowShelfQ 0.3
 #define QLMBiquadHighShelfQ 0.5
 #define QLMBiquadThreeWayHighShelfQ 0.3

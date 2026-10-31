@@ -99,7 +99,7 @@ Captures decide whether the 8351B's refusal lifts. We record GLM applying setups
 
 `compare-apply FILE.sam reports.txt --group NAME` checks a capture of GLM's apply of one group against qlm's blocks from a setup file. It reads the two files and opens no bus. It refuses any option of the bus, so a wrong flag can't drive the monitors.
 
-It takes each DSP pass in the capture, from `17 01` through the `40` frames after `3D`. `--from S` and `--to S` keep only the passes in that window of the capture's seconds. Each apply gets its own run, with its group and its window.
+It takes each DSP pass in the capture, from `17 01` through the `40` frames after `3D`. A pass with no `3D` was cut short: GLM sent the session's next `17 01` first, as it does when it leases a monitor again mid-pass. It's compared with the start of the block, as far as GLM got, and prints `cut short by GLM`. `--from S` and `--to S` keep only the passes in that window of the capture's seconds. Each apply gets its own run, with its group and its window.
 
 It matches each pass to the node of the group whose block is closest to it. Only that group's nodes count, since another group may hold a near copy of a node. In Main.sam, Group_4 is nearly Main 4x2, so a search across groups could match a changed node's pass to the old copy, and hide the change. Two more rules narrow the match:
 

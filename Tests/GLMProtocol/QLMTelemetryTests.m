@@ -185,7 +185,7 @@ static QLMMessage QLMJoinedFrame(QLMMessage first, QLMMessage second) {
 
 // sleep-wake-darkwake: the Left 8351B, at 15, splits a frame at 313.28 s.
 // The first part is the temperature alone. The next poll, at 313.88 s,
-// brings the rest. In every capture, each of the 40 first parts and the
+// brings the rest. In every capture, each of the 47 first parts and the
 // monitor's next reply make one whole frame, and no second part comes alone.
 - (void)testASplitFrame {
     QLMMessage first = QLMMakeMessage(QLMAddressReply, 0x09, 0x41, 0x2A);
@@ -226,7 +226,7 @@ static QLMMessage QLMJoinedFrame(QLMMessage first, QLMMessage second) {
             firsts[address] = reply;
         }
     }
-    XCTAssertEqual(splits, 40u);
+    XCTAssertEqual(splits, 47u);
 }
 
 // sleep-wake-darkwake: 8A rides one frame in 30 s. One frame that carried it

@@ -30,7 +30,7 @@ The numbers here come from a script over every `reports.txt`. It parsed each rep
 
 ## The frame
 
-The captures hold 31,628 replies to a monitor's `08`. 18,174 are whole frames, and 13,330 are a bare `09`. 44 are a bare busy marker. 80 are the two parts of 40 split frames.
+The captures hold 36,609 replies to a monitor's `08`. 21,046 are whole frames, and 15,418 are a bare `09`. 51 are a bare busy marker. 94 are the two parts of 47 split frames.
 
 Each model sends its fields in a fixed order:
 
@@ -58,7 +58,7 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 | 313.283 s | `09 41 2A` |
 | 313.878 s | `09 81 00 2A 82 00 2A 83 00 2A 42 9F 43 80 45 80 44 80 47 01 49 73 88 00 4B 89 00 41 84 02 F1` |
 
-- The captures have 40 split frames, from every model, in 13 scenarios. The split falls at any field: after `41` in 29, and after `83`, `46`, `42`, `47`, `49`, or `89` in the rest.
+- The captures have 47 split frames, from every model, in 15 scenarios. The split falls at any field: after `41` in 33, and after `81`, `83`, `46`, `42`, `47`, `49`, or `89` in the rest.
 - Every first part is followed by its second part at the monitor's next poll. No second part comes alone.
 - **Guess:** the poll reads the monitor's reply while the monitor is still writing that second's frame.
 
