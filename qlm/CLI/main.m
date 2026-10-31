@@ -103,9 +103,8 @@ static void QLMPrintUsage(FILE *stream) {
             "does and a redacted one doesn't, only that node counts. A node is one monitor, so a second\n"
             "session can't match it, unless the capture leases that session, as when a monitor is leased\n"
             "again. It prints each pass's node, then every setting whose frame differs, as GLM's then qlm's,\n"
-            "every frame only GLM sent, every frame only qlm would send, and the 8351B's 43 00 02 and\n"
-            "4B 00 00 00 01, which qlm leaves out. It checks every generator stop, 05 04, in the window, pass\n"
-            "or no pass. A left-out frame or a stop with other bytes is a frame only GLM sent. It exits 0\n"
+            "every frame only GLM sent, and every frame only qlm would send. It checks every generator stop,\n"
+            "05 04, in the window, pass or no pass. A stop with other bytes is a frame only GLM sent. It exits 0\n"
             "when every pass matches and every stop is the known one, %d when not, %d for an argument it\n"
             "doesn't know or no --group, and %d for a file it can't read, a group the setup lacks, or no pass.\n",
             QLMAdapterPollLimit, [[QLMSystemSettings alloc] init].adapterPollInterval, QLMDimDecibels, QLMCeilingLimit,
@@ -851,9 +850,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         QLMMessage message = QLMApplyMessage(record);
         QLMPrintFrame(&message, NULL, NULL);
     }
-    printf("%lu frames. Not sent, though GLM sends them: 05 04 before each block, and the 8351B's 43 00 02 and "
-           "4B 00 00 00 01.\n",
-           (unsigned long)records.count);
+    printf("%lu frames. Not sent, though GLM sends it: 05 04 before each block.\n", (unsigned long)records.count);
     printf("%s\n", allowed ? "every node's rate is verified: an apply would be allowed"
                             : "REFUSED: a node's design rate is unverified, so an apply runs only as its supervised "
                               "test, with --unverified-rate");
