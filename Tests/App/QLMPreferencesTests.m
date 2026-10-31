@@ -99,6 +99,32 @@ static NSData *QLMID(uint8_t last) {
     }
 }
 
+// No level registers a default, so a key with nothing kept, or a hand edit
+// that is no level, reads as the class's own default. doubleForKey: reads
+// either as 0 dB.
+- (void)testALevelWithNoRegisteredDefaultReadsAsItsDefault {
+    NSDictionary<NSString *, id> *registered = [_defaults volatileDomainForName:NSRegistrationDomain];
+    NSDictionary<NSString *, NSNumber *> *levels = @{
+        @"QLMCeilingDecibels": @(QLMCeilingLimit),
+        @"QLMLowestDecibels": @(-60),
+        @"QLMVolumeDecibels": @(-40),
+        @"QLMFakeVolumeDecibels": @(-40),
+    };
+    for (id kept in @[NSNull.null, @"loud"]) {
+        for (NSString *key in levels) {
+            XCTAssertNil(registered[key], @"%@", key);
+            if (kept != NSNull.null) {
+                [_defaults setObject:kept forKey:key];
+            }
+            XCTAssertEqual([_defaults doubleForKey:key], 0, @"%@", key);
+        }
+        XCTAssertEqual(_preferences.ceilingDecibels, levels[@"QLMCeilingDecibels"].doubleValue, @"%@", kept);
+        XCTAssertEqual(_preferences.lowestDecibels, levels[@"QLMLowestDecibels"].doubleValue, @"%@", kept);
+        XCTAssertEqual(_preferences.adapterBus.volumeDecibels, levels[@"QLMVolumeDecibels"].doubleValue, @"%@", kept);
+        XCTAssertEqual(_preferences.fakeBus.volumeDecibels, levels[@"QLMFakeVolumeDecibels"].doubleValue, @"%@", kept);
+    }
+}
+
 // A hand-edited number at or under 0 dB still reads, held to the range.
 - (void)testAHandEditedLevelUnderFullLevelReads {
     [_defaults setDouble:-12.3 forKey:@"QLMCeilingDecibels"];

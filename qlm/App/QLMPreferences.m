@@ -6,6 +6,8 @@
 #import "QLMSystem.h"
 
 const double QLMVolumeRangeMinimumSpan = 10;
+static const double QLMDefaultLowestDecibels = -60;
+static const double QLMDefaultVolumeDecibels = -40;
 
 static NSString *const QLMCeilingKey = @"QLMCeilingDecibels";
 static NSString *const QLMLowestKey = @"QLMLowestDecibels";
@@ -37,15 +39,13 @@ BOOL QLMIsSavableLevel(double decibels) {
     return decibels <= QLMVolumeDecibelsMax;
 }
 
-// TRAP: doubleForKey: reads a string that is no number as 0 dB. So only a
-// number at or under 0 dB is read, and anything else is the default.
-static double QLMKeptLevel(NSUserDefaults *defaults, NSString *key) {
+// Anything but a number at or under 0 dB reads as the default. The levels
+// register no default, so a key with none can't read as 0 dB. TRAP:
+// doubleForKey: reads a string that is no number, or nothing, as 0 dB.
+static double QLMKeptLevel(NSUserDefaults *defaults, NSString *key, double fallback) {
     id kept = [defaults objectForKey:key];
     double decibels = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
-    if (QLMIsSavableLevel(decibels)) {
-        return decibels;
-    }
-    return [[defaults volatileDomainForName:NSRegistrationDomain][key] doubleValue];
+    return QLMIsSavableLevel(decibels) ? decibels : fallback;
 }
 
 // Kept as a property list.
@@ -81,7 +81,6 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         _defaults = defaults;
         _prefix = [prefix copy];
         _preferences = preferences;
-        [defaults registerDefaults:@{[self key:QLMVolumeName]: @(-40)}];
     }
     return self;
 }
@@ -91,7 +90,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 }
 
 - (double)volumeDecibels {
-    return [_preferences boundedVolume:QLMKeptLevel(_defaults, [self key:QLMVolumeName])];
+    return [_preferences boundedVolume:QLMKeptLevel(_defaults, [self key:QLMVolumeName], QLMDefaultVolumeDecibels)];
 }
 
 - (BOOL)saveVolumeDecibels:(double)volumeDecibels {
@@ -197,6 +196,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 
 @implementation QLMPreferences {
     NSUserDefaults *_defaults;
+    double _defaultCeilingDecibels;  // System's
 }
 
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults {
@@ -205,9 +205,8 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         _defaults = defaults;
         _adapterBus = [[QLMBusPreferences alloc] initWithDefaults:defaults prefix:QLMAdapterBusPrefix preferences:self];
         _fakeBus = [[QLMBusPreferences alloc] initWithDefaults:defaults prefix:QLMFakeBusPrefix preferences:self];
+        _defaultCeilingDecibels = [[QLMSystemSettings alloc] init].ceilingDecibels;
         [defaults registerDefaults:@{
-            QLMCeilingKey: @([[QLMSystemSettings alloc] init].ceilingDecibels),
-            QLMLowestKey: @(-60),
             QLMWakesAtLaunchKey: @NO,
             QLMUsesAdapterKey: @NO,
         }];
@@ -218,7 +217,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 // Read through the save's bounds too, so a hand-edited default stays on a
 // step and above the range's bottom.
 - (double)ceilingDecibels {
-    return fmax(QLMVolumeDecibelsMin + QLMVolumeRangeMinimumSpan, QLMStepBelow(QLMKeptLevel(_defaults, QLMCeilingKey)));
+    return fmax(QLMVolumeDecibelsMin + QLMVolumeRangeMinimumSpan, QLMStepBelow(QLMKeptLevel(_defaults, QLMCeilingKey, _defaultCeilingDecibels)));
 }
 
 - (BOOL)saveCeilingDecibels:(double)ceilingDecibels {
@@ -235,7 +234,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 }
 
 - (double)lowestDecibels {
-    return [self boundedLowest:QLMKeptLevel(_defaults, QLMLowestKey)];
+    return [self boundedLowest:QLMKeptLevel(_defaults, QLMLowestKey, QLMDefaultLowestDecibels)];
 }
 
 - (BOOL)saveLowestDecibels:(double)lowestDecibels {
