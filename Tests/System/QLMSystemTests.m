@@ -1612,6 +1612,8 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
     XCTAssertEqual([self sentWithOpcode:0x3A from:before].count, 0u);
     XCTAssertEqual([self sentWithOpcode:0x10 from:before].count, 0u);
+    XCTAssertEqual([self sentWithOpcode:0x43 from:before].count, 0u);
+    XCTAssertEqual([self sentWithOpcode:0x4B from:before].count, 0u);
     XCTAssertEqual(_bus.sentMessages.count, before);
     XCTAssertNil(_system.snapshot.activeGroupName);
 }
@@ -2682,7 +2684,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 
 // AGENTS.md's Safety rule refuses a group with an unverified model, the
 // 8351B, but for qlmctl's supervised test, which sets allowsUnverifiedRates.
+// The setting is off by default. The supervised test's block carries 43 00 02
+// and 4B 00 00 00 01, as GLM's does. The refused apply sends neither.
 - (void)testOnlyTheSupervisedSettingAppliesAnUnverifiedRate {
+    XCTAssertFalse([[QLMSystemSettings alloc] init].allowsUnverifiedRates);
     _settings.cycleInterval = 10;
     const uint8_t leftID[3] = {0x0F, 0x42, 0x42};  // the fixture's 1000002, the Left 8351B
     _left = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(leftID, 3) serialNumber:@"8351BP21001234"
@@ -2702,12 +2707,19 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         [_system setVolumeDecibels:-40];
         NSUInteger before = _bus.sentMessages.count;
         NSError *error = [self applyGroup:left];
+        uint8_t session = QLMFindMonitor(_system.snapshot, _left.hardwareID).session;
         if (allowed.boolValue) {
             XCTAssertNil(error);
             XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 1u);
+            const uint8_t frame43[] = {session, 0x43, 0x00, 0x02};
+            const uint8_t frame4B[] = {session, 0x4B, 0x00, 0x00, 0x00, 0x01};
+            XCTAssertEqualObjects([self sentWithOpcode:0x43 from:before], @[QLMBytes(frame43, sizeof frame43)]);
+            XCTAssertEqualObjects([self sentWithOpcode:0x4B from:before], @[QLMBytes(frame4B, sizeof frame4B)]);
         } else {
             XCTAssertEqual(error.code, QLMSystemErrorUnverifiedRate);
             XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 0u);
+            XCTAssertEqual([self sentWithOpcode:0x43 from:before].count, 0u);
+            XCTAssertEqual([self sentWithOpcode:0x4B from:before].count, 0u);
         }
         [self stopAndWait];
     }

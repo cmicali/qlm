@@ -56,6 +56,10 @@ bool QLMFrameAllows(const uint8_t *payload, size_t length) {
     case 0x3E:
     case 0x42:
         return length == 3 && payload[1] == 0x00 && payload[2] == 0x00;
+    case 0x43: // to the 8351B, meaning unknown: 00 02 only
+        return length == 3 && payload[1] == 0x00 && payload[2] == 0x02;
+    case 0x4B: // to the 8351B, meaning unknown: 00 00 00 01 only
+        return length == 5 && payload[1] == 0x00 && payload[2] == 0x00 && payload[3] == 0x00 && payload[4] == 0x01;
     case 0x3A: // power only, never the standalone settings
         return length >= 2 && payload[1] == 0x03;
     default:
@@ -63,8 +67,8 @@ bool QLMFrameAllows(const uint8_t *payload, size_t length) {
     }
 }
 
-static bool QLMFrameIsSubwooferOnly(uint8_t opcode) {
-    return opcode == 0x3C || opcode == 0x3E || opcode == 0x42;
+static bool QLMFrameIsSessionOnly(uint8_t opcode) {
+    return opcode == 0x3C || opcode == 0x3E || opcode == 0x42 || opcode == 0x43 || opcode == 0x4B;
 }
 
 static bool QLMFramePut(uint8_t *out, size_t capacity, size_t *count, uint8_t byte, bool escape) {
@@ -97,12 +101,12 @@ QLMFrameStatus QLMFrameEncode(const QLMMessage *message, uint8_t *out, size_t ca
         message->address == QLMFrameEscape) {
         return QLMFrameErrorForbidden;
     }
-    // GLM sends 2D only as a broadcast, and 3C, 3E, and 42 only to a
-    // subwoofer's session.
+    // GLM sends 2D only as a broadcast, 3C, 3E, and 42 only to a subwoofer's
+    // session, and 43 and 4B only to an 8351B's.
     if (message->payload[0] == 0x2D && message->address != QLMAddressBroadcast) {
         return QLMFrameErrorForbidden;
     }
-    if (QLMFrameIsSubwooferOnly(message->payload[0]) && !QLMAddressIsLeasable(message->address)) {
+    if (QLMFrameIsSessionOnly(message->payload[0]) && !QLMAddressIsLeasable(message->address)) {
         return QLMFrameErrorForbidden;
     }
 

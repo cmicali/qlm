@@ -142,8 +142,6 @@ static NSData *QLMSettingKey(NSData *payload) {
 @interface QLMBlockComparison ()
 @property (nonatomic, readwrite) NSArray<NSArray<NSData *> *> *changed;
 @property (nonatomic, readwrite) NSArray<NSData *> *glmOnly;
-@property (nonatomic, readwrite) NSArray<NSData *> *leftOut;
-@property (nonatomic, readwrite) NSArray<NSData *> *missingLeftOut;
 @property (nonatomic, readwrite) NSArray<NSData *> *qlmOnly;
 @property (nonatomic, readwrite) BOOL inOrder;
 // Fewer differences first, then in order.
@@ -153,19 +151,9 @@ static NSData *QLMSettingKey(NSData *payload) {
 @implementation QLMBlockComparison
 
 + (instancetype)comparisonOfBlock:(QLMDSPBlock *)block withPass:(QLMCapturedPass *)pass {
-    NSArray<NSData *> *extras = block.leftOutPayloads;
-    NSMutableOrderedSet<NSData *> *leftOut = [NSMutableOrderedSet orderedSet];
-    NSMutableArray<NSData *> *kept = [NSMutableArray array];
-    for (NSData *payload in pass.payloads) {
-        if ([extras containsObject:payload]) {
-            [leftOut addObject:payload];
-        } else {
-            [kept addObject:payload];
-        }
-    }
     NSArray<NSData *> *payloads = block.payloads;
-    if (pass.cutShort && kept.count < payloads.count) {
-        payloads = [payloads subarrayWithRange:NSMakeRange(0, kept.count)];
+    if (pass.cutShort && pass.payloads.count < payloads.count) {
+        payloads = [payloads subarrayWithRange:NSMakeRange(0, pass.payloads.count)];
     }
     NSMutableDictionary<NSData *, NSData *> *expected = [NSMutableDictionary dictionary];
     for (NSData *payload in payloads) {
@@ -175,7 +163,7 @@ static NSData *QLMSettingKey(NSData *payload) {
     NSMutableSet<NSData *> *changedSeen = [NSMutableSet set];
     NSMutableOrderedSet<NSData *> *glmOnly = [NSMutableOrderedSet orderedSet];
     NSMutableSet<NSData *> *seen = [NSMutableSet set];
-    for (NSData *payload in kept) {
+    for (NSData *payload in pass.payloads) {
         NSData *key = QLMSettingKey(payload);
         NSData *mine = expected[key];
         if (mine == nil) {
@@ -194,25 +182,17 @@ static NSData *QLMSettingKey(NSData *payload) {
             [qlmOnly addObject:payload];
         }
     }
-    NSMutableArray<NSData *> *missing = [NSMutableArray array];
-    for (NSData *extra in extras) {
-        if (!pass.cutShort && ![leftOut containsObject:extra]) {
-            [missing addObject:extra];
-        }
-    }
 
     QLMBlockComparison *comparison = [[QLMBlockComparison alloc] init];
     comparison.changed = changed;
     comparison.glmOnly = glmOnly.array;
-    comparison.leftOut = leftOut.array;
-    comparison.missingLeftOut = missing;
     comparison.qlmOnly = qlmOnly.array;
-    comparison.inOrder = [kept isEqualToArray:payloads];
+    comparison.inOrder = [pass.payloads isEqualToArray:payloads];
     return comparison;
 }
 
 - (NSUInteger)differenceCount {
-    return self.changed.count + self.glmOnly.count + self.missingLeftOut.count + self.qlmOnly.count;
+    return self.changed.count + self.glmOnly.count + self.qlmOnly.count;
 }
 
 - (BOOL)matches {
@@ -386,12 +366,6 @@ static void QLMPrintMatch(FILE *out, QLMPassMatch *match, QLMSetup *setup) {
     for (NSData *payload in comparison.qlmOnly) {
         QLMPrintPayload(out, "qlm only", payload);
     }
-    for (NSData *payload in comparison.missingLeftOut) {
-        QLMPrintPayload(out, "not sent", payload);
-    }
-    for (NSData *payload in comparison.leftOut) {
-        QLMPrintPayload(out, "left out", payload);
-    }
     if (!match.matches && match.ties > 0) {
         fprintf(out, "  %lu other %s as close\n", (unsigned long)match.ties, match.ties == 1 ? "node is" : "nodes are");
     }
@@ -461,6 +435,6 @@ int QLMCompareApply(NSArray<NSString *> *arguments, FILE *out, FILE *err) {
                 matches.count - matched == 1 ? "differs" : "differ", (unsigned long)oddStops, oddStops == 1 ? "stop differs" : "stops differ");
         return QLMCompareApplyDiffers;
     }
-    fprintf(out, ", apart from what qlm leaves out: the generator stop, and the 8351B's 43 00 02 and 4B 00 00 00 01.\n");
+    fprintf(out, ", apart from the generator stop, which qlm leaves out.\n");
     return 0;
 }

@@ -34,6 +34,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite, nullable) NSNumber *lfeCrossoverFrequency;
 @property (nonatomic, readwrite, nullable) NSNumber *lfeLevel;
 @property (nonatomic, readwrite, nullable) NSNumber *subwooferGroupID;
+@property (nonatomic, readwrite, nullable) NSNumber *groupDelayCompensation;
+@property (nonatomic, readwrite, nullable) NSNumber *bassExtensionCrossover;
 @property (nonatomic, readwrite) NSArray<QLMSetupBand *> *bands;
 @end
 

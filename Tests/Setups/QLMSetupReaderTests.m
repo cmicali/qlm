@@ -162,9 +162,24 @@
     XCTAssertEqual(node.levelSensitivity, -0.17);
     XCTAssertEqual(node.timeOfFlightCompensation, 1.23);
     XCTAssertEqual(node.input, 1);
+    XCTAssertEqualObjects(node.groupDelayCompensation, @2);
+    XCTAssertEqualObjects(node.bassExtensionCrossover, @1);
     XCTAssertEqual(node.bands.count, 20u);
     for (QLMSetupBand *band in node.bands) {
         XCTAssertEqual(band.sampleRate, 96000);
+    }
+}
+
+// At node level only the 8351B has GroupDelayCompensation and
+// BassExtensionXO(Hz). Each group has its own GroupDelayCompensation, which
+// the reader passes over.
+- (void)testOnlyTheThreeWaysHaveTheirOwnFields {
+    for (QLMSetupGroup *group in QLMReadFixtureSetup().groups) {
+        for (QLMSetupNode *node in group.nodes) {
+            BOOL threeWay = node.nodeClass == QLMSetupNodeClassThreeWay;
+            XCTAssertEqual(node.groupDelayCompensation != nil, threeWay, @"%@ %@", group.name, node.serial);
+            XCTAssertEqual(node.bassExtensionCrossover != nil, threeWay, @"%@ %@", group.name, node.serial);
+        }
     }
 }
 

@@ -111,7 +111,7 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
         ]];
         _nodeIgnored = [NSSet setWithArray:@[
             @"CalibrationGroupID", @"CalibrationStatusFlag", @"PhaseCalibratedWith", @"MultiChannel_AES_EBU",
-            @"GroupDelayCompensation", @"WooferSystemWithSerial", @"BassExtensionXO(Hz)", @"RateFlatness", @"RateCorrelated",
+            @"WooferSystemWithSerial", @"RateFlatness", @"RateCorrelated",
         ]];
     }
     return self;
@@ -454,6 +454,10 @@ static QLMSetupNodeClass QLMNodeClassNamed(NSString *name) {
             node.lfeLevel = @([self number:entry]);
         } else if ([key isEqualToString:@"SubwooferGroupID"]) {
             node.subwooferGroupID = @([self number:entry]);
+        } else if ([key isEqualToString:@"GroupDelayCompensation"]) {
+            node.groupDelayCompensation = @([self number:entry]);
+        } else if ([key isEqualToString:@"BassExtensionXO(Hz)"]) {
+            node.bassExtensionCrossover = @([self number:entry]);
         } else if ([key isEqualToString:@"LP_Shelve"]) {
             QLMSetupBand *band = [self parseBandOfType:QLMSetupBandLowShelf from:entry];
             if (band != nil) [bands addObject:band];

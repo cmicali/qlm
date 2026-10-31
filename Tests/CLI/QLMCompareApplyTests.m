@@ -127,11 +127,10 @@ static QLMCapturedPass *QLMLeftPass(void) {
     XCTAssertEqual(status, 0, @"%@%@", output, errors);
     XCTAssertEqualObjects(errors, @"");
     XCTAssertTrue([output containsString:@"\n6 of 6 generator stops are the known 05 04 00 00 00 FF FF EA 00 01 90 00 02 DA.\n"], @"%@", output);
-    XCTAssertTrue([output containsString:@"\n6 of 6 passes match, apart from"], @"%@", output);
+    XCTAssertTrue([output containsString:@"\n6 of 6 passes match, apart from the generator stop, which qlm leaves out.\n"], @"%@", output);
     XCTAssertEqual([self lines:output starting:@"  GLM"].count, 0u);
     XCTAssertEqual([self lines:output starting:@"  qlm"].count, 0u);
-    XCTAssertEqual([self lines:output starting:@"  left out   43 00 02"].count, 2u);
-    XCTAssertEqual([self lines:output starting:@"  left out   4B 00 00 00 01"].count, 2u);
+    XCTAssertEqual([self lines:output starting:@"  left out"].count, 0u);
 }
 
 - (void)testAChangedBandIsTheOneFrameThatDiffers {
