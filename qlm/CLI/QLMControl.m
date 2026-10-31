@@ -104,8 +104,9 @@ NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *a
         return nil;
     }
     NSArray<NSString *> *options = [arguments subarrayWithRange:NSMakeRange(2, arguments.count - 2)];
+    NSSet<NSString *> *valued = [NSSet setWithArray:@[@"--group", @"--from", @"--to"]];
     NSMutableDictionary<NSString *, NSString *> *given =
-        [QLMReadArguments(options, [NSSet setWithObject:@"--strict-outside"],[NSSet setWithArray:@[@"--group", @"--from", @"--to"]], NULL, problem) mutableCopy];
+        [QLMReadArguments(options, [NSSet setWithObject:@"--check-outside"], valued, NULL, problem) mutableCopy];
     double from = 0;
     double to = INFINITY;
     if (given == nil || (given[@"--from"] != nil && !QLMReadNumber(given[@"--from"], @"a number of seconds", &from, problem)) ||

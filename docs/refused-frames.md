@@ -230,7 +230,7 @@ GLM sends two kinds of apply. `QLMApplySequence` builds both, System sends them,
 
 1. `FF 1F 00 00 08`, then the duck, `FF 1F 00 00 02`.
 2. `FF 3A 03 7F` twice.
-3. The routing pass, in the group's node order. A node that is on gets `3A 03 01` twice, and one that is off `3A 03 02`. A subwoofer gets `3B`. Then `05 04`, the state if the monitor is on, the routing frames, and the state again.
+3. The routing pass, in the group's node order. A node that is on gets `3A 03 01` twice, and one that is off `3A 03 02`. A subwoofer gets `3B`. Then `05 04`, the state if the monitor is on, the routing frames, and the state again. A monitor the switch leaves off gets its routing too, with the new group's crossover, and no DSP pass (`setup-a-baseline`, the 7350A at 40.049 s).
 4. A round, then the DSP pass in device order: `FF 04` for every node, and the block of each one that is on.
 5. `01 2B 00`, two rounds, the volume three times, a round, and the pair.
 
@@ -243,7 +243,7 @@ The tests match byte for byte for the apply at launch, the one after a wake, and
 - **GLM left out the last round and the pair** in `group-switch-main-2x2-main-2x1`, though it sent them in the other five.
 - **A monitor woken into the group loses its lease.** GLM then applies its block at the new lease beside the switch's restore. System sends the restore, then the block.
 - **GLM ran the switch twice** in `group-switch-main-2x1-main-2x2`, after the 7350A lost its lease. The test compares the first pass.
-- **GLM cuts a pass short when it leases the monitor again.** In `setup-b-peq-8351b`, at 183.450 and 300.973 s, the 7350A took a new session mid-pass. GLM stopped its pass at the old one, and sent the whole block at the new one. The short pass is the block's start, frame for frame, and `compare-apply` checks it as that.
+- **GLM cuts a pass short when it leases the monitor again.** In `setup-b-peq-8351b`, at 183.450 and 300.973 s, the 7350A took a new session mid-pass. GLM stopped its pass at the old one, and sent the whole block at the new one. The short pass is the block's start, frame for frame, and `compare-apply` checks it as that. No frame before a pass's `3D` marks the cut, since GLM's cycle polls a session and sends its state mid-pass (`setup-j-restore`, 35.009 and 35.013 s, to `0E`). So `compare-apply` ends a short pass at the next `17 01`.
 
 Any group with an 8351B is still refused for a real apply: every node's block must build at a verified rate, on or off. The dry run still prints such a group, and ends with REFUSED.
 

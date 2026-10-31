@@ -248,7 +248,15 @@ With the notes, those times give each apply's window, from a second or more befo
 qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --group "$GROUP" --from $FROM --to $TO
 ```
 
-Each run also lists, as `GLM, outside a pass`, the DSP frames no pass holds. A step's live edits show there, under the edited monitor's pass before them, each band with its slot. They come before the step's save, so check them against the step's own snapshot, not the one before: each slot's last edit should be the slot as that snapshot's block sends it. The ones before it are values the editor passed through. By default they change no verdict. `--strict-outside` makes every frame outside a pass but such a band a difference.
+Each run also lists, as `GLM, outside a pass`, the DSP frames no pass holds, and what explains each one. A switch's routing frames come before the pass they route. A step's live edits come after the edited monitor's pass before them, each band with its slot, and so does the level, delay, and `10 01 09` GLM sends when you confirm the editor. Each slot's last edit should be the slot as the block sends it, and the ones before it are values the editor passed through.
+
+The edits come before the step's save, so check them against the step's own snapshot, not the one before. Run the window of the apply before the edits again, with the step's snapshot and `--check-outside`:
+
+```bash
+qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --group "Main 4x2" --from $FROM --to $TO --check-outside
+```
+
+The summary should say `0 not explained`. The edited monitor's pass in that window is from the step before, so it differs, and the run exits 1. That pass is what names the monitor's node. A redacted snapshot holds no hardware IDs, and a window with no pass names a node only by model, so it can't tell the two 8351Bs apart.
 
 `compare-apply` matches passes only within the group it's given. Main.sam's Group_4 is nearly a copy of Main 4x2, and these steps change only Main 4x2. So a match across groups could put a changed node's pass on Group_4's old copy, and hide the change.
 
