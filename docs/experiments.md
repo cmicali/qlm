@@ -239,7 +239,7 @@ The setup: REW's pink noise on the Right channel. The knob at −60 dB. No `qlmc
    qlmctl poll --seconds 40
    ```
 
-   Once `poll` has printed the monitors, pull the knob's plug out of the adapter. `poll` prints `no knob`. Don't turn the knob while it's out. Let `poll` run out. About 2.6 s later, the adapter takes over with no knob. Wait 10 s.
+   Once `poll` has printed the monitors, pull the knob's plug out of the adapter. `poll` prints `knob none`. Don't turn the knob while it's out. Let `poll` run out. About 2.6 s later, the adapter takes over with no knob. Wait 10 s.
 3. C3, the staircase. Keep the noise off, then start it once `poll` runs.
 
    ```bash

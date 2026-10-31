@@ -708,8 +708,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     next();
 }
 
+// A coalesced volume counts until its timer sends it. While stopped the
+// timer sends nothing. A start before it fires makes it send, so it counts
+// again.
 - (BOOL)isIdle {
-    return !_inFlight && _sends.count == 0;
+    return !_inFlight && _sends.count == 0 && !(_volumeSendPending && _running);
 }
 
 #pragma mark - The cycle
@@ -1624,8 +1627,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMAdapterStatus status = adapter.status;
         state.knobPresent = status.knob;
         state.micPresent = status.mic;
-        state.micDE = status.mic ? @(status.micDE) : nil;
-        state.micDD = status.mic ? @(status.micDD) : nil;
+        state.micDE = status.mic && status.hasMicDE ? @(status.micDE) : nil;
+        state.micDD = status.mic && status.hasMicDD ? @(status.micDD) : nil;
         state.knobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
     }
     state.missedPolls = adapter.missedPolls;

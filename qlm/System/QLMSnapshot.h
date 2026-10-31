@@ -64,7 +64,9 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly) BOOL hasStatus;
 @property (nonatomic, readonly) BOOL knobPresent;
 @property (nonatomic, readonly) BOOL micPresent;
-// The mic's two readings, DE and DD, as raw counts. Nil without the mic.
+// The mic's two readings, DE and DD, as raw counts. Nil without the mic,
+// or when the reply lacks the reading. Like the knob, they stay at the last
+// status read while missedPolls is above 0.
 // Their meaning is unconfirmed: docs/adapter-status.md has the guesses. They
 // refresh once a cycle.
 @property (nonatomic, readonly, nullable) NSNumber *micDE;
@@ -133,8 +135,9 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @interface QLMSnapshot : NSObject
 
 // The last call that ran on System's queue before this snapshot was made,
-// or 0 before any. TRAP: its frames may not have gone out. A volume
-// coalesced behind its timer leaves the snapshot idle.
+// or 0 before any. Its frames are out or still queued, a volume held by the
+// coalescing timer among them. In an idle snapshot none is left to go out:
+// each went out, failed, or was dropped by a stop.
 @property (nonatomic, readonly) QLMCallNumber lastCall;
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) QLMAdapterState *adapter;
@@ -156,7 +159,8 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // their stored settings. It ends when a group applies, or when GLM holds
 // the adapter, since GLM's launch applies its group. Kept across a stop.
 @property (nonatomic, readonly) BOOL wokeWithoutGroup;
-// Nothing was queued for the bus or in flight when this was published.
+// Nothing was queued for the bus, in flight, or, while System runs, held by
+// the volume's coalescing timer when this was made.
 @property (nonatomic, readonly) BOOL idle;
 // While System runs, what a stop would do to the level now. Once it has
 // stopped, what it did.

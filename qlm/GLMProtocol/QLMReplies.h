@@ -92,11 +92,14 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
 // two bits of a tag give its value's length: 00 none, 01 one byte, 10 two,
 // and 11 four. 30 or 31 says whether the knob is in, and 32 or 33 the mic.
 // The knob's position, DF, is a signed big-endian count of tenths of a dB.
-// The mic's readings, DE and DD, have no known scale.
+// The mic's readings, DE and DD, have no known scale. Each has* says its tag
+// was read, since 0 is a reading.
 typedef struct {
     bool knob;
     bool mic;
     bool hasKnobPosition;
+    bool hasMicDE;
+    bool hasMicDD;
     int32_t knobTenths;
     uint32_t micDE;
     uint32_t micDD;
