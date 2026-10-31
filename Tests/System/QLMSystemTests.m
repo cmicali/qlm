@@ -1763,6 +1763,56 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(sent, expected);
 }
 
+// Every monitor that wakes loses its lease, and GLM sends its apply at wake
+// to each (docs/protocol.md, Sleep and wake; captures/standby-wake, 47.70
+// to 49.09 s). In qlm-app-first, the app's wake sent none, since no group
+// was active. With one active, System's wake does: each monitor leased
+// again gets its whole block. The fake bus keeps its sessions over a wake,
+// so the test lapses them, as the monitors do.
+- (void)testAWakeAppliesTheActiveGroupToEachMonitorLeasedAgain {
+    _settings.cycleInterval = 0.3;
+    _settings.ceilingDecibels = 0;
+    [self useMainsAndSub];
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 3 && snapshot.allIdentified && snapshot.idle;
+    }];
+    [_system setVolumeDecibels:-10];
+    QLMSetupGroup *mains = [self mainsAndSubOf:0 named:@"Mains"];
+    XCTAssertNil([self applyGroup:mains]);
+    [_system sleep];
+    QLMSnapshot *asleep = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 3 && !snapshot.anyOn && snapshot.idle;
+    }];
+    NSMutableSet<NSNumber *> *oldSessions = [NSMutableSet set];
+    for (QLMMonitorState *monitor in asleep.monitors) {
+        [oldSessions addObject:@(monitor.session)];
+    }
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system wake];
+    [self lapseLeases];
+    QLMSnapshot *woken = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        BOOL leasedAgain = snapshot.monitors.count == 3 && snapshot.allIdentified && snapshot.idle;
+        for (QLMMonitorState *monitor in snapshot.monitors) {
+            leasedAgain = leasedAgain && monitor.status == QLMMonitorStatusOn && ![oldSessions containsObject:@(monitor.session)];
+        }
+        return leasedAgain;
+    }];
+    XCTAssertEqualObjects(woken.activeGroupName, @"Mains");
+    NSArray<NSData *> *sent = [_bus.sentMessages subarrayWithRange:NSMakeRange(before, _bus.sentMessages.count - before)];
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self blocksOf:mains];
+    XCTAssertEqual(blocks.count, 3u);
+    for (QLMMonitorState *monitor in woken.monitors) {
+        XCTAssertGreaterThan(blocks[monitor.hardwareID].payloads.count, 0u);
+        for (NSData *payload in blocks[monitor.hardwareID].payloads) {
+            NSMutableData *record = [NSMutableData dataWithBytes:&(uint8_t){monitor.session} length:1];
+            [record appendData:payload];
+            XCTAssertTrue([sent containsObject:record], @"%@ at %02x missed %@", monitor.serialNumber, monitor.session, payload);
+        }
+    }
+}
+
 // A monitor just switched on plays at its own stored level until a host
 // sends one (captures/qlm-control-first/notes.md, after the capture). So
 // once a volume is set, it goes out right after a lease, before anything
