@@ -724,6 +724,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return;
     }
     _cycleQueued = YES;
+    // The mic's readings change on every poll, so they publish here instead.
+    if (_adapterRecord.hasStatus && _adapterRecord.status.mic) {
+        _dirty = YES;
+    }
     [self identifyAdapter];
     if (self.settings.discoversMonitors) {
         [self probe];
@@ -1620,6 +1624,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMAdapterStatus status = adapter.status;
         state.knobPresent = status.knob;
         state.micPresent = status.mic;
+        state.micDE = status.mic ? @(status.micDE) : nil;
+        state.micDD = status.mic ? @(status.micDD) : nil;
         state.knobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
     }
     state.missedPolls = adapter.missedPolls;

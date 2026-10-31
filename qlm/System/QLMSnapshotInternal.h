@@ -37,6 +37,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) BOOL hasStatus;
 @property (nonatomic, readwrite) BOOL knobPresent;
 @property (nonatomic, readwrite) BOOL micPresent;
+@property (nonatomic, readwrite, nullable) NSNumber *micDE;
+@property (nonatomic, readwrite, nullable) NSNumber *micDD;
 @property (nonatomic, readwrite, nullable) NSNumber *knobTenths;
 @property (nonatomic, readwrite) NSUInteger missedPolls;
 @property (nonatomic, readwrite, nullable) NSDate *lastReply;

@@ -56,6 +56,8 @@ Over USB, `qlmctl` refuses the adapter while GLM runs, while another process hol
 
 Every command that drives the bus checks every argument before the bus opens. An unknown, repeated, or empty one is refused with exit 64, so a mistyped `--dry-run` can't send for real.
 
+`info` and `poll` print the knob and the calibration mic. With the mic in, they add its two readings, `DE` and `DD`, as raw counts, like `mic in, DE 2301456, DD 2298770`. We don't know yet what the readings measure, so qlm shows no dB. `poll` prints the mic's line each time the readings change, which with the mic in is once a cycle, about every 0.57 s. [docs/adapter-status.md](docs/adapter-status.md#the-mic-de-and-dd) has what we've seen of them.
+
 ### The controls over USB
 
 `volume`, `dim`, and `wake --volume` set a level, so each needs `--ceiling dB`, and GLMProtocol caps every volume frame at it. The ceiling may be at most −30 dB, or 0 dB with `--allow-high-ceiling`, and the volume may not be above it. qlm can't read the monitors' level, so `dim` also needs `--volume dB`, the level it dims from. Every wake ends with a level, as GLM's does: the `--volume` given, else the knob's position under the ceiling, else the bottom level, `00 00 08`. A bare `wake` needs no `--ceiling`, and caps the knob's level at −30 dB.

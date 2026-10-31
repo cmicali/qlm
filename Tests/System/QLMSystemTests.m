@@ -776,6 +776,57 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(device.unmatchedReports, 0u);
 }
 
+// captures/startup-idle-mic, 7.31 s: GLM's first 01 08 reads 32 34, DE
+// 1B AB FB A0, and DD 00 22 4E 4F. The readings' meaning is unconfirmed
+// (docs/adapter-status.md), so the snapshot carries them as raw counts.
+- (void)testCarriesTheMicsReadingsAsRawCounts {
+    _settings.discoversMonitors = NO;
+    _settings.adapterPollsPerRound = 1;
+    [self startSystemWithAdapter:[[QLMReplayAdapter alloc] initWithCapture:QLMReadCapture(@"startup-idle-mic", NULL)]];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.adapter.hasStatus;
+    }];
+    XCTAssertTrue(snapshot.adapter.micPresent);
+    XCTAssertEqualObjects(snapshot.adapter.micDE, @(0x1BABFBA0));
+    XCTAssertEqualObjects(snapshot.adapter.micDD, @(0x00224E4F));
+}
+
+// captures/startup-idle, 7.31 s: 33, no mic.
+- (void)testCarriesNoReadingsWithoutTheMic {
+    _settings.discoversMonitors = NO;
+    [self startSystemWithAdapter:[[QLMReplayAdapter alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)]];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.adapter.hasStatus;
+    }];
+    XCTAssertFalse(snapshot.adapter.micPresent);
+    XCTAssertNil(snapshot.adapter.micDE);
+    XCTAssertNil(snapshot.adapter.micDD);
+}
+
+// A change to the mic's readings alone publishes nothing. With no monitor to
+// publish a cycle, the cycle itself brings the new readings.
+- (void)testACyclePublishesTheMicsNewReadings {
+    _settings.discoversMonitors = NO;
+    _settings.adapterPollInterval = 0.02;
+    _settings.cycleInterval = 0.5;
+    [_bus perform:^{
+        self->_bus.micDE = @1;
+        self->_bus.micDD = @2;
+    }];
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.identified && [snapshot.adapter.micDE isEqual:@1] && snapshot.idle;
+    }];
+    QLMSnapshot *next = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.adapter.micDE isEqual:@3];
+    } after:^{
+        [self->_bus perform:^{
+            self->_bus.micDE = @3;
+        }];
+    }];
+    XCTAssertEqualObjects(next.adapter.micDD, @2);
+}
+
 - (void)testALostReplyDoesNotDropAMonitor {
     [self startSystem];
     [self waitForDiscovery];
