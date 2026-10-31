@@ -53,6 +53,8 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly, nullable) NSNumber *lfeCrossoverFrequency;  // subwoofers
 @property (nonatomic, readonly, nullable) NSNumber *lfeLevel;               // subwoofers
 @property (nonatomic, readonly, nullable) NSNumber *subwooferGroupID;       // subwoofers
+@property (nonatomic, readonly, nullable) NSNumber *groupDelayCompensation; // three-ways
+@property (nonatomic, readonly, nullable) NSNumber *bassExtensionCrossover; // three-ways: BassExtensionXO(Hz)
 @property (nonatomic, readonly) NSArray<QLMSetupBand *> *bands;
 
 @end
@@ -64,6 +66,10 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly) double groupSensitivity;  // dB
 @property (nonatomic, readonly) double crossover;         // Hz
 @property (nonatomic, readonly) NSInteger crossoverGlobalMode;
+@property (nonatomic, readonly, nullable) NSNumber *groupDelayCompensation;
+@property (nonatomic, readonly, nullable) NSNumber *bassExtensionMode;          // Group_BE_Mode
+@property (nonatomic, readonly, nullable) NSNumber *bassExtensionCrossoverMin;  // Group_BE_XOMin, Hz
+@property (nonatomic, readonly, nullable) NSNumber *bassExtensionCrossoverMax;  // Group_BE_XOMax, Hz
 @property (nonatomic, readonly) double videoDelay;
 @property (nonatomic, readonly) BOOL subwooferBypass;
 @property (nonatomic, readonly, nullable) NSNumber *volumePreset1;  // dB

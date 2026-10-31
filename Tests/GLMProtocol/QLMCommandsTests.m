@@ -227,7 +227,9 @@
     XCTAssertEqualWithAccuracy(20 * log10(0x7A3957 / (double)QLMVolumeWordMax), -0.4, 0.01);
 }
 
-// Sections 6, 7, and 9: the DSP block's frames.
+// Sections 6, 7, and 9: the DSP block's frames. 43 and 4B are in no
+// section: GLM sends them to the 8351B in captures/startup-idle, at 8.650
+// and 8.725 s.
 - (void)testDSPBlockBuilders {
     QLMMessage prepare = QLMCommandPrepare(0x02);
     XCTAssertEqual(prepare.address, 0x02);
@@ -257,8 +259,13 @@
     QLMMessage subwoofer = QLMCommandSubwooferUnknown(0x05, 0x3E);
     XCTAssertEqual(subwoofer.address, 0x05);
     QLMAssertBytes(subwoofer.payload, subwoofer.length, 0x3E, 0x00, 0x00);
+    QLMMessage threeWay43 = QLMCommandThreeWay43(0x03, 0x02);
+    XCTAssertEqual(threeWay43.address, 0x03);
+    QLMAssertBytes(threeWay43.payload, threeWay43.length, 0x43, 0x00, 0x02);
+    QLMMessage threeWay4B = QLMCommandThreeWay4B(0x03, 0x01);
+    QLMAssertBytes(threeWay4B.payload, threeWay4B.length, 0x4B, 0x00, 0x00, 0x00, 0x01);
 
-    QLMMessage messages[] = {prepare, delay, level, unknown, peq, crossover, sync, routing, subwoofer};
+    QLMMessage messages[] = {prepare, delay, level, unknown, peq, crossover, sync, routing, subwoofer, threeWay43, threeWay4B};
     for (size_t i = 0; i < sizeof messages / sizeof messages[0]; i++) {
         uint8_t out[QLMFrameMax];
         size_t length = 0;

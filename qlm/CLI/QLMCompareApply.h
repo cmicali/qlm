@@ -22,33 +22,42 @@ extern const int QLMCompareApplyDiffers;
 // pass, or the capture's start. At launch and wake it comes right before
 // 17 01, and in a group switch in the routing pass.
 @property (nonatomic, readonly) NSArray<NSData *> *generatorStops;
-// From the session's reply to 39, where the capture holds one.
+// From the session's last lease at or before the pass, and the reply to 39
+// that follows it. Nil where the capture holds neither.
 @property (nonatomic, readonly, nullable) NSString *model;
-// From the last lease of the session in the capture, where it holds one.
 @property (nonatomic, readonly, nullable) NSData *hardwareID;
-// GLM sent no 3D: its next 17 01, or the capture's end, came first. GLM cuts
-// a pass short when it leases the monitor again mid-pass.
+// GLM sent no 3D: the next 17 01 to any session, or the capture's end, came
+// first. GLM cuts a pass short when it leases the monitor again mid-pass.
 @property (nonatomic, readonly) BOOL cutShort;
 @end
 
-// A generator stop GLM sent a session.
-@interface QLMCapturedStop : NSObject
+// A frame GLM sent a session.
+@interface QLMSessionFrame : NSObject
 @property (nonatomic) uint8_t session;
 @property (nonatomic) NSTimeInterval time;
 @property (nonatomic) NSData *payload;
+// For a DSP frame outside a pass: the session's pass before it and after
+// it, each when it is in the window.
+@property (nonatomic, nullable) QLMCapturedPass *follows;
+@property (nonatomic, nullable) QLMCapturedPass *precedes;
+// From the session's lease, as a pass's.
+@property (nonatomic, readonly, nullable) NSString *model;
 @end
 
 // Every generator stop, a 05 frame to a session, from `from` to before `to`,
 // pass or no pass. A switch sends one to each monitor of the setup, the ones
 // off in the new group included.
-NSArray<QLMCapturedStop *> *QLMGeneratorStopsInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
+NSArray<QLMSessionFrame *> *QLMGeneratorStopsInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
 
 // The generator stop's 14 bytes in every capture so far.
 BOOL QLMIsKnownGeneratorStop(NSData *payload);
 
 // Each pass whose 17 01 is from `from` to before `to`, in seconds into the
-// capture.
-NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
+// capture. `outside` gets each DSP frame in the window that no pass holds:
+// one GLM sent a session before a pass, or after one closed. A switch's
+// routing frames and a band GLM sends as it's edited are such frames.
+NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to,
+                                               NSArray<QLMSessionFrame *> *_Nullable *_Nullable outside);
 
 // How a captured pass differs from a block. Payloads are compared by the
 // setting each names: a PEQ slot, a level subcommand, a routing input, or
@@ -60,16 +69,12 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
 
 // Each setting both send with other bytes, as GLM's payload, then qlm's.
 @property (nonatomic, readonly) NSArray<NSArray<NSData *> *> *changed;
-// What GLM sent and qlm's block lacks, past what qlm knowingly leaves out.
+// What GLM sent and qlm's block lacks.
 @property (nonatomic, readonly) NSArray<NSData *> *glmOnly;
-// The block's leftOutPayloads, as GLM sent them.
-@property (nonatomic, readonly) NSArray<NSData *> *leftOut;
-// The block's leftOutPayloads this pass lacks.
-@property (nonatomic, readonly) NSArray<NSData *> *missingLeftOut;
 @property (nonatomic, readonly) NSArray<NSData *> *qlmOnly;
-// GLM's payloads, less what qlm leaves out, are the block's in order.
+// GLM's payloads are the block's in order.
 @property (nonatomic, readonly) BOOL inOrder;
-// changed, glmOnly, missingLeftOut, and qlmOnly, counted.
+// changed, glmOnly, and qlmOnly, counted.
 @property (nonatomic, readonly) NSUInteger differenceCount;
 // No difference, and in order.
 @property (nonatomic, readonly) BOOL matches;
@@ -104,13 +109,18 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
 NSArray<QLMPassMatch *> *QLMMatchPasses(NSArray<QLMCapturedPass *> *passes, QLMSetup *setup, QLMSetupGroup *group,
                                         NSArray<NSString *> *_Nullable *_Nullable refusals);
 
+// The block's frame for the setting `payload` names, the last when it sends
+// the setting twice. Nil for a setting it lacks.
+NSData *_Nullable QLMBlockSetting(QLMDSPBlock *block, NSData *payload);
+
 // compare-apply, given what follows the command's name. It reads a setup
 // file and a capture's reports.txt, and opens no bus. It prints to `out`,
 // and why it can't compare to `err`. It returns 0 when every pass matches
-// and every generator stop in the window is the known one,
-// QLMCompareApplyDiffers when not, EX_USAGE for an argument it
-// doesn't know, and EX_DATAERR for a file it can't read, a group the setup
-// lacks, or no pass to compare.
+// and every generator stop in the window is the known one, and with
+// --check-outside, every DSP frame outside a pass is explained. It returns
+// QLMCompareApplyDiffers when not, EX_USAGE for an argument it doesn't
+// know, and EX_DATAERR for a file it can't read, a group the setup lacks,
+// or no pass to compare, unless --check-outside has frames outside a pass.
 int QLMCompareApply(NSArray<NSString *> *arguments, FILE *out, FILE *err);
 
 NS_ASSUME_NONNULL_END
