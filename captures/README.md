@@ -16,7 +16,8 @@ captures/
 └── <scenario>/
     ├── capture.pcapng.xz       what usbmon or USBPcap recorded, xz-compressed but otherwise untouched
     ├── reports.txt             tools/pcapng-to-reports.py's text form of it
-    └── notes.md                what you did, when, and what you saw
+    ├── notes.md                what you did, when, and what you saw
+    └── setups/*.sam            for a setup-* capture, the setup at each step, redacted
 ```
 
 `reports.txt` is what the tests read. One line per HID report: the time in seconds from the first packet, `out` or `in`, then the bytes in hex. Lines starting with `#` are comments.
@@ -99,6 +100,7 @@ Record each one on its own. Start every capture with the monitors on and GLM clo
 | `quit-glm` | With GLM open and the volume at −20 dB, quit GLM. Wait ten seconds. |
 | `unplug` | With GLM open, unplug the adapter. Wait ten seconds. Plug it back in. |
 | `sleep-wake` | With GLM open, sleep the computer, wait a minute, wake it. Then check `pmset -g log` for an `Entering Sleep` line. A sleep that reaches only DarkWake leaves GLM running. |
+| `setup-<part>-<topic>` | GLM applying a copy of the setup with known changes. [docs/setup-captures.md](../docs/setup-captures.md) is the script. |
 
 ## What Phase 0 must answer
 

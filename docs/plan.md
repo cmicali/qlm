@@ -67,6 +67,7 @@ The capture kit is `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-
 | [telemetry.md](telemetry.md) | Each telemetry tag, and what the meters can show (#35) |
 | [measurement.md](measurement.md) | Phase 3's measurement, step by step (#34) |
 | [experiments.md](experiments.md) | The script for a session that settles the open questions a person at the desk can (#47) |
+| [setup-captures.md](setup-captures.md) | The script for capturing GLM's applies of setups made with known changes, to decode the rest of the group apply |
 
 ### Decided since Phase 1
 
@@ -86,7 +87,7 @@ We made these calls after the captures and the runs on the monitors. Each is bui
 
 What's left, in the order we'll do it. Most of it needs the monitors and the user at the desk, at a low level, one monitor first.
 
-1. The rest of the group apply, decoded from GLM's captures. The owner makes setups in GLM with known, varied settings: PEQ bands of each type, frequency, gain, and Q on each model; crossover points; levels and delays; and the 8351B's own fields, `GroupDelayCompensation` and the bass extension crossover, `BassExtensionXO(Hz)`. We capture GLM applying each setup through the Pi proxy. qlm's design from each setup must then match GLM's frames byte for byte, which decodes `43 00 02` and `4B 00 00 00 01`.
+1. The rest of the group apply, decoded from GLM's captures. The owner makes setups in GLM with known, varied settings: PEQ bands of each type, frequency, gain, and Q on each model; crossover points; levels and delays; and the 8351B's own fields, `GroupDelayCompensation` and the bass extension crossover, `BassExtensionXO(Hz)`. We capture GLM applying each setup through the Pi proxy. qlm's design from each setup must then match GLM's frames byte for byte, which decodes `43 00 02` and `4B 00 00 00 01`. [setup-captures.md](setup-captures.md) is the script. The captures also show whether GLM's generator stop, `05 04 …`, ever changes, and the owner decides about `05` after them.
 2. Lifting the 8351B's refusal. Once qlm's apply matches GLM's byte for byte across those captures, that's the owner's call. Then the app can apply the active group at a wake, as GLM does, and switch groups. Today a wake leaves the monitors on their stored settings, until GLM applies the group (#53). The REW measurement in [measurement.md](measurement.md) becomes an optional final check, not the gate.
 3. The week of daily use without GLM, Phase 4's Done when. `make install` installs the app (#46). The fixes from its first run (#52, #53), and System's (#49), have run only on the fake bus, so the week is their first test on the monitors. The debug channel can check them one step at a time first, following `.claude/skills/app-hardware-run`.
 4. The experiments session. [experiments.md](experiments.md) is the script, and it settles the [open questions in protocol.md](protocol.md#open-questions) that a person at the desk can, such as what level the adapter applies with no knob in. Its Part A also hears `qlmctl`'s own hand-back, which neither control run had. Part B needs `qlmctl volume --adapter-poll`, which isn't built yet.
