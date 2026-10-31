@@ -130,6 +130,16 @@
     }];
 }
 
+// A status tag and its 4-byte value, big-endian.
+static size_t QLMFakePutField(uint8_t *bytes, size_t length, uint8_t tag, uint32_t value) {
+    bytes[length] = tag;
+    bytes[length + 1] = (uint8_t)(value >> 24);
+    bytes[length + 2] = (uint8_t)(value >> 16);
+    bytes[length + 3] = (uint8_t)(value >> 8);
+    bytes[length + 4] = (uint8_t)value;
+    return length + 5;
+}
+
 static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated) {
     const char *utf8 = text.UTF8String;
     size_t length = strlen(utf8) + (terminated ? 1 : 0);
@@ -140,9 +150,9 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
     *reply = QLMMessageMake(QLMAddressReply, payload, 1 + length);
 }
 
-// docs/adapter-status.md: 01 08 gets the status fields, with the knob's
-// position when it is in; 01 39 and 01 19 01 the adapter's identity. Any
-// other message to 01 gets a bare ack, as 01 2B does.
+// docs/adapter-status.md: 01 08 gets the status fields, with the mic's
+// readings and the knob's position when each is in; 01 39 and 01 19 01 the
+// adapter's identity. Any other message to 01 gets a bare ack, as 01 2B does.
 - (BOOL)adapterReplyTo:(const QLMMessage *)message into:(QLMMessage *)reply {
     if (_adapterDropReplies > 0) {
         _adapterDropReplies -= 1;
@@ -150,16 +160,24 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
     }
     switch (message->payload[0]) {
     case 0x08: {
-        NSNumber *knob = _knobTenths;
-        if (knob == nil) {
-            const uint8_t bytes[] = {0x09, 0x33, 0x31};
-            *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
+        uint8_t bytes[QLMPayloadMax] = {0x09};
+        size_t length = 1;
+        if (_micDE != nil && _micDD != nil) {
+            bytes[length++] = 0x32;
+            bytes[length++] = 0x34;
+            length = QLMFakePutField(bytes, length, 0xDE, _micDE.unsignedIntValue);
+            length = QLMFakePutField(bytes, length, 0xDD, _micDD.unsignedIntValue);
         } else {
-            uint32_t tenths = (uint32_t)knob.intValue;
-            const uint8_t bytes[] = {0x09, 0x33, 0x30, 0x36, 0xDF, (uint8_t)(tenths >> 24), (uint8_t)(tenths >> 16),
-                                     (uint8_t)(tenths >> 8), (uint8_t)tenths};
-            *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
+            bytes[length++] = 0x33;
         }
+        if (_knobTenths != nil) {
+            bytes[length++] = 0x30;
+            bytes[length++] = 0x36;
+            length = QLMFakePutField(bytes, length, 0xDF, (uint32_t)_knobTenths.intValue);
+        } else {
+            bytes[length++] = 0x31;
+        }
+        *reply = QLMMessageMake(QLMAddressReply, bytes, length);
         return YES;
     }
     case 0x19:

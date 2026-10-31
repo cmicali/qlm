@@ -60,6 +60,11 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly) BOOL hasStatus;
 @property (nonatomic, readonly) BOOL knobPresent;
 @property (nonatomic, readonly) BOOL micPresent;
+// The mic's two readings, DE and DD, as raw counts. Nil without the mic.
+// Their meaning is unconfirmed: docs/adapter-status.md has the guesses. They
+// refresh once a cycle.
+@property (nonatomic, readonly, nullable) NSNumber *micDE;
+@property (nonatomic, readonly, nullable) NSNumber *micDD;
 // The knob's position in tenths of a dB: 0 at the top, about -1004 at the
 // bottom. Nil without the knob.
 @property (nonatomic, readonly, nullable) NSNumber *knobTenths;
