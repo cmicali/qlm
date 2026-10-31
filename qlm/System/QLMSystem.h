@@ -23,7 +23,7 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 @interface QLMSystemSettings : NSObject <NSCopying>
 
 // The user's ceiling. Every volume frame is capped at it. The default is low.
-@property (nonatomic) double ceilingDecibels;           // -20
+@property (nonatomic) double ceilingDecibels;           // -30, qlmctl's highest without --allow-high-ceiling
 @property (nonatomic) NSTimeInterval cycleInterval;     // 0.57 s: probe, volume, a poll to each monitor
 @property (nonatomic) NSTimeInterval volumeInterval;    // 0.05 s: at most one volume frame per interval
 @property (nonatomic) NSUInteger missedPollsLimit;      // 4 polls unanswered, then the retry burst

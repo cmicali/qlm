@@ -23,7 +23,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _ceilingDecibels = -20;
+        _ceilingDecibels = -30;
         _cycleInterval = 0.57;
         _volumeInterval = 0.05;
         _missedPollsLimit = 4;
