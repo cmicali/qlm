@@ -22,12 +22,11 @@
 
 // A monitor's 08 poll, answered.
 static BOOL QLMIsAnsweredPoll(QLMCaptureExchange *exchange) {
-    QLMMessage message = exchange.message;
-    return QLMAddressIsLeasable(message.address) && message.payload[0] == 0x08 && exchange.answered;
+    return QLMIsMonitorPoll(exchange.message) && exchange.answered;
 }
 
 // Every reply in `scenario` that reads as telemetry, by the address polled.
-static NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *QLMTelemetryFrames(NSString *scenario) {
+static NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *QLMReadTelemetryFrames(NSString *scenario) {
     NSMutableDictionary<NSNumber *, NSMutableArray<QLMTelemetryFrame *> *> *frames = [NSMutableDictionary dictionary];
     for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
         if (!QLMIsAnsweredPoll(exchange)) {
@@ -48,6 +47,21 @@ static NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *QLMTelemetryFra
         [frames[address] addObject:frame];
     }
     return frames;
+}
+
+// QLMReadTelemetryFrames, read once per scenario and shared.
+static NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *QLMTelemetryFrames(NSString *scenario) {
+    static NSMutableDictionary<NSString *, NSDictionary *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [NSMutableDictionary dictionary];
+    });
+    @synchronized(cache) {
+        if (cache[scenario] == nil) {
+            cache[scenario] = QLMReadTelemetryFrames(scenario);
+        }
+        return cache[scenario];
+    }
 }
 
 // The frames in `run` that carry 8A.
@@ -229,9 +243,17 @@ static QLMMessage QLMJoinedFrame(QLMMessage first, QLMMessage second) {
     XCTAssertEqual(splits, 47u);
 }
 
+// The time of a frame, less the seconds since the wake that 8A and 49 count
+// together: 8A is the count over 256, and 49 the count mod 256.
+static NSTimeInterval QLMWakeTime(QLMTelemetryFrame *frame) {
+    return frame.time - (frame.telemetry.wakeSteps * 256 + frame.telemetry.wakeSeconds);
+}
+
 // sleep-wake-darkwake: 8A rides one frame in 30 s. One frame that carried it
 // came split, at 395.43 s, so one gap is 60 s.
-// It counts up by one at a time, from 2 to 4, and 3 lasts 240 s.
+// It counts up by one at a time, from 2 to 4. With 49 it makes one count of
+// seconds since the wake, so a step is 256 s. The wake time it gives holds
+// within a second from one frame to the next, through both steps.
 // startup-idle: GLM's first poll of each monitor carries the 8A no host read.
 - (void)testWakeStepsEveryThirtySeconds {
     NSDictionary<NSNumber *, NSArray<QLMTelemetryFrame *> *> *frames = QLMTelemetryFrames(@"sleep-wake-darkwake");
@@ -240,20 +262,13 @@ static QLMMessage QLMJoinedFrame(QLMMessage first, QLMMessage second) {
         XCTAssertGreaterThanOrEqual(steps.count, 19u, @"%@", address);
         XCTAssertEqual(steps.firstObject.telemetry.wakeSteps, 2, @"%@", address);
         XCTAssertEqual(steps.lastObject.telemetry.wakeSteps, 4, @"%@", address);
-        NSTimeInterval three = 0;
-        NSTimeInterval four = 0;
         for (NSUInteger i = 1; i < steps.count; i++) {
             NSTimeInterval elapsed = steps[i].time - steps[i - 1].time;
             NSInteger step = steps[i].telemetry.wakeSteps - steps[i - 1].telemetry.wakeSteps;
             XCTAssertTrue(fabs(elapsed - 30) < 1.5 || fabs(elapsed - 60) < 1.5, @"%@ at %.2f", address, steps[i].time);
             XCTAssertTrue(step == 0 || step == 1, @"%@ at %.2f", address, steps[i].time);
-            if (step == 1 && steps[i].telemetry.wakeSteps == 3) {
-                three = steps[i].time;
-            } else if (step == 1 && steps[i].telemetry.wakeSteps == 4) {
-                four = steps[i].time;
-            }
+            XCTAssertEqualWithAccuracy(QLMWakeTime(steps[i]), QLMWakeTime(steps[i - 1]), 1, @"%@ at %.2f", address, steps[i].time);
         }
-        XCTAssertEqualWithAccuracy(four - three, 240, 2, @"%@", address);
     }
 
     frames = QLMTelemetryFrames(@"startup-idle");
@@ -281,6 +296,156 @@ static QLMMessage QLMJoinedFrame(QLMMessage first, QLMMessage second) {
     XCTAssertEqual(muted.midMeter, QLMTelemetryOutputSilent);
     XCTAssertEqual(muted.lfMeter, QLMTelemetryOutputSilent);
     XCTAssertEqual(unmuted.inputMeter, muted.inputMeter);
+}
+
+// The frames in `run` from `from` to `to`.
+static NSArray<QLMTelemetryFrame *> *QLMFramesBetween(NSArray<QLMTelemetryFrame *> *run, NSTimeInterval from, NSTimeInterval to) {
+    return [run filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(QLMTelemetryFrame *frame, NSDictionary *bindings) {
+        return frame.time >= from && frame.time <= to;
+    }]];
+}
+
+// The session the first lease after `time` gave the hardware ID, or 0.
+static uint8_t QLMSessionLeased(NSString *scenario, const uint8_t hardwareID[3], NSTimeInterval time) {
+    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+        QLMMessage message = exchange.message;
+        if (exchange.time > time && QLMIsLease(message) && memcmp(message.payload + 1, hardwareID, 3) == 0) {
+            return message.payload[4];
+        }
+    }
+    return 0;
+}
+
+// qlm-control-all: the Rear Right 8330A was switched on at its power switch
+// and answered the probe at 214.755 s. Its first frame, at 215.94 s, reads
+// 49 at 1, and 8A reads 0 at 225.05 and 254.68 s. So a power-on starts the
+// count from 0, as a wake does.
+- (void)testAPowerOnStartsTheWakeCount {
+    NSArray<QLMTelemetryFrame *> *run = QLMFramesBetween(QLMTelemetryFrames(@"qlm-control-all")[@0x07], 214.7, 283);
+    XCTAssertEqualWithAccuracy(run.firstObject.time, 215.941, 0.001);
+    XCTAssertEqual(run.firstObject.telemetry.wakeSeconds, 1);
+    NSArray<QLMTelemetryFrame *> *steps = QLMWakeStepFrames(run);
+    XCTAssertEqual(steps.count, 2u);
+    for (QLMTelemetryFrame *frame in steps) {
+        XCTAssertEqual(frame.telemetry.wakeSteps, 0, @"%.3f", frame.time);
+        XCTAssertEqualWithAccuracy(QLMWakeTime(frame), 214.9, 0.5, @"%.3f", frame.time);
+    }
+}
+
+// In every whole frame from a monitor that is on, the system info's c- is
+// the number of 81, 82, and 83 readings: 1 for the subwoofers, 2 for the
+// 8330A, and 3 for the 8351B. The adapter's is 0.
+- (void)testTheSystemInfosCCountsThe81To83Readings {
+    NSUInteger frames = 0;
+    for (NSString *scenario in QLMCaptureScenarios()) {
+        NSMutableDictionary<NSNumber *, NSNumber *> *counts = [NSMutableDictionary dictionary];
+        for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+            QLMMessage message = exchange.message;
+            QLMMessage reply = exchange.reply;
+            NSNumber *address = @(message.address);
+            char text[QLMPayloadMax];
+            if (exchange.answered && message.payload[0] == 0x39 && QLMReplyText(&reply, text, sizeof text)) {
+                XCTAssertEqual(strncmp(text, "c-", 2), 0, @"%@ at %.3f", scenario, exchange.time);
+                counts[address] = @(text[2] - '0');
+                if (message.address == QLMAddressAdapter) {
+                    XCTAssertEqual(text[2], '0', @"%@ at %.3f", scenario, exchange.time);
+                }
+                continue;
+            }
+            QLMTelemetry t;
+            if (!QLMIsAnsweredPoll(exchange) || counts[address] == nil || QLMReplyTelemetry(&reply, &t) != QLMTelemetryOK || t.status != 0x01) {
+                continue;
+            }
+            NSInteger readings = (t.sensor81 != QLMTelemetryAbsent) + (t.sensor82 != QLMTelemetryAbsent) + (t.sensor83 != QLMTelemetryAbsent);
+            XCTAssertEqual(readings, counts[address].integerValue, @"%@ at %.3f", scenario, exchange.time);
+            frames += 1;
+        }
+    }
+    XCTAssertGreaterThan(frames, 10000u);
+}
+
+// A woken monitor doesn't wait for its mute state. Each run sent no 2B after
+// its wake. In qlm-control-all and qlm-app-first, the wake ended with the
+// level and the pair, and the Rear Right 8330A's HF meter left its floor
+// 3.4 and 3.6 s after the first wake pair, with music in. In
+// qlm-control-first, `wake` sent nothing but the pairs, and the Right 8351B,
+// which played before its standby, read its floor in every output for 12 s
+// though its input read the music.
+- (void)testAWokenMonitorWaitsForALevelNotItsMute {
+    const uint8_t rearRight[] = {0x12, 0x2F, 0xAB};
+    const uint8_t right8351B[] = {0x11, 0x4B, 0xEA};
+    struct {
+        NSString *scenario;
+        const uint8_t *hardwareID;
+        NSTimeInterval wake;
+        NSTimeInterval end;
+        NSTimeInterval plays;
+    } wakes[] = {
+        {@"qlm-control-all", rearRight, 8481.939, 8486.5, 8485.336},
+        {@"qlm-app-first", rearRight, 1232.644, 1237, 1236.198},
+        {@"qlm-control-first", right8351B, 827.791, 840.0, 0},
+    };
+    for (size_t i = 0; i < sizeof wakes / sizeof wakes[0]; i++) {
+        NSString *scenario = wakes[i].scenario;
+        NSMutableSet<NSNumber *> *sent = [NSMutableSet set];
+        for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+            if (exchange.time >= wakes[i].end) {
+                break;
+            }
+            QLMMessage message = exchange.message;
+            if (exchange.time >= wakes[i].wake && QLMIsControl(message)) {
+                [sent addObject:@(message.payload[0])];
+            }
+        }
+        XCTAssertFalse([sent containsObject:@0x2B], @"%@", scenario);
+        BOOL levelAndPair = wakes[i].plays > 0;
+        XCTAssertEqual([sent containsObject:@0x1F], levelAndPair, @"%@", scenario);
+        XCTAssertEqual([sent containsObject:@0x2D], levelAndPair, @"%@", scenario);
+
+        uint8_t session = QLMSessionLeased(scenario, wakes[i].hardwareID, wakes[i].wake);
+        NSArray<QLMTelemetryFrame *> *run = QLMFramesBetween(QLMTelemetryFrames(scenario)[@(session)], wakes[i].wake, wakes[i].end);
+        XCTAssertGreaterThanOrEqual(run.count, 3u, @"%@", scenario);
+        for (QLMTelemetryFrame *frame in run) {
+            XCTAssertGreaterThan(frame.telemetry.inputMeter, 0xD0, @"%@ at %.3f", scenario, frame.time);
+            if (levelAndPair && frame.time > wakes[i].plays - 0.001) {
+                XCTAssertGreaterThan(frame.telemetry.hfMeter, QLMTelemetryOutputSilent + 40, @"%@ at %.3f", scenario, frame.time);
+                continue;
+            }
+            XCTAssertEqual(frame.telemetry.hfMeter, QLMTelemetryOutputSilent, @"%@ at %.3f", scenario, frame.time);
+            XCTAssertEqual(frame.telemetry.lfMeter, QLMTelemetryOutputSilent, @"%@ at %.3f", scenario, frame.time);
+        }
+        if (levelAndPair) {
+            [self telemetryIn:run at:wakes[i].plays];
+        }
+    }
+}
+
+// qlm-control-all: the bare 04 comes only from the two monitors switched on at
+// their power switch: the Rear Right 8330A at 02, and the other 8330A at 04.
+// Each ends its first frame after GLM's apply at launch with 8A 00 00 and 04.
+// By 49, they were switched on 166 and 206 s before. By 8A, the other four
+// woke 81 minutes before, and their frames in the same round end 8A 00 13.
+- (void)testTheBare04ComesFromTheMonitorsSwitchedOn {
+    NSArray<QLMCaptureExchange *> *round = [self qlm_frames:6 of:@"qlm-control-all" from:381.148658 keep:QLMIsMonitorPoll];
+    if (round == nil) {
+        return;
+    }
+    for (QLMCaptureExchange *exchange in round) {
+        QLMMessage message = exchange.message;
+        QLMMessage reply = exchange.reply;
+        QLMTelemetry t;
+        QLMTelemetryStatus status = QLMReplyTelemetry(&reply, &t);
+        XCTAssertTrue(t.busy, @"%.6f s", exchange.time);
+        if (message.address == 0x02 || message.address == 0x04) {
+            XCTAssertEqual(status, QLMTelemetryErrorUnknownTag, @"%.6f s", exchange.time);
+            XCTAssertEqual(t.unknownTag, 0x04, @"%.6f s", exchange.time);
+            XCTAssertEqual(t.wakeSteps, 0, @"%.6f s", exchange.time);
+            XCTAssertEqual(t.wakeSeconds, message.address == 0x02 ? 166 : 206, @"%.6f s", exchange.time);
+        } else {
+            XCTAssertEqual(status, QLMTelemetryOK, @"%.6f s", exchange.time);
+            XCTAssertEqual(t.wakeSteps, 0x13, @"%.6f s", exchange.time);
+        }
+    }
 }
 
 @end

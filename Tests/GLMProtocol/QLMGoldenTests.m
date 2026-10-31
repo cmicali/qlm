@@ -414,4 +414,133 @@ static NSData *QLMDataFromHex(NSString *hex) {
     [self assertScenario:groupSwitch sent:QLMCommandRouting(0x03, 0x00, 0x02, 0x00, 0x01)];
 }
 
+
+// How long each monitor that answered a probe from `from` to `to` held the
+// lease it had: at least until the last probe before it that no monitor
+// answered, and at most until it answered. Both count from the last frame
+// it answered at its session. The host sent its session nothing after that.
+- (NSArray<NSArray<NSNumber *> *> *)lapsesIn:(NSString *)scenario from:(NSTimeInterval)from to:(NSTimeInterval)to {
+    NSMutableArray<NSArray<NSNumber *> *> *lapses = [NSMutableArray array];
+    NSMutableDictionary<NSData *, NSNumber *> *sessions = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSNumber *, NSNumber *> *answered = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSNumber *, NSNumber *> *sent = [NSMutableDictionary dictionary];
+    NSTimeInterval unanswered = 0;
+    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+        if (exchange.time > to) {
+            break;
+        }
+        QLMMessage message = exchange.message;
+        QLMMessage reply = exchange.reply;
+        NSNumber *time = @(exchange.time);
+        BOOL probe = message.address == QLMAddressBroadcast && message.payload[0] == 0xFE;
+        uint8_t hardwareID[3];
+        if (QLMIsLease(message) && exchange.answered) {
+            sessions[[NSData dataWithBytes:message.payload + 1 length:3]] = @(message.payload[4]);
+        } else if (QLMAddressIsLeasable(message.address)) {
+            sent[@(message.address)] = time;
+            if (exchange.answered) {
+                answered[@(message.address)] = time;
+            }
+        } else if (probe && !exchange.answered) {
+            unanswered = exchange.time;
+        } else if (probe && exchange.time >= from && QLMReplyHardwareID(&reply, hardwareID)) {
+            NSNumber *session = sessions[[NSData dataWithBytes:hardwareID length:3]];
+            NSTimeInterval last = answered[session].doubleValue;
+            XCTAssertNotNil(session, @"%@ at %.3f", scenario, exchange.time);
+            XCTAssertEqual(sent[session].doubleValue, last, @"%@ at %.3f", scenario, exchange.time);
+            [lapses addObject:@[@(unanswered - last), @(exchange.time - last)]];
+        }
+    }
+    return lapses;
+}
+
+// A monitor drops its lease 2.4 to 2.9 s after the last frame it answered,
+// on or in standby, with the host still polling the adapter.
+// standby-wake: GLM leased the Right 8351B, in standby, at 0E, asked its 39,
+// and sent its session nothing more. Its lease lapsed within 2.26 to 2.83 s,
+// three times. So the leases in standby every 3 s are GLM's, not the
+// standby's.
+// qlm-control-first: one qlmctl run found the three, and the next probed
+// from 499.79 s. The Left 8351B, in standby, the 7370A, and the Right
+// 8351B held their leases 2.37 s or more, and lapsed within 2.97 s.
+- (void)testALeaseLapsesUnderThreeSecondsAfterItsLastAnswer {
+    NSArray<NSArray<NSNumber *> *> *standby = [self lapsesIn:@"standby-wake" from:37.4 to:46.0];
+    NSArray<NSArray<NSNumber *> *> *run = [self lapsesIn:@"qlm-control-first" from:502 to:502.72];
+    XCTAssertEqual(standby.count, 3u);
+    XCTAssertEqual(run.count, 3u);
+    for (NSArray<NSNumber *> *lapse in standby) {
+        XCTAssertGreaterThan(lapse[0].doubleValue, 2.25);
+        XCTAssertLessThan(lapse[1].doubleValue, 2.84);
+    }
+    for (NSArray<NSNumber *> *lapse in run) {
+        XCTAssertGreaterThan(lapse[0].doubleValue, 2.36);
+        XCTAssertLessThan(lapse[1].doubleValue, 2.97);
+    }
+}
+
+// The broadcast frames from `from` to `to`, as their records.
+static NSSet<NSData *> *QLMBroadcasts(NSString *scenario, NSTimeInterval from, NSTimeInterval to) {
+    NSMutableSet<NSData *> *broadcasts = [NSMutableSet set];
+    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+        if (exchange.time > to) {
+            break;
+        }
+        QLMMessage message = exchange.message;
+        if (exchange.time >= from && message.address == QLMAddressBroadcast) {
+            [broadcasts addObject:QLMAdapterRecord(&message)];
+        }
+    }
+    return broadcasts;
+}
+
+static NSData *QLMRecordOf(QLMMessage message) {
+    return QLMAdapterRecord(&message);
+}
+
+// A probe, or a poll of a monitor.
+static BOOL QLMIsProbeOrPoll(QLMMessage message) {
+    return message.payload[0] == 0xFE || QLMIsMonitorPoll(message);
+}
+
+// A broadcast 03 drops every lease, and the wake does not.
+// setup-b-peq-8351b: GLM broadcast 03 twice at 22.461 s, then the wake
+// pairs. All six answered the probe at 23.760 s, 1.52 s after the last
+// frame a monitor answered, though a lease outlasts 2.4 s of quiet.
+// setup-j-restore: GLM sent the same wake pairs, and every other broadcast
+// of setup-b's but 03 and its level, to the six while they held leases.
+// The probe after them, at 34.993 s, got no answer, and each of the six
+// answered its next poll at its session.
+- (void)testABroadcast03DropsEveryLease {
+    NSSet<NSData *> *b = QLMBroadcasts(@"setup-b-peq-8351b", 22.3, 23.76);
+    NSSet<NSData *> *j = QLMBroadcasts(@"setup-j-restore", 32.9, 35.0);
+    NSMutableSet<NSData *> *bOnly = [b mutableCopy];
+    [bOnly minusSet:j];
+    XCTAssertEqualObjects(bOnly, ([NSSet setWithObjects:QLMRecordOf(QLMMakeMessage(QLMAddressBroadcast, 0x03)),
+                                                        QLMRecordOf(QLMCommandVolumeWord(0x003107, 0x7FFFFF)), nil]));
+    XCTAssertTrue([j containsObject:QLMRecordOf(QLMCommandPower(QLMPowerStepWakeSecond))]);
+
+    NSArray<QLMCaptureExchange *> *probe = [self qlm_frames:1 of:@"setup-b-peq-8351b" from:23.759721 keep:NULL];
+    QLMMessage reply = probe.firstObject.reply;
+    uint8_t hardwareID[3] = {0};
+    XCTAssertTrue(QLMReplyHardwareID(&reply, hardwareID));
+    QLMAssertBytes(hardwareID, sizeof hardwareID, 0x12, 0x2F, 0xAB);
+    NSTimeInterval answered = 0;
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"setup-b-peq-8351b", NULL).exchanges) {
+        if (exchange.time >= 23.759) {
+            break;
+        }
+        if (QLMAddressIsLeasable(exchange.message.address) && exchange.answered) {
+            answered = exchange.time;
+        }
+    }
+    XCTAssertEqualWithAccuracy(23.759721 - answered, 1.52, 0.01);
+
+    NSArray<QLMCaptureExchange *> *after = [self qlm_frames:7 of:@"setup-j-restore" from:34.992563 keep:QLMIsProbeOrPoll];
+    XCTAssertFalse(after.firstObject.answered);
+    for (NSUInteger i = 1; i < after.count; i++) {
+        XCTAssertEqual(after[i].message.payload[0], 0x08, @"%.6f s", after[i].time);
+        XCTAssertTrue(after[i].answered, @"%.6f s", after[i].time);
+    }
+}
+
 @end

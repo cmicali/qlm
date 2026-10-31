@@ -7,7 +7,7 @@ Every monitor answers its `08` poll with a telemetry frame. hlm's spec lists mos
 | Tag | Sent by | What it is | Sure? |
 | --- | --- | --- | --- |
 | `49` | every model | Seconds since the monitor last woke, mod 256. One frame a second. | High |
-| `8A` | every model | A slow clock since the wake: 0 at a wake, then one more about every 240 s. It rides one frame in 30 s. | High on the behavior, medium on the unit |
+| `8A` | every model | The seconds since the wake, over 256. With `49`, it makes one count of seconds. It rides one frame in 30 s. | High |
 | `82` | the 8351B | A third reading of the kind `81` and `83` are. It equals the temperature at rest. What it measures is unknown. | Medium |
 | `88` | the 8351B | A steady reading, different on each monitor, that standby does not change. | Unknown |
 | `89` | the 8351B | A steady reading that falls 16 to 19 within a second of standby, and comes back at the wake. | Unknown |
@@ -40,7 +40,7 @@ Each model sends its fields in a fixed order:
 | 8330A | `81 83 42 43 45 47 49 84` | `47 49 84` |
 | 7370A, 7350A | `83 42 46 43 45 47 49 84` | `47 49 84` |
 
-Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A`, as every example in section 8.1 does, but for two. In `qlm-control-all`, at 381.151 and 381.166 s, both 8330As, busy, ended a frame with a bare `04` after `8A`. Every frame reads with the tag rule. `04` is the only unknown tag, and it comes only after `84` (`QLMGoldenTests`).
+Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A`, as every example in section 8.1 does, but for two. In `qlm-control-all`, at 381.151 and 381.166 s, both 8330As, busy, ended a frame with a bare `04` after `8A`. Every frame reads with the tag rule. `04` is the only unknown tag, and it comes only after `84` (`QLMGoldenTests`). Both 8330As had been switched on at their power switches minutes before, and these were their first frames after GLM's apply ([protocol.md](protocol.md#telemetry)).
 
 ### One frame a second
 
@@ -72,20 +72,23 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 - **A lease, an unplug, a new host, standby, and a group apply do not reset it.** The Left 8351B's count ran on through all twelve GLM captures from `startup-idle-mic` (20:57) to `standby-wake` (21:21), with six wraps. It drifted 2.2 s against the captures' clock. In `standby-wake`, it counted on through standby at 34.9 s.
 - **A wake resets it.** In `standby-wake`, GLM woke the six at 46.0 s. At 49.05 s, each read `01` or `02`. Monitors that join a group from standby read `02` too (`group-switch-main-2x1-main-4x2`, 38.2 s, and `group-switch-main-2x2-main-4x2`, 12.8 s). After qlm's wake, the 8351Bs and the 7370A read `01` (`qlm-control-first`, 829.4 s).
 - **Monitors woken together count together.** The two 8330A woke in the same group switch at about 21:14:48. A minute later, in `mute-dim`, both read `35` at 0.19 s.
-- **Guess:** a power-on at the mains switch also resets it. No capture has one.
+- **A power-on at the power switch resets it too.** In `qlm-control-all`, the Rear Right 8330A was switched on and answered the probe at 214.755 s. Its first frame, at 215.94 s, read `01`, and its `8A` read `00 00` (`testAPowerOnStartsTheWakeCount`). The other 8330A's count restarted at about 175 s too, though the notes don't say it was switched.
 
-## `8A`: a slow clock since the wake
+## `8A`: the seconds since the wake, over 256
+
+`8A` and `49` are one count of seconds since the wake. `8A` is the count over 256, and `49` the count mod 256. So `8A` steps every 256 s.
 
 - **It rides one frame in 30 s.** 447 frames carry it, about one in 24. After the first one a host reads, 213 of the 214 gaps between them in GLM's polling are 30 or 31 s. The other is 60 s, where the frame that carried it came split (`sleep-wake-darkwake`, 395.43 s).
 - **A tick that no poll reads waits for the next poll.** GLM's first poll of each monitor carries `8A` (`startup-idle` and `startup-idle-mic`, 9.9 s, all six). So does the first poll after the replug in `unplug` (70.8 s) and `unplug-proxy-hang` (108.7 s). So does the first poll of every qlm run in `qlm-control-first`.
 - **It is 0 after a wake.** In `standby-wake`, each of the six read `00 00` from 52.0 s. After qlm's wake, the 8351Bs read `00 00` at 833.4 s, and the 7370A at 839.1 s.
-- **It counts up about every 240 s.** In `sleep-wake-darkwake`, `00 03` lasts 240.0 to 240.5 s on all six. The Left 8351B read `13 04` at 20:59 and `13 0A` at 21:21, one step about every 4 minutes. It counts in standby too: the Left went from `00 02` to `00 05` in 721 s (`qlm-control-first`).
-- **The first step is late.** By `49`'s clock, the six took their first step about 280 s after the wake, and each one after that about 240 s apart. So `8A` is not exactly the seconds since the wake over 240. **Guess:** it has its own counter, which starts a little after the wake.
+- **With `49`, it counts the seconds since the wake.** Take two frames that carry `8A` from one session, with no lease or wake between. The captures hold 508 such pairs. In 505, the time less `8A` × 256 + `49` moves less than 1.5 s from one to the next, through every step. In `sleep-wake-darkwake`, it holds within a second (`testWakeStepsEveryThirtySeconds`). In `qlm-control-all`, all six read `00 1E` from 8400.45 to 8481.47 s, after their wake at 575.1 s: 30 steps of 256 s is 7,680 s.
+- **In the other three, the earlier frame lags a step.** Each came 9 to 22 s after `49` wrapped, and carried the `8A` from before the wrap (`knob-sweep`, 9.185 s; `qlm-first-discover`, 79.695 and 79.753 s). **Guess:** a frame's `8A` is read when its 30 s slot falls due, a little before the frame.
+- **A step looks like 240 s from the outside.** In `sleep-wake-darkwake`, the first frames to show `00 03` and `00 04` came 240 s apart. That's a multiple of the 30 s between frames that carry it, not the step. The count runs on across both steps without a jump. It counts in standby too: the Left went from `00 02` to `00 05` in 721 s (`qlm-control-first`).
 - **The value is big-endian, by section 4.** Only the low byte moves in the captures. No capture shows a carry.
 - **The values the captures show:**
-  - `00 00` to `00 05` after the evening's wakes.
-  - `00 A7` to `00 C0` the next morning. That fits about 11 to 13 hours since the last wake, the night before.
-  - `13 04` to `13 0D` (the 8351Bs and the subwoofers) and `2B DF` to `2B E3` (the 8330A) before that evening's first wake. That is about 13.5 and 31 days. **Guess:** these monitors had not woken in that long.
+  - `00 00` to `00 05` after the evening's wakes, and `00 1E` two hours after one (`qlm-control-all`).
+  - `00 A7` to `00 C0` the next morning. That is 11.9 to 13.7 hours since the last wake, the night before.
+  - `13 04` to `13 0D` (the 8351Bs and the subwoofers) and `2B DF` to `2B E3` (the 8330A) before that evening's first wake. That is 14.4 and 33.3 days. **Guess:** these monitors had not woken in that long.
 
 ## `81`, `82`, and `83`
 
@@ -169,12 +172,12 @@ Show each output as its count less `80`, in dB, over a window of about 60 dB, as
 ### What the meters showed about the control run
 
 - **The knob's burst unmuted the 7370A.** At 373.12 s, qlm followed the knob's first turn with `2B 04` to every monitor. The 7370A had been muted in GLM. Its `45` rose from `80` to 207 at 373.87 s. Its notes put the sub's start at 638.7 s, when the Right went silent. The meters say it played from 373.9 s.
-- **After qlm's wake, every output read its floor.** From 829.4 to 839.1 s, the Right's `43`, `44`, and `45`, and the 7370A's `45`, read `80`. Their `42` read the music. qlm sent no `2B` after the wake. GLM's wake sends `2B 04` to every monitor (`standby-wake`, 49.05 s). The notes say the music came back, but not when. **Guess:** a woken monitor stays muted until a host sends its mute state.
+- **After qlm's wake, every output read its floor.** From 829.4 to 839.1 s, the Right's `43`, `44`, and `45`, and the 7370A's `45`, read `80`. Their `42` read the music. qlm sent no `2B` after the wake. GLM's wake sends `2B 04` to every monitor (`standby-wake`, 49.05 s). The notes say the music came back, but not when. Later runs say why the outputs stayed down. A woken monitor waits for the level or the pair, not its mute state, and this wake sent neither ([protocol.md](protocol.md#monitors-keep-their-level-and-their-mute)).
 
 ## What qlm can use
 
 - **`wakeSeconds`** tells a new frame from an old one, and shows how long ago a monitor woke, within 256 s.
-- **`wakeSteps`** shows how long a monitor has been up, in steps of about 4 minutes. It arrives once in 30 s, so keep the last one.
+- **`wakeSteps`** × 256 + `wakeSeconds` is how long a monitor has been up, in seconds. `wakeSteps` arrives once in 30 s, so keep the last one.
 - **The meters** can drive the window's input and output bars.
 - **The temperature** is unsettled for a minute after a wake.
 
@@ -184,6 +187,5 @@ These would settle them:
 
 - **`88` and `89`.** Poll an 8351B through standby for an hour, then wake it. Watch both against the temperature.
 - **`42`'s slope and the meters' scale.** Play a test tone at known levels, through one monitor.
-- **`8A`'s unit and its first step.** Poll one monitor from its wake for 20 minutes.
-- **A power-on.** Switch a monitor on at its mains switch while polling it. Check that `49` and `8A` start at 0.
-- **The wake and the mute.** Wake with qlm while music plays, and listen. Check whether the outputs stay at the floor until a `2B`.
+- **The wake and the level.** Wake with qlm while music plays, and send the level alone, with no pair. Check whether the outputs leave their floor.
+- **The bare `04`.** Switch a monitor on at its power switch, then apply the group with qlm. Check its first frame after.
