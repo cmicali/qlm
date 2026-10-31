@@ -61,6 +61,8 @@ Nothing else is in the reply. No field changes with standby, a group switch, mut
 
 These appear only with the calibration mic in. Normal use has no mic, and qlm doesn't act on them. It does show them, as raw counts, since we don't know their scale. `qlmctl info` and `qlmctl poll` print them on the mic line, and the debug channel's `dump_state` carries them as `micDE` and `micDD`.
 
+A reply with `32` but no `DE` or `DD` prints `in, no readings`. No capture has that shape. After a missed `01 08`, the knob and mic lines show the last reply read, and end with `(stale, 3 polls missed)`. `dump_state` carries the count as `missedPolls`.
+
 qlm reads the adapter twice every 0.107 s, but its snapshot takes the readings only once a cycle, about every 0.57 s. So `poll` shows about one `DE` in ten. Every reading is in a capture.
 
 - `DE` changes on every poll. The first poll of each pair usually reads higher than the second: in 809 of 1,092 pairs in `startup-idle-mic`, and 483 of 677 in `knob-sweep`. The first `DE` after GLM opens in `startup-idle-mic` is `1B AB FB A0` (7.31 s), about 200 times its median. **Guess:** `DE` is the peak since the last read.

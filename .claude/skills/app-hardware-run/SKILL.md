@@ -295,7 +295,7 @@ Step 6 runs under its own `poll`, with the noise off throughout:
 
 | Step | What the user does | Seconds | What it settles |
 | --- | --- | --- | --- |
-| 6 | The mic in, the noise off. Pull the knob out, wait, and plug it back in before `poll` ends. Leave the knob where it was. | 20 out | The one shape no capture has: mic in, knob out. `poll` prints `no knob` while it's out. |
+| 6 | The mic in, the noise off. Pull the knob out, wait, and plug it back in before `poll` ends. Leave the knob where it was. | 20 out | The one shape no capture has: mic in, knob out. `poll` prints `knob none` while it's out. |
 
 If `poll`'s `DD` stays at its step 2 floor at REW's top step, stop. Don't raise the monitors' level. A louder test is the user's call, at −50 dB or lower.
 

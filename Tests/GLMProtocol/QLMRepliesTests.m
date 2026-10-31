@@ -194,6 +194,8 @@
     XCTAssertTrue(status.mic);
     XCTAssertTrue(status.knob);
     XCTAssertEqual(status.knobTenths, 0);
+    XCTAssertTrue(status.hasMicDE);
+    XCTAssertTrue(status.hasMicDD);
     XCTAssertEqual(status.micDE, 0x00231000u);
     XCTAssertEqual(status.micDD, 0x00220001u);
 
@@ -202,6 +204,21 @@
     XCTAssertFalse(status.knob);
     XCTAssertFalse(status.hasKnobPosition);
     XCTAssertFalse(status.mic);
+    XCTAssertFalse(status.hasMicDE);
+    XCTAssertFalse(status.hasMicDD);
+}
+
+// Hand-built: the mic in with neither reading, a shape no capture has. The
+// knob is startup-idle's, at -100.4 dB (7.29 s). A missing reading is not a 0.
+- (void)testAdapterStatusWithTheMicAndNoReadings {
+    QLMMessage message = QLMMakeMessage(QLMAddressReply, 0x09, 0x32, 0x34, 0x30, 0x36, 0xDF, 0xFF, 0xFF, 0xFC, 0x14);
+    QLMAdapterStatus status;
+    XCTAssertEqual(QLMReplyAdapterStatus(&message, &status), QLMAdapterStatusOK);
+    XCTAssertTrue(status.mic);
+    XCTAssertFalse(status.hasMicDE);
+    XCTAssertFalse(status.hasMicDD);
+    XCTAssertEqual(status.knobTenths, -1004);
+    XCTAssertFalse(QLMReplyIsAdapterStatus(&message));
 }
 
 // The tag rule steps over a tag it does not know, by its top two bits.

@@ -803,6 +803,57 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertNil(snapshot.adapter.micDD);
 }
 
+// The mic in with neither reading, 32 34 alone, then with DE alone: shapes no
+// capture has. A missing reading is nil, not 0.
+- (void)testCarriesNoReadingWhenTheReplyLacksIt {
+    _settings.discoversMonitors = NO;
+    _settings.adapterPollInterval = 0.02;
+    [_bus perform:^{
+        self->_bus.micIn = YES;
+    }];
+    [self startSystem];
+    QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.adapter.hasStatus;
+    }];
+    XCTAssertTrue(snapshot.adapter.micPresent);
+    XCTAssertNil(snapshot.adapter.micDE);
+    XCTAssertNil(snapshot.adapter.micDD);
+    snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.adapter.micDE != nil;
+    } after:^{
+        [self->_bus perform:^{
+            self->_bus.micDE = @5;
+        }];
+    }];
+    XCTAssertEqualObjects(snapshot.adapter.micDE, @5);
+    XCTAssertNil(snapshot.adapter.micDD);
+}
+
+// After lost replies, the snapshot keeps the last readings, as it keeps the
+// knob, and missedPolls says they are stale.
+- (void)testKeepsTheMicsLastReadingsThroughMissedPolls {
+    _settings.discoversMonitors = NO;
+    _settings.adapterPollInterval = 0.01;
+    [_bus perform:^{
+        self->_bus.micDE = @1;
+        self->_bus.micDD = @2;
+    }];
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.identified;
+    }];
+    QLMSnapshot *stale = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.missedPolls == 2;
+    } after:^{
+        [self->_bus perform:^{
+            self->_bus.adapterDropReplies = 2;
+        }];
+    }];
+    XCTAssertEqualObjects(stale.adapter.micDE, @1);
+    XCTAssertEqualObjects(stale.adapter.micDD, @2);
+    XCTAssertEqualObjects(stale.adapter.knobTenths, @(-1004));
+}
+
 // A change to the mic's readings alone publishes nothing. With no monitor to
 // publish a cycle, the cycle itself brings the new readings.
 - (void)testACyclePublishesTheMicsNewReadings {
