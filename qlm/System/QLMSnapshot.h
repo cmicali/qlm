@@ -64,7 +64,9 @@ extern const NSInteger QLMMonitorValueAbsent;
 @property (nonatomic, readonly) BOOL hasStatus;
 @property (nonatomic, readonly) BOOL knobPresent;
 @property (nonatomic, readonly) BOOL micPresent;
-// The mic's two readings, DE and DD, as raw counts. Nil without the mic.
+// The mic's two readings, DE and DD, as raw counts. Nil without the mic,
+// or when the reply lacks the reading. Like the knob, they stay at the last
+// status read while missedPolls is above 0.
 // Their meaning is unconfirmed: docs/adapter-status.md has the guesses. They
 // refresh once a cycle.
 @property (nonatomic, readonly, nullable) NSNumber *micDE;

@@ -51,7 +51,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy) NSString *adapterSystemInfo;
 @property (nonatomic, copy) NSString *adapterSerialNumber;
 @property (nonatomic, nullable) NSNumber *knobTenths;  // nil: no knob. -1004, the bottom stop, by default.
-// The calibration mic's two readings, DE and DD. Nil, the default: no mic.
+// The calibration mic. It is in when micIn is YES or either reading is set,
+// and each reading set goes out. Every capture with the mic in has both.
+@property (nonatomic) BOOL micIn;
 @property (nonatomic, nullable) NSNumber *micDE;
 @property (nonatomic, nullable) NSNumber *micDD;
 @property (nonatomic) NSUInteger adapterDropReplies;

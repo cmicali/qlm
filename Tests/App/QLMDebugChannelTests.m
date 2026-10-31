@@ -400,6 +400,7 @@
     XCTAssertEqualObjects(adapter[@"micPresent"], @YES);
     XCTAssertEqualObjects(adapter[@"micDE"], @(0x1BABFBA0));
     XCTAssertEqualObjects(adapter[@"micDD"], @(0x00224E4F));
+    XCTAssertEqualObjects(adapter[@"missedPolls"], @0);
 }
 
 - (void)testDumpStateShowsTheBannersButton {
