@@ -208,6 +208,20 @@
     XCTAssertEqual(QLMReplyAdapterStatus(&reply, &status), QLMAdapterStatusOK);
     XCTAssertFalse(status.knob);
 
+    // With the mic, the shape is startup-idle-mic's: 32 34 DE DD, then the knob.
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-775);
+        self->_bus.micDE = @(0x1BABFBA0);
+        self->_bus.micDD = @(0x00224E4F);
+    }];
+    XCTAssertTrue([self send:QLMCommandPoll(QLMAddressAdapter) reply:&reply error:NULL]);
+    XCTAssertTrue(QLMReplyIsAdapterStatus(&reply));
+    XCTAssertEqual(QLMReplyAdapterStatus(&reply, &status), QLMAdapterStatusOK);
+    XCTAssertTrue(status.mic);
+    XCTAssertEqual(status.micDE, 0x1BABFBA0u);
+    XCTAssertEqual(status.micDD, 0x00224E4Fu);
+    XCTAssertEqual(status.knobTenths, -775);
+
     char text[QLMPayloadMax];
     char model[32];
     char firmware[32];

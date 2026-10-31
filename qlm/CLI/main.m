@@ -13,6 +13,7 @@
 #import "QLMFakeBus.h"
 #include "QLMFrame.h"
 #import "QLMHIDAdapter.h"
+#import "QLMMicText.h"
 #import "QLMReplayAdapter.h"
 #import "QLMSetupReader.h"
 #import "QLMSystem.h"
@@ -21,11 +22,12 @@ static void QLMPrintUsage(FILE *stream) {
     fprintf(stream,
             "usage: qlmctl <command> [options]\n"
             "\n"
-            "  info [BUS]                     print the adapter's identity and its knob\n"
+            "  info [BUS]                     print the adapter's identity, its knob, and its mic\n"
             "  discover [BUS] [--setup FILE.sam] [--seconds N]\n"
             "                                 list every monitor once all are identified, or after N seconds,\n"
             "                                 named from the setup file by hardware ID\n"
-            "  poll [BUS] [--seconds N]       print each monitor's telemetry as it arrives, for N seconds\n"
+            "  poll [BUS] [--seconds N]       print each monitor's telemetry as it arrives, for N seconds, and the\n"
+            "                                 knob and the mic as they change\n"
             "  volume <dB> [BUS] [CONTROL] [--ceiling dB [--allow-high-ceiling]] [--adapter-poll SECONDS]\n"
             "                                 set the volume, at or below the ceiling. --adapter-poll sends one\n"
             "                                 01 08 every SECONDS, 0 to %.0f, in place of GLM's pair every %g s, and\n"
@@ -259,7 +261,7 @@ static int QLMInfo(int argc, const char *argv[]) {
     NSString *systemInfo = [adapter.systemInfo stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     printf("system    %s\n", systemInfo.UTF8String ?: "?");
     QLMPrintKnob(adapter);
-    printf("mic       %s\n", !adapter.hasStatus ? "?" : (adapter.micPresent ? "in" : "none"));
+    printf("mic       %s\n", QLMMicText(adapter).UTF8String);
     if (!adapter.identified) {
         fputs("qlmctl: the adapter did not answer every query\n", stderr);
         return EX_UNAVAILABLE;
@@ -345,6 +347,7 @@ static int QLMPoll(int argc, const char *argv[]) {
     NSDate *start = [NSDate date];
     __block NSNumber *lastKnob = nil;
     __block BOOL knobShown = NO;
+    __block NSString *lastMic = nil;
     __block BOOL reported = NO;
     [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
         if (reported) {
@@ -366,6 +369,11 @@ static int QLMPoll(int argc, const char *argv[]) {
             }
             lastKnob = knob;
             knobShown = YES;
+        }
+        NSString *mic = QLMMicText(snapshot.adapter);
+        if (snapshot.adapter.hasStatus && ![mic isEqualToString:lastMic]) {
+            printf("%7.2f s  mic %s\n", elapsed, mic.UTF8String);
+            lastMic = mic;
         }
         for (QLMMonitorState *monitor in snapshot.monitors) {
             if (monitor.status == QLMMonitorStatusUnknown) {

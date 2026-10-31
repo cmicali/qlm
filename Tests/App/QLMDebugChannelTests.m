@@ -376,6 +376,32 @@
     XCTAssertTrue([reply containsString:@"\"knobDecibels\" : -100.4,"], @"%@", reply);
 }
 
+// The readings as captures/startup-idle-mic's first 01 08 gives them, at
+// 7.31 s: DE 1B AB FB A0, DD 00 22 4E 4F. Raw counts of unconfirmed meaning
+// (docs/adapter-status.md).
+- (void)testDumpStateCarriesTheMic {
+    NSDictionary *adapter = [self runOK:@[@"dump_state"]][@"snapshot"][@"adapter"];
+    XCTAssertEqualObjects(adapter[@"micPresent"], @NO);
+    XCTAssertEqualObjects(adapter[@"micDE"], NSNull.null);
+    XCTAssertEqualObjects(adapter[@"micDD"], NSNull.null);
+
+    // System polls the adapter only at start here.
+    [self stopSystem];
+    [_bus perform:^{
+        self->_bus.micDE = @(0x1BABFBA0);
+        self->_bus.micDD = @(0x00224E4F);
+    }];
+    _app.debugSystem = [self systemOn:_bus];
+    [_app.debugSystem start];
+    [self waitUntil:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.micPresent;
+    }];
+    adapter = [self runOK:@[@"dump_state"]][@"snapshot"][@"adapter"];
+    XCTAssertEqualObjects(adapter[@"micPresent"], @YES);
+    XCTAssertEqualObjects(adapter[@"micDE"], @(0x1BABFBA0));
+    XCTAssertEqualObjects(adapter[@"micDD"], @(0x00224E4F));
+}
+
 - (void)testDumpStateShowsTheBannersButton {
     _app.debugQuitGLMTitle = @"Quit GLM";
     XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"quitGLMButton"], @"Quit GLM");
