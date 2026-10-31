@@ -33,6 +33,7 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
     // System ran with the adapter at the last update. A drop counts only
     // between two such updates.
     BOOL _wasHealthy;
+    QLMAdapterProblem _adapterProblem;  // at the last update
     NSMutableSet<NSData *> *_hot;
     NSMutableDictionary<NSString *, NSDate *> *_lastAlerts;  // by kind and monitor
 }
@@ -67,6 +68,18 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
     }
     _wasHealthy = healthy;
     [self alertHeat:snapshot.monitors];
+    [self alertAdapterProblem:snapshot];
+}
+
+// The adapter takes over about 2.6 s after the last report it took, with
+// no stop of qlm's, and the popover may be closed. Only the HID adapter
+// reports a problem, so this is the real monitors'.
+- (void)alertAdapterProblem:(QLMSnapshot *)snapshot {
+    QLMAdapterProblem problem = snapshot.adapterProblem;
+    if (problem != _adapterProblem && problem != QLMAdapterProblemNone && QLMStopMayRaiseLevel(snapshot)) {
+        [_notifier postIdentifier:@"adapter" title:QLMBusProblemTitle(snapshot) body:QLMBusProblemDetail(snapshot)];
+    }
+    _adapterProblem = problem;
 }
 
 - (void)alertDrops:(NSArray<QLMMonitorState *> *)monitors {

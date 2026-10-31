@@ -23,7 +23,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _ceilingDecibels = -20;
+        _ceilingDecibels = -30;
         _cycleInterval = 0.57;
         _volumeInterval = 0.05;
         _missedPollsLimit = 4;
@@ -1037,6 +1037,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (volume == nil) {
         return;
     }
+    // A turn above the ceiling, with the volume at it, changes nothing, so
+    // it sends nothing (captures/qlm-app-first/notes.md, Surprises).
+    volume = [self underCeiling:volume.doubleValue];
+    if ([volume isEqual:_volumeDecibels]) {
+        return;
+    }
     _volumeDecibels = volume;
     _dirty = YES;
     for (int i = 0; i < 3; i++) {
@@ -1120,7 +1126,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)setVolumeDecibels:(double)decibels {
     [self onQueue:^{
-        self->_volumeDecibels = @(decibels);
+        self->_volumeDecibels = [self underCeiling:decibels];
         self->_dirty = YES;
         [self scheduleVolumeSend];
     }];
@@ -1131,11 +1137,20 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMSystemSettings *settings = [self.settings copy];
         settings.ceilingDecibels = ceilingDecibels;
         self.settings = settings;
+        if (self->_volumeDecibels != nil) {
+            self->_volumeDecibels = [self underCeiling:self->_volumeDecibels.doubleValue];
+        }
         self->_dirty = YES;
         if (self->_running && !self->_stopping && self->_volumeDecibels != nil) {
             [self sendVolume];
         }
     }];
+}
+
+// The volume System keeps is never above the ceiling, so what the snapshot
+// says is what goes out.
+- (NSNumber *)underCeiling:(double)decibels {
+    return @(fmin(decibels, self.settings.ceilingDecibels));
 }
 
 - (void)scheduleVolumeSend {
@@ -1583,6 +1598,19 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return state;
 }
 
+- (QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds {
+    __block QLMSnapshot *snapshot = nil;
+    dispatch_semaphore_t made = dispatch_semaphore_create(0);
+    dispatch_async(_queue, ^{
+        snapshot = [self makeSnapshot];
+        dispatch_semaphore_signal(made);
+    });
+    if (dispatch_semaphore_wait(made, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC))) != 0) {
+        return nil;
+    }
+    return snapshot;
+}
+
 - (void)publishIfSettled {
     if (_dirty && [self isIdle]) {
         [self publish];
@@ -1591,6 +1619,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)publish {
     _dirty = NO;
+    QLMSnapshot *snapshot = [self makeSnapshot];
+    self.snapshot = snapshot;
+    QLMSnapshotHandler handler = _snapshotHandler;
+    if (handler != nil && _snapshotQueue != NULL) {
+        [_clock async:_snapshotQueue run:^{
+            handler(snapshot);
+        }];
+    }
+}
+
+- (QLMSnapshot *)makeSnapshot {
     NSMutableArray<QLMMonitorState *> *states = [NSMutableArray arrayWithCapacity:_monitors.count];
     BOOL allIdentified = _monitors.count > 0;
     BOOL allMuted = _monitors.count > 0;
@@ -1649,13 +1688,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return [a.serialNumber compare:b.serialNumber];
     }];
     snapshot.anyOn = anyOn;
-    self.snapshot = snapshot;
-    QLMSnapshotHandler handler = _snapshotHandler;
-    if (handler != nil && _snapshotQueue != NULL) {
-        [_clock async:_snapshotQueue run:^{
-            handler(snapshot);
-        }];
-    }
+    return snapshot;
 }
 
 @end

@@ -1,8 +1,5 @@
 #import "QLMAppDelegate.h"
 
-#include <math.h>
-
-#include "QLMCommands.h"
 #import "QLMAlerts.h"
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
@@ -24,6 +21,8 @@
 // allowance for a sleep. A stop sends at most the hand-back level, then
 // closes the adapter.
 static const NSTimeInterval QLMStopAllowance = 3;
+// How long a stop's warning waits for System's snapshot now.
+static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 
 @interface QLMAppDelegate () <QLMPopoverControllerDelegate, QLMSettingsWindowControllerDelegate>
 @property (nonatomic) QLMPreferences *preferences;
@@ -38,9 +37,9 @@ static const NSTimeInterval QLMStopAllowance = 3;
 @property (nonatomic, nullable) QLMFakeBusWindowController *fakeBusController;
 @property (nonatomic, nullable) QLMFakeBus *bus;
 @property (nonatomic, nullable) QLMSystem *system;
-// The mute record last kept, as System started from it or last saved.
-@property (nonatomic, copy) NSSet<NSData *> *keptMutedIDs;
-@property (nonatomic) BOOL keptMutingAll;
+// What System's bus keeps across launches. It follows the bus, so a
+// snapshot from the fake bus never reaches the real monitors' store.
+@property (nonatomic, readonly) QLMBusPreferences *kept;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
@@ -93,43 +92,53 @@ static const NSTimeInterval QLMStopAllowance = 3;
 }
 
 // Quit waits for the stop, so the hand-back level goes out before qlm does.
-// On the real monitors, a take-over that would raise the level asks first.
+// Every quit comes here: the popover's Quit, and logout, restart, and shut
+// down. qlm has no menu, so no Cmd-Q.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
-    QLMHandBack *handBack = self.monitorList.snapshot.handBack;
-    if ([self takeOverRaisesLevel:handBack] && [self answerLouderHandBack:handBack] != NSAlertSecondButtonReturn) {
+    [self.settingsController endEditing];
+    if (![self mayStop:@"Quitting" anyway:@"Quit Anyway"]) {
         return NSTerminateCancel;
     }
     [self stopSystemAndWait];
     return NSTerminateNow;
 }
 
-// A debug command's quit answers in place of the user.
-- (NSModalResponse)answerLouderHandBack:(QLMHandBack *)handBack {
+// Only on the real monitors: on the fake bus a take-over moves no level.
+- (BOOL)stopMayRaiseLevel:(QLMSnapshot *)snapshot {
+    return self.bus == nil && QLMStopMayRaiseLevel(snapshot);
+}
+
+// System's snapshot now, since the latest may lag a level or a knob
+// reading. While System's queue waits on an adapter that takes no report,
+// the latest decides.
+- (nullable QLMSnapshot *)snapshotNow {
+    return [self.system snapshotNowWithin:QLMSnapshotAllowance] ?: self.monitorList.snapshot;
+}
+
+// Asks before a stop that may make the monitors louder. YES goes ahead. A
+// debug command's quit answers in place of the user.
+- (BOOL)mayStop:(NSString *)stop anyway:(NSString *)anyway {
+    QLMSnapshot *now = [self snapshotNow];
+    if (![self stopMayRaiseLevel:now]) {
+        return YES;
+    }
 #if DEBUG
     if (self.debugQuitAnswer != nil) {
-        return self.debugQuitAnswer.integerValue;
+        return self.debugQuitAnswer.integerValue == NSAlertSecondButtonReturn;
     }
 #endif
-    [self activateApp];
-    return [[self louderHandBackAlert:handBack] runModal];
-}
-
-// Only on the real monitors: on the fake bus a take-over moves no level.
-- (BOOL)takeOverRaisesLevel:(QLMHandBack *)handBack {
-    return handBack.kind == QLMHandBackLouder && self.bus == nil;
-}
-
-// Cancel is the default.
-- (NSAlert *)louderHandBackAlert:(QLMHandBack *)handBack {
+    BOOL louder = now.handBack.kind == QLMHandBackLouder;
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"Quitting makes the monitors louder";
-    alert.informativeText = [NSString stringWithFormat:@"%@ About 2.6 s after qlm quits, the adapter sets the knob's level. "
-                                                       @"Turn the knob down first, or quit anyway.",
-                                                       QLMHandBackRiseText(handBack)];
+    alert.messageText = [NSString stringWithFormat:louder ? @"%@ makes the monitors louder" : @"%@ may make the monitors louder", stop];
+    alert.informativeText = [NSString stringWithFormat:@"%@ About 2.6 s after qlm lets go, the adapter sets %@. "
+                                                       @"Turn the knob down first, or %@.",
+                                                       QLMTakeOverText(now), louder ? @"the knob's level" : @"its own level",
+                                                       anyway.lowercaseString];
+    // Cancel is the default.
     [alert addButtonWithTitle:@"Cancel"];
-    NSButton *quit = [alert addButtonWithTitle:@"Quit Anyway"];
-    quit.hasDestructiveAction = YES;
-    return alert;
+    [alert addButtonWithTitle:anyway].hasDestructiveAction = YES;
+    [self activateApp];
+    return [alert runModal] == NSAlertSecondButtonReturn;
 }
 
 #pragma mark - System
@@ -146,14 +155,11 @@ static const NSTimeInterval QLMStopAllowance = 3;
         bus.recordsSentMessages = NO;
         adapter = bus;
     }
+    self.bus = bus;
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.preferences.ceilingDecibels;
-    self.keptMutedIDs = self.preferences.mutedHardwareIDs;
-    self.keptMutingAll = self.preferences.mutingAll;
-    settings.mutedHardwareIDs = self.keptMutedIDs;
-    settings.mutingAll = self.keptMutingAll;
+    [self.kept fillSettings:settings];
     QLMSystem *system = [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
-    self.bus = bus;
     self.system = system;
     self.popoverController.system = system;
     self.popoverController.showsFakeBus = bus != nil;
@@ -178,7 +184,11 @@ static const NSTimeInterval QLMStopAllowance = 3;
     [system start];
     // At connect, keep the app's own level. The knob moves nothing until a
     // volume is set.
-    [system setVolumeDecibels:self.preferences.volumeDecibels];
+    [system setVolumeDecibels:self.kept.volumeDecibels];
+}
+
+- (QLMBusPreferences *)kept {
+    return self.bus == nil ? self.preferences.adapterBus : self.preferences.fakeBus;
 }
 
 // System lets go of the adapter before the Mac sleeps. As at quit, the
@@ -186,12 +196,12 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // (qlm-control-first). No one can answer a prompt now, so a louder
 // take-over is logged, and on the real monitors it is a notification.
 - (void)macWillSleep:(NSNotification *)notification {
-    QLMSnapshot *snapshot = self.monitorList.snapshot;
+    QLMSnapshot *snapshot = [self snapshotNow];
     NSLog(@"qlm: the Mac sleeps. %@", QLMHandBackLine(snapshot) ?: @"the level at the take-over is unknown.");
-    if ([self takeOverRaisesLevel:snapshot.handBack]) {
+    if ([self stopMayRaiseLevel:snapshot]) {
         [self.notifier postIdentifier:@"hand-back"
                                 title:@"The level may have risen as the Mac slept"
-                                 body:QLMHandBackRiseText(snapshot.handBack)];
+                                 body:QLMTakeOverText(snapshot)];
     }
     [self stopSystemAndWait];
 }
@@ -227,7 +237,8 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // A new adapter setting takes a new System, with a new adapter: a stopped
 // one is not handed to another. The new System starts once the old has let
 // go, so the two never hold the adapter at once. Dim carries over, read
-// from the old System's last snapshot. Each bus keeps its own mute record.
+// from the old System's last snapshot. Each bus keeps its own level, mute
+// record, and leases.
 // The active group and the fake bus's state do not carry over. A second
 // change during a restart finds the new System already made, and stops.
 - (void)restartSystem {
@@ -251,40 +262,15 @@ static const NSTimeInterval QLMStopAllowance = 3;
     if (self.fakeBusController.window.visible) {
         [self.fakeBusController refresh];
     }
-    [self keepMuteRecord:snapshot];
-    // The knob moves the volume too. Keep whichever set it last.
-    NSNumber *volume = snapshot.volumeDecibels;
-    if (volume != nil) {
-        double kept = fmin(volume.doubleValue, snapshot.ceilingDecibels);
-        if (fabs(kept - self.preferences.volumeDecibels) >= QLMVolumeDecibelsStep / 2) {
-            self.preferences.volumeDecibels = kept;
-        }
-    }
+    [self.kept keepFromSnapshot:snapshot];
     [self renderStatusItem];
-}
-
-// TRAP: a snapshot from before System starts carries an empty record, not
-// the one System starts from. Only a running System's record is kept. It is
-// compared with the last one kept, not read back from the defaults.
-- (void)keepMuteRecord:(QLMSnapshot *)snapshot {
-    if (!snapshot.running) {
-        return;
-    }
-    if (![snapshot.mutedHardwareIDs isEqualToSet:self.keptMutedIDs]) {
-        self.keptMutedIDs = snapshot.mutedHardwareIDs;
-        self.preferences.mutedHardwareIDs = snapshot.mutedHardwareIDs;
-    }
-    if (snapshot.mutingAll != self.keptMutingAll) {
-        self.keptMutingAll = snapshot.mutingAll;
-        self.preferences.mutingAll = snapshot.mutingAll;
-    }
 }
 
 - (void)renderStatusItem {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
     NSString *symbol = @"hifispeaker.2";
     NSString *tip = @"qlm";
-    NSString *problem = QLMBusProblemTitle(snapshot.busProblem);
+    NSString *problem = QLMBusProblemTitle(snapshot);
     if (problem != nil) {
         symbol = @"exclamationmark.triangle";
         tip = [NSString stringWithFormat:@"qlm: %@", problem];
@@ -292,8 +278,7 @@ static const NSTimeInterval QLMStopAllowance = 3;
         symbol = @"speaker.slash";
         tip = @"qlm: muted";
     } else if (snapshot.volumeDecibels != nil) {
-        double volume = fmin(snapshot.volumeDecibels.doubleValue, snapshot.ceilingDecibels);
-        tip = [NSString stringWithFormat:@"qlm: %@%@", QLMDecibelsText(volume), snapshot.dimmed ? @", dimmed" : @""];
+        tip = [NSString stringWithFormat:@"qlm: %@%@", QLMDecibelsText(snapshot.volumeDecibels.doubleValue), snapshot.dimmed ? @", dimmed" : @""];
     }
     if ([symbol isEqualToString:self.statusSymbol] && [tip isEqualToString:self.statusTip]) {
         return;
@@ -422,6 +407,10 @@ static const NSTimeInterval QLMStopAllowance = 3;
     [self loadSetup];
 }
 
+- (BOOL)settingsShouldTurnOffAdapter:(QLMSettingsWindowController *)controller {
+    return [self mayStop:@"Turning off the adapter" anyway:@"Turn Off Anyway"];
+}
+
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
     [self restartSystem];
 }
@@ -485,7 +474,7 @@ static const NSTimeInterval QLMStopAllowance = 3;
 }
 
 - (BOOL)debugQuitAsksFirst {
-    return [self takeOverRaisesLevel:self.monitorList.snapshot.handBack];
+    return [self stopMayRaiseLevel:[self snapshotNow]];
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

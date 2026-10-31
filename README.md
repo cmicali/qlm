@@ -37,13 +37,13 @@ qlm is a menu bar item, with no Dock icon. At its first launch, macOS asks wheth
 
 ## The app
 
-The menu bar app runs on a fake bus until you turn on "Drive the real monitors through the GLM adapter" in Settings. It caps every volume at the ceiling set there. When GLM holds the adapter, it offers to quit GLM. On the real monitors, it asks before a quit that would make them louder. It refuses any group with a model whose filter design rate is unverified, and has no way around that. Today that's any group with an 8351B. The app says so, and sends nothing, so while every group in your setup has an 8351B, the app switches no group.
+The menu bar app runs on a fake bus until you turn on "Drive the real monitors through the GLM adapter" in Settings. It caps every volume at the ceiling set there. When GLM holds the adapter, it offers to quit GLM. On the real monitors, it asks before a quit, or turning the setting off, that may make them louder: the knob above qlm's level, or no knob read. It refuses any group with a model whose filter design rate is unverified, and has no way around that. Today that's any group with an 8351B. The app says so, and sends nothing, so while every group in your setup has an 8351B, the app switches no group.
 
 ### Driving the real monitors
 
 The app is new to the real adapter, so turn the setting on at a low level, one monitor first:
 
-1. In Settings, set the ceiling to −40 dB or lower, and press Return. The field saves only then. The default is −20 dB. No volume goes out above the ceiling.
+1. In Settings, set the ceiling to −40 dB or lower. The field saves when you leave it, and when Settings closes. The default is −30 dB. No volume goes out above the ceiling.
 2. Turn the knob all the way down. The ceiling doesn't reach the knob, and when qlm quits or the Mac sleeps, the adapter takes over at the knob's level.
 3. In GLM, put every monitor but one in standby. Then quit GLM, since qlm drives nothing while GLM runs. Leave "Wake the monitors" off.
 4. Turn the setting on.

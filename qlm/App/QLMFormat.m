@@ -43,43 +43,48 @@ NSString *QLMReplyAgeText(NSDate *date) {
     return [formatter stringFromDate:date];
 }
 
-// The knob above qlm's level, and the rise, to follow "Now: ".
-// "<lead> reads −10.0 dB, above qlm's −50.0 dB.": the knob against the
-// level qlm sends.
-static NSString *QLMKnobText(NSString *lead, NSString *relation, QLMHandBack *handBack) {
-    return [NSString stringWithFormat:@"%@ reads %@, %@ qlm's %@.", lead, QLMDecibelsText(handBack.knobDecibels.doubleValue),
-                                      relation, QLMDecibelsText(handBack.volumeDecibels.doubleValue)];
-}
-
-static NSString *QLMRiseText(NSString *lead, QLMHandBack *handBack) {
-    double rise = handBack.knobDecibels.doubleValue - handBack.volumeDecibels.doubleValue;
-    return [NSString stringWithFormat:@"%@ At the take-over, the level would rise %@.", QLMKnobText(lead, @"above", handBack),
-                                      QLMDecibelsText(rise)];
-}
-
-NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
+// After `the`, "The" or "Now: the". The knob is read before the level,
+// as qlmctl reads them.
+static NSString *QLMTakeOverTextAfter(NSString *the, QLMSnapshot *snapshot) {
     QLMHandBack *handBack = snapshot.handBack;
+    double knob = handBack.knobDecibels.doubleValue;
+    double volume = handBack.volumeDecibels.doubleValue;
     switch (handBack.kind) {
-    case QLMHandBackKnobLevel:
-        return [NSString stringWithFormat:@"%@ qlm sends the knob's level as it stops, so the take-over changes nothing.",
-                                          QLMKnobText(@"Now: the knob", @"at or below", handBack)];
     case QLMHandBackLouder:
-        return QLMRiseText(@"Now: the knob", handBack);
+        return [NSString stringWithFormat:@"%@ knob reads %@, above qlm's %@. At the take-over, the level would rise %@.", the,
+                                          QLMDecibelsText(knob), QLMDecibelsText(volume), QLMDecibelsText(knob - volume)];
+    case QLMHandBackKnobLevel:
+        return [NSString stringWithFormat:@"%@ knob reads %@, at or below qlm's %@. At the take-over, the level would not rise.", the,
+                                          QLMDecibelsText(knob), QLMDecibelsText(volume)];
     case QLMHandBackUnknown:
         break;
     }
-    if (snapshot.adapter.hasStatus && handBack.knobDecibels == nil) {
-        return @"Now: no knob is in, so the level at the take-over is unknown.";
+    NSString *why = handBack.knobDecibels != nil ? @"qlm has set no level"
+                    : snapshot.adapter.hasStatus ? @"no knob is in"
+                                                 : @"qlm has not read the knob yet";
+    return [NSString stringWithFormat:@"%@ level at the take-over is unknown, since %@.", the, why];
+}
+
+NSString *QLMTakeOverText(QLMSnapshot *snapshot) {
+    return QLMTakeOverTextAfter(@"The", snapshot);
+}
+
+NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
+    return snapshot.adapter.hasStatus ? QLMTakeOverTextAfter(@"Now: the", snapshot) : nil;
+}
+
+BOOL QLMStopMayRaiseLevel(QLMSnapshot *snapshot) {
+    BOOL holds = snapshot.busProblem == QLMBusProblemNone || snapshot.adapterProblem != QLMAdapterProblemNone;
+    return snapshot.running && holds && snapshot.handBack.kind != QLMHandBackKnobLevel;
+}
+
+NSString *QLMBusProblemTitle(QLMSnapshot *snapshot) {
+    switch (snapshot.adapterProblem) {
+    case QLMAdapterProblemUnresponsive: return @"The adapter stopped answering";
+    case QLMAdapterProblemLostTrack: return @"qlm lost track of the adapter";
+    case QLMAdapterProblemNone: break;
     }
-    return nil;
-}
-
-NSString *QLMHandBackRiseText(QLMHandBack *handBack) {
-    return QLMRiseText(@"The knob", handBack);
-}
-
-NSString *QLMBusProblemTitle(QLMBusProblem problem) {
-    switch (problem) {
+    switch (snapshot.busProblem) {
     case QLMBusProblemNoAdapter: return @"No adapter";
     case QLMBusProblemGLM: return @"GLM has the adapter";
     case QLMBusProblemOtherHost: return @"Another app has the adapter";
@@ -90,6 +95,23 @@ NSString *QLMBusProblemTitle(QLMBusProblem problem) {
 
 // The error's sentence only names the other host. Nothing decides by it.
 NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
+    NSString *action = nil;
+    switch (snapshot.adapterProblem) {
+    case QLMAdapterProblemUnresponsive:
+        action = @"qlm tries again for about 7 s, then waits for a reply, and resumes once one comes.";
+        break;
+    case QLMAdapterProblemLostTrack:
+        action = @"Unplug the adapter, and plug it back in. qlm sends nothing until then.";
+        break;
+    case QLMAdapterProblemNone:
+        break;
+    }
+    // System keeps the adapter's last knob reading meanwhile.
+    if (action != nil) {
+        return [NSString stringWithFormat:@"%@ Meanwhile the adapter takes over at the knob's level, about 2.6 s after the last "
+                                          @"report it took. %@",
+                                          action, QLMTakeOverText(snapshot)];
+    }
     switch (snapshot.busProblem) {
     case QLMBusProblemNoAdapter: return @"Connect the GLM adapter by USB.";
     case QLMBusProblemGLM: return @"qlm drives nothing while GLM runs. Quit GLM to hand the monitors to qlm.";

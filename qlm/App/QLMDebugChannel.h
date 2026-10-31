@@ -26,8 +26,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) QLMPreferences *debugPreferences;
 // The banner's Quit GLM button: its title, or nil while it is hidden.
 @property (nonatomic, readonly, copy, nullable) NSString *debugQuitGLMTitle;
-// A quit now asks first, since the take-over would raise the real monitors'
-// level.
+// A quit now asks first, since the take-over may raise the real monitors'
+// level. So does turning the adapter off, which stops them too.
 @property (nonatomic, readonly) BOOL debugQuitAsksFirst;
 // What the status item's click does when the popover is closed.
 - (void)debugShowPopover;

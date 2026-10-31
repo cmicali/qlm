@@ -159,9 +159,12 @@ targets:
       # qlmctl's gates and dry run. Its main.m is the tool's own.
       - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md", "main.m"]
-      # The app's debug verbs, and the files they read that need no app.
+      # The app's debug verbs, and the app's code they and the tests read.
+      # TRAP: AppKit can't make a view here. Hostless, NSApplication won't
+      # start, and any view's layer asks for it.
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
+      - qlm/App/QLMMonitorList.m
       - qlm/App/QLMPreferences.m
     settings:
       base:

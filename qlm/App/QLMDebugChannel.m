@@ -238,18 +238,43 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             return @{@"ok": @YES, @"ceilingDecibels": @(app.debugPreferences.ceilingDecibels)};
         }),
         // Settings' checkbox, "Drive the real monitors through the GLM
-        // adapter". A change starts a new System.
+        // adapter". A change starts a new System. Turning it off stops the
+        // real monitors, so where the louder alert would show, it refuses.
         QLMDebugVerb(@"adapter <on|off>", QLM_HANDLER {
             BOOL on = NO;
             if (!VibeParseOnOff(tokens, &on)) {
                 return nil;
             }
             BOOL changed = on != app.debugPreferences.usesAdapter;
+            if (changed && !on && app.debugQuitAsksFirst) {
+                return QLMDebugError(@"turning the adapter off may make the monitors louder. Answer with adapter_off_answering");
+            }
             if (changed) {
                 app.debugPreferences.usesAdapter = on;
                 [app debugAdapterDidChange];
             }
             return @{@"ok": @YES, @"usesAdapter": @(on), @"restarted": @(changed)};
+        }),
+        // The argument answers the louder alert, as quit_answering's does.
+        QLMDebugVerb(@"adapter_off_answering <cancel|anyway>", QLM_HANDLER {
+            NSString *answer = tokens[1].lowercaseString;
+            BOOL anyway = [answer isEqualToString:@"anyway"];
+            if (!anyway && ![answer isEqualToString:@"cancel"]) {
+                return nil;
+            }
+            BOOL asks = app.debugQuitAsksFirst;
+            BOOL turningOff = app.debugPreferences.usesAdapter && (!asks || anyway);
+            if (turningOff) {
+                app.debugPreferences.usesAdapter = NO;
+                [app debugAdapterDidChange];
+            }
+            QLMSnapshot *snapshot = app.debugSnapshot;
+            return @{
+                @"ok": @YES,
+                @"asksFirst": @(asks),
+                @"restarted": @(turningOff),
+                @"handBack": snapshot ? QLMDebugHandBack(snapshot) : NSNull.null,
+            };
         }),
         // A monitor's mute button takes a click while System tracks it.
         QLMDebugVerb(@"mute <serial> <on|off>", QLM_HANDLER {

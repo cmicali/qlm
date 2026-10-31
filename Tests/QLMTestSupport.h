@@ -10,6 +10,7 @@
 #import "QLMClock.h"
 #include "QLMFrame.h"
 #import "QLMSetup.h"
+#import "QLMSnapshot.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -31,6 +32,9 @@ NS_ASSUME_NONNULL_BEGIN
     })
 
 NSData *QLMBytes(const uint8_t *bytes, size_t length);
+
+// A hand-back as System would give it.
+QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume);
 
 // The output report a message packs into, 64 bytes.
 NSData *QLMReportFor(QLMMessage message);

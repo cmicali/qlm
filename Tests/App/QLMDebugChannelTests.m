@@ -102,7 +102,7 @@
     _defaults = [[NSUserDefaults alloc] initWithSuiteName:_suiteName];
     QLMPreferences *preferences = [[QLMPreferences alloc] initWithDefaults:_defaults];
     preferences.ceilingDecibels = -30;
-    preferences.volumeDecibels = -45;
+    preferences.fakeBus.volumeDecibels = -45;
 
     _time = [[QLMVirtualClock alloc] init];
     _bus = [QLMFakeBus demoBusWithSubwoofer:NO];
@@ -111,7 +111,7 @@
     _app.debugSystem = [self systemOn:_bus];
     // As the app starts it: its own level, kept across launches.
     [_app.debugSystem start];
-    [_app.debugSystem setVolumeDecibels:preferences.volumeDecibels];
+    [_app.debugSystem setVolumeDecibels:preferences.fakeBus.volumeDecibels];
     [self waitUntil:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.anyOn && snapshot.idle;
     }];
@@ -288,6 +288,7 @@
         @"volume <dB>": @[@[@"volume"], @[@"volume", @"loud"], @[@"volume", @"nan"], @[@"volume", @"inf"], @[@"volume", @"-40", @"-41"]],
         @"ceiling <dB>": @[@[@"ceiling"], @[@"ceiling", @"-35dB"], @[@"ceiling", @"-inf"]],
         @"adapter <on|off>": @[@[@"adapter"], @[@"adapter", @"yes"]],
+        @"adapter_off_answering <cancel|anyway>": @[@[@"adapter_off_answering"], @[@"adapter_off_answering", @"yes"]],
         @"mute <serial> <on|off>": @[@[@"mute", @"8330apm21001234"], @[@"mute", @"8330apm21001234", @"loud"], @[@"mute", @"on"]],
         @"mute_all <on|off>": @[@[@"mute_all"], @[@"mute_all", @"1"]],
         @"dim <on|off>": @[@[@"dim", @"sideways"], @[@"dim", @"on", @"off"]],
@@ -446,6 +447,22 @@
     XCTAssertEqualObjects(([self runOK:@[@"adapter", @"OFF"]][@"restarted"]), @YES);
     XCTAssertEqualObjects(_app.actions, (@[@"adapter on", @"adapter off"]));
     XCTAssertFalse([_defaults boolForKey:@"QLMUsesAdapter"]);
+}
+
+// Turning the adapter off stops the real monitors, as a quit does. Where
+// the louder alert would show, only an explicit anyway turns it off.
+- (void)testTurningTheAdapterOffAnswersTheLouderAlert {
+    [self runOK:@[@"adapter", @"on"]];
+    _app.debugQuitAsksFirst = YES;
+    XCTAssertEqualObjects(([self errorOf:@[@"adapter", @"off"]]),
+                          @"turning the adapter off may make the monitors louder. Answer with adapter_off_answering");
+    NSDictionary *reply = [self runOK:@[@"adapter_off_answering", @"cancel"]];
+    XCTAssertEqualObjects(reply[@"asksFirst"], @YES);
+    XCTAssertEqualObjects(reply[@"restarted"], @NO);
+    XCTAssertTrue([_defaults boolForKey:@"QLMUsesAdapter"]);
+    XCTAssertEqualObjects(([self runOK:@[@"adapter_off_answering", @"anyway"]][@"restarted"]), @YES);
+    XCTAssertFalse([_defaults boolForKey:@"QLMUsesAdapter"]);
+    XCTAssertEqualObjects(_app.actions, (@[@"adapter on", @"adapter off"]));
 }
 
 - (void)testMuteNamesAMonitorBySerial {

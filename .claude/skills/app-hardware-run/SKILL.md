@@ -17,7 +17,7 @@ These come from `AGENTS.md`'s Safety section. They outrank the user's plan and t
 - **Low level, one monitor first.** Agree on the ceiling and the level before the adapter goes on. Earlier runs used a −35 dB ceiling and −50 dB. **Never raise the ceiling above the one agreed.**
 - **Never drive the bus while GLM runs.** The app refuses the adapter while GLM holds it. **Run `quit_glm` only on the user's word.**
 - **One host at a time.** Never run `qlmctl` against the adapter while the app runs, and never run a second qlm, the installed one included.
-- **A louder hand-back needs the user's own yes.** When `dump_state` gives `snapshot.handBack.kind` as `louder`, the adapter raises the level about 2.6 s after qlm quits. Run `quit_answering anyway` only after the user says so. Otherwise suggest they turn the knob down first.
+- **A louder hand-back needs the user's own yes.** When `dump_state` gives `quitAsksFirst` as true, the adapter may raise the level about 2.6 s after qlm quits or the adapter goes off. That's a `snapshot.handBack.kind` of `louder`, or `unknown` with no knob read. Run `quit_answering anyway` or `adapter_off_answering anyway` only after the user says so. Otherwise suggest they turn the knob down first.
 - **If anything sounds wrong, run `mute_all on` at once**, then ask. It needs no permission. Tell the user it ran.
 - **Quit with `quit_answering`, never vibe-libs' `quit`.** The standard `quit` terminates inside a main-queue block. There the app's wait for System's stop can only time out, 3 s later, and a louder hand-back puts up the alert while the channel waits.
 
@@ -45,7 +45,8 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
 | `dump_state` | Reads the snapshot the popover shows, and the app's settings: below | never |
 | `volume <dB>` | The slider, on GLM's 0.5 dB steps | System is stopped, or the level is outside the slider's range (`sliderRange`) |
 | `ceiling <dB>` | Settings' ceiling. The preferences bound it: at most 0 dB, on a step at or below the value | never |
-| `adapter <on\|off>` | Settings' "Drive the real monitors through the GLM adapter". A change starts a new System | never |
+| `adapter <on\|off>` | Settings' "Drive the real monitors through the GLM adapter". A change starts a new System | `off` while the louder alert would show (`quitAsksFirst`) |
+| `adapter_off_answering <cancel\|anyway>` | Turning the setting off. The argument answers the louder alert, if it would show | never |
 | `mute <serial> <on\|off>` | One monitor's mute button | System tracks no monitor with that serial |
 | `mute_all <on\|off>` | Mute | System is stopped, or tracks no monitor |
 | `dim <on\|off>` | Dim | System is stopped |

@@ -23,7 +23,7 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 @interface QLMSystemSettings : NSObject <NSCopying>
 
 // The user's ceiling. Every volume frame is capped at it. The default is low.
-@property (nonatomic) double ceilingDecibels;           // -20
+@property (nonatomic) double ceilingDecibels;           // -30, qlmctl's highest without --allow-high-ceiling
 @property (nonatomic) NSTimeInterval cycleInterval;     // 0.57 s: probe, volume, a poll to each monitor
 @property (nonatomic) NSTimeInterval volumeInterval;    // 0.05 s: at most one volume frame per interval
 @property (nonatomic) NSUInteger missedPollsLimit;      // 4 polls unanswered, then the retry burst
@@ -76,6 +76,14 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // The handler gets the latest snapshot at once, then every one published.
 - (void)setSnapshotHandler:(nullable QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue;
 
+// The snapshot System would publish now. The latest one may lag, since
+// System publishes only once nothing is queued for the bus or in flight.
+// Decide from this one what must not miss a change, such as whether a stop
+// makes the monitors louder. Nil when System's queue is still busy after
+// `seconds`: it waits up to 5 s on each report an adapter does not take.
+// Never from System's queue.
+- (nullable QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds;
+
 - (void)start;
 // Before it lets go, sends the knob's level when the knob is at or below the
 // level System sends, so the adapter's take-over changes nothing. The
@@ -87,13 +95,16 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)stopWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every
-// cycle, and ahead of everything else when a monitor is leased. Clamped to
-// the ceiling in the builder. Once one is set, a turn of the adapter's knob
-// sets it too, as GLM lets it (QLMKnob). At start the knob sets nothing.
+// cycle, and ahead of everything else when a monitor is leased. Held at the
+// ceiling, and clamped to it in the builder too. Once one is set, a turn of
+// the adapter's knob sets it too, as GLM lets it (QLMKnob), under the
+// ceiling. A turn that leaves it where it was sends nothing. At start the
+// knob sets nothing.
 - (void)setVolumeDecibels:(double)decibels;
 
 // Caps every volume frame that goes out after this, those already in line
-// too. A volume already set goes out again, under the new ceiling.
+// too. A volume above the new ceiling falls to it, and stays there if the
+// ceiling rises again. A volume already set goes out again.
 - (void)setCeilingDecibels:(double)ceilingDecibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A
