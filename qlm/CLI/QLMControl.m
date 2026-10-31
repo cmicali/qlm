@@ -224,7 +224,7 @@ NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *a
         if (!QLMReadNumber(ceiling, @"a ceiling in dB", &number, problem)) {
             return nil;
         }
-        if (number > 0) {
+        if (number > QLMVolumeDecibelsMax) {
             *problem = @"the ceiling may not be above 0 dB";
             return nil;
         }
