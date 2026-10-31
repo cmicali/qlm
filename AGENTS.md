@@ -2,7 +2,7 @@
 
 Guidance for any coding agent working in this repository.
 
-qlm is a native Mac controller for Genelec SAM monitors. It talks to them through the GLM network adapter. It replaces GLM for status, volume, mute, dim, power, and group switching. It never calibrates. **Only `qlmctl` has run on real hardware**, and its controls only on one monitor; the app and the group apply run over a fake bus. The plan is [docs/plan.md](docs/plan.md), and its "Where things stand" section says what is built and what waits. Read it before changing anything here.
+qlm is a native Mac controller for Genelec SAM monitors. It talks to them through the GLM network adapter. It replaces GLM for status, volume, mute, dim, power, and group switching. It never calibrates. The app and `qlmctl`'s controls have run on all six monitors of one system, though `qlmctl mute` only on one. **The group apply has run only on the fake bus.** The plan is [docs/plan.md](docs/plan.md), and its "Where things stand" section says what is built and what waits. Read it before changing anything here.
 
 ## Building
 
@@ -18,7 +18,8 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 - `qlm/App/` is the menu bar app, in AppKit and Objective-C.
 - `qlm/CLI/` is `qlmctl`.
 - `Tests/` mirrors `qlm/`.
-- `captures/` holds the Phase 0 captures, and `tools/` the scripts that record and convert them. `captures/README.md` has the scenarios.
+- `captures/` holds the Phase 0 captures and qlm's own runs on the monitors. `captures/README.md` has the scenarios.
+- `tools/` holds the scripts that record and convert the captures, and the Pi proxy in `tools/pi/`. It also holds the setup redaction, the measurement's comparison, and two scripts the Makefile runs: `check-release.sh` and `quit-app.sh`.
 - **A setup file in the repo is redacted.** `tools/redact-setup.py` makes the fixture in `Tests/Setups/Fixtures/`. Never commit a raw `.sam` file.
 
 ## Layers
