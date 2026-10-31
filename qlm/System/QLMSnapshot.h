@@ -136,7 +136,8 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 
 // The last call that ran on System's queue before this snapshot was made,
 // or 0 before any. Its frames are out or still queued, a volume held by the
-// coalescing timer among them. In an idle snapshot they are all out.
+// coalescing timer among them. In an idle snapshot none is left to go out:
+// each went out, failed, or was dropped by a stop.
 @property (nonatomic, readonly) QLMCallNumber lastCall;
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) QLMAdapterState *adapter;
@@ -158,8 +159,8 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // their stored settings. It ends when a group applies, or when GLM holds
 // the adapter, since GLM's launch applies its group. Kept across a stop.
 @property (nonatomic, readonly) BOOL wokeWithoutGroup;
-// Nothing was queued for the bus, in flight, or held by the volume's
-// coalescing timer when this was made.
+// Nothing was queued for the bus, in flight, or, while System runs, held by
+// the volume's coalescing timer when this was made.
 @property (nonatomic, readonly) BOOL idle;
 // While System runs, what a stop would do to the level now. Once it has
 // stopped, what it did.

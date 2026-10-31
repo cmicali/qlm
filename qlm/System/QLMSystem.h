@@ -71,8 +71,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // queued for the bus, in flight, or held by the volume's coalescing timer.
 // Every method may be called from any thread.
 // Each command returns its call's number. Once the call has run on System's
-// queue, a snapshot that carries it follows, with its frames out or queued
-// (QLMSnapshot's lastCall).
+// queue, a snapshot that carries it follows, with its frames out, queued,
+// failed, or dropped by a stop (QLMSnapshot's lastCall).
 // While the bus is refused or gone, no frame goes to a session. Once it comes
 // back, System drops every monitor, and takes each back only where its own
 // serial answers at the session it last held.
