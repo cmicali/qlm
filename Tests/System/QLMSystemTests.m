@@ -2897,6 +2897,43 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     });
 }
 
+// A volume set within volumeInterval of the last frame waits on a timer,
+// with nothing queued for the bus. No snapshot that carries its call is idle
+// until its frame is out.
+- (void)testACoalescedVolumeIsNotIdleUntilItsFrameIsOut {
+    _settings.cycleInterval = 10;
+    _settings.volumeInterval = 0.05;
+    [self startSystem];
+    [self waitForIdle];
+    QLMSystem *system = _system;
+    QLMCallNumber first = [system setVolumeDecibels:-40];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.lastCall >= first;
+    }];
+    NSTimeInterval firstSent = _time.now;
+    NSUInteger before = _bus.sentMessages.count;
+    QLMMessage level = QLMCommandVolume(-45, _settings.ceilingDecibels);
+    NSData *frame = QLMAdapterRecord(&level);
+    QLMFakeBus *bus = _bus;
+    __block QLMCallNumber call = 0;
+    __block BOOL outWhenShown = NO;
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        if (call == 0 || snapshot.lastCall < call || !snapshot.idle) {
+            return NO;
+        }
+        outWhenShown = [bus.sentMessages containsObject:frame];
+        return YES;
+    } after:^{
+        call = [system setVolumeDecibels:-45];
+        [self->_time settle];
+        XCTAssertEqual([self countSent:frame from:before], 0u);  // coalesced
+        XCTAssertFalse([system snapshotNowWithin:1].idle);
+    }];
+    XCTAssertTrue(outWhenShown);
+    XCTAssertEqualWithAccuracy(_time.now - firstSent, _settings.volumeInterval, 1e-9);
+    XCTAssertEqual([self countSent:frame from:before], 1u);
+}
+
 // So a wait for a call's number ends, even for a call that sends nothing.
 - (void)testACallThatChangesNothingStillPublishesItsNumber {
     [self startSystem];
