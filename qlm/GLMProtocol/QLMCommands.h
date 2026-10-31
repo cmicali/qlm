@@ -89,5 +89,9 @@ QLMMessage QLMCommandRouting(uint8_t session, uint8_t inputIndex, uint8_t source
 // 3C, 3E, or 42, then 00 00, as GLM sends each to a subwoofer. What they set
 // is unknown. Any other opcode gives a message the allowlist refuses.
 QLMMessage QLMCommandSubwooferUnknown(uint8_t session, uint8_t opcode);
+// 43 00 vv and 4B 00 00 00 vv, as GLM sends each to an 8351B. What they set
+// is unknown. The allowlist takes only 43 00 02 and 4B 00 00 00 01.
+QLMMessage QLMCommandThreeWay43(uint8_t session, uint8_t value);
+QLMMessage QLMCommandThreeWay4B(uint8_t session, uint8_t value);
 
 #endif

@@ -86,7 +86,7 @@ static NSString *QLMDescribeExchange(QLMCaptureExchange *exchange) {
     }
     XCTAssertEqual(mismatches, 0u);
     XCTAssertGreaterThan(repacked, 50000u);
-    NSSet<NSString *> *glmOnly = [NSSet setWithArray:@[@"05", @"43", @"4B", @"adapter 22", @"adapter 51", @"FF 03"]];
+    NSSet<NSString *> *glmOnly = [NSSet setWithArray:@[@"05", @"adapter 22", @"adapter 51", @"FF 03"]];
     XCTAssertEqualObjects(refused, glmOnly);
 }
 

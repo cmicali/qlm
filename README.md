@@ -111,11 +111,9 @@ It matches each pass to the node of the group whose block is closest to it. Only
 | A setting whose frame differs | `GLM`, then `qlm` |
 | A frame only GLM sent | `GLM only` |
 | A frame only qlm would send | `qlm only` |
-| The 8351B's `43 00 02` and `4B 00 00 00 01`, which qlm leaves out | `left out` |
-| One of those two that GLM didn't send | `not sent` |
 | A DSP frame no pass holds, and what explains it | `GLM, outside a pass`, before or after a pass, or to a session with no pass in the window |
 
-It also checks every generator stop, `05 04`, in the window, to a monitor with a pass or not. A left-out frame or a stop with other bytes counts as one only GLM sent.
+It also checks every generator stop, `05 04`, in the window, to a monitor with a pass or not. A stop with other bytes counts as one only GLM sent.
 
 GLM sends some DSP frames outside any pass, and the output lists each one with what explains it:
 

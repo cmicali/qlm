@@ -102,10 +102,10 @@ static void QLMPrintUsage(FILE *stream) {
             "names count, the reply after the session's last lease before the pass. When the setup holds the\n"
             "hardware ID that lease names, as a raw setup file does and a redacted one doesn't, only that\n"
             "node counts. A node is one monitor, so a second session can't match it, unless the capture\n"
-            "leases that session, as when a monitor is leased again. It prints each pass's node, then every setting whose frame differs, as GLM's then qlm's,\n"
-            "every frame only GLM sent, every frame only qlm would send, and the 8351B's 43 00 02 and\n"
-            "4B 00 00 00 01, which qlm leaves out. It checks every generator stop, 05 04, in the window, pass\n"
-            "or no pass. A left-out frame or a stop with other bytes is a frame only GLM sent.\n"
+            "leases that session, as when a monitor is leased again. It prints each pass's node, then every\n"
+            "setting whose frame differs, as GLM's then qlm's, every frame only GLM sent, and every frame\n"
+            "only qlm would send. It checks every generator stop, 05 04, in the window, pass or no pass. A\n"
+            "stop with other bytes is a frame only GLM sent.\n"
             "It also lists, as GLM, outside a pass, every DSP frame in the window that no pass holds, and\n"
             "says what explains it. A switch's routing frames, 3B and 40, are listed before the pass they\n"
             "route, and explained when that pass sends the same. One to a monitor with no pass right after it\n"
@@ -861,9 +861,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         QLMMessage message = QLMApplyMessage(record);
         QLMPrintFrame(&message, NULL, NULL);
     }
-    printf("%lu frames. Not sent, though GLM sends them: 05 04 before each block, and the 8351B's 43 00 02 and "
-           "4B 00 00 00 01.\n",
-           (unsigned long)records.count);
+    printf("%lu frames. Not sent, though GLM sends it: 05 04 before each block.\n", (unsigned long)records.count);
     printf("%s\n", allowed ? "every node's rate is verified: an apply would be allowed"
                             : "REFUSED: a node's design rate is unverified, so an apply runs only as its supervised "
                               "test, with --unverified-rate");

@@ -70,16 +70,12 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
 
 // Each setting both send with other bytes, as GLM's payload, then qlm's.
 @property (nonatomic, readonly) NSArray<NSArray<NSData *> *> *changed;
-// What GLM sent and qlm's block lacks, past what qlm knowingly leaves out.
+// What GLM sent and qlm's block lacks.
 @property (nonatomic, readonly) NSArray<NSData *> *glmOnly;
-// The block's leftOutPayloads, as GLM sent them.
-@property (nonatomic, readonly) NSArray<NSData *> *leftOut;
-// The block's leftOutPayloads this pass lacks.
-@property (nonatomic, readonly) NSArray<NSData *> *missingLeftOut;
 @property (nonatomic, readonly) NSArray<NSData *> *qlmOnly;
-// GLM's payloads, less what qlm leaves out, are the block's in order.
+// GLM's payloads are the block's in order.
 @property (nonatomic, readonly) BOOL inOrder;
-// changed, glmOnly, missingLeftOut, and qlmOnly, counted.
+// changed, glmOnly, and qlmOnly, counted.
 @property (nonatomic, readonly) NSUInteger differenceCount;
 // No difference, and in order.
 @property (nonatomic, readonly) BOOL matches;
@@ -115,7 +111,7 @@ NSArray<QLMPassMatch *> *QLMMatchPasses(NSArray<QLMCapturedPass *> *passes, QLMS
                                         NSArray<NSString *> *_Nullable *_Nullable refusals);
 
 // The block's frame for the setting `payload` names, the last when it sends
-// the setting twice, or one it leaves out. Nil for a setting it lacks.
+// the setting twice. Nil for a setting it lacks.
 NSData *_Nullable QLMBlockSetting(QLMDSPBlock *block, NSData *payload);
 
 // compare-apply, given what follows the command's name. It reads a setup
