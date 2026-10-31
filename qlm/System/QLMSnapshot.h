@@ -15,6 +15,10 @@ typedef NS_ENUM(NSInteger, QLMMonitorClass) {
     QLMMonitorClassTwoWay,
 };
 
+// Each call to one of System's commands takes the next number, from 1, in
+// the order the calls run on System's queue.
+typedef uint64_t QLMCallNumber;
+
 // A value absent from the last telemetry is -1.
 extern const NSInteger QLMMonitorValueAbsent;
 
@@ -123,6 +127,10 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // The whole system at one moment. Immutable.
 @interface QLMSnapshot : NSObject
 
+// The last call to System that ran before this was made, or 0 before any.
+// A snapshot that carries a call's number, or a later one, reflects that
+// call.
+@property (nonatomic, readonly) QLMCallNumber lastCall;
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) QLMAdapterState *adapter;
 // Why nothing reaches the bus: QLMAdapterErrorBusy while another host has

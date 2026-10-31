@@ -1,5 +1,7 @@
 #import "QLMSystem.h"
 
+#include <os/lock.h>
+
 #import "QLMApplySequence.h"
 #include "QLMCommands.h"
 #include "QLMReplies.h"
@@ -254,12 +256,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
     QLMSnapshotHandler _snapshotHandler;
     dispatch_queue_t _snapshotQueue;
+    os_unfair_lock _callLock;
+    QLMCallNumber _callsTaken;  // under _callLock
+    QLMCallNumber _lastCall;    // the last call run on the queue
 }
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter settings:(QLMSystemSettings *)settings {
     self = [super init];
     if (self) {
         _queue = dispatch_queue_create("com.commonwealthrecordings.qlm.system", DISPATCH_QUEUE_SERIAL);
+        _callLock = OS_UNFAIR_LOCK_INIT;
         _adapter = adapter;
         _adapterRewrites = [adapter respondsToSelector:@selector(sendMessage:rewrite:replyHandler:)];
         __weak QLMSystem *weakSelf = self;
@@ -306,6 +312,21 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }];
 }
 
+// A command's work. It marks System dirty, so a snapshot that carries its
+// number follows. TRAP: the number and the hop share the lock, so the
+// numbers run in order on the queue, whatever thread calls.
+- (QLMCallNumber)call:(dispatch_block_t)block {
+    os_unfair_lock_lock(&_callLock);
+    QLMCallNumber number = ++_callsTaken;
+    [self onQueue:^{
+        self->_lastCall = number;
+        self->_dirty = YES;
+        block();
+    }];
+    os_unfair_lock_unlock(&_callLock);
+    return number;
+}
+
 - (void)setSnapshotHandler:(QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue {
     QLMSnapshotHandler copied = [handler copy];
     [self onQueue:^{
@@ -322,8 +343,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Lifecycle
 
-- (void)start {
-    [self onQueue:^{
+- (QLMCallNumber)start {
+    return [self call:^{
         if (self->_stopping) {
             self->_startAfterStop = YES;
             return;
@@ -358,13 +379,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
 }
 
-- (void)stop {
-    [self stopWithCompletion:nil];
+- (QLMCallNumber)stop {
+    return [self stopWithCompletion:nil];
 }
 
-- (void)stopWithCompletion:(dispatch_block_t)completion {
+- (QLMCallNumber)stopWithCompletion:(dispatch_block_t)completion {
     dispatch_block_t copied = [completion copy];
-    [self onQueue:^{
+    return [self call:^{
         self->_startAfterStop = NO;
         if (copied != nil) {
             [self->_stopCompletions addObject:copied];
@@ -1128,23 +1149,21 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Volume
 
-- (void)setVolumeDecibels:(double)decibels {
-    [self onQueue:^{
+- (QLMCallNumber)setVolumeDecibels:(double)decibels {
+    return [self call:^{
         self->_volumeDecibels = [self underCeiling:decibels];
-        self->_dirty = YES;
         [self scheduleVolumeSend];
     }];
 }
 
-- (void)setCeilingDecibels:(double)ceilingDecibels {
-    [self onQueue:^{
+- (QLMCallNumber)setCeilingDecibels:(double)ceilingDecibels {
+    return [self call:^{
         QLMSystemSettings *settings = [self.settings copy];
         settings.ceilingDecibels = ceilingDecibels;
         self.settings = settings;
         if (self->_volumeDecibels != nil) {
             self->_volumeDecibels = [self underCeiling:self->_volumeDecibels.doubleValue];
         }
-        self->_dirty = YES;
         if (self->_running && !self->_stopping && self->_volumeDecibels != nil) {
             [self sendVolume];
         }
@@ -1218,13 +1237,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // GLM's dim: the level twice, one round of 2B, then broadcast 2D 00 and
 // 3D 00 00 (captures/mute-dim, 51.24 s).
-- (void)setDimmed:(BOOL)dimmed {
-    [self onQueue:^{
+- (QLMCallNumber)setDimmed:(BOOL)dimmed {
+    return [self call:^{
         if (self->_dimmed == dimmed) {
             return;
         }
         self->_dimmed = dimmed;
-        self->_dirty = YES;
         if (!self->_running || self->_volumeDecibels == nil) {
             return;
         }
@@ -1238,9 +1256,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Mute
 
-- (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID {
+- (QLMCallNumber)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID {
     NSData *identity = [hardwareID copy];
-    [self onQueue:^{
+    return [self call:^{
         if (!self->_running) {
             return;
         }
@@ -1255,7 +1273,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             }
         }
         [self->_unstatedIDs addObject:identity];
-        self->_dirty = YES;
         QLMMonitorRecord *monitor = [self monitorWithHardwareID:identity];
         // A round reaches only a monitor that is on.
         monitor.needsState = monitor.needsState || !monitor.isOn;
@@ -1271,17 +1288,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }];
 }
 
-- (void)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs {
+- (QLMCallNumber)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs {
     NSSet<NSData *> *copied = [hardwareIDs copy];
-    [self onQueue:^{
+    return [self call:^{
         [self->_mutedIDs unionSet:copied];
         [self->_liftedIDs minusSet:copied];
-        self->_dirty = YES;
     }];
 }
 
-- (void)setAllMuted:(BOOL)muted {
-    [self onQueue:^{
+- (QLMCallNumber)setAllMuted:(BOOL)muted {
+    return [self call:^{
         if (!self->_running) {
             return;
         }
@@ -1394,8 +1410,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 #pragma mark - Power
 
 // GLM's four steps, about 22 ms apart (captures/standby-wake, 34.86 s).
-- (void)sleep {
-    [self onQueue:^{
+- (QLMCallNumber)sleep {
+    return [self call:^{
         if (!self->_running) {
             return;
         }
@@ -1417,8 +1433,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // the knob's, which the adapter applies once qlm lets go, or with no knob
 // the bottom level. The monitors come back under new sessions, and the
 // probe finds them.
-- (void)wake {
-    [self onQueue:^{
+- (QLMCallNumber)wake {
+    return [self call:^{
         if (!self->_running) {
             return;
         }
@@ -1450,23 +1466,23 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Group apply
 
-- (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
-    [self applyGroup:group switching:NO completion:completion];
+- (QLMCallNumber)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
+    return [self applyGroup:group switching:NO completion:completion];
 }
 
-- (void)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
-    [self applyGroup:group switching:YES completion:completion];
+- (QLMCallNumber)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion {
+    return [self applyGroup:group switching:YES completion:completion];
 }
 
 // `switching`: GLM's switch even when no group is active yet.
-- (void)applyGroup:(QLMSetupGroup *)group switching:(BOOL)switching completion:(void (^)(NSError *_Nullable error))completion {
+- (QLMCallNumber)applyGroup:(QLMSetupGroup *)group switching:(BOOL)switching completion:(void (^)(NSError *_Nullable error))completion {
     id<QLMClock> clock = _clock;
     void (^finish)(NSError *) = ^(NSError *error) {
         [clock async:dispatch_get_main_queue() run:^{
             completion(error);
         }];
     };
-    [self onQueue:^{
+    return [self call:^{
         NSError *refusal = nil;
         NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self checkGroup:group error:&refusal];
         if (blocks == nil) {
@@ -1677,6 +1693,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [states addObject:state];
     }
     QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
+    snapshot.lastCall = _lastCall;
     snapshot.running = _running;
     snapshot.adapter = [self adapterState];
     snapshot.adapterError = _adapterError;

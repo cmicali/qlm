@@ -175,17 +175,17 @@ static NSData *QLMRecord(QLMMessage message) {
 }
 
 // An action that is done before it returns, as when qlmctl's thread is slow
-// to come back from it. The wait's handler is in place first, so it sees the
-// mute land, and the dry run does not run out.
+// to come back from it. The replay of the latest snapshot carries the call's
+// number, so it counts, and the dry run does not run out.
 - (void)testAnActionDoneBeforeItReturnsStillShows {
     NSData *target = QLMDiscovered().monitors[0].hardwareID;  // at 09
-    NSArray<NSData *> *records = [self recordsOf:^int(QLMSystem *system, QLMSnapshot *found) {
-        [system setMuted:YES forMonitorWithHardwareID:target];
+    NSArray<NSData *> *records = [self recordsOf:^QLMCallNumber(QLMSystem *system, QLMSnapshot *found, int *status) {
+        QLMCallNumber call = [system setMuted:YES forMonitorWithHardwareID:target];
         [self->_time settle];
-        return 0;
-    } effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return call;
+    } effect:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && [snapshot.mutedHardwareIDs containsObject:target];
-    })];
+    }];
     XCTAssertTrue([records containsObject:QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))], @"%@", records);
 }
 
@@ -193,17 +193,16 @@ static NSData *QLMRecord(QLMMessage message) {
     QLMSnapshot *discovered = QLMDiscovered();
     NSData *target = discovered.monitors[0].hardwareID;
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [self dryRunSettings], @[], ^int(QLMSystem *system, QLMSnapshot *found) {
-        [system setMuted:YES forMonitorWithHardwareID:target];
-        return 0;
-    }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [self dryRunSettings], @[], ^QLMCallNumber(QLMSystem *system, QLMSnapshot *found, int *status) {
+        return [system setMuted:YES forMonitorWithHardwareID:target];
+    }, ^BOOL(QLMSnapshot *snapshot) {
         for (QLMMonitorState *monitor in snapshot.monitors) {
             if ([monitor.hardwareID isEqualToData:target]) {
                 return snapshot.idle && monitor.muted;
             }
         }
         return NO;
-    }), &status);
+    }, &status);
 
     XCTAssertEqual(status, 0);
     XCTAssertTrue([records containsObject:QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))]);
@@ -218,9 +217,8 @@ static NSData *QLMRecord(QLMMessage message) {
     QLMSystemSettings *settings = [self dryRunSettings];
     settings.ceilingDecibels = -40;
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, @[], ^int(QLMSystem *system, QLMSnapshot *found) {
-        [system setVolumeDecibels:-20];  // held at the -40 dB ceiling
-        return 0;
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, @[], ^QLMCallNumber(QLMSystem *system, QLMSnapshot *found, int *status) {
+        return [system setVolumeDecibels:-20];  // held at the -40 dB ceiling
     }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && [snapshot.volumeDecibels isEqual:@(-40)];
     }, &status);
@@ -297,9 +295,9 @@ static NSArray<NSData *> *QLMPair(void) {
 // level and the pair, as GLM's does (captures/standby-wake, 47.24 s).
 - (void)testWakeWithAVolumeEndsWithIt {
     NSData *level = QLMRecord(QLMCommandVolume(-43.5, -35));
-    NSArray<NSData *> *records = [self recordsOf:QLMWakeAction(@(-43.5)) effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+    NSArray<NSData *> *records = [self recordsOf:QLMWakeAction(@(-43.5)) effect:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && snapshot.anyOn && [snapshot.volumeDecibels isEqual:@(-43.5)];
-    })];
+    }];
     NSMutableArray<NSData *> *expected = [NSMutableArray arrayWithObject:level];
     for (int pair = 0; pair < 3; pair++) {
         [expected addObject:QLMRecord(QLMCommandPower(QLMPowerStepWakeFirst))];
@@ -354,13 +352,12 @@ static NSArray<NSData *> *QLMPair(void) {
 - (void)testMuteKeepsTheMonitorsMutedElsewhereMuted {
     QLMSnapshot *discovered = QLMDiscovered();
     NSData *target = discovered.monitors[1].hardwareID;  // at 05
-    QLMControlAction mute = ^int(QLMSystem *system, QLMSnapshot *found) {
-        [system setMuted:YES forMonitorWithHardwareID:target];
-        return 0;
+    QLMControlAction mute = ^QLMCallNumber(QLMSystem *system, QLMSnapshot *found, int *status) {
+        return [system setMuted:YES forMonitorWithHardwareID:target];
     };
-    NSArray<NSData *> *records = [self recordsOf:mute muted:@[@"5678"] effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+    NSArray<NSData *> *records = [self recordsOf:mute muted:@[@"5678"] effect:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && snapshot.allMuted;
-    })];
+    }];
     NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueMuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))];
     XCTAssertEqualObjects(records, [round arrayByAddingObjectsFromArray:round]);
 
@@ -377,41 +374,107 @@ static NSArray<NSData *> *QLMPair(void) {
 // before a wait returns, so this counts what had gone out when the test
 // first passed.
 - (void)testAnUnmuteWithMutedWaitsForItsRounds {
+    QLMFakeBus *bus = nil;
+    QLMSystem *system = [self startedSystemOn:&bus];
+    NSData *target = bus.monitors[0].hardwareID;  // 1234, at 02
+    NSUInteger start = bus.sentMessages.count;
+    NSUInteger sentWhenShown = 0;
+    int status = -1;
+    QLMSnapshot *shown = QLMWaitForEffect(system, system.snapshot, @[@"5678"], ^QLMCallNumber(QLMSystem *running, QLMSnapshot *found, int *status) {
+        return [running setMuted:NO forMonitorWithHardwareID:target];
+    }, [self unmutedTest:target bus:bus start:start sent:&sentWhenShown], 5, &status);
+    XCTAssertEqual(status, 0);
+    XCTAssertNotNil(shown);
+    [self assertRoundsOf:bus from:start sentWhenShown:sentWhenShown];
+    [system stop];
+}
+
+// #57's race, without #57's second wait: the record and the unmute run in
+// one wait, and the record's snapshot is out before the unmute is called.
+// It shows the target unmuted, idle. Only its number is too low.
+- (void)testASnapshotFromBeforeTheLastCallCannotEndAWait {
+    QLMFakeBus *bus = nil;
+    QLMSystem *system = [self startedSystemOn:&bus];
+    NSData *target = bus.monitors[0].hardwareID;
+    NSData *muted = bus.monitors[1].hardwareID;
+    NSUInteger start = bus.sentMessages.count;
+    NSUInteger sentWhenShown = 0;
+    __block QLMCallNumber recorded = 0;
+    __block QLMCallNumber unmuted = 0;
+    QLMSnapshot *shown = QLMWaitForSnapshot(system, 5, ^QLMCallNumber {
+        recorded = [system recordMutedHardwareIDs:[NSSet setWithObject:muted]];
+        [self->_time settle];
+        unmuted = [system setMuted:NO forMonitorWithHardwareID:target];
+        return unmuted;
+    }, [self unmutedTest:target bus:bus start:start sent:&sentWhenShown]);
+    XCTAssertEqual(unmuted, recorded + 1);
+    XCTAssertEqual(shown.lastCall, unmuted);
+    [self assertRoundsOf:bus from:start sentWhenShown:sentWhenShown];
+    [system stop];
+}
+
+// Another thread's call publishes after the wait began but before the
+// action's own call. Its snapshot passes the test, and still can't end the
+// wait.
+- (void)testAPublishFromAnotherThreadCannotEndAWaitEarly {
+    QLMFakeBus *bus = nil;
+    QLMSystem *system = [self startedSystemOn:&bus];
+    NSData *target = bus.monitors[0].hardwareID;
+    NSData *muted = bus.monitors[1].hardwareID;
+    NSUInteger start = bus.sentMessages.count;
+    NSUInteger sentWhenShown = 0;
+    __block QLMCallNumber other = 0;
+    int status = -1;
+    QLMSnapshot *shown = QLMWaitForEffect(system, system.snapshot, @[], ^QLMCallNumber(QLMSystem *running, QLMSnapshot *found, int *status) {
+        dispatch_sync(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+            other = [running recordMutedHardwareIDs:[NSSet setWithObject:muted]];
+        });
+        [self->_time settle];
+        XCTAssertEqual(running.snapshot.lastCall, other);
+        return [running setMuted:NO forMonitorWithHardwareID:target];
+    }, [self unmutedTest:target bus:bus start:start sent:&sentWhenShown], 5, &status);
+    XCTAssertEqual(status, 0);
+    XCTAssertEqual(shown.lastCall, other + 1);
+    [self assertRoundsOf:bus from:start sentWhenShown:sentWhenShown];
+    [system stop];
+}
+
+// The demo bus's two monitors, found, with no cycle or adapter poll to come.
+- (QLMSystem *)startedSystemOn:(QLMFakeBus *__autoreleasing *)busOut {
     QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
     QLMSystemSettings *settings = [self dryRunSettings];
     settings.cycleInterval = 10;
     settings.adapterPollInterval = 0;
     QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
-    QLMSnapshot *discovered = QLMWaitForSnapshot(system, 5, ^BOOL {
-        [system start];
-        return YES;
+    QLMSnapshot *discovered = QLMWaitForSnapshot(system, 5, ^QLMCallNumber {
+        return [system start];
     }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.allIdentified && snapshot.monitors.count == 2;
     });
-    NSData *target = bus.monitors[0].hardwareID;  // 1234, at 02
-    NSUInteger start = bus.sentMessages.count;
-    __block NSUInteger sentWhenShown = 0;
-    QLMSnapshotTest effect = QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+    XCTAssertNotNil(discovered);
+    *busOut = bus;
+    return system;
+}
+
+// Passes once the target shows unmuted, idle, and counts what had gone out.
+- (QLMSnapshotTest)unmutedTest:(NSData *)target bus:(QLMFakeBus *)bus start:(NSUInteger)start sent:(NSUInteger *)sent {
+    return ^BOOL(QLMSnapshot *snapshot) {
         if (!snapshot.idle || [snapshot.mutedHardwareIDs containsObject:target]) {
             return NO;
         }
-        sentWhenShown = bus.sentMessages.count - start;
+        *sent = bus.sentMessages.count - start;
         return YES;
-    });
-    int status = -1;
-    QLMSnapshot *shown = QLMWaitForEffect(system, discovered, @[@"5678"], ^int(QLMSystem *running, QLMSnapshot *found) {
-        [running setMuted:NO forMonitorWithHardwareID:target];
-        return 0;
-    }, effect, 5, &status);
-    XCTAssertEqual(status, 0);
-    XCTAssertNotNil(shown);
+    };
+}
 
+// The unmute's two rounds, 1234 at 02 unmuted and 5678 at 03 muted, all out
+// before the wait passed.
+- (void)assertRoundsOf:(QLMFakeBus *)bus from:(NSUInteger)start sentWhenShown:(NSUInteger)sentWhenShown {
     NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x02, QLMMuteValueUnmuted)), QLMRecord(QLMCommandMute(0x03, QLMMuteValueMuted))];
     NSArray<NSData *> *rounds = [round arrayByAddingObjectsFromArray:round];
     XCTAssertEqual(sentWhenShown, rounds.count);
     NSArray<NSData *> *sent = bus.sentMessages;
     XCTAssertEqualObjects([sent subarrayWithRange:NSMakeRange(start, sent.count - start)], rounds);
-    [system stop];
 }
 
 // qlmctl's note at exit says what the stop did. A louder take-over names
@@ -635,8 +698,9 @@ static QLMSnapshot *QLMDiscoveredWithKnob(NSNumber *_Nullable tenths) {
 
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [self dryRunSettings], @[], ^int(QLMSystem *system, QLMSnapshot *found) {
-        return EX_DATAERR;
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [self dryRunSettings], @[], ^QLMCallNumber(QLMSystem *system, QLMSnapshot *found, int *status) {
+        *status = EX_DATAERR;
+        return 0;
     }, ^BOOL(QLMSnapshot *snapshot) {
         return YES;
     }, &status);
