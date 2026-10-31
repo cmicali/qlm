@@ -114,13 +114,9 @@ static NSView *QLMSpacer(void) {
     self.dot.toolTip = QLMPresenceName(entry.presence);
     self.model.stringValue = monitor.model ?: @"?";
     // The setup's name tells the Left 8351B from the Right, where the serial
-    // can't (qlm-app-first). A serial shows in a monospaced font.
-    NSString *name = QLMMonitorLabel(monitor, self.owner.setup);
-    BOOL named = name != nil && ![name isEqualToString:monitor.serialNumber];
-    self.name.stringValue = name ?: @"";
-    self.name.font = named ? [NSFont systemFontOfSize:NSFont.smallSystemFontSize]
-                           : [NSFont monospacedSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
-    self.name.toolTip = named ? monitor.serialNumber : nil;
+    // can't (qlm-app-first).
+    self.name.stringValue = QLMMonitorLabel(monitor, self.owner.setup) ?: @"";
+    self.name.toolTip = monitor.serialNumber;
     self.detail.stringValue = entry.presence == QLMMonitorPresenceOnline ? QLMTemperatureText(monitor.temperature) : QLMEntryStatusText(entry);
     self.muteButton.enabled = entry.tracked;
     if (mutedChanged) {

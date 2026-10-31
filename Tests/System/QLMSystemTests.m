@@ -1784,9 +1784,9 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMSnapshot *asleep = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 3 && !snapshot.anyOn && snapshot.idle;
     }];
-    NSMutableSet<NSNumber *> *oldSessions = [NSMutableSet set];
+    NSMutableIndexSet *oldSessions = [NSMutableIndexSet indexSet];
     for (QLMMonitorState *monitor in asleep.monitors) {
-        [oldSessions addObject:@(monitor.session)];
+        [oldSessions addIndex:monitor.session];
     }
 
     NSUInteger before = _bus.sentMessages.count;
@@ -1795,20 +1795,18 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMSnapshot *woken = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         BOOL leasedAgain = snapshot.monitors.count == 3 && snapshot.allIdentified && snapshot.idle;
         for (QLMMonitorState *monitor in snapshot.monitors) {
-            leasedAgain = leasedAgain && monitor.status == QLMMonitorStatusOn && ![oldSessions containsObject:@(monitor.session)];
+            leasedAgain = leasedAgain && monitor.status == QLMMonitorStatusOn && ![oldSessions containsIndex:monitor.session];
         }
         return leasedAgain;
     }];
     XCTAssertEqualObjects(woken.activeGroupName, @"Mains");
-    NSArray<NSData *> *sent = [_bus.sentMessages subarrayWithRange:NSMakeRange(before, _bus.sentMessages.count - before)];
     NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self blocksOf:mains];
     XCTAssertEqual(blocks.count, 3u);
     for (QLMMonitorState *monitor in woken.monitors) {
         XCTAssertGreaterThan(blocks[monitor.hardwareID].payloads.count, 0u);
         for (NSData *payload in blocks[monitor.hardwareID].payloads) {
-            NSMutableData *record = [NSMutableData dataWithBytes:&(uint8_t){monitor.session} length:1];
-            [record appendData:payload];
-            XCTAssertTrue([sent containsObject:record], @"%@ at %02x missed %@", monitor.serialNumber, monitor.session, payload);
+            QLMMessage frame = QLMMessageMake(monitor.session, payload.bytes, payload.length);
+            XCTAssertGreaterThan([self countSent:QLMAdapterRecord(&frame) from:before], 0u, @"%@ missed %@", monitor.serialNumber, payload);
         }
     }
 }

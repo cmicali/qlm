@@ -2,6 +2,8 @@
 
 #import "QLMMonitorList.h"
 
+@class QLMSetup;
+
 NS_ASSUME_NONNULL_BEGIN
 
 // Posts through UNUserNotificationCenter. The first alert asks the user
@@ -23,6 +25,9 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMMonitorAlerts : NSObject
 
 - (instancetype)initWithNotifier:(QLMNotifier *)notifier;
+
+// Names each monitor in an alert, as the popover does.
+@property (nonatomic, nullable) QLMSetup *setup;
 
 // Call after each of the list's updates.
 - (void)updateWithMonitorList:(QLMMonitorList *)list;

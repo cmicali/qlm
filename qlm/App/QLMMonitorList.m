@@ -46,8 +46,7 @@ NSString *QLMEntryStatusText(QLMMonitorEntry *entry) {
     if (self) {
         _order = [NSMutableArray array];
         _lastStates = [NSMutableDictionary dictionary];
-        _entries = @[];
-        _dropped = @[];
+        [self forgetMonitors];
     }
     return self;
 }

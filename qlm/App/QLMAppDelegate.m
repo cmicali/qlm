@@ -314,6 +314,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
                 return;
             }
             strongSelf.setup = setup;
+            strongSelf.alerts.setup = setup;
             strongSelf.setupError = setup == nil ? error : nil;
             strongSelf.popoverController.setup = setup;
             [strongSelf.settingsController showSetup:setup error:strongSelf.setupError];
