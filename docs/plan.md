@@ -6,7 +6,7 @@
 
 This section is a snapshot of main: what has run on the real adapter, what each layer holds, what we decided and learned on the way, and what comes next. [protocol.md](protocol.md) holds the protocol itself, with a source for every fact, so this section links to it rather than restate it.
 
-Main passes 418 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
+Main passes 423 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
 
 ### What has run where
 
@@ -53,6 +53,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - After a wake with no group active, it says the monitors play without their group's settings until GLM applies the group. System's snapshot carries that. With a group active, System already sends GLM's apply at wake to each monitor leased again (#53).
   - It names each monitor as the setup file does, and forgets the fake bus's monitors when the setting changes (#53).
   - A logout, restart, or shutdown no longer waits on the louder hand-back's alert, which hung a Mac left to restart overnight. Where the user's quit asks, it mutes every monitor first, so the take-over can't make them louder, and the next launch starts muted.
+  - Its notifications play no sound, since the Mac's sound likely plays through the monitors. Each fires once until its cause clears: a dropped monitor back and on, or a hot one cooled. A sleep while dimmed, whose take-over is louder every time, alerts at most once a day. The alerts' rules have tests now.
 
 ### The captures, the kits, and the docs
 

@@ -78,7 +78,7 @@ static OSType QLMQuitReason(void) {
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
     self.notifier = [[QLMNotifier alloc] init];
-    self.alerts = [[QLMMonitorAlerts alloc] initWithNotifier:self.notifier];
+    self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:self.notifier clock:[[QLMSleepCountingClock alloc] init]];
 
     self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
@@ -238,15 +238,13 @@ static OSType QLMQuitReason(void) {
 
 // System lets go of the adapter before the Mac sleeps. As at quit, the
 // adapter takes over at the knob's level about 2.6 s after the last report
-// (qlm-control-first). No one can answer a prompt now, so a louder
-// take-over is logged, and on the real monitors it is a notification.
+// (qlm-control-first). A louder take-over is logged, and on the real
+// monitors it is an alert.
 - (void)macWillSleep:(NSNotification *)notification {
     QLMSnapshot *snapshot = [self snapshotNow];
     NSLog(@"qlm: the Mac sleeps. %@", QLMHandBackLine(snapshot) ?: @"the level at the take-over is unknown.");
     if ([self stopMayRaiseLevel:snapshot]) {
-        [self.notifier postIdentifier:@"hand-back"
-                                title:@"The level may have risen as the Mac slept"
-                                 body:QLMTakeOverText(snapshot)];
+        [self.alerts alertSleepWithSnapshot:snapshot];
     }
     [self stopSystemAndWait];
 }
