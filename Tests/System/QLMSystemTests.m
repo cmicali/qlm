@@ -267,15 +267,6 @@
     }];
 }
 
-static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID) {
-    for (QLMMonitorState *monitor in snapshot.monitors) {
-        if ([monitor.hardwareID isEqualToData:hardwareID]) {
-            return monitor;
-        }
-    }
-    return nil;
-}
-
 - (QLMSnapshot *)waitForDiscovery {
     return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.anyOn;
@@ -2190,6 +2181,49 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
     XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
     XCTAssertNil(stopped.handBack.volumeDecibels);
+}
+
+// A stop no one can answer, such as a restart's, mutes every monitor first
+// where the take-over would be louder or is unknown, and the record keeps
+// it. A mute outlasts the host (captures/qlm-control-first, 648.7 s). At
+// the knob's level, it hands back as any stop does.
+- (void)testAStopMutingIfLouderMutesAllWhereTheTakeOverIsLouder {
+    for (NSNumber *tenths in @[@(-300), [NSNull null]]) {
+        [self startWithKnob:tenths == (id)[NSNull null] ? nil : tenths volume:@(-40)];
+        [_bus perform:^{
+            self->_left.muteValue = 0;
+            self->_right.muteValue = 0;
+        }];
+        NSUInteger before = _bus.sentMessages.count;
+        QLMSystem *system = _system;
+        QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return !snapshot.running;
+        } after:^{
+            [system stopMutingIfLouderWithCompletion:nil];
+        }];
+        XCTAssertNotEqual(stopped.handBack.kind, QLMHandBackKnobLevel, @"%@", tenths);
+        XCTAssertTrue(stopped.mutingAll, @"%@", tenths);
+        XCTAssertGreaterThan([self sentWithOpcode:0x2B from:before].count, 0u, @"%@", tenths);
+        [_bus perform:^{
+            XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted, @"%@", tenths);
+            XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted, @"%@", tenths);
+        }];
+        [self lapseLeases];
+    }
+
+    [self startWithKnob:@(-600) volume:@(-40)];
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSystem *system = _system;
+    QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stopMutingIfLouderWithCompletion:nil];
+    }];
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
+        return YES;
+    }], @[QLMAdapterRecord(&knob)]);
+    XCTAssertFalse(stopped.mutingAll);
 }
 
 // A start while the stop sends the knob's level runs once the stop is done.

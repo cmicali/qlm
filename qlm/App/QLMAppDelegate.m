@@ -19,8 +19,8 @@
 #endif
 
 // How long quit and sleep wait for System to let go, well within the Mac's
-// allowance for a sleep. A stop sends at most the hand-back level, then
-// closes the adapter.
+// allowance for a sleep. A stop sends at most the hand-back level, or mute
+// all, then closes the adapter.
 static const NSTimeInterval QLMStopAllowance = 3;
 // How long a stop's warning waits for System's snapshot now.
 static const NSTimeInterval QLMSnapshotAllowance = 0.5;
@@ -29,7 +29,6 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMMonitorAlerts *alerts;
-@property (nonatomic) QLMNotifier *notifier;
 @property (nonatomic) NSStatusItem *statusItem;
 @property (nonatomic) NSPopover *popover;
 @property (nonatomic) QLMPopoverController *popoverController;
@@ -59,14 +58,25 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @end
 #endif
 
+// The quit Apple event's reason, or 0 with none.
+static OSType QLMQuitReason(void) {
+    NSAppleEventDescriptor *event = NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+    if (event.eventClass != kCoreEventClass || event.eventID != kAEQuitApplication) {
+        return 0;
+    }
+    NSAppleEventDescriptor *reason = [event attributeDescriptorForKeyword:kAEQuitReason] ?: [event paramDescriptorForKeyword:kAEQuitReason];
+    return reason.typeCodeValue;
+}
+
 @implementation QLMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     NSApp.mainMenu = QLMMainMenu();
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
-    self.notifier = [[QLMNotifier alloc] init];
-    self.alerts = [[QLMMonitorAlerts alloc] initWithNotifier:self.notifier];
+    self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:[[QLMNotifier alloc] init] now:^NSTimeInterval {
+        return QLMSecondsCountingSleep();
+    }];
 
     self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
@@ -98,10 +108,14 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // and shut down.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     [self.settingsController endEditing];
-    if (![self mayStop:@"Quitting" anyway:@"Quit Anyway"]) {
+    QLMSnapshot *now = [self snapshotNow];
+    QLMQuitStep step = QLMQuitStepFor([self stopMayRaiseLevel:now], QLMQuitReason());
+    if (step == QLMQuitStepAsk && ![self askBeforeStop:@"Quitting" anyway:@"Quit Anyway" now:now]) {
         return NSTerminateCancel;
     }
-    [self stopSystemAndWait];
+    // A Mac left to restart overnight would hang on the alert. The next
+    // launch starts from the record, muted.
+    [self stopSystemAndWaitMuting:step == QLMQuitStepMuteFirst];
     return NSTerminateNow;
 }
 
@@ -117,13 +131,14 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
     return [self.system snapshotNowWithin:QLMSnapshotAllowance] ?: self.monitorList.snapshot;
 }
 
-// Asks before a stop that may make the monitors louder. YES goes ahead. A
-// debug command's quit answers in place of the user.
+// Asks before a stop that may make the monitors louder. YES goes ahead.
 - (BOOL)mayStop:(NSString *)stop anyway:(NSString *)anyway {
     QLMSnapshot *now = [self snapshotNow];
-    if (![self stopMayRaiseLevel:now]) {
-        return YES;
-    }
+    return ![self stopMayRaiseLevel:now] || [self askBeforeStop:stop anyway:anyway now:now];
+}
+
+// A debug command's quit answers in place of the user.
+- (BOOL)askBeforeStop:(NSString *)stop anyway:(NSString *)anyway now:(QLMSnapshot *)now {
 #if DEBUG
     if (self.debugQuitAnswer != nil) {
         return self.debugQuitAnswer.integerValue == NSAlertSecondButtonReturn;
@@ -196,17 +211,15 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 
 // System lets go of the adapter before the Mac sleeps. As at quit, the
 // adapter takes over at the knob's level about 2.6 s after the last report
-// (qlm-control-first). No one can answer a prompt now, so a louder
-// take-over is logged, and on the real monitors it is a notification.
+// (qlm-control-first). A louder take-over is logged, and on the real
+// monitors it is an alert.
 - (void)macWillSleep:(NSNotification *)notification {
     QLMSnapshot *snapshot = [self snapshotNow];
     NSLog(@"qlm: the Mac sleeps. %@", QLMHandBackLine(snapshot) ?: @"the level at the take-over is unknown.");
     if ([self stopMayRaiseLevel:snapshot]) {
-        [self.notifier postIdentifier:@"hand-back"
-                                title:@"The level may have risen as the Mac slept"
-                                 body:QLMTakeOverText(snapshot)];
+        [self.alerts alertSleepWithSnapshot:snapshot];
     }
-    [self stopSystemAndWait];
+    [self stopSystemAndWaitMuting:NO];
 }
 
 // Waits up to QLMStopAllowance for System to let go: the Mac waits for a
@@ -215,15 +228,20 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // main queue, the completion waits for that block, so only the deadline
 // ends the wait. A restart that finishes meanwhile starts a new System, so
 // that one is stopped too.
-- (void)stopSystemAndWait {
+- (void)stopSystemAndWaitMuting:(BOOL)mutes {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:QLMStopAllowance];
     QLMSystem *system = nil;
     while (self.system != system && deadline.timeIntervalSinceNow > 0) {
         system = self.system;
         __block BOOL stopped = NO;
-        [system stopWithCompletion:^{
+        dispatch_block_t completion = ^{
             stopped = YES;
-        }];
+        };
+        if (mutes) {
+            [system stopMutingIfLouderWithCompletion:completion];
+        } else {
+            [system stopWithCompletion:completion];
+        }
         while (!stopped && deadline.timeIntervalSinceNow > 0) {
             [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
         }

@@ -1,5 +1,7 @@
 #import "QLMAlerts.h"
 
+#include <time.h>
+
 #import <UserNotifications/UserNotifications.h>
 
 #import "QLMFormat.h"
@@ -11,6 +13,8 @@ static const NSInteger QLMHotTemperature = 70;
 static const NSInteger QLMHotHysteresis = 5;
 // Between two alerts of one kind for one monitor, at least this long.
 static const NSTimeInterval QLMAlertInterval = 10 * 60;
+// Between two alerts of a sleep while dimmed, at least this long.
+static const NSTimeInterval QLMDimmedSleepInterval = 24 * 60 * 60;
 
 // Stable across leases, for the notification's identifier.
 static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
@@ -22,21 +26,29 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
     return key;
 }
 
+NSTimeInterval QLMSecondsCountingSleep(void) {
+    return (NSTimeInterval)clock_gettime_nsec_np(CLOCK_MONOTONIC) / NSEC_PER_SEC;
+}
+
 @implementation QLMMonitorAlerts {
-    QLMNotifier *_notifier;
+    id<QLMAlertPosting> _poster;
+    NSTimeInterval (^_now)(void);
     // System ran with the adapter at the last update. A drop counts only
     // between two such updates.
     BOOL _wasHealthy;
     QLMAdapterProblem _adapterProblem;  // at the last update
     NSMutableSet<NSData *> *_hot;
-    NSMutableDictionary<NSString *, NSDate *> *_lastAlerts;  // by kind and monitor
+    NSMutableSet<NSData *> *_dropped;  // alerted, and not back and on since
+    NSMutableDictionary<NSString *, NSNumber *> *_lastAlerts;  // now, by key
 }
 
-- (instancetype)initWithNotifier:(QLMNotifier *)notifier {
+- (instancetype)initWithPoster:(id<QLMAlertPosting>)poster now:(NSTimeInterval (^)(void))now {
     self = [super init];
     if (self) {
-        _notifier = notifier;
+        _poster = poster;
+        _now = [now copy];
         _hot = [NSMutableSet set];
+        _dropped = [NSMutableSet set];
         _lastAlerts = [NSMutableDictionary dictionary];
     }
     return self;
@@ -49,20 +61,29 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
     return label != nil ? [NSString stringWithFormat:@"%@ %@", model, label] : model;
 }
 
-// Records the alert unless one of its kind went out for the monitor within
-// QLMAlertInterval.
-- (BOOL)mayAlert:(NSString *)kind monitor:(QLMMonitorState *)monitor {
-    NSString *key = [NSString stringWithFormat:@"%@-%@", kind, QLMMonitorKey(monitor)];
-    NSDate *last = _lastAlerts[key];
-    if (last != nil && -last.timeIntervalSinceNow < QLMAlertInterval) {
+// Records the alert unless one with the same key went out within
+// `interval`.
+- (BOOL)mayAlert:(NSString *)key within:(NSTimeInterval)interval {
+    NSNumber *last = _lastAlerts[key];
+    NSTimeInterval now = _now();
+    if (last != nil && now - last.doubleValue < interval) {
         return NO;
     }
-    _lastAlerts[key] = [NSDate date];
+    _lastAlerts[key] = @(now);
     return YES;
+}
+
+- (BOOL)mayAlert:(NSString *)kind monitor:(QLMMonitorState *)monitor {
+    return [self mayAlert:[NSString stringWithFormat:@"%@-%@", kind, QLMMonitorKey(monitor)] within:QLMAlertInterval];
 }
 
 - (void)updateWithMonitorList:(QLMMonitorList *)list {
     QLMSnapshot *snapshot = list.snapshot;
+    for (QLMMonitorState *monitor in snapshot.monitors) {
+        if (monitor.status == QLMMonitorStatusOn && !monitor.offline) {
+            [_dropped removeObject:monitor.hardwareID];
+        }
+    }
     BOOL healthy = snapshot.running && snapshot.busProblem == QLMBusProblemNone;
     if (healthy && _wasHealthy) {
         [self alertDrops:list.dropped];
@@ -72,13 +93,20 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
     [self alertAdapterProblem:snapshot];
 }
 
+- (void)alertSleepWithSnapshot:(QLMSnapshot *)snapshot {
+    if (snapshot.dimmed && ![self mayAlert:@"dimmed-sleep" within:QLMDimmedSleepInterval]) {
+        return;
+    }
+    [_poster postIdentifier:@"hand-back" title:@"The level may have risen as the Mac slept" body:QLMTakeOverText(snapshot)];
+}
+
 // The adapter takes over about 2.6 s after the last report it took, with
 // no stop of qlm's, and the popover may be closed. Only the HID adapter
 // reports a problem, so this is the real monitors'.
 - (void)alertAdapterProblem:(QLMSnapshot *)snapshot {
     QLMAdapterProblem problem = snapshot.adapterProblem;
     if (problem != _adapterProblem && problem != QLMAdapterProblemNone && QLMStopMayRaiseLevel(snapshot)) {
-        [_notifier postIdentifier:@"adapter" title:QLMBusProblemTitle(snapshot) body:QLMBusProblemDetail(snapshot)];
+        [_poster postIdentifier:@"adapter" title:QLMBusProblemTitle(snapshot) body:QLMBusProblemDetail(snapshot)];
     }
     _adapterProblem = problem;
 }
@@ -86,24 +114,25 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
 - (void)alertDrops:(NSArray<QLMMonitorState *> *)monitors {
     NSMutableArray<QLMMonitorState *> *dropped = [NSMutableArray array];
     for (QLMMonitorState *monitor in monitors) {
-        if ([self mayAlert:@"drop" monitor:monitor]) {
+        if (![_dropped containsObject:monitor.hardwareID] && [self mayAlert:@"drop" monitor:monitor]) {
+            [_dropped addObject:monitor.hardwareID];
             [dropped addObject:monitor];
         }
     }
     if (dropped.count == 1) {
         QLMMonitorState *monitor = dropped.firstObject;
-        [_notifier postIdentifier:[@"drop-" stringByAppendingString:QLMMonitorKey(monitor)]
-                            title:[NSString stringWithFormat:@"%@ dropped off the bus", monitor.model ?: @"A monitor"]
-                             body:[NSString stringWithFormat:@"%@ stopped answering. qlm finds it again when it answers.", [self nameOf:monitor]]];
+        [_poster postIdentifier:[@"drop-" stringByAppendingString:QLMMonitorKey(monitor)]
+                          title:[NSString stringWithFormat:@"%@ dropped off the bus", monitor.model ?: @"A monitor"]
+                           body:[NSString stringWithFormat:@"%@ stopped answering. qlm finds it again when it answers.", [self nameOf:monitor]]];
     } else if (dropped.count > 1) {
         NSMutableArray<NSString *> *names = [NSMutableArray array];
         for (QLMMonitorState *monitor in dropped) {
             [names addObject:[self nameOf:monitor]];
         }
-        [_notifier postIdentifier:@"drops"
-                            title:[NSString stringWithFormat:@"%lu monitors dropped off the bus", (unsigned long)dropped.count]
-                             body:[NSString stringWithFormat:@"%@ stopped answering. qlm finds them again when they answer.",
-                                                             [names componentsJoinedByString:@", "]]];
+        [_poster postIdentifier:@"drops"
+                          title:[NSString stringWithFormat:@"%lu monitors dropped off the bus", (unsigned long)dropped.count]
+                           body:[NSString stringWithFormat:@"%@ stopped answering. qlm finds them again when they answer.",
+                                                           [names componentsJoinedByString:@", "]]];
     }
 }
 
@@ -118,10 +147,10 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
         } else if (temperature >= QLMHotTemperature && ![_hot containsObject:monitor.hardwareID]) {
             [_hot addObject:monitor.hardwareID];
             if ([self mayAlert:@"hot" monitor:monitor]) {
-                [_notifier postIdentifier:[@"hot-" stringByAppendingString:QLMMonitorKey(monitor)]
-                                    title:[NSString stringWithFormat:@"%@ runs hot", monitor.model ?: @"A monitor"]
-                                     body:[NSString stringWithFormat:@"%@ reads %@. qlm alerts at %@.", [self nameOf:monitor],
-                                                                     QLMTemperatureText(temperature), QLMTemperatureText(QLMHotTemperature)]];
+                [_poster postIdentifier:[@"hot-" stringByAppendingString:QLMMonitorKey(monitor)]
+                                  title:[NSString stringWithFormat:@"%@ runs hot", monitor.model ?: @"A monitor"]
+                                   body:[NSString stringWithFormat:@"%@ reads %@. qlm alerts at %@.", [self nameOf:monitor],
+                                                                   QLMTemperatureText(temperature), QLMTemperatureText(QLMHotTemperature)]];
             }
         }
     }
@@ -157,10 +186,9 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
     UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
     content.title = title;
     content.body = body;
-    content.sound = UNNotificationSound.defaultSound;
     UNNotificationRequest *request = [UNNotificationRequest requestWithIdentifier:identifier content:content trigger:nil];
     // macOS asks the user once. After that, this answers at once.
-    [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert | UNAuthorizationOptionSound
+    [center requestAuthorizationWithOptions:UNAuthorizationOptionAlert
                           completionHandler:^(BOOL granted, NSError *error) {
                               if (granted) {
                                   [center addNotificationRequest:request withCompletionHandler:nil];
@@ -172,7 +200,7 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
 - (void)userNotificationCenter:(UNUserNotificationCenter *)center
        willPresentNotification:(UNNotification *)notification
          withCompletionHandler:(void (^)(UNNotificationPresentationOptions))completionHandler {
-    completionHandler(UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionSound);
+    completionHandler(UNNotificationPresentationOptionBanner);
 }
 
 @end
