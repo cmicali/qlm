@@ -25,8 +25,15 @@ NSString *QLMReplyAgeText(NSDate *_Nullable date);
 // Nil while no volume is set, and for no snapshot.
 NSString *_Nullable QLMHandBackLine(QLMSnapshot *_Nullable snapshot);
 
-// For a louder hand-back: the knob above qlm's level, and the rise.
-NSString *QLMHandBackRiseText(QLMHandBack *handBack);
+// Whether a stop now may make the monitors louder: qlm holds the adapter,
+// and the take-over is above qlm's level, or its level is unknown. While
+// the adapter is refused or gone, qlm sent nothing, so a stop hands nothing
+// back.
+BOOL QLMStopMayRaiseLevel(QLMSnapshot *_Nullable snapshot);
+
+// What the take-over does to the level: the knob against qlm's level, or
+// why the level is unknown.
+NSString *QLMStopRiseText(QLMSnapshot *snapshot);
 
 // The banner's lines for the snapshot's busProblem. The title is nil when
 // there is none.

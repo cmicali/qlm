@@ -86,36 +86,41 @@ static const NSTimeInterval QLMStopAllowance = 3;
 }
 
 // Quit waits for the stop, so the hand-back level goes out before qlm does.
-// On the real monitors, a take-over that would raise the level asks first.
+// Every quit comes here: the popover's Quit, and logout, restart, and shut
+// down. qlm has no menu, so no Cmd-Q.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     [self.settingsController endEditing];
-    QLMHandBack *handBack = self.monitorList.snapshot.handBack;
-    if ([self takeOverRaisesLevel:handBack]) {
-        [self activateApp];
-        if ([[self louderHandBackAlert:handBack] runModal] != NSAlertSecondButtonReturn) {
-            return NSTerminateCancel;
-        }
+    if (![self mayStop:@"Quitting" anyway:@"Quit Anyway"]) {
+        return NSTerminateCancel;
     }
     [self stopSystemAndWait];
     return NSTerminateNow;
 }
 
 // Only on the real monitors: on the fake bus a take-over moves no level.
-- (BOOL)takeOverRaisesLevel:(QLMHandBack *)handBack {
-    return handBack.kind == QLMHandBackLouder && self.bus == nil;
+- (BOOL)stopMayRaiseLevel:(QLMSnapshot *)snapshot {
+    return self.bus == nil && QLMStopMayRaiseLevel(snapshot);
 }
 
-// Cancel is the default.
-- (NSAlert *)louderHandBackAlert:(QLMHandBack *)handBack {
+// Asks before a stop that may make the monitors louder. YES goes ahead.
+// System's snapshot now, since the latest may lag a level or a knob reading.
+- (BOOL)mayStop:(NSString *)stop anyway:(NSString *)anyway {
+    QLMSnapshot *now = [self.system snapshotNow];
+    if (![self stopMayRaiseLevel:now]) {
+        return YES;
+    }
+    BOOL louder = now.handBack.kind == QLMHandBackLouder;
     NSAlert *alert = [[NSAlert alloc] init];
-    alert.messageText = @"Quitting makes the monitors louder";
-    alert.informativeText = [NSString stringWithFormat:@"%@ About 2.6 s after qlm quits, the adapter sets the knob's level. "
-                                                       @"Turn the knob down first, or quit anyway.",
-                                                       QLMHandBackRiseText(handBack)];
+    alert.messageText = [NSString stringWithFormat:louder ? @"%@ makes the monitors louder" : @"%@ may make the monitors louder", stop];
+    alert.informativeText = [NSString stringWithFormat:@"%@ About 2.6 s after qlm lets go, the adapter sets %@. "
+                                                       @"Turn the knob down first, or %@.",
+                                                       QLMStopRiseText(now), louder ? @"the knob's level" : @"its own level",
+                                                       anyway.lowercaseString];
+    // Cancel is the default.
     [alert addButtonWithTitle:@"Cancel"];
-    NSButton *quit = [alert addButtonWithTitle:@"Quit Anyway"];
-    quit.hasDestructiveAction = YES;
-    return alert;
+    [alert addButtonWithTitle:anyway].hasDestructiveAction = YES;
+    [self activateApp];
+    return [alert runModal] == NSAlertSecondButtonReturn;
 }
 
 #pragma mark - System
@@ -173,12 +178,12 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // (qlm-control-first). No one can answer a prompt now, so a louder
 // take-over is logged, and on the real monitors it is a notification.
 - (void)macWillSleep:(NSNotification *)notification {
-    QLMSnapshot *snapshot = self.monitorList.snapshot;
+    QLMSnapshot *snapshot = [self.system snapshotNow];
     NSLog(@"qlm: the Mac sleeps. %@", QLMHandBackLine(snapshot) ?: @"the level at the take-over is unknown.");
-    if ([self takeOverRaisesLevel:snapshot.handBack]) {
+    if ([self stopMayRaiseLevel:snapshot]) {
         [self.notifier postIdentifier:@"hand-back"
                                 title:@"The level may have risen as the Mac slept"
-                                 body:QLMHandBackRiseText(snapshot.handBack)];
+                                 body:QLMStopRiseText(snapshot)];
     }
     [self stopSystemAndWait];
 }
@@ -382,6 +387,10 @@ static const NSTimeInterval QLMStopAllowance = 3;
 
 - (void)settingsDidChooseSetupFile:(QLMSettingsWindowController *)controller {
     [self loadSetup];
+}
+
+- (BOOL)settingsShouldTurnOffAdapter:(QLMSettingsWindowController *)controller {
+    return [self mayStop:@"Turning off the adapter" anyway:@"Turn Off Anyway"];
 }
 
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {

@@ -60,9 +60,9 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @"every volume at or below the ceiling. Off, qlm runs on a fake bus and sends nothing. A change reconnects.",
         QLMSettingsTextWidth);
     NSTextField *handBackNote = QLMNoteLabel(
-        @"When qlm quits or the Mac sleeps, the adapter takes over about 2.6 s after qlm lets go, at its knob's level. "
+        @"When qlm quits, the Mac sleeps, or this goes off, the adapter takes over about 2.6 s after qlm lets go, at its knob's level. "
         @"The ceiling does not apply to the knob. With the knob at or below qlm's level, qlm sends the knob's level first, "
-        @"so nothing changes. With it above, the level rises, and qlm asks before it quits. If USB drops, qlm can send nothing first.",
+        @"so nothing changes. With it above, or unknown, the level may rise, and qlm asks first. If USB drops, qlm can send nothing first.",
         QLMSettingsTextWidth);
     self.handBackLevel = QLMNoteLabel(@"", QLMSettingsTextWidth);
 
@@ -207,7 +207,12 @@ static const CGFloat QLMSettingsTextWidth = 360;
 #pragma mark - The adapter
 
 - (void)adapterClicked:(NSButton *)checkbox {
-    self.preferences.usesAdapter = checkbox.state == NSControlStateValueOn;
+    BOOL on = checkbox.state == NSControlStateValueOn;
+    if (!on && ![self.delegate settingsShouldTurnOffAdapter:self]) {
+        checkbox.state = NSControlStateValueOn;
+        return;
+    }
+    self.preferences.usesAdapter = on;
     [self.delegate settingsDidChangeAdapter:self];
 }
 

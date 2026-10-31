@@ -13,6 +13,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)settingsDidChangeVolumeRange:(QLMSettingsWindowController *)controller;
 // The preferences name another setup file.
 - (void)settingsDidChooseSetupFile:(QLMSettingsWindowController *)controller;
+// The user turns the adapter off, which stops the real monitors. NO keeps
+// it on.
+- (BOOL)settingsShouldTurnOffAdapter:(QLMSettingsWindowController *)controller;
 // The preferences switched between the GLM adapter and the fake bus.
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller;
 @end

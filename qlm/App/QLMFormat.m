@@ -74,8 +74,25 @@ NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
     return nil;
 }
 
-NSString *QLMHandBackRiseText(QLMHandBack *handBack) {
-    return QLMRiseText(@"The knob", handBack);
+BOOL QLMStopMayRaiseLevel(QLMSnapshot *snapshot) {
+    BOOL holds = snapshot.busProblem == QLMBusProblemNone || snapshot.adapterProblem != QLMAdapterProblemNone;
+    return snapshot.running && holds && snapshot.handBack.kind != QLMHandBackKnobLevel;
+}
+
+NSString *QLMStopRiseText(QLMSnapshot *snapshot) {
+    QLMHandBack *handBack = snapshot.handBack;
+    switch (handBack.kind) {
+    case QLMHandBackLouder:
+        return QLMRiseText(@"The knob", handBack);
+    case QLMHandBackKnobLevel:
+        return [QLMKnobText(@"The knob", @"at or below", handBack) stringByAppendingString:@" At the take-over, the level would not rise."];
+    case QLMHandBackUnknown:
+        break;
+    }
+    NSString *why = handBack.volumeDecibels == nil ? @"qlm has set no level"
+                    : snapshot.adapter.hasStatus   ? @"No knob is in"
+                                                   : @"qlm has not read the knob yet";
+    return [why stringByAppendingString:@", so the level at the take-over is unknown."];
 }
 
 NSString *QLMBusProblemTitle(QLMBusProblem problem) {
