@@ -103,7 +103,7 @@ It takes each DSP pass in the capture, from `17 01` through the `40` frames afte
 
 It matches each pass to the node of the group whose block is closest to it. Only that group's nodes count, since another group may hold a near copy of a node. In Main.sam, Group_4 is nearly Main 4x2, so a search across groups could match a changed node's pass to the old copy, and hide the change. Two more rules narrow the match:
 
-- Only nodes of the model in the session's `39` reply count. A raw setup file also names each node's hardware ID, so then only the node the session's lease names counts. A redacted one doesn't.
+- Only nodes of the model in the session's `39` reply count. That's the reply after the session's last lease before the pass, since monitors are leased again, and qlm's runs reuse a session for another monitor. A raw setup file also names each node's hardware ID, so then only the node that lease names counts. A redacted one doesn't.
 - A node is one monitor. So a second session that matches a node already matched fails, unless the capture leases that session, as when a monitor wakes into the group.
 
 | It prints | As |
@@ -111,8 +111,24 @@ It matches each pass to the node of the group whose block is closest to it. Only
 | A setting whose frame differs | `GLM`, then `qlm` |
 | A frame only GLM sent | `GLM only` |
 | A frame only qlm would send | `qlm only` |
+| A DSP frame no pass holds, and what explains it | `GLM, outside a pass`, before or after a pass, or to a session with no pass in the window |
 
-It also checks every generator stop, `05 04`, in the window, to a monitor with a pass or not. A stop with other bytes counts as one only GLM sent. It exits 0 when every pass matches and every stop is the known one, and 1 when not. A wrong argument, or no `--group`, exits 64. A file it can't read, a group the setup lacks, or no pass to compare exits 65.
+It also checks every generator stop, `05 04`, in the window, to a monitor with a pass or not. A stop with other bytes counts as one only GLM sent.
+
+GLM sends some DSP frames outside any pass, and the output lists each one with what explains it:
+
+| Frame | Listed | Explained when |
+| --- | --- | --- |
+| A switch's routing, `3B` and `40` | Before the pass it routes | That pass sends the same |
+| Routing to a monitor the switch leaves off | Before the session's next pass, after its last, or under the session | Always. It's the routing pass's, step 3 in [refused-frames.md](docs/refused-frames.md#the-group-apply). |
+| A setting, such as a band you edit, or the level, delay, and `10 01 09` GLM sends when you confirm the editor | After the session's pass before it | Its last frame per session in the window is the frame the node's block sends. The ones before it are `passed through`. |
+| Anything else | After the session's pass before it | Never |
+
+A band names its slot. With no pass at its session in the window, a frame's node is the one node of the group of the session's model, if there's one. A live edit comes before the step's save, so it's explained by that step's snapshot, not the one before.
+
+These frames change no verdict by default. With `--check-outside`, any that isn't explained differs. A window with frames outside a pass but no pass is then compared too.
+
+It exits 0 when every pass matches and every stop is the known one, and 1 when not. A wrong argument, or no `--group`, exits 64. A file it can't read, a group the setup lacks, or no pass to compare exits 65.
 
 ```bash
 qlmctl compare-apply Tests/Setups/Fixtures/Main.sam captures/startup-idle/reports.txt --group "Main 2x1"

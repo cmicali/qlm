@@ -430,7 +430,7 @@ The design rate is 48 kHz for the 8330A, and 12 kHz for the subwoofers.[^peq-rat
 
 GLM sends all twenty slots in every block, not only the changed ones. A subwoofer's block sends 23 PEQ frames, with slot 0 four times.[^peq-twenty]
 
-GLM also sends a band on its own, as it's edited in GLM's Acoustic editor. Each change goes out at once, as one `10 0E` to the monitor's session, outside any block. Confirming the editor sends the monitor `10 01 00`, `10 02`, and `10 01 09`, and no block. The block follows at the next group switch.[^peq-live]
+GLM also sends a band on its own, as it's edited in GLM's Acoustic editor. Each change goes out at once, as one `10 0E` to the monitor's session, outside any block. A slot may get several as you edit it, and its last is the slot as the saved setup's block sends it. Confirming the editor sends the monitor `10 01 00`, `10 02`, and `10 01 09`, and no block. The block follows at the next group switch.[^peq-live]
 
 #### `3B`, the crossover
 
@@ -460,7 +460,7 @@ The input index, the source, a pair selector, and the AES3 channel.[^routing] In
 [^peq-twenty]: #9; `QLMDSPBlockGoldenTests`.
 [^shelf-w0]: `setup-b-peq-8351b`, slot `03` at 265.754 s, live from the editor, and at 300.029 s, in the pass; `testShelvesTakeAFloatW0`.
 [^peq-range-8351b]: `setup-b-peq-8351b`, the Main 4x2 applies at 182.460 and 300.007 s, and its notes; `QLMDSPBlockGoldenTests`.
-[^peq-live]: `setup-b-peq-8351b`, 49.989 to 117.849 s and 230.501 to 265.754 s; the confirms at 167.774 and 287.885 s.
+[^peq-live]: `setup-b-peq-8351b`, 49.989 to 117.849 s and 230.501 to 265.754 s; the confirms at 167.774 and 287.885 s; `testLiveBandEditsAreTheNextSnapshots`.
 [^crossover]: [refused-frames.md](refused-frames.md#43-00-02-and-4b-00-00-00-01-to-the-8351b).
 [^crossover-full]: hlm §7.
 [^routing]: hlm §7.
