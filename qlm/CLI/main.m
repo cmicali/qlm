@@ -224,9 +224,8 @@ static int QLMInfo(int argc, const char *argv[]) {
     if (system == nil) {
         return EX_UNAVAILABLE;
     }
-    QLMSnapshot *result = QLMWaitForSnapshot(system, QLMInfoTimeout, ^BOOL {
-        [system start];
-        return YES;
+    QLMSnapshot *result = QLMWaitForSnapshot(system, QLMInfoTimeout, ^QLMCallNumber {
+        return [system start];
     }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.adapterError != nil || snapshot.adapter.identified;
     }) ?: system.snapshot;
@@ -287,9 +286,8 @@ static int QLMDiscover(int argc, const char *argv[]) {
         return EX_UNAVAILABLE;
     }
     double seconds = QLMSecondsGiven(given, 0);
-    BOOL (^start)(void) = ^BOOL {
-        [system start];
-        return YES;
+    QLMCallNumber (^start)(void) = ^QLMCallNumber {
+        return [system start];
     };
     QLMSnapshot *result = nil;
     if (seconds > 0) {
@@ -481,9 +479,8 @@ static int QLMRunControl(QLMControlOptions *options, QLMControlAction action, QL
     if (system == nil) {
         return EX_UNAVAILABLE;
     }
-    QLMSnapshot *discovered = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^BOOL {
-        [system start];
-        return YES;
+    QLMSnapshot *discovered = QLMWaitForSnapshot(system, QLMDiscoveryTimeout, ^QLMCallNumber {
+        return [system start];
     }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.adapterError != nil || snapshot.allIdentified;
     });
@@ -528,9 +525,8 @@ static int QLMRunControl(QLMControlOptions *options, QLMControlAction action, QL
         }
     }
     // The stop may send the knob's level first, so wait for it.
-    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^BOOL {
-        [system stop];
-        return YES;
+    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^QLMCallNumber {
+        return [system stop];
     }, ^BOOL(QLMSnapshot *snapshot) {
         return !snapshot.running;
     });
@@ -575,20 +571,19 @@ static int QLMMute(int argc, const char *argv[]) {
         return EX_USAGE;
     }
     __block NSData *target = nil;  // nil for every monitor
-    return QLMRunControl(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+    return QLMRunControl(options, ^QLMCallNumber(QLMSystem *system, QLMSnapshot *discovered, int *status) {
         if (options.serial == nil) {
-            [system setAllMuted:options.on];
-            return 0;
+            return [system setAllMuted:options.on];
         }
         NSString *problem = nil;
         target = QLMHardwareIDsForSerials(@[options.serial], discovered, &problem).anyObject;
         if (target == nil) {
             fprintf(stderr, "qlmctl: %s\n", problem.UTF8String);
-            return EX_DATAERR;
+            *status = EX_DATAERR;
+            return 0;
         }
-        [system setMuted:options.on forMonitorWithHardwareID:target];
-        return 0;
-    }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return [system setMuted:options.on forMonitorWithHardwareID:target];
+    }, ^BOOL(QLMSnapshot *snapshot) {
         if (!snapshot.idle) {
             return NO;
         }
@@ -601,7 +596,7 @@ static int QLMMute(int argc, const char *argv[]) {
             }
         }
         return NO;
-    }));
+    });
 }
 
 static int QLMDim(int argc, const char *argv[]) {
@@ -610,7 +605,6 @@ static int QLMDim(int argc, const char *argv[]) {
         return EX_USAGE;
     }
     NSNumber *volume = options.volumeDecibels;
-    // Without a volume, dim sends nothing, and the replay may pass.
     return QLMRunControl(options, QLMDimAction(options.on, volume), ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && snapshot.dimmed == options.on && (volume == nil || [snapshot.volumeDecibels isEqualToNumber:volume]);
     });
@@ -626,14 +620,13 @@ static int QLMPower(int argc, const char *argv[], BOOL wake) {
     QLMMonitorStatus wanted = wake ? QLMMonitorStatusOn : QLMMonitorStatusStandby;
     NSNumber *volume = options.volumeDecibels;
     __block NSUInteger count = 0;
-    QLMControlAction power = wake ? QLMWakeAction(volume) : ^int(QLMSystem *system, QLMSnapshot *discovered) {
-        [system sleep];
-        return 0;
+    QLMControlAction power = wake ? QLMWakeAction(volume) : ^QLMCallNumber(QLMSystem *system, QLMSnapshot *discovered, int *status) {
+        return [system sleep];
     };
-    return QLMRunControl(options, ^int(QLMSystem *system, QLMSnapshot *discovered) {
+    return QLMRunControl(options, ^QLMCallNumber(QLMSystem *system, QLMSnapshot *discovered, int *status) {
         count = discovered.monitors.count;
-        return power(system, discovered);
-    }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        return power(system, discovered, status);
+    }, ^BOOL(QLMSnapshot *snapshot) {
         if (!snapshot.idle || snapshot.monitors.count != count) {
             return NO;
         }
@@ -646,7 +639,7 @@ static int QLMPower(int argc, const char *argv[], BOOL wake) {
             }
         }
         return YES;
-    }));
+    });
 }
 
 static int QLMSleep(int argc, const char *argv[]) {
@@ -735,7 +728,7 @@ static int QLMPrintSetup(int argc, const char *argv[]) {
 // The switch, or with `launch` the apply at launch, at `volume`. System
 // completes an apply on the main queue, so spin the main run loop.
 static QLMControlAction QLMApplyGroupAction(QLMSetupGroup *group, BOOL launch, NSNumber *volume) {
-    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+    return ^QLMCallNumber(QLMSystem *system, QLMSnapshot *discovered, int *status) {
         [system setVolumeDecibels:volume.doubleValue];
         __block BOOL done = NO;
         __block NSError *result = nil;
@@ -743,21 +736,18 @@ static QLMControlAction QLMApplyGroupAction(QLMSetupGroup *group, BOOL launch, N
             result = error;
             done = YES;
         };
-        if (launch) {
-            [system applyGroup:group completion:completion];
-        } else {
-            [system switchToGroup:group completion:completion];
-        }
+        QLMCallNumber call = launch ? [system applyGroup:group completion:completion] : [system switchToGroup:group completion:completion];
         while (!done) {
             [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
         }
         if (result != nil) {
             fprintf(stderr, "qlmctl: %s (%s %ld)\n", result.localizedDescription.UTF8String, result.domain.UTF8String,
                     (long)result.code);
-            return EX_UNAVAILABLE;
+            *status = EX_UNAVAILABLE;
+            return 0;
         }
         printf("applied %s\n", group.name.UTF8String);
-        return 0;
+        return call;
     };
 }
 
