@@ -26,9 +26,8 @@ extern const int QLMCompareApplyDiffers;
 // that follows it. Nil where the capture holds neither.
 @property (nonatomic, readonly, nullable) NSString *model;
 @property (nonatomic, readonly, nullable) NSData *hardwareID;
-// GLM sent no 3D: a frame to the session that isn't a DSP frame, its next
-// 17 01, or the capture's end, came first. GLM cuts a pass short when it
-// leases the monitor again mid-pass.
+// GLM sent no 3D: the next 17 01 to any session, or the capture's end, came
+// first. GLM cuts a pass short when it leases the monitor again mid-pass.
 @property (nonatomic, readonly) BOOL cutShort;
 @end
 

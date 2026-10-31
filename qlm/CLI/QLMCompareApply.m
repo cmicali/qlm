@@ -12,8 +12,8 @@
 const int QLMCompareApplyDiffers = 1;
 
 // What one lease of a session names: the hardware ID it leased, and the
-// model the session's next reply to 39 gives. Each 39 reply comes a few ms
-// after its lease. qlm's runs and Phase 0's captures lease monitors again,
+// model the session's next reply to 39 gives. Each 39 reply comes after its
+// lease, within about a second, and no pass falls between them. qlm's runs and Phase 0's captures lease monitors again,
 // at new sessions or reused ones, so a session's model holds only for its
 // lease. A session leased before the capture began has no hardware ID.
 @interface QLMLease : NSObject
@@ -150,8 +150,7 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
         // that follow its 3D, or at the next 17 01. TRAP: no frame before
         // its 3D marks a pass cut short. GLM's cycle sends a session its
         // poll, 08, and its state, 2B, mid-pass (setup-j-restore, 35.009
-        // and 35.013 s to 0E), and it leases monitors mid-pass
-        // (setup-b-peq-8351b, 182.734 s, in 0D's pass).
+        // and 35.013 s to 0E).
         BOOL inPass = open != nil && message.address == open.session;
         if (inPass && !open.cutShort && payload[0] != 0x40) {
             open = nil;
