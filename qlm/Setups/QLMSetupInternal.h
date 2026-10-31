@@ -45,6 +45,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) double groupSensitivity;
 @property (nonatomic, readwrite) double crossover;
 @property (nonatomic, readwrite) NSInteger crossoverGlobalMode;
+@property (nonatomic, readwrite, nullable) NSNumber *groupDelayCompensation;
+@property (nonatomic, readwrite, nullable) NSNumber *bassExtensionMode;
+@property (nonatomic, readwrite, nullable) NSNumber *bassExtensionCrossoverMin;
+@property (nonatomic, readwrite, nullable) NSNumber *bassExtensionCrossoverMax;
 @property (nonatomic, readwrite) double videoDelay;
 @property (nonatomic, readwrite) BOOL subwooferBypass;
 @property (nonatomic, readwrite, nullable) NSNumber *volumePreset1;

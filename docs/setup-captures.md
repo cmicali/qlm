@@ -188,7 +188,7 @@ The diff after F1 to F3 shows whether GLM moves the two rates along with the cro
 
 This part matters most. GLM sends two frames to the 8351Bs, always with the same bytes. `43 00 02` follows the level pair, before the PEQ slots. `4B 00 00 00 01` follows `3B`.[^43-4b] The 8351B's node has two fields no other node has, and both hold the same value in every group: `GroupDelayCompensation:2` and `BassExtensionXO(Hz):1`. Our guess is that `43` carries the first and `4B` the second. qlm now builds both frames from those fields, but only at 2 and 1. Against the guess, each group has a `GroupDelayCompensation:2` of its own, and no other model gets a `43`.
 
-qlm refuses an 8351B whose fields hold any other value. So for a G1 or G2 copy, `compare-apply` says `qlm builds no block` for that node, and exits 1. Its pass is then shown against the other 8351B, so a `43` or `4B` that GLM changed shows as GLM's frame against qlm's.
+qlm refuses an 8351B whose fields hold any other value, or whose group's `GroupDelayCompensation`, `Group_BE_Mode`, `Group_BE_XOMin`, or `Group_BE_XOMax` differ from 2, 0, 150, and 250. So for any copy in Part G, `compare-apply` says `qlm builds no block` for that node, and exits 1. Its pass is then shown against the other 8351B, so a `43` or `4B` that GLM changed shows as GLM's frame against qlm's.
 
 Each step changes one field to each other value GLM offers, one value per step:
 

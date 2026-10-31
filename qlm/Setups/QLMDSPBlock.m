@@ -33,12 +33,16 @@ static BOOL QLMLFEAsCaptured(QLMSetupNode *node) {
            node.subwooferGroupID.doubleValue == 0 && (crossover == nil || crossover.doubleValue == 120);
 }
 
-// Guess: 43 00 vv carries GroupDelayCompensation, and 4B 00 00 00 vv
-// BassExtensionXO(Hz). Every capture has them at 2 and 1, so the mapping is
-// matched only there, and any other value is refused. Against it: every
-// group has a GroupDelayCompensation:2 too, and no other model gets a 43.
-static BOOL QLMThreeWayAsCaptured(QLMSetupNode *node) {
-    return [node.groupDelayCompensation isEqual:@2] && [node.bassExtensionCrossover isEqual:@1];
+// Guess: 43 00 vv carries the node's GroupDelayCompensation, and 4B 00 00 00
+// vv its BassExtensionXO(Hz). Every capture has them at 2 and 1, so the
+// mapping is matched only there. Against it: the group has a
+// GroupDelayCompensation too, and its bass extension fields. Every captured
+// group holds 2, 0, 150, and 250, and those may drive the frames instead. So
+// the block also requires them. The 8351B is the only three-way captured.
+static BOOL QLMThreeWayAsCaptured(QLMSetupNode *node, QLMSetupGroup *group) {
+    return [node.groupDelayCompensation isEqual:@2] && [node.bassExtensionCrossover isEqual:@1] &&
+           [group.groupDelayCompensation isEqual:@2] && [group.bassExtensionMode isEqual:@0] &&
+           [group.bassExtensionCrossoverMin isEqual:@150] && [group.bassExtensionCrossoverMax isEqual:@250];
 }
 
 static BOOL QLMRateVerified(QLMSetupNodeClass nodeClass, double designRate) {
@@ -83,8 +87,8 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
         if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorLFE, @"LFE fields that no capture maps");
         return nil;
     }
-    if (node.nodeClass == QLMSetupNodeClassThreeWay && !QLMThreeWayAsCaptured(node)) {
-        if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorThreeWay, @"GroupDelayCompensation or BassExtensionXO(Hz) that no capture maps");
+    if (node.nodeClass == QLMSetupNodeClassThreeWay && !QLMThreeWayAsCaptured(node, group)) {
+        if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorThreeWay, @"three-way or group fields that no capture maps");
         return nil;
     }
     if (node.bands.count != QLMPEQSlots) {

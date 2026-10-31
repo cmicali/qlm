@@ -106,8 +106,8 @@ NSString *const QLMSetupErrorLineKey = @"QLMSetupErrorLine";
         _groupIgnored = [NSSet setWithArray:@[
             @"Calibration_Description", @"AutoCal_Cloud", @"Session_ID", @"ReferenceLevelActive", @"Loudness_Signal_Level",
             @"Loudness_Target_Level", @"Loudness_Calibrated_Level", @"HP_Loudness_Calibrated_Level", @"Group_Microphone_Serial",
-            @"Group_BE_XOMin", @"Group_BE_XOMax", @"Group_BE_Mode", @"GroupDelayCompensation", @"Group_RoomProfile",
-            @"Group_RoomProfile_MidRange", @"Group_RoomProfile_Strength", @"Group_SymmetricalEQ", @"Group_Audio",
+            @"Group_RoomProfile", @"Group_RoomProfile_MidRange", @"Group_RoomProfile_Strength", @"Group_SymmetricalEQ",
+            @"Group_Audio",
         ]];
         _nodeIgnored = [NSSet setWithArray:@[
             @"CalibrationGroupID", @"CalibrationStatusFlag", @"PhaseCalibratedWith", @"MultiChannel_AES_EBU",
@@ -515,6 +515,14 @@ static QLMSetupNodeClass QLMNodeClassNamed(NSString *name) {
             group.crossover = [self number:entry];
         } else if ([key isEqualToString:@"Group_Crossover_GlobalMode"]) {
             group.crossoverGlobalMode = [self integer:entry];
+        } else if ([key isEqualToString:@"GroupDelayCompensation"]) {
+            group.groupDelayCompensation = @([self number:entry]);
+        } else if ([key isEqualToString:@"Group_BE_Mode"]) {
+            group.bassExtensionMode = @([self number:entry]);
+        } else if ([key isEqualToString:@"Group_BE_XOMin"]) {
+            group.bassExtensionCrossoverMin = @([self number:entry]);
+        } else if ([key isEqualToString:@"Group_BE_XOMax"]) {
+            group.bassExtensionCrossoverMax = @([self number:entry]);
         } else if ([key isEqualToString:@"Video_Delay"]) {
             group.videoDelay = [self number:entry];
         } else if ([key isEqualToString:@"SubwooferBypass"]) {

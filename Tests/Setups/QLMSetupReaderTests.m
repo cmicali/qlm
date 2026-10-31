@@ -74,6 +74,14 @@
     XCTAssertEqual(main.groupSensitivity, 0);
     XCTAssertEqual(main.crossover, 85);
     XCTAssertEqual(main.crossoverGlobalMode, 1);
+    // The fields a three-way's 43 and 4B may carry instead of its own: the
+    // same in every group of every setup in the repository.
+    for (QLMSetupGroup *group in setup.groups) {
+        XCTAssertEqualObjects(group.groupDelayCompensation, @2, @"%@", group.name);
+        XCTAssertEqualObjects(group.bassExtensionMode, @0, @"%@", group.name);
+        XCTAssertEqualObjects(group.bassExtensionCrossoverMin, @150, @"%@", group.name);
+        XCTAssertEqualObjects(group.bassExtensionCrossoverMax, @250, @"%@", group.name);
+    }
     XCTAssertEqualObjects(main.volumePreset1, @(-40));
     XCTAssertEqualObjects(main.volumePreset2, @(-50));
     XCTAssertFalse(main.subwooferBypass);

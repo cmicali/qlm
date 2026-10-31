@@ -959,7 +959,7 @@ Every block starts with `17 01`. What follows depends on the model.[^block]
 
 Only the 8330A gets the extra `FF 04` after `17 01`.[^extra-keep-alive]
 
-qlm builds the 8351B's `43 00 vv` from its node's `GroupDelayCompensation`, and `4B 00 00 00 vv` from its `BassExtensionXO(Hz)`. **That mapping is a guess.** In the setup files only the 8351B's nodes have the two fields. They hold 2 and 1 in every group of every setup captured, and GLM sends `43 00 02` and `4B 00 00 00 01` in every 8351B pass. So the guess is matched at those values only, and a node with any other value, or neither field, gets no block. Each group has a `GroupDelayCompensation:2` of its own too, and no other model gets a `43`.[^three-way-fields]
+qlm builds the 8351B's `43 00 vv` from its node's `GroupDelayCompensation`, and `4B 00 00 00 vv` from its `BassExtensionXO(Hz)`. **That mapping is a guess.** In the setup files only the 8351B's nodes have the two fields. They hold 2 and 1 in every group of every setup captured, and GLM sends `43 00 02` and `4B 00 00 00 01` in every 8351B pass. So the guess is matched at those values only, and a node with any other value, or neither field, gets no block. Each group has a `GroupDelayCompensation` of its own too, and its bass extension fields, `Group_BE_Mode`, `Group_BE_XOMin`, and `Group_BE_XOMax`. They hold 2, 0, 150, and 250 in every captured group, and may be what drives the two frames. No other model gets a `43`. So qlm also refuses an 8351B's block in a group with other values. qlm builds the frames for any three-way, class `ThreewayGen2`, as it lays out the rest of the block by class. The 8351B is the only three-way captured, and the rate refusal stops a group apply to any of them.[^three-way-fields]
 
 The subwoofers, the 7370A and the 7350A, send a longer block, with repeats. Their level pair is `10 01 00` and `10 01 09`. Their routing pair is `40 00 02 00` and the channel, then `40 01 02 00 00`.[^sub-block]
 
@@ -987,7 +987,7 @@ qlm leaves out only `05 04`. Its block matches every one of GLM's 8351B passes i
 
 No apply by qlm has run on the monitors or been measured yet. [measurement.md](measurement.md) is the procedure.
 
-[^three-way-fields]: `Tests/Setups/Fixtures/Main.sam` and the setups in `captures/setup-*/setups/`; `testOnlyTheThreeWaysHaveTheirOwnFields`, `testThreeWayBlockInGLMsOrder`, `testRefusals`, and `testTwoWayAndThreeWayPassesAreTheBlockInOrder`, over all 47 of the 8351B's passes in the 15 captures `QLMDSPBlockGoldenTests` reads.
+[^three-way-fields]: `Tests/Setups/Fixtures/Main.sam` and the setups in `captures/setup-*/setups/`; `testGroups`, `testOnlyTheThreeWaysHaveTheirOwnFields`, `testThreeWayBlockInGLMsOrder`, `testRefusals`, and `testTwoWayAndThreeWayPassesAreTheBlockInOrder`, over all 47 of the 8351B's passes in the 15 captures `QLMDSPBlockGoldenTests` reads.
 [^glm-opens]: `startup-idle`, 7.29 to 9.90 s; `unplug`, 68.34 to 69.04 s. [refused-frames.md](refused-frames.md#glms-startup-against-qlms) has each time.
 [^glm-level]: [adapter-status.md](adapter-status.md#what-glm-does-with-the-knob).
 [^main-sam]: `qlm-control-first`'s notes, after the capture.

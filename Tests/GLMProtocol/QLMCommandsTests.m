@@ -227,7 +227,9 @@
     XCTAssertEqualWithAccuracy(20 * log10(0x7A3957 / (double)QLMVolumeWordMax), -0.4, 0.01);
 }
 
-// Sections 6, 7, and 9: the DSP block's frames.
+// Sections 6, 7, and 9: the DSP block's frames. 43 and 4B are in no
+// section: GLM sends them to the 8351B in captures/startup-idle, at 8.650
+// and 8.725 s.
 - (void)testDSPBlockBuilders {
     QLMMessage prepare = QLMCommandPrepare(0x02);
     XCTAssertEqual(prepare.address, 0x02);

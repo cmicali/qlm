@@ -273,7 +273,7 @@ static NSData *QLMDelayOf(QLMDSPBlock *block) {
     QLMSetupNode *unknownClass = [[QLMSetupNode alloc] init];
     unknownClass.className = @"FourwayGen3";
     unknownClass.hardwareID = twoByTwo.nodes[0].hardwareID;
-    broken.nodes = @[twoByTwo.nodes[1], unknownClass];
+    broken.nodes = @[twoByTwo.nodes[2], unknownClass];
     XCTAssertNil([QLMDSPBlock blocksByHardwareIDForGroup:broken error:&error]);
     XCTAssertEqual(error.code, QLMDSPBlockErrorClass);
 }
@@ -362,6 +362,30 @@ static NSData *QLMDelayOf(QLMDSPBlock *block) {
         [changed setValue:change[1] == [NSNull null] ? nil : change[1] forKey:change[0]];
         XCTAssertNil([QLMDSPBlock blockForNode:changed inGroup:group error:&error], @"%@", change);
         XCTAssertEqual(error.code, QLMDSPBlockErrorThreeWay, @"%@", change);
+    }
+
+    // So is one whose group's GroupDelayCompensation or bass extension
+    // fields differ from every captured group's 2, 0, 150, and 250, since
+    // those may drive 43 and 4B instead. The node's own fields stay at 2 and
+    // 1. A two-way in such a group still gets its block.
+    NSArray<NSArray *> *groupChanges = @[
+        @[@"groupDelayCompensation", @0], @[@"groupDelayCompensation", @1], @[@"groupDelayCompensation", [NSNull null]],
+        @[@"bassExtensionMode", @1], @[@"bassExtensionMode", [NSNull null]], @[@"bassExtensionCrossoverMin", @120],
+        @[@"bassExtensionCrossoverMin", [NSNull null]], @[@"bassExtensionCrossoverMax", @300],
+        @[@"bassExtensionCrossoverMax", [NSNull null]],
+    ];
+    for (NSArray *change in groupChanges) {
+        QLMSetupGroup *changed = [[QLMSetupGroup alloc] init];
+        changed.nodes = group.nodes;
+        changed.groupDelayCompensation = group.groupDelayCompensation;
+        changed.bassExtensionMode = group.bassExtensionMode;
+        changed.bassExtensionCrossoverMin = group.bassExtensionCrossoverMin;
+        changed.bassExtensionCrossoverMax = group.bassExtensionCrossoverMax;
+        XCTAssertNotNil([QLMDSPBlock blockForNode:left inGroup:changed error:&error], @"%@", error);
+        [changed setValue:change[1] == [NSNull null] ? nil : change[1] forKey:change[0]];
+        XCTAssertNil([QLMDSPBlock blockForNode:left inGroup:changed error:&error], @"%@", change);
+        XCTAssertEqual(error.code, QLMDSPBlockErrorThreeWay, @"%@", change);
+        XCTAssertNotNil([QLMDSPBlock blockForNode:group.nodes[0] inGroup:changed error:&error], @"%@: %@", change, error);
     }
 }
 

@@ -12,7 +12,7 @@ typedef NS_ERROR_ENUM(QLMDSPBlockErrorDomain, QLMDSPBlockError) {
     QLMDSPBlockErrorUnstable,    // a designed filter with a pole outside the unit circle
     QLMDSPBlockErrorInput,       // an input the routing frame cannot say
     QLMDSPBlockErrorLFE,         // a subwoofer's LFE fields differ from every capture's
-    QLMDSPBlockErrorThreeWay,    // an 8351B's GroupDelayCompensation or BassExtensionXO(Hz) differs from every capture's
+    QLMDSPBlockErrorThreeWay,    // a three-way's own fields, or its group's, differ from every capture's
 };
 
 // One monitor's DSP settings for one group, as the frames a group apply

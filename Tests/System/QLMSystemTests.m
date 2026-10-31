@@ -1599,6 +1599,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     group.groupSensitivity = source.groupSensitivity;
     group.crossover = source.crossover;
     group.crossoverGlobalMode = source.crossoverGlobalMode;
+    group.groupDelayCompensation = source.groupDelayCompensation;
+    group.bassExtensionMode = source.bassExtensionMode;
+    group.bassExtensionCrossoverMin = source.bassExtensionCrossoverMin;
+    group.bassExtensionCrossoverMax = source.bassExtensionCrossoverMax;
     group.videoDelay = source.videoDelay;
     group.subwooferBypass = source.subwooferBypass;
     group.lowShelf = source.lowShelf;
