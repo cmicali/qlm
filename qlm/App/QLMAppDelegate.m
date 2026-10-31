@@ -16,6 +16,9 @@
 #import "QLMSetupReader.h"
 #import "QLMSetupWatcher.h"
 #import "QLMSystem.h"
+#if DEBUG
+#import "QLMDebugChannel.h"
+#endif
 
 // How long quit and sleep wait for System to let go, well within the Mac's
 // allowance for a sleep. A stop sends at most the hand-back level, then
@@ -47,6 +50,11 @@ static const NSTimeInterval QLMStopAllowance = 3;
 @property (nonatomic, copy, nullable) NSString *statusTip;
 @end
 
+#if DEBUG
+@interface QLMAppDelegate (Debug) <QLMDebugApp>
+@end
+#endif
+
 @implementation QLMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -75,6 +83,9 @@ static const NSTimeInterval QLMStopAllowance = 3;
     NSNotificationCenter *workspace = NSWorkspace.sharedWorkspace.notificationCenter;
     [workspace addObserver:self selector:@selector(macWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
     [workspace addObserver:self selector:@selector(macDidWake:) name:NSWorkspaceDidWakeNotification object:nil];
+#if DEBUG
+    QLMDebugInstallChannel(self);
+#endif
 }
 
 // Quit waits for the stop, so the hand-back level goes out before qlm does.
@@ -404,3 +415,37 @@ static const NSTimeInterval QLMStopAllowance = 3;
 }
 
 @end
+
+#if DEBUG
+
+@implementation QLMAppDelegate (Debug)
+
+- (QLMSnapshot *)debugSnapshot {
+    return self.monitorList.snapshot;
+}
+
+- (NSPopover *)debugPopover {
+    return self.popover;
+}
+
+- (void)debugShowPopover {
+    if (!self.popover.isShown) {
+        [self togglePopover:nil];
+    }
+}
+
+- (void)debugShowMonitors {
+    [self popoverControllerShowMonitors:self.popoverController];
+}
+
+- (void)debugShowSettings {
+    [self popoverControllerShowSettings:self.popoverController];
+}
+
+- (void)debugReadSetup {
+    [self popoverControllerReadSetupAgain:self.popoverController];
+}
+
+@end
+
+#endif

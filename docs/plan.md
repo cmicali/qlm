@@ -202,18 +202,17 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 | core/Common | log and signpost macros, work lanes, the display-paced timer for meters, build provenance |
 | ui/Controls | the mac sliders and buttons, and the detent slider for volume |
 | system/Updates | Sparkle, for a direct-download build |
-| dev/DebugChannel | drive a running debug build from a script, for tests against the real monitors |
+| dev/DebugChannel | drive a running debug build from a script, for tests against the real monitors. Taken. |
+| dev/DebugVerbs | the standard debug verbs: the build, the view tree, the screenshot, process health, and synthetic input. Taken. |
 | audio/OutputDevices | later: switch groups when macOS changes output device, for example analog to AES |
 
 Nothing else applies: no decoding, playback, tags, or waveforms.
 
-**The submodule is in place at `vibe-libs/`, but this app includes nothing from it yet.** When a target takes its first piece, `project.yml` adds `include: [vibe-libs/vibe-libs.yml]`, sets `VIBE_LIBS_ROOT`, and lists the pieces under `templates:`. The comment at the top of `project.yml` has the steps.
-
-qlm's pin of vibe-libs, `23cf330`, predates every move. Upstream, vibe-libs now holds every piece in the table above. So the first piece qlm takes starts with a bump of the pin. Until then, the app runs on Apple's frameworks.
+**The app takes two pieces: dev/DebugChannel and dev/DebugVerbs.** They bring core/Common and core/Graphics with them. `project.yml` includes `vibe-libs/vibe-libs.yml`, sets `VIBE_LIBS_ROOT`, and lists them under the app's `templates:`. Each compiles to nothing in Release. The CLI and the tests take none. The rest of the table waits for its own work.
 
 **The protocol stays in this app.** No other app needs it, so by vibe-libs's own rule it is not a candidate.
 
-vibe-libs's `AGENTS.md` says its users are Vibe and one other app. This would be a third, so that line needs an update when the app takes its first piece.
+vibe-libs's `AGENTS.md` counts this app among its users.
 
 ## Licensing
 

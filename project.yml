@@ -1,10 +1,9 @@
 name: qlm
 
-# vibe-libs/ is the shared toolbox, a git submodule. When a target takes its
-# first piece, add `include: [vibe-libs/vibe-libs.yml]` here, set
-# `VIBE_LIBS_ROOT: "$(SRCROOT)/vibe-libs"` in the base settings, set
-# `templateAttributes: {excludedPlatform: iOS}` on that target, and list the
-# pieces it takes under `templates:`.
+# vibe-libs/ is the shared toolbox, a git submodule. Its spec gives each piece
+# as a template. A target lists the pieces it takes under `templates:`, and
+# sets `templateAttributes: {excludedPlatform: iOS}`.
+include: [vibe-libs/vibe-libs.yml]
 
 options:
   bundleIdPrefix: com.commonwealthrecordings
@@ -24,6 +23,7 @@ settingGroups:
 
 settings:
   base:
+    VIBE_LIBS_ROOT: "$(SRCROOT)/vibe-libs"   # where vibe-libs' templates find their headers
     ALWAYS_SEARCH_USER_PATHS: NO
     CLANG_ANALYZER_NONNULL: YES
     CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION: YES_AGGRESSIVE
@@ -96,7 +96,12 @@ targets:
   qlm:
     type: application
     platform: macOS
-    templates: [QLMShared]
+    # The debug channel and its standard verbs, which bring Common and
+    # Graphics. Each wraps its sources in #if DEBUG, so they are in every
+    # configuration and ship in none (qlm/App/QLMDebugChannel.h).
+    templates: [QLMShared, VibeLibsDebugChannel, VibeLibsDebugVerbs]
+    templateAttributes:
+      excludedPlatform: iOS
     sources:
       - path: qlm/App
         excludes:
