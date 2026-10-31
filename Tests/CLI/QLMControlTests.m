@@ -5,6 +5,7 @@
 #import "QLMAdapter.h"
 #include "QLMCommands.h"
 #import "QLMControl.h"
+#import "QLMFakeBus.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
@@ -192,7 +193,7 @@ static NSData *QLMRecord(QLMMessage message) {
     QLMSnapshot *discovered = QLMDiscovered();
     NSData *target = discovered.monitors[0].hardwareID;
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [self dryRunSettings], ^int(QLMSystem *system, QLMSnapshot *found) {
+    NSArray<NSData *> *records = QLMDryRunRecords(discovered, [self dryRunSettings], @[], ^int(QLMSystem *system, QLMSnapshot *found) {
         [system setMuted:YES forMonitorWithHardwareID:target];
         return 0;
     }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
@@ -217,7 +218,7 @@ static NSData *QLMRecord(QLMMessage message) {
     QLMSystemSettings *settings = [self dryRunSettings];
     settings.ceilingDecibels = -40;
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, ^int(QLMSystem *system, QLMSnapshot *found) {
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, @[], ^int(QLMSystem *system, QLMSnapshot *found) {
         [system setVolumeDecibels:-20];  // held at the -40 dB ceiling
         return 0;
     }, ^BOOL(QLMSnapshot *snapshot) {
@@ -253,11 +254,15 @@ static NSData *QLMRecord(QLMMessage message) {
 // What `action` sends on the dry run's mirror of QLMDiscovered, its monitors
 // at 09 and 05, with no cycle inside it.
 - (NSArray<NSData *> *)recordsOf:(QLMControlAction)action effect:(QLMSnapshotTest)effect {
+    return [self recordsOf:action muted:@[] effect:effect];
+}
+
+- (NSArray<NSData *> *)recordsOf:(QLMControlAction)action muted:(NSArray<NSString *> *)muted effect:(QLMSnapshotTest)effect {
     QLMSystemSettings *settings = [self dryRunSettings];
     settings.ceilingDecibels = -35;
     settings.cycleInterval = 10;
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, action, effect, &status);
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, muted, action, effect, &status);
     XCTAssertEqual(status, 0);
     return records;
 }
@@ -353,17 +358,60 @@ static NSArray<NSData *> *QLMPair(void) {
         [system setMuted:YES forMonitorWithHardwareID:target];
         return 0;
     };
-    NSArray<NSData *> *records = [self recordsOf:QLMWithMuted(@[@"5678"], mute) effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+    NSArray<NSData *> *records = [self recordsOf:mute muted:@[@"5678"] effect:QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
         return snapshot.idle && snapshot.allMuted;
     })];
     NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x05, QLMMuteValueMuted)), QLMRecord(QLMCommandMute(0x09, QLMMuteValueMuted))];
     XCTAssertEqualObjects(records, [round arrayByAddingObjectsFromArray:round]);
 
     int status = -1;
-    XCTAssertNil(QLMDryRunRecords(discovered, [self dryRunSettings], QLMWithMuted(@[@"9999"], mute), ^BOOL(QLMSnapshot *snapshot) {
+    XCTAssertNil(QLMDryRunRecords(discovered, [self dryRunSettings], @[@"9999"], mute, ^BOOL(QLMSnapshot *snapshot) {
         return YES;
     }, &status));
     XCTAssertEqual(status, EX_DATAERR);
+}
+
+// qlmctl mute off --serial with --muted. The record --muted makes shows the
+// target unmuted already. A wait that saw it ended before the rounds went
+// out, and the dry run printed nothing. The virtual clock settles every hop
+// before a wait returns, so this counts what had gone out when the test
+// first passed.
+- (void)testAnUnmuteWithMutedWaitsForItsRounds {
+    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
+    QLMSystemSettings *settings = [self dryRunSettings];
+    settings.cycleInterval = 10;
+    settings.adapterPollInterval = 0;
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    QLMSnapshot *discovered = QLMWaitForSnapshot(system, 5, ^BOOL {
+        [system start];
+        return YES;
+    }, ^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.allIdentified && snapshot.monitors.count == 2;
+    });
+    NSData *target = bus.monitors[0].hardwareID;  // 1234, at 02
+    NSUInteger start = bus.sentMessages.count;
+    __block NSUInteger sentWhenShown = 0;
+    QLMSnapshotTest effect = QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+        if (!snapshot.idle || [snapshot.mutedHardwareIDs containsObject:target]) {
+            return NO;
+        }
+        sentWhenShown = bus.sentMessages.count - start;
+        return YES;
+    });
+    int status = -1;
+    QLMSnapshot *shown = QLMWaitForEffect(system, discovered, @[@"5678"], ^int(QLMSystem *running, QLMSnapshot *found) {
+        [running setMuted:NO forMonitorWithHardwareID:target];
+        return 0;
+    }, effect, 5, &status);
+    XCTAssertEqual(status, 0);
+    XCTAssertNotNil(shown);
+
+    NSArray<NSData *> *round = @[QLMRecord(QLMCommandMute(0x02, QLMMuteValueUnmuted)), QLMRecord(QLMCommandMute(0x03, QLMMuteValueMuted))];
+    NSArray<NSData *> *rounds = [round arrayByAddingObjectsFromArray:round];
+    XCTAssertEqual(sentWhenShown, rounds.count);
+    NSArray<NSData *> *sent = bus.sentMessages;
+    XCTAssertEqualObjects([sent subarrayWithRange:NSMakeRange(start, sent.count - start)], rounds);
+    [system stop];
 }
 
 // qlmctl's note at exit says what the stop did. A louder take-over names
@@ -402,9 +450,192 @@ static NSArray<NSData *> *QLMPair(void) {
     XCTAssertFalse(volume.settings.allowsUnverifiedRates);
 }
 
+#pragma mark - The adapter's polling
+
+// docs/experiments.md, The flag: --adapter-poll goes on volume alone, from 0
+// to QLMAdapterPollLimit seconds. Every other command refuses it, and so
+// sends nothing.
+- (void)testAdapterPollIsVolumesAloneAndBounded {
+    NSArray<NSString *> *usb = @[@"-50", @"--ceiling", @"-40"];
+    for (NSString *seconds in @[@"0", @"0.57", @"2", @"10"]) {
+        QLMControlOptions *options = [self read:QLMControlCommandVolume arguments:[usb arrayByAddingObjectsFromArray:@[@"--adapter-poll", seconds]]];
+        XCTAssertEqualObjects(options.adapterPollSeconds, @(seconds.doubleValue));
+    }
+    for (NSString *seconds in @[@"-1", @"-0.01", @"10.5", @"1e9"]) {
+        [self refuse:QLMControlCommandVolume arguments:[usb arrayByAddingObjectsFromArray:@[@"--adapter-poll", seconds]] mentions:@"0 to 10"];
+    }
+    for (NSString *seconds in @[@"nan", @"inf", @"", @"0.5s", @"fast", @"--dry-run"]) {
+        [self refuse:QLMControlCommandVolume arguments:[usb arrayByAddingObjectsFromArray:@[@"--adapter-poll", seconds]] mentions:@"not a number"];
+    }
+    [self refuse:QLMControlCommandVolume arguments:[usb arrayByAddingObject:@"--adapter-poll"] mentions:@"value"];
+    [self refuse:QLMControlCommandVolume arguments:[usb arrayByAddingObjectsFromArray:@[@"--adapter-poll", @"1", @"--adapter-poll", @"2"]]
+        mentions:@"twice"];
+
+    NSArray<NSString *> *poll = @[@"--fake", @"--adapter-poll", @"1"];
+    [self refuse:QLMControlCommandMute arguments:[@[@"on"] arrayByAddingObjectsFromArray:poll] mentions:@"unknown argument '--adapter-poll'"];
+    [self refuse:QLMControlCommandDim arguments:[@[@"on"] arrayByAddingObjectsFromArray:poll] mentions:@"unknown argument '--adapter-poll'"];
+    [self refuse:QLMControlCommandSleep arguments:poll mentions:@"unknown argument '--adapter-poll'"];
+    [self refuse:QLMControlCommandWake arguments:poll mentions:@"unknown argument '--adapter-poll'"];
+    [self refuse:QLMControlCommandApplyGroup arguments:[@[@"--dry-run"] arrayByAddingObjectsFromArray:poll]
+        mentions:@"unknown argument '--adapter-poll'"];
+}
+
+// info, discover, and poll refuse what they don't know, as the controls do.
+// poll ignored --adapter-poll, and ran GLM's pairs.
+- (void)testQueriesRefuseAnArgumentTheyDoNotKnow {
+    NSString *problem = nil;
+    NSDictionary<NSString *, NSString *> *given = QLMQueryArguments(@"poll", @[@"--seconds", @"30", @"--fake"], &problem);
+    XCTAssertEqualObjects(given, (@{@"--seconds": @"30", @"--fake": @"--fake"}));
+    given = QLMQueryArguments(@"discover", @[@"--setup", @"Main.sam", @"--seconds", @"3", @"--replay", @"reports.txt"], &problem);
+    XCTAssertEqualObjects(given[@"--setup"], @"Main.sam");
+    XCTAssertEqualObjects(given[@"--replay"], @"reports.txt");
+    XCTAssertEqualObjects(QLMQueryArguments(@"info", @[], &problem), @{});
+
+    NSArray<NSArray<NSString *> *> *refused = @[
+        @[@"poll", @"--seconds", @"30", @"--adapter-poll", @"0"], @[@"discover", @"--adapter-poll", @"0"], @[@"info", @"--adapter-poll", @"0"],
+        @[@"info", @"--seconds", @"3"], @[@"poll", @"--setup", @"Main.sam"], @[@"poll", @"--secnds", @"30"], @[@"poll", @"30"],
+        @[@"poll", @"--seconds"], @[@"poll", @"--fake", @"--fake"], @[@"poll", @"--seconds", @"abc"], @[@"poll", @"--seconds", @"30s"],
+        @[@"discover", @"--seconds", @"-5"], @[@"info", @"--fake", @"--replay", @"reports.txt"],
+    ];
+    for (NSArray<NSString *> *line in refused) {
+        NSArray<NSString *> *arguments = [line subarrayWithRange:NSMakeRange(1, line.count - 1)];
+        XCTAssertNil(QLMQueryArguments(line[0], arguments, &problem), @"%@", line);
+        XCTAssertNotNil(problem, @"%@", line);
+    }
+}
+
+// Without --adapter-poll, the settings are System's own: GLM's pair every
+// 0.107 s (docs/adapter-status.md). With it, one poll a round.
+- (void)testAdapterPollSetsOnePollARound {
+    QLMSystemSettings *glm = [[QLMSystemSettings alloc] init];
+    XCTAssertEqual(glm.adapterPollInterval, 0.107);
+    XCTAssertEqual(glm.adapterPollsPerRound, 2u);
+    QLMControlOptions *options = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--fake"]];
+    XCTAssertNil(options.adapterPollSeconds);
+    XCTAssertEqual(options.settings.adapterPollInterval, glm.adapterPollInterval);
+    XCTAssertEqual(options.settings.adapterPollsPerRound, glm.adapterPollsPerRound);
+    XCTAssertEqualObjects(options.adapterPollText, @"qlm polls the adapter as GLM does, with a pair of 01 08 every 0.107 s.");
+
+    options = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--fake", @"--adapter-poll", @"0.57"]];
+    XCTAssertEqual(options.settings.adapterPollInterval, 0.57);
+    XCTAssertEqual(options.settings.adapterPollsPerRound, 1u);
+    XCTAssertEqual(((QLMSystemSettings *)[options.settings copy]).adapterPollsPerRound, 1u);
+    XCTAssertEqualObjects(options.adapterPollText, @"qlm polls the adapter with one 01 08 every 0.57 s, in place of GLM's pair every 0.107 s.");
+
+    options = [self read:QLMControlCommandVolume arguments:@[@"-50", @"--fake", @"--adapter-poll", @"0"]];
+    XCTAssertEqual(options.settings.adapterPollInterval, 0.0);
+    XCTAssertEqual(options.settings.adapterPollsPerRound, 1u);
+    XCTAssertEqualObjects(options.adapterPollText, @"qlm polls the adapter with one 01 08 at start only, in place of GLM's pair every 0.107 s.");
+}
+
+// The time of each 01 08, from the start, over 5 s of `volume -50 --fake`
+// with these arguments, on the fake bus. `others` gets every other frame,
+// the stop's included.
+- (NSArray<NSNumber *> *)adapterPollTimesWith:(NSArray<NSString *> *)arguments others:(NSArray<NSData *> **)others {
+    QLMControlOptions *options = [self read:QLMControlCommandVolume arguments:[@[@"-50", @"--fake"] arrayByAddingObjectsFromArray:arguments]];
+    QLMSystemSettings *settings = options.settings;
+    settings.clock = _time;
+    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    NSData *poll = QLMRecord(QLMCommandPoll(QLMAddressAdapter));
+    NSMutableArray<NSNumber *> *times = [NSMutableArray array];
+    __block NSUInteger seen = 0;
+    NSTimeInterval start = _time.now;
+    [system start];
+    [system setVolumeDecibels:-50];
+    [_time runUntil:^BOOL {
+        NSArray<NSData *> *sent = bus.sentMessages;
+        for (; seen < sent.count; seen++) {
+            if ([sent[seen] isEqualToData:poll]) {
+                [times addObject:@(self->_time.now - start)];
+            }
+        }
+        return NO;
+    } within:5];
+    [system stop];
+    [_time settle];
+    *others = [bus.sentMessages filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSData *record, NSDictionary *bindings) {
+        return ![record isEqualToData:poll];
+    }]];
+    return times;
+}
+
+// docs/experiments.md, The flag: one 01 08 every SECONDS in place of GLM's
+// pair every 0.107 s, and 0 polls only at start. The rest of the cycle, the
+// probe, the volume, and a poll to each monitor, stays as it is, and so does
+// the stop's level.
+- (void)testAdapterPollSetsTheCadence {
+    NSArray<NSData *> *glmOthers = nil;
+    NSArray<NSNumber *> *glm = [self adapterPollTimesWith:@[] others:&glmOthers];
+    XCTAssertEqual(glm.count, 2 * (1 + 46u));  // 46 * 0.107 s = 4.922 s
+    for (NSUInteger i = 0; i < glm.count; i++) {
+        XCTAssertEqualWithAccuracy(glm[i].doubleValue, (i / 2) * 0.107, 1e-9, @"poll %lu", (unsigned long)i);
+    }
+    XCTAssertGreaterThan(glmOthers.count, 0u);
+    uint32_t ceiling = QLMVolumeWordForDecibels(QLMCeilingLimit);
+    for (NSData *record in glmOthers) {
+        const uint8_t *bytes = record.bytes;
+        QLMMessage message = QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
+        uint32_t word = 0;
+        XCTAssertTrue(!QLMVolumeFrameWord(&message, &word) || word <= ceiling, @"%@", record);
+    }
+
+    NSDictionary<NSString *, NSNumber *> *rounds = @{@"0": @1, @"0.57": @9, @"2": @3};  // from 0, to 4.56 s and 4 s
+    for (NSString *interval in rounds) {
+        NSArray<NSData *> *others = nil;
+        NSArray<NSNumber *> *times = [self adapterPollTimesWith:@[@"--adapter-poll", interval] others:&others];
+        XCTAssertEqual(times.count, rounds[interval].unsignedIntegerValue, @"every %@ s", interval);
+        for (NSUInteger i = 0; i < times.count; i++) {
+            XCTAssertEqualWithAccuracy(times[i].doubleValue, i * interval.doubleValue, 1e-9, @"every %@ s, poll %lu", interval, (unsigned long)i);
+        }
+        XCTAssertEqualObjects(others, glmOthers, @"every %@ s", interval);
+    }
+}
+
+static QLMSnapshot *QLMDiscoveredWithKnob(NSNumber *_Nullable tenths) {
+    QLMSnapshot *snapshot = QLMDiscovered();
+    QLMAdapterState *adapter = [[QLMAdapterState alloc] init];
+    adapter.hasStatus = YES;
+    adapter.knobPresent = tenths != nil;
+    adapter.knobTenths = tenths;
+    snapshot.adapter = adapter;
+    return snapshot;
+}
+
+// With fewer polls, the adapter may take over during the run, at the knob's
+// level, which the ceiling does not bound. So --adapter-poll needs the knob
+// in, at or below the level that goes out, by System's hand-back rule. The
+// knob reads in tenths of a dB.
+- (void)testFewerAdapterPollsNeedTheKnobAtOrBelowTheVolume {
+    QLMSnapshotTest effect = ^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && [snapshot.volumeDecibels isEqual:@(-50)];
+    };
+    NSData *level = QLMRecord(QLMCommandVolume(-50, QLMCeilingLimit));
+    for (NSNumber *knob in @[@(-600), @(-500)]) {
+        int status = -1;
+        NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscoveredWithKnob(knob), [self dryRunSettings], @[], QLMVolumeAction(-50, YES), effect, &status);
+        XCTAssertEqual(status, 0, @"knob %@", knob);
+        XCTAssertTrue([records containsObject:level], @"knob %@", knob);
+    }
+    for (QLMSnapshot *discovered in @[QLMDiscoveredWithKnob(@(-480)), QLMDiscoveredWithKnob(nil)]) {
+        int status = -1;
+        XCTAssertNil(QLMDryRunRecords(discovered, [self dryRunSettings], @[], QLMVolumeAction(-50, YES), effect, &status));
+        XCTAssertEqual(status, EX_DATAERR, @"knob %@", discovered.adapter.knobTenths);
+    }
+    // The frame under a -40.2 dB ceiling goes out at a step below the knob's.
+    QLMSystemSettings *settings = [self dryRunSettings];
+    settings.ceilingDecibels = -40.2;
+    int status = -1;
+    XCTAssertNil(QLMDryRunRecords(QLMDiscoveredWithKnob(@(-402)), settings, @[], QLMVolumeAction(-40.2, YES), effect, &status));
+    XCTAssertEqual(status, EX_DATAERR);
+
+    XCTAssertNotNil(QLMDryRunRecords(QLMDiscoveredWithKnob(@(-400)), [self dryRunSettings], @[], QLMVolumeAction(-50, NO), effect, &status));
+    XCTAssertEqual(status, 0);
+}
+
 - (void)testADryRunOfARefusedActionHasNoFrames {
     int status = -1;
-    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [self dryRunSettings], ^int(QLMSystem *system, QLMSnapshot *found) {
+    NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), [self dryRunSettings], @[], ^int(QLMSystem *system, QLMSnapshot *found) {
         return EX_DATAERR;
     }, ^BOOL(QLMSnapshot *snapshot) {
         return YES;
