@@ -65,9 +65,8 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
 }
 
 // The user's own quit asks before a louder take-over, and one with no knob
-// in. A logout, restart, or shutdown can't wait on an alert, so it mutes
-// first instead. A take-over at the knob's level needs neither. Source:
-// kAEQuitReason in AERegistry.h.
+// in. A logout, restart, or shutdown mutes first instead. A take-over at
+// the knob's level needs neither. Source: kAEQuitReason in AERegistry.h.
 - (void)testAQuitByTheMacMutesWhereTheUsersQuitAsks {
     QLMSnapshot *louder = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
     QLMSnapshot *noKnob = QLMSnapshotWith(QLMHandBackUnknown, nil, @(-50));

@@ -62,7 +62,8 @@ typedef NS_ENUM(NSInteger, QLMQuitStep) {
 
 // `reason` is the quit Apple event's kAEQuitReason, or 0 with none, as at
 // Cmd-Q and the popover's Quit. A logout, restart, or shutdown can't wait
-// on an alert, so where the user's quit asks, it mutes first.
+// on an alert, so where the user's quit asks, it stops with System's
+// stopMutingIfLouderWithCompletion:.
 QLMQuitStep QLMQuitStepFor(BOOL stopMayRaiseLevel, OSType reason);
 
 // The banner's lines: the snapshot's adapterProblem, else its busProblem.

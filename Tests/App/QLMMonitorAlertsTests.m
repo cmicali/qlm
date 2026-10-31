@@ -52,7 +52,10 @@
     _system = [[QLMSystem alloc] initWithAdapter:_bus settings:settings];
     _list = [[QLMMonitorList alloc] init];
     _recorder = [[QLMAlertRecorder alloc] init];
-    _alerts = [[QLMMonitorAlerts alloc] initWithPoster:_recorder clock:_time];
+    QLMVirtualClock *time = _time;
+    _alerts = [[QLMMonitorAlerts alloc] initWithPoster:_recorder now:^NSTimeInterval {
+        return time.now;
+    }];
     [_system start];
     [_system setVolumeDecibels:-45];
     [self updateWhen:^BOOL(QLMSnapshot *snapshot) {
@@ -87,15 +90,6 @@
     return _bus.monitors.firstObject;
 }
 
-- (nullable QLMMonitorState *)stateOf:(QLMFakeMonitor *)fake in:(QLMSnapshot *)snapshot {
-    for (QLMMonitorState *monitor in snapshot.monitors) {
-        if ([monitor.hardwareID isEqualToData:fake.hardwareID]) {
-            return monitor;
-        }
-    }
-    return nil;
-}
-
 // Switched off and on again, so it holds no lease.
 - (void)setLeftPresent:(BOOL)present on:(BOOL)on {
     QLMFakeMonitor *left = [self left];
@@ -117,7 +111,7 @@
     [self setLeftPresent:YES on:on];
     QLMMonitorStatus status = on ? QLMMonitorStatusOn : QLMMonitorStatusStandby;
     [self updateWhen:^BOOL(QLMSnapshot *snapshot) {
-        return [self stateOf:[self left] in:snapshot].status == status;
+        return QLMFindMonitor(snapshot, [self left].hardwareID).status == status;
     }];
 }
 
@@ -127,7 +121,7 @@
         left.temperature = temperature;
     }];
     [self updateWhen:^BOOL(QLMSnapshot *snapshot) {
-        return [self stateOf:[self left] in:snapshot].temperature == temperature;
+        return QLMFindMonitor(snapshot, [self left].hardwareID).temperature == temperature;
     }];
 }
 

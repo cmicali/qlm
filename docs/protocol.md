@@ -649,7 +649,7 @@ A logout, restart, or shutdown can't wait on that question. Where a quit would a
 [^hand-back-gaps]: [adapter-status.md](adapter-status.md#how-the-adapter-knows-a-host-is-present).
 [^hand-back-all]: `qlm-control-all`, at 81.4, 442.0, 456.8, 8410.5, 8425.4, 8494.1, and 8663.8 s, and its notes.
 [^hand-back-app]: `qlm-app-first`, and its notes; `testEachStopHandsBackAtTheKnob`; `QLMSnapshot.h`.
-[^hand-back-mac]: `testAQuitByTheMacMutesWhereTheUsersQuitAsks`.
+[^hand-back-mac]: `testAQuitByTheMacMutesWhereTheUsersQuitAsks`; `testAStopMutingIfLouderMutesAllWhereTheTakeOverIsLouder`.
 
 ## Sequences
 

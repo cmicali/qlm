@@ -1,6 +1,5 @@
 #import <Foundation/Foundation.h>
 
-#import "QLMClock.h"
 #import "QLMMonitorList.h"
 
 @class QLMSetup;
@@ -20,10 +19,9 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMNotifier : NSObject <QLMAlertPosting>
 @end
 
-// The real clock, with a now that counts the time the Mac sleeps, so a day
-// between two alerts is a day.
-@interface QLMSleepCountingClock : QLMRealClock
-@end
+// Seconds, never going back, counting the time the Mac sleeps, so a day
+// between two alerts is a day. QLMRealClock's uptime stops while it sleeps.
+NSTimeInterval QLMSecondsCountingSleep(void);
 
 // Turns the monitor list's updates into alerts: a monitor System drops, one
 // that runs hot at 70 °C, an adapter that stops answering while its
@@ -36,7 +34,8 @@ NS_ASSUME_NONNULL_BEGIN
 // main queue.
 @interface QLMMonitorAlerts : NSObject
 
-- (instancetype)initWithPoster:(id<QLMAlertPosting>)poster clock:(id<QLMClock>)clock;
+// `now` gives seconds, never going back.
+- (instancetype)initWithPoster:(id<QLMAlertPosting>)poster now:(NSTimeInterval (^)(void))now;
 
 // Names each monitor in an alert, as the popover does.
 @property (nonatomic, nullable) QLMSetup *setup;

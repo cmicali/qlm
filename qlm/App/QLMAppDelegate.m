@@ -19,11 +19,9 @@
 #endif
 
 // How long quit and sleep wait for System to let go, well within the Mac's
-// allowance for a sleep. A stop sends at most the hand-back level, then
-// closes the adapter.
+// allowance for a sleep. A stop sends at most the hand-back level, or mute
+// all, then closes the adapter.
 static const NSTimeInterval QLMStopAllowance = 3;
-// How long a logout, restart, or shutdown waits for mute all to go out.
-static const NSTimeInterval QLMMuteAllowance = 1;
 // How long a stop's warning waits for System's snapshot now.
 static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 
@@ -31,7 +29,6 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMMonitorAlerts *alerts;
-@property (nonatomic) QLMNotifier *notifier;
 @property (nonatomic) NSStatusItem *statusItem;
 @property (nonatomic) NSPopover *popover;
 @property (nonatomic) QLMPopoverController *popoverController;
@@ -77,8 +74,9 @@ static OSType QLMQuitReason(void) {
     NSApp.mainMenu = QLMMainMenu();
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
-    self.notifier = [[QLMNotifier alloc] init];
-    self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:self.notifier clock:[[QLMSleepCountingClock alloc] init]];
+    self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:[[QLMNotifier alloc] init] now:^NSTimeInterval {
+        return QLMSecondsCountingSleep();
+    }];
 
     self.popoverController = [[QLMPopoverController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
     self.popoverController.delegate = self;
@@ -111,39 +109,14 @@ static OSType QLMQuitReason(void) {
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     [self.settingsController endEditing];
     QLMSnapshot *now = [self snapshotNow];
-    switch (QLMQuitStepFor([self stopMayRaiseLevel:now], QLMQuitReason())) {
-    case QLMQuitStepAsk:
-        if (![self askBeforeStop:@"Quitting" anyway:@"Quit Anyway" now:now]) {
-            return NSTerminateCancel;
-        }
-        break;
-    case QLMQuitStepMuteFirst:
-        [self muteAllAndWait];
-        break;
-    case QLMQuitStepStop:
-        break;
+    QLMQuitStep step = QLMQuitStepFor([self stopMayRaiseLevel:now], QLMQuitReason());
+    if (step == QLMQuitStepAsk && ![self askBeforeStop:@"Quitting" anyway:@"Quit Anyway" now:now]) {
+        return NSTerminateCancel;
     }
-    [self stopSystemAndWait];
+    // A Mac left to restart overnight would hang on the alert. The next
+    // launch starts from the record, muted.
+    [self stopSystemAndWaitMuting:step == QLMQuitStepMuteFirst];
     return NSTerminateNow;
-}
-
-// A logout, restart, or shutdown can't wait on the louder hand-back's alert,
-// and a Mac left to restart overnight would hang on it. So every monitor is
-// muted before qlm lets go. A mute outlasts the host (docs/protocol.md), so
-// the take-over can't make them louder. The record keeps mute all, so the
-// next launch starts muted. TRAP: a stop drops what is still queued, so
-// this waits for the mute's frames to go out.
-- (void)muteAllAndWait {
-    QLMCallNumber call = [self.system setAllMuted:YES];
-    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:QLMMuteAllowance];
-    while (deadline.timeIntervalSinceNow > 0) {
-        QLMSnapshot *latest = self.monitorList.snapshot;
-        if (latest.lastCall >= call && latest.idle) {
-            return;
-        }
-        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
-    }
-    NSLog(@"qlm: mute all did not go out within %.0f s of the quit.", QLMMuteAllowance);
 }
 
 // Only on the real monitors: on the fake bus a take-over moves no level.
@@ -246,7 +219,7 @@ static OSType QLMQuitReason(void) {
     if ([self stopMayRaiseLevel:snapshot]) {
         [self.alerts alertSleepWithSnapshot:snapshot];
     }
-    [self stopSystemAndWait];
+    [self stopSystemAndWaitMuting:NO];
 }
 
 // Waits up to QLMStopAllowance for System to let go: the Mac waits for a
@@ -255,15 +228,20 @@ static OSType QLMQuitReason(void) {
 // main queue, the completion waits for that block, so only the deadline
 // ends the wait. A restart that finishes meanwhile starts a new System, so
 // that one is stopped too.
-- (void)stopSystemAndWait {
+- (void)stopSystemAndWaitMuting:(BOOL)mutes {
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:QLMStopAllowance];
     QLMSystem *system = nil;
     while (self.system != system && deadline.timeIntervalSinceNow > 0) {
         system = self.system;
         __block BOOL stopped = NO;
-        [system stopWithCompletion:^{
+        dispatch_block_t completion = ^{
             stopped = YES;
-        }];
+        };
+        if (mutes) {
+            [system stopMutingIfLouderWithCompletion:completion];
+        } else {
+            [system stopWithCompletion:completion];
+        }
         while (!stopped && deadline.timeIntervalSinceNow > 0) {
             [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
         }
