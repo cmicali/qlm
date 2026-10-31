@@ -425,6 +425,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [self send:[self knobOrBottomLevel] then:nil];
         } else {
             [self muteAll:YES];
+            // A record keeper takes only a running System's record, so this
+            // one carries mute all before the stop ends.
+            [self publish];
         }
         [self afterSends:^{
             [self finishStop];

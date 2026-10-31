@@ -645,7 +645,7 @@ qlm's app chooses its stop by where the knob sits. With the knob above the app's
 | Quit, 1125.91 s | −40 dB, below −35 dB | `FF 1F 01 47 AE`, −40 dB | The same |
 | The adapter setting off, 1341.85 s | −40 dB, below −35 dB | `FF 1F 01 47 AE`, −40 dB | The same |
 
-A logout, restart, or shutdown can't wait on that question. Where a quit would ask, the app mutes every monitor first, then lets go, since a mute outlasts the host ([Monitors keep their level and their mute](#monitors-keep-their-level-and-their-mute)). That stop hasn't run on the monitors yet.[^hand-back-mac]
+A logout, restart, or shutdown can't wait on that question. Where a quit would ask, the app mutes every monitor first, then lets go, since a mute outlasts the host ([Monitors keep their level and their mute](#monitors-keep-their-level-and-their-mute)). The app saves mute all in its record before the stop ends, so the next launch restates the mutes. That stop hasn't run on the monitors yet.[^hand-back-mac]
 
 [^no-keep-alive]: `startup-idle`, from 10 s; #12.
 [^hlm-keep-alive]: hlm §7.

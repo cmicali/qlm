@@ -104,9 +104,11 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // the adapter, or at once when it is not running.
 - (QLMCallNumber)stopWithCompletion:(nullable dispatch_block_t)completion;
 // The same, for a stop no one can answer. Where the take-over would be
-// louder, or is unknown, it sends mute all before it lets go, and the
-// record keeps it. A mute outlasts the host, so the take-over can't make
-// the monitors louder.
+// louder, or is unknown, it sends mute all before it lets go. A mute
+// outlasts the host, so the take-over can't make the monitors louder. A
+// snapshot that still runs carries mute all in the record before the stop
+// ends, so a keeper of the record, as the app is, starts the next System
+// muted.
 - (QLMCallNumber)stopMutingIfLouderWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every
