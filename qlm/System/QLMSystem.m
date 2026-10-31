@@ -1062,7 +1062,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // the mute state, then the level again (captures/standby-wake, 0.99 s).
 - (void)followKnob:(const QLMAdapterStatus *)status {
     if (!status->knob || !status->hasKnobPosition) {
-        [_knob reset];
+        // TRAP: the reading jumps as the plug slides out, and GLM follows
+        // the jump (captures/volume-sweep, 25.11 to 25.45 s). So a raise the
+        // knob made just before it read absent is taken back.
+        NSNumber *before = [_knob volumeAtUnplugAtTime:_clock.now volume:_volumeDecibels];
+        if (before != nil) {
+            _volumeDecibels = before;
+            _dirty = YES;
+            [self scheduleVolumeSend];
+        }
         return;
     }
     NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:_clock.now volume:_volumeDecibels];

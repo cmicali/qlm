@@ -595,6 +595,47 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// The reading jumps as the plug slides out, and GLM follows the jump
+// (captures/volume-sweep, 25.11 to 25.45 s). Here the knob jumps up, then
+// reads absent a poll later. System takes the raise back with one frame at
+// the level before it, and stays there. A raise older than half a second
+// stands.
+- (void)testAKnobPulledOutTakesBackTheRaiseItJustMade {
+    _settings.adapterPollInterval = 0.107;
+    [self startWithKnob:@(-400) volume:@(-40)];
+    QLMMessage raised = QLMCommandVolume(-30, _settings.ceilingDecibels);
+    QLMMessage back = QLMCommandVolume(-40, _settings.ceilingDecibels);
+    NSData *raisedRecord = QLMAdapterRecord(&raised);
+    NSData *backRecord = QLMAdapterRecord(&back);
+
+    NSUInteger before = _bus.sentMessages.count;
+    XCTAssertEqualObjects([self turnKnobTo:-300].volumeDecibels, @(-30));
+    XCTAssertEqualObjects([self pullKnob].volumeDecibels, @(-40));
+    [_time advanceBy:1];
+    NSArray<NSData *> *expected = @[raisedRecord, raisedRecord, raisedRecord, raisedRecord, backRecord];
+    XCTAssertEqualObjects([self sentWithOpcode:0x1F from:before], expected);
+
+    [self turnKnobTo:-400];
+    before = _bus.sentMessages.count;
+    XCTAssertEqualObjects([self turnKnobTo:-300].volumeDecibels, @(-30));
+    [_time advanceBy:0.6];
+    XCTAssertEqualObjects([self pullKnob].volumeDecibels, @(-30));
+    [_time advanceBy:1];
+    expected = @[raisedRecord, raisedRecord, raisedRecord, raisedRecord];
+    XCTAssertEqualObjects([self sentWithOpcode:0x1F from:before], expected);
+}
+
+// Pulls the knob out, and waits until the snapshot shows it, with nothing
+// queued.
+- (QLMSnapshot *)pullKnob {
+    [_bus perform:^{
+        self->_bus.knobTenths = nil;
+    }];
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapter.hasStatus && !snapshot.adapter.knobPresent && snapshot.idle;
+    }];
+}
+
 // The latest snapshot waits until nothing is queued for the bus or in
 // flight. A snapshot of now does not, so a stop decided from it sees a level
 // that has not gone out yet: here, one below the knob, which makes the

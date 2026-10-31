@@ -80,4 +80,32 @@
     XCTAssertEqualObjects([knob volumeForReading:-717 atTime:23 volume:@(-72.0)], @(-71.5));
 }
 
+// As the plug slides out, the reading jumps for 0.33 s before it reads
+// absent (volume-sweep, 25.11 to 25.45 s). So a knob that comes out takes
+// back its raises of the last half second, to the volume before the first
+// of them. A follow from before that stands. Then the knob rests again.
+- (void)testAKnobPulledOutTakesBackItsLastHalfSecond {
+    QLMKnob *knob = [[QLMKnob alloc] init];
+    [knob volumeForReading:-400 atTime:0 volume:@(-40)];
+    XCTAssertEqualObjects([knob volumeForReading:-300 atTime:1 volume:@(-40)], @(-30.0));
+    XCTAssertEqualObjects([knob volumeForReading:-250 atTime:1.6 volume:@(-30.0)], @(-25.0));
+    XCTAssertEqualObjects([knob volumeForReading:-200 atTime:1.7 volume:@(-25.0)], @(-20.0));
+    XCTAssertEqualObjects([knob volumeAtUnplugAtTime:2.0 volume:@(-20.0)], @(-30.0));
+    XCTAssertNil([knob volumeForReading:-500 atTime:3 volume:@(-30.0)]);
+
+    [knob volumeForReading:-400 atTime:10 volume:@(-40)];
+    XCTAssertEqualObjects([knob volumeForReading:-300 atTime:11 volume:@(-40)], @(-30.0));
+    XCTAssertNil([knob volumeAtUnplugAtTime:11.51 volume:@(-30.0)]);
+}
+
+// In volume-sweep, the knob came out at its bottom stop, with GLM's level
+// above it. The jump took GLM's level down, from -56.5 dB to -99.0 at
+// 25.23 s. A follow that lowered the volume stands.
+- (void)testAKnobPulledOutKeepsALowerVolume {
+    QLMKnob *knob = [[QLMKnob alloc] init];
+    [knob volumeForReading:-1004 atTime:0 volume:@(-56.5)];
+    XCTAssertEqualObjects([knob volumeForReading:-992 atTime:0.11 volume:@(-56.5)], @(-99.0));
+    XCTAssertNil([knob volumeAtUnplugAtTime:0.33 volume:@(-99.0)]);
+}
+
 @end

@@ -777,6 +777,7 @@ qlm follows the same rule, with a few differences:
 | With no volume set | | The knob sets none. |
 | The burst | On every change it follows | Only when its volume changes |
 | The level | Now and then, the level of the change before | The reading's nearest step, under the ceiling |
+| When the knob comes out | Keeps the level the plug's jump left | Takes back a raise of the last 0.5 s |
 | Source | [adapter-status.md](adapter-status.md#what-glm-does-with-the-knob); #18 | `QLMKnob`; `QLMKnobTests`; `QLMKnobGoldenTests` |
 
 We replayed the knob readings of those seven captures through qlm, on the virtual clock, with the app's polls. At every rest point but five, where GLM's level lagged, qlm's level is GLM's.[^knob-golden]
@@ -784,6 +785,8 @@ We replayed the knob readings of those seven captures through qlm, on the virtua
 In `qlm-control-first`, qlm jumped to the knob at its first real turn, then followed it. The highest level it sent was −41.5 dB, under a −35 dB ceiling.[^control-run-knob]
 
 In `qlm-app-first`, the knob reached its top stop, 0 dB, and its bottom. qlm never sent above its −35 dB ceiling, and at the bottom it sent the floor, `00 00 08`. But its volume followed the knob past the ceiling, and only the frame was capped. So each change still sent a burst: 102 bursts in 13.7 s, 75 of them with the level held at −35 dB.[^app-knob]
+
+The knob's reading jumps as its plug comes out. In `volume-sweep`, it moved for 0.33 s before the reply said `31`, and GLM followed the jump.[^knob-out] qlm follows it too. But when the reply says `31`, qlm takes back any raise the knob made in the last 0.5 s. Its volume goes back to the level before the first follow in that time, and stays there. A follow that lowered the level stands, and so does one from before the half second. So pulling the knob out never leaves the level louder than it was. In `volume-sweep`, the knob sat at its bottom stop, below GLM's level, so the jump took the level down. qlm keeps that lower level, as GLM did.[^knob-out-qlm]
 
 ### Dim
 
@@ -1002,6 +1005,8 @@ No apply by qlm has run on the monitors or been measured yet. [measurement.md](m
 [^knob-lock]: `volume-sweep`, 25.44 s; its notes.
 [^control-run-knob]: `qlm-control-first`, 373.12 s; `testEveryLevelIsGLMsAndUnderTheCeiling`.
 [^app-knob]: `qlm-app-first`, 282.6 to 296.5 s; `testTheAppSentOnlyControlsUnderTheCeiling`; `QLMKnob.h`.
+[^knob-out]: `volume-sweep`, 25.11 to 25.45 s; [adapter-status.md](adapter-status.md#unplugging-volume-sweep).
+[^knob-out-qlm]: `QLMKnob.h`; `testAKnobPulledOutTakesBackItsLastHalfSecond`; `testAKnobPulledOutTakesBackTheRaiseItJustMade`; `testAKnobPulledOutAtItsBottomStopInVolumeSweep`.
 [^dim-volume]: hlm §9; `mute-dim`, 51.24 s.
 [^dim-sequence]: `mute-dim`, 51.24 s on and 54.77 s off; `testDimIsGLMs`.
 [^dim-2d]: [refused-frames.md](refused-frames.md#broadcast-2d-00-and-3d-00-00).

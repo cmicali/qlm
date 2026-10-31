@@ -219,6 +219,83 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
     XCTAssertEqual([self replay:@"sleep-wake-no-sleep" compared:25 stale:0], 0u);
 }
 
+// volume-sweep: the knob rests at its bottom stop with GLM at -56.5 dB. As
+// the plug comes out, the reading jumps from 25.11 s. Its last reading is
+// -988, and the reply to the poll at 25.444 s says 31, the knob is out. The
+// test replays every reading from 20 to 30 s, at the app's polls. qlm
+// follows the jump down to -97.5 dB, the level GLM held after it. That
+// follow lowered the level, so it stands once the knob is out.
+- (void)testAKnobPulledOutAtItsBottomStopInVolumeSweep {
+    NSMutableArray<QLMKnobMoment *> *readings = [NSMutableArray array];  // NAN: the knob is out
+    double glm = NAN;
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"volume-sweep", NULL).exchanges) {
+        if (exchange.time >= 30) {
+            break;
+        }
+        QLMMessage message = exchange.message;
+        if (exchange.time < 20) {
+            double level = QLMLevelOfRecord(QLMAdapterRecord(&message));
+            glm = isnan(level) ? glm : level;
+            continue;
+        }
+        QLMMessage reply = exchange.reply;
+        QLMAdapterStatus status;
+        if (message.address != QLMAddressAdapter || message.payload[0] != 0x08 || !exchange.answered ||
+            QLMReplyAdapterStatus(&reply, &status) != QLMAdapterStatusOK) {
+            continue;
+        }
+        BOOL present = status.knob && status.hasKnobPosition;
+        [readings addObject:QLMMoment(exchange.time, present ? status.knobTenths : NAN)];
+    }
+    XCTAssertEqual(glm, -56.5);
+    NSUInteger out = [readings indexOfObjectPassingTest:^BOOL(QLMKnobMoment *moment, NSUInteger i, BOOL *stop) {
+        return isnan(moment.value);
+    }];
+    XCTAssertEqualWithAccuracy(readings[out].time, 25.444, 0.001);
+    XCTAssertEqual(readings[out - 1].value, -988);
+    XCTAssertEqual(readings.firstObject.value, -1004);
+    for (NSUInteger i = out; i < readings.count; i++) {
+        XCTAssertTrue(isnan(readings[i].value), @"%.3f s", readings[i].time);
+    }
+
+    QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+    QLMFakeMonitor *monitor = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes((const uint8_t[]){0x12, 0x2F, 0xA0}, 3)
+                                                             serialNumber:@"8330AP21000000"
+                                                               systemInfo:@"c-2;model-8330A"
+                                                              deviceClass:QLMTelemetryClassTwoWay];
+    QLMFakeBus *bus = [[QLMFakeBus alloc] initWithMonitors:@[monitor]];
+    bus.knobTenths = @(readings.firstObject.value);
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.clock = time;
+    settings.ceilingDecibels = 0;
+    settings.cycleInterval = 1000;
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    [system start];
+    [time settle];
+    [system setVolumeDecibels:glm];
+    [time settle];
+
+    NSTimeInterval offset = time.now - readings.firstObject.time;
+    double levelBeforeOut = NAN;
+    for (QLMKnobMoment *reading in readings) {
+        [time advanceBy:reading.time + offset - time.now];
+        if (reading == readings[out]) {
+            levelBeforeOut = QLMLastLevelSent(bus.sentMessages);
+        }
+        [bus perform:^{
+            bus.knobTenths = isnan(reading.value) ? nil : @(reading.value);
+        }];
+    }
+    [time advanceBy:30 + offset - time.now];
+    NSArray<NSData *> *sent = bus.sentMessages;
+    XCTAssertEqual(levelBeforeOut, -97.5);
+    XCTAssertEqual(QLMLastLevelSent(sent), -97.5);
+    XCTAssertEqualObjects(system.snapshot.volumeDecibels, @(-97.5));
+    XCTAssertFalse(system.snapshot.adapter.knobPresent);
+    [system stop];
+    [time settle];
+}
+
 // standby-wake: the knob was just plugged in, and its reading settles near
 // the bottom.
 - (void)testAJustPluggedKnobIsGLMsInStandbyWake {
