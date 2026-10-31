@@ -54,9 +54,9 @@ The app is new to the real adapter, so turn the setting on at a low level, one m
 
 Over USB, `qlmctl` refuses the adapter while GLM runs, while another process holds it, or when it can't seize it. It then exits 69 and sends nothing.
 
-### The controls over USB
+Every command that drives the bus checks every argument before the bus opens. An unknown, repeated, or empty one is refused with exit 64, so a mistyped `--dry-run` can't send for real.
 
-`volume`, `mute`, `dim`, `sleep`, and `wake` check every argument before any bus opens. An unknown, repeated, or empty one is refused, so a mistyped `--dry-run` can't send for real.
+### The controls over USB
 
 `volume`, `dim`, and `wake --volume` set a level, so each needs `--ceiling dB`, and GLMProtocol caps every volume frame at it. The ceiling may be at most −30 dB, or 0 dB with `--allow-high-ceiling`, and the volume may not be above it. qlm can't read the monitors' level, so `dim` also needs `--volume dB`, the level it dims from. Every wake ends with a level, as GLM's does: the `--volume` given, else the knob's position under the ceiling, else the bottom level, `00 00 08`. A bare `wake` needs no `--ceiling`, and caps the knob's level at −30 dB.
 
@@ -72,6 +72,8 @@ A first run, at a low level:
 qlmctl volume -50 --ceiling -40 --dry-run
 qlmctl volume -50 --ceiling -40 --seconds 5
 ```
+
+qlm polls the adapter as GLM does, with a pair of `01 08` every 0.107 s. `volume --adapter-poll SECONDS` sends one `01 08` every SECONDS instead, at most 10, and `0` polls only at start. The rest of the cycle stays as it is. It's for Part B of [docs/experiments.md](docs/experiments.md#part-b-the-adapters-host-timeout), which looks for the adapter's host timeout. With fewer polls, the adapter may take over during the run, at the knob's level. So the flag needs the knob in, at or below the volume, or `qlmctl` refuses and sends nothing more. `volume` prints how it polls the adapter as it starts.
 
 ### The hand-back
 

@@ -29,6 +29,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
         _missedPollsLimit = 4;
         _retryBurst = 4;
         _adapterPollInterval = 0.107;
+        _adapterPollsPerRound = 2;
         _discoversMonitors = YES;
         _mutedHardwareIDs = [NSSet set];
         _liftedHardwareIDs = [NSSet set];
@@ -46,6 +47,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.missedPollsLimit = self.missedPollsLimit;
     copy.retryBurst = self.retryBurst;
     copy.adapterPollInterval = self.adapterPollInterval;
+    copy.adapterPollsPerRound = self.adapterPollsPerRound;
     copy.discoversMonitors = self.discoversMonitors;
     copy.mutedHardwareIDs = self.mutedHardwareIDs;
     copy.mutingAll = self.mutingAll;
@@ -57,9 +59,6 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
 }
 
 @end
-
-// GLM polls the adapter in pairs, 2.4 ms apart (docs/adapter-status.md).
-static const NSUInteger QLMAdapterPollsPerRound = 2;
 
 // GLM's spacing between the power steps.
 static const NSTimeInterval QLMSleepStepSpacing = 0.022;
@@ -1001,14 +1000,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }];
 }
 
-// A pair of 01 08, unless the last pair is still queued. The reply carries
-// the knob and the mic. Only a change to them publishes a snapshot.
+// A round of 01 08, unless the last round is still queued. The reply
+// carries the knob and the mic. Only a change to them publishes a snapshot.
 - (void)pollAdapter {
     if (!_running || _adapterPollsQueued > 0) {
         return;
     }
     QLMTrackedAdapter *adapter = _adapterRecord;
-    for (NSUInteger i = 0; i < QLMAdapterPollsPerRound; i++) {
+    for (NSUInteger i = 0; i < self.settings.adapterPollsPerRound; i++) {
         _adapterPollsQueued += 1;
         [self send:QLMCommandPoll(QLMAddressAdapter) then:^(const QLMMessage *reply, NSError *error) {
             self->_adapterPollsQueued -= 1;

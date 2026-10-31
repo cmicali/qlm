@@ -13,6 +13,9 @@
 // 10 dB under System's default ceiling, for the first runs on the monitors.
 const double QLMCeilingLimit = -30;
 
+// For docs/experiments.md's Part B, whose longest interval is 3.2 s.
+const NSTimeInterval QLMAdapterPollLimit = 10;
+
 @interface QLMControlOptions ()
 @property (nonatomic, readwrite) BOOL fake;
 @property (nonatomic, readwrite, nullable) NSString *replayPath;
@@ -25,6 +28,7 @@ const double QLMCeilingLimit = -30;
 @property (nonatomic, readwrite) BOOL unverifiedRate;
 @property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) NSTimeInterval seconds;
+@property (nonatomic, readwrite, nullable) NSNumber *adapterPollSeconds;
 @end
 
 // Only the whole text, and only a finite number. Otherwise `problem` says
@@ -41,17 +45,69 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
     return YES;
 }
 
+// TRAP: an argument read loosely is a safety hole. A mistyped --dry-run
+// would send for real, and --replay without its file would mean USB.
+static NSDictionary<NSString *, NSString *> *_Nullable QLMReadArguments(NSArray<NSString *> *arguments, NSSet<NSString *> *flags,
+                                                                        NSSet<NSString *> *valued, NSString *_Nullable *_Nullable positional,
+                                                                        NSString **problem) {
+    *problem = nil;
+    NSMutableDictionary<NSString *, NSString *> *given = [NSMutableDictionary dictionary];  // a flag maps to itself
+    for (NSUInteger i = 0; i < arguments.count; i++) {
+        NSString *argument = arguments[i];
+        if (given[argument] != nil) {
+            *problem = [NSString stringWithFormat:@"%@ is given twice", argument];
+            return nil;
+        }
+        if ([flags containsObject:argument]) {
+            given[argument] = argument;
+        } else if ([valued containsObject:argument]) {
+            if (i + 1 >= arguments.count) {
+                *problem = [NSString stringWithFormat:@"%@ needs a value", argument];
+                return nil;
+            }
+            given[argument] = arguments[++i];
+        } else if (positional != NULL && *positional == nil && ![argument hasPrefix:@"--"]) {
+            *positional = argument;
+        } else {
+            *problem = [NSString stringWithFormat:@"unknown argument '%@'", argument];
+            return nil;
+        }
+    }
+    if (given[@"--fake"] != nil && given[@"--replay"] != nil) {
+        *problem = @"--fake and --replay name different buses";
+        return nil;
+    }
+    double seconds = 0;
+    if (given[@"--seconds"] != nil && !QLMReadNumber(given[@"--seconds"], @"a number of seconds", &seconds, problem)) {
+        return nil;
+    }
+    if (seconds < 0) {
+        *problem = @"--seconds may not be negative";
+        return nil;
+    }
+    return given;
+}
+
+NSDictionary<NSString *, NSString *> *QLMQueryArguments(NSString *command, NSArray<NSString *> *arguments, NSString **problem) {
+    NSDictionary<NSString *, NSArray<NSString *> *> *options = @{
+        @"info": @[@"--replay"],
+        @"discover": @[@"--replay", @"--setup", @"--seconds"],
+        @"poll": @[@"--replay", @"--seconds"],
+    };
+    NSCParameterAssert(options[command] != nil);
+    return QLMReadArguments(arguments, [NSSet setWithObject:@"--fake"], [NSSet setWithArray:options[command]], NULL, problem);
+}
+
 @implementation QLMControlOptions
 
 + (instancetype)optionsForCommand:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments problem:(NSString **)problem {
-    *problem = nil;
     NSMutableSet<NSString *> *flags = [NSMutableSet setWithObjects:@"--fake", @"--dry-run", nil];
     NSMutableSet<NSString *> *valued = [NSMutableSet setWithObjects:@"--replay", @"--seconds", @"--muted", nil];
     BOOL takesPositional = YES;
     switch (command) {
     case QLMControlCommandVolume:
         [flags addObject:@"--allow-high-ceiling"];
-        [valued addObject:@"--ceiling"];
+        [valued addObjectsFromArray:@[@"--ceiling", @"--adapter-poll"]];
         break;
     case QLMControlCommandDim:
         [flags addObject:@"--allow-high-ceiling"];
@@ -75,30 +131,10 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         break;
     }
 
-    // TRAP: an argument read loosely is a safety hole. A mistyped --dry-run
-    // would send for real, and --replay without its file would mean USB.
     NSString *positional = nil;
-    NSMutableDictionary<NSString *, NSString *> *given = [NSMutableDictionary dictionary];  // a flag maps to itself
-    for (NSUInteger i = 0; i < arguments.count; i++) {
-        NSString *argument = arguments[i];
-        if (given[argument] != nil) {
-            *problem = [NSString stringWithFormat:@"%@ is given twice", argument];
-            return nil;
-        }
-        if ([flags containsObject:argument]) {
-            given[argument] = argument;
-        } else if ([valued containsObject:argument]) {
-            if (i + 1 >= arguments.count) {
-                *problem = [NSString stringWithFormat:@"%@ needs a value", argument];
-                return nil;
-            }
-            given[argument] = arguments[++i];
-        } else if (takesPositional && positional == nil && ![argument hasPrefix:@"--"]) {
-            positional = argument;
-        } else {
-            *problem = [NSString stringWithFormat:@"unknown argument '%@'", argument];
-            return nil;
-        }
+    NSDictionary<NSString *, NSString *> *given = QLMReadArguments(arguments, flags, valued, takesPositional ? &positional : NULL, problem);
+    if (given == nil) {
+        return nil;
     }
 
     QLMControlOptions *options = [[QLMControlOptions alloc] init];
@@ -122,10 +158,6 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         }
         options.mutedSerials = serials;
     }
-    if (options.fake && options.replayPath != nil) {
-        *problem = @"--fake and --replay name different buses";
-        return nil;
-    }
 
     if (takesPositional && positional == nil) {
         *problem = command == QLMControlCommandVolume ? @"volume needs a level in dB" : @"give on or off";
@@ -146,16 +178,17 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
         }
         options.volumeDecibels = @(number);
     }
-    NSString *seconds = given[@"--seconds"];
-    if (seconds != nil) {
-        if (!QLMReadNumber(seconds, @"a number of seconds", &number, problem)) {
+    options.seconds = given[@"--seconds"].doubleValue;
+    NSString *adapterPoll = given[@"--adapter-poll"];
+    if (adapterPoll != nil) {
+        if (!QLMReadNumber(adapterPoll, @"a number of seconds", &number, problem)) {
             return nil;
         }
-        if (number < 0) {
-            *problem = @"--seconds may not be negative";
+        if (number < 0 || number > QLMAdapterPollLimit) {
+            *problem = [NSString stringWithFormat:@"--adapter-poll takes 0 to %.0f seconds", QLMAdapterPollLimit];
             return nil;
         }
-        options.seconds = number;
+        options.adapterPollSeconds = @(number);
     }
 
     options.ceilingDecibels = QLMCeilingLimit;
@@ -206,7 +239,21 @@ static BOOL QLMReadNumber(NSString *text, NSString *what, double *value, NSStrin
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.ceilingDecibels;
     settings.allowsUnverifiedRates = self.unverifiedRate;
+    if (self.adapterPollSeconds != nil) {
+        settings.adapterPollInterval = self.adapterPollSeconds.doubleValue;
+        settings.adapterPollsPerRound = 1;
+    }
     return settings;
+}
+
+- (NSString *)adapterPollText {
+    NSTimeInterval glm = [[QLMSystemSettings alloc] init].adapterPollInterval;
+    if (self.adapterPollSeconds == nil) {
+        return [NSString stringWithFormat:@"qlm polls the adapter as GLM does, with a pair of 01 08 every %g s.", glm];
+    }
+    double seconds = self.adapterPollSeconds.doubleValue;
+    NSString *when = seconds > 0 ? [NSString stringWithFormat:@"every %g s", seconds] : @"at start only";
+    return [NSString stringWithFormat:@"qlm polls the adapter with one 01 08 %@, in place of GLM's pair every %g s.", when, glm];
 }
 
 @end
@@ -308,17 +355,36 @@ NSSet<NSData *> *QLMHardwareIDsForSerials(NSArray<NSString *> *serials, QLMSnaps
     return hardwareIDs;
 }
 
-QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction action) {
-    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+QLMSnapshot *QLMWaitForEffect(QLMSystem *system, QLMSnapshot *discovered, NSArray<NSString *> *mutedSerials, QLMControlAction action,
+                               QLMSnapshotTest effect, NSTimeInterval timeout, int *status) {
+    *status = 0;
+    if (mutedSerials.count > 0) {
         NSString *problem = nil;
-        NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(serials, discovered, &problem);
+        NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(mutedSerials, discovered, &problem);
         if (hardwareIDs == nil) {
             fprintf(stderr, "qlmctl: --muted: %s\n", problem.UTF8String);
-            return EX_DATAERR;
+            *status = EX_DATAERR;
+            return nil;
         }
-        [system recordMutedHardwareIDs:hardwareIDs];
-        return action(system, discovered);
-    };
+        // TRAP: the record publishes a snapshot. Inside the action's wait, it
+        // passes a test the action leaves true, such as mute off of a monitor
+        // not muted, before the action's frames go out.
+        QLMSnapshot *recorded = QLMWaitForSnapshot(system, timeout, ^BOOL {
+            [system recordMutedHardwareIDs:hardwareIDs];
+            return YES;
+        }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
+            return [hardwareIDs isSubsetOfSet:snapshot.mutedHardwareIDs];
+        }));
+        if (recorded == nil) {
+            fprintf(stderr, "qlmctl: --muted: the record did not show in %.0f s\n", timeout);
+            *status = EX_TEMPFAIL;
+            return nil;
+        }
+    }
+    return QLMWaitForSnapshot(system, timeout, ^BOOL {
+        *status = action(system, discovered);
+        return *status == 0;
+    }, effect);
 }
 
 NSString *QLMHandBackText(QLMHandBack *handBack) {
@@ -338,6 +404,33 @@ NSString *QLMHandBackText(QLMHandBack *handBack) {
     return [NSString stringWithFormat:@"about 2.6 s after qlm stops, the adapter takes over with its own level, unknown "
                                       @"here because %@.",
                                       why];
+}
+
+QLMControlAction QLMVolumeAction(double decibels, BOOL fewerAdapterPolls) {
+    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+        NSNumber *knob = discovered.adapter.knobTenths;
+        if (fewerAdapterPolls && knob == nil) {
+            fputs("qlmctl: --adapter-poll needs the knob in. With fewer polls, the adapter may take over during the run, "
+                  "at a level qlm can't know.\n",
+                  stderr);
+            return EX_DATAERR;
+        }
+        if (fewerAdapterPolls) {
+            // System's hand-back rule: the knob's word against the word that goes out.
+            QLMMessage level = QLMCommandVolume(decibels, system.settings.ceilingDecibels);
+            uint32_t word = 0;
+            QLMVolumeFrameWord(&level, &word);
+            double knobDecibels = knob.doubleValue / 10.0;
+            if (QLMVolumeWordForDecibels(knobDecibels) > word) {
+                fprintf(stderr, "qlmctl: --adapter-poll needs the knob at or below %.1f dB, and it reads %.1f dB. With fewer "
+                                "polls, the adapter may take over during the run, at the knob's level. Turn the knob down first.\n",
+                        QLMVolumeDecibelsForWord(word), knobDecibels);
+                return EX_DATAERR;
+            }
+        }
+        [system setVolumeDecibels:decibels];
+        return 0;
+    };
 }
 
 QLMControlAction QLMDimAction(BOOL on, NSNumber *volumeDecibels) {
@@ -361,8 +454,8 @@ QLMControlAction QLMWakeAction(NSNumber *volumeDecibels) {
     };
 }
 
-NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, QLMControlAction action, QLMSnapshotTest effect,
-                                    int *status) {
+NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, NSArray<NSString *> *mutedSerials,
+                                    QLMControlAction action, QLMSnapshotTest effect, int *status) {
     QLMFakeBus *bus = QLMMirrorBus(discovered);
     QLMSystemSettings *mirrorSettings = [settings copy];
     mirrorSettings.adapterPollInterval = 0;
@@ -392,10 +485,7 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     }
 
     NSUInteger start = bus.sentMessages.count;
-    QLMSnapshot *effected = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL {
-        *status = action(mirror, found);
-        return *status == 0;
-    }, effect);
+    QLMSnapshot *effected = QLMWaitForEffect(mirror, found, mutedSerials, action, effect, QLMMirrorTimeout, status);
     if (*status != 0) {
         [mirror stop];
         return nil;

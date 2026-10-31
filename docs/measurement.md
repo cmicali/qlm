@@ -4,7 +4,7 @@ Phase 3 is done when a measurement taken after qlm applies a group matches one t
 
 You measure with REW and a measurement mic. GLM applies the group, and REW measures. GLM quits. Then `qlmctl apply-group` applies the same group, and REW measures again. `tools/compare-measurements.py` compares the two.
 
-The commands follow `qlmctl apply-group`'s supervised test, with `--unverified-rate`, as cmicali/qlm#31 builds it. Before the session, run `qlmctl help`, and fix any command here that differs.
+The commands follow `qlmctl apply-group`'s supervised test, behind `--unverified-rate`. #31 built it, and it reached main with #32. Before the session, run `qlmctl help`, and fix any command here that differs.
 
 ## What passes
 
@@ -101,7 +101,7 @@ So after a host stops, wait 1 minute when every monitor is on. Wait 4 minutes wh
    qlmctl apply-group "$SETUP" "Main 2x1" --volume -35 --ceiling -30 --dry-run
    ```
 
-   It reads only the setup file and sends nothing. Its volume frames carry −35 dB. It shows every monitor unmuted. It ends by saying the apply runs only as the supervised test.
+   It reads only the setup file and sends nothing. Its volume frames go to the bottom, `00 00 08`, then the duck, `00 00 02`, and end at −35 dB, `02 46 B4`, as GLM's switch does. It states the group's three monitors as unmuted, `2B 04`, and the three outside it as GLM does, `2B 05` then `2B 07`. It ends by saying the apply runs only as the supervised test.
 6. Relaunch GLM.
 
 ## The run, for Main 2x1

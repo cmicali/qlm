@@ -72,7 +72,7 @@ Stop at once on anything unexpected: a level above what the step says, a click o
 Do these before you sit down. They take about 20 minutes.
 
 1. Build `qlmctl` from main with `make cli`. Run `qlmctl help`, and fix any command here that differs.
-2. Part B needs a flag `qlmctl` doesn't have yet, `--adapter-poll` ([The flag](#the-flag)). If `qlmctl help` doesn't list it, skip B2 to B4.
+2. B2 to B4 need `volume`'s `--adapter-poll` ([The flag](#the-flag)). Check that `qlmctl help` lists it. A build without it refuses those steps with exit 64, and sends nothing.
 3. Open REW, with its signal generator set to pink noise. Parts B, C, and H use it. Any player of steady pink noise at a level set in dBFS will do.
 4. For Part G, make the copy of the setup, as [Part G](#part-g-glms-analog-routing-frame) says.
 5. On the Pi, check that `qlm-proxy` is running, and that `vcgencmd get_throttled` reads `0x0`.
@@ -87,11 +87,7 @@ Do these before you sit down. They take about 20 minutes.
    COPY="$HOME/Documents/Genelec/GLM5/Setup Files/Main analog.sam"
    ```
 
-Three things about `qlmctl` today matter here:
-
-- `poll` and `discover` ignore an option they don't know, so a typo there runs with the defaults. The controls refuse one, and send nothing.
-- The dry run of `mute off --serial` with `--muted` prints "would send nothing". The record `--muted` makes is published before the mute, and the dry run stops reading there. The script never uses that pair.
-- `qlmctl help` says that `wake` without `--volume` sends no level. Since #29, it sends the knob's. The script always gives `--volume`.
+Every `qlmctl` command that drives the bus refuses an option it doesn't know, with exit 64, and sends nothing. So a typo can't run with the defaults.
 
 ## Part A: start, and the hand-back
 
@@ -163,14 +159,14 @@ The setup is what Part A left, with one change. Swap the music for REW's pink no
 
 ### The flag
 
-`qlmctl` can't vary its polling today. System has the setting, `adapterPollInterval`, but `qlmctl` doesn't expose it, and System always sends a pair, since `QLMAdapterPollsPerRound` is fixed at 2. B2 to B4 need one small flag:
+B2 to B4 vary qlm's polling with one flag, `--adapter-poll SECONDS`, on `volume` only. qlm then polls the adapter with one `01 08` every SECONDS, in place of GLM's pair every 0.107 s. `0` polls it only at start. The rest of the cycle stays: the probe, the volume, and a poll to each monitor. The flag sets two of System's settings, `adapterPollInterval` and `adapterPollsPerRound`.
 
-- `--adapter-poll SECONDS`, on `volume` only. qlm polls the adapter with one `01 08` every SECONDS, in place of GLM's pair every 0.107 s. `0` polls it only at start. The rest of the cycle stays: the probe, the volume, and a poll to each monitor.
-- It needs the polls per round as a setting, beside `adapterPollInterval`, and the option in `QLMControlOptions`.
-- At start, `qlmctl` prints the cadence it runs, so the notes can't get it wrong.
+- SECONDS runs from 0 to 10. A negative value, a larger one, or one that isn't a number exits 64, and nothing is sent.
+- At start, `volume` prints the cadence it runs, so the notes can't get it wrong. For B3, that's `qlm polls the adapter with one 01 08 every 0.57 s, in place of GLM's pair every 0.107 s.` Without the flag, it names GLM's pair.
+- With fewer polls, the adapter may take over during the run, at the knob's level, which qlm's ceiling doesn't bound. So the flag needs the knob in, at or below the volume. Otherwise `qlmctl` refuses after discovery, with exit 65, and sends nothing more. With the knob at −60 dB and the volume at −50 dB, a take-over can only make it quieter.
 - With a long interval, qlm reads the knob late, and with `0` only at start. Its hand-back then uses that old reading, so nobody touches the knob during these runs.
 
-It goes on `volume` alone because `volume` refuses an option it doesn't know, and sends nothing. So a build without the flag fails safe: today's `qlmctl` answers `unknown argument '--adapter-poll'`, with exit 64. `poll` would ignore the flag, and run GLM's pairs while the notes said otherwise.
+Every other command refuses the flag, with `unknown argument '--adapter-poll'` and exit 64, and sends nothing. A build without the flag refuses it the same way. Either way, the notes can't record a cadence that didn't run.
 
 ### The steps
 
@@ -187,7 +183,7 @@ It goes on `volume` alone because `volume` refuses an option it doesn't know, an
    qlmctl volume -50 --ceiling -35 --muted "$OTHERS" --seconds 30 --adapter-poll 0; afplay /System/Library/Sounds/Tink.aiff
    ```
 
-   The level rises to −50 dB at the start. Listen closely for the first 5 s, then to the end. A take-over would bring a dip toward the knob's −60 dB, once, or again and again as qlm's cycle sends −50 dB back. At the exit, qlm sends the knob's −60 dB.
+   It first prints `qlm polls the adapter with one 01 08 at start only`. The level rises to −50 dB at the start. Listen closely for the first 5 s, then to the end. A take-over would bring a dip toward the knob's −60 dB, once, or again and again as qlm's cycle sends −50 dB back. At the exit, qlm sends the knob's −60 dB.
 3. B3, only if B2 dipped. One poll a cycle:
 
    ```bash
@@ -367,7 +363,7 @@ The setup: all six on, five muted, the knob at −60 dB, and quiet music. No vol
    qlmctl mute off --serial "$RIGHT" --seconds 10; afplay /System/Library/Sounds/Tink.aiff
    ```
 
-   The dry run prints two rounds of `2B 04` to all six, and nothing to the adapter. All six play again, at the knob's −60 dB. That's on purpose. A round restates every monitor, and without `--muted` the dry run shows exactly what goes out. Listen for 15 s after the Tink.
+   The dry run prints two rounds of `2B 04` to all six, and nothing to the adapter. All six play again, at the knob's −60 dB. That's on purpose. A round restates every monitor, and E2 names none with `--muted`. Listen for 15 s after the Tink.
 3. E3, clear the adapter's mute:
 
    ```bash

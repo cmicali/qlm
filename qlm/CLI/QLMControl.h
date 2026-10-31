@@ -10,6 +10,18 @@ NS_ASSUME_NONNULL_BEGIN
 // ceiling is this. GLMProtocol caps every volume frame at the ceiling.
 extern const double QLMCeilingLimit;
 
+// The most --adapter-poll takes, in seconds.
+extern const NSTimeInterval QLMAdapterPollLimit;
+
+// info, discover, and poll send no control, but each refuses an argument
+// it doesn't know, as a control does. So a misplaced option, such as
+// volume's --adapter-poll, can't run with the defaults. Each flag maps to
+// itself, and each option to its value. Nil, with the reason in `problem`,
+// for an unknown or repeated argument, an option with no value, --seconds
+// that is not a number of seconds, or --fake with --replay.
+NSDictionary<NSString *, NSString *> *_Nullable QLMQueryArguments(NSString *command, NSArray<NSString *> *arguments,
+                                                                  NSString *_Nullable *_Nonnull problem);
+
 typedef NS_ENUM(NSInteger, QLMControlCommand) {
     QLMControlCommandVolume,
     QLMControlCommandMute,
@@ -48,8 +60,13 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
 // The stated --ceiling, or QLMCeilingLimit.
 @property (nonatomic, readonly) double ceilingDecibels;
 @property (nonatomic, readonly) NSTimeInterval seconds;  // --seconds, or 0
-// System's settings, with the ceiling.
+// volume's --adapter-poll: one 01 08 every this many seconds, in place of
+// GLM's pair every 0.107 s. 0 polls only at start. Nil when not given.
+@property (nonatomic, readonly, nullable) NSNumber *adapterPollSeconds;
+// System's settings, with the ceiling and the adapter's polling.
 @property (nonatomic, readonly) QLMSystemSettings *settings;
+// How the settings poll the adapter, for qlmctl to print at start.
+@property (nonatomic, readonly) NSString *adapterPollText;
 
 @end
 
@@ -74,14 +91,31 @@ QLMSnapshotTest QLMAfterReplay(QLMSnapshotTest test);
 // code; 0 means the command went to System.
 typedef int (^QLMControlAction)(QLMSystem *system, QLMSnapshot *discovered);
 
-// The dry run. It runs the action on a fake bus that mirrors the monitors in
-// `discovered`, never on the bus that found them, and returns every frame
-// the action sent there but discovery's, addressed as `discovered` has each
-// monitor. `status` gets the action's exit code, EX_TEMPFAIL when `effect`
-// did not show and the list may be short, or EX_SOFTWARE when the mirror did
-// not find every monitor. Nil when the action did not run.
-NSArray<NSData *> *_Nullable QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, QLMControlAction action,
-                                              QLMSnapshotTest effect, int *status);
+// A control, after discovery. First it records the monitors `mutedSerials`
+// names as muted, sending nothing, and waits for a snapshot that shows the
+// record. qlm cannot read a mute. Then it runs the action, and returns the
+// first snapshot after it that passes `effect`, or nil after the timeout.
+// `status` gets the action's exit code, or EX_DATAERR, with nothing
+// recorded, when a text names no single monitor, or EX_TEMPFAIL when the
+// record did not show.
+QLMSnapshot *_Nullable QLMWaitForEffect(QLMSystem *system, QLMSnapshot *discovered, NSArray<NSString *> *mutedSerials,
+                                        QLMControlAction action, QLMSnapshotTest effect, NSTimeInterval timeout, int *status);
+
+// The dry run. It runs the control as QLMWaitForEffect does, on a fake bus
+// that mirrors the monitors in `discovered`, never on the bus that found
+// them. It returns every frame sent there but discovery's, addressed as
+// `discovered` has each monitor. `status` gets QLMWaitForEffect's, or
+// EX_TEMPFAIL when `effect` did not show and the list may be short, or
+// EX_SOFTWARE when the mirror did not find every monitor. Nil when the
+// action did not run.
+NSArray<NSData *> *_Nullable QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *settings, NSArray<NSString *> *mutedSerials,
+                                              QLMControlAction action, QLMSnapshotTest effect, int *status);
+
+// The volume. With fewer adapter polls, the adapter may take over during
+// the run, at the knob's level, which the ceiling does not bound. So then
+// it refuses, with EX_DATAERR and nothing sent, unless the knob reads at or
+// below the level that goes out, by System's hand-back rule.
+QLMControlAction QLMVolumeAction(double decibels, BOOL fewerAdapterPolls);
 
 // Dim, as GLM sends it. System sends GLM's dim only when dim changes with a
 // volume set, so this sets the state dim changes from, then the volume,
@@ -96,11 +130,6 @@ QLMControlAction QLMWakeAction(NSNumber *_Nullable volumeDecibels);
 // each text. Nil, with the reason, when a text matches none or several.
 NSSet<NSData *> *_Nullable QLMHardwareIDsForSerials(NSArray<NSString *> *serials, QLMSnapshot *discovered,
                                                    NSString *_Nullable *_Nonnull problem);
-
-// Records the monitors `serials` name as muted, sending nothing, then runs
-// the action, so its rounds restate them as muted. qlm cannot read a mute.
-// A text that names no single monitor sends nothing and returns EX_DATAERR.
-QLMControlAction QLMWithMuted(NSArray<NSString *> *serials, QLMControlAction action);
 
 // What System's stop did about the adapter's take-over, for qlmctl to print
 // at exit. It is a warning but for QLMHandBackKnobLevel.

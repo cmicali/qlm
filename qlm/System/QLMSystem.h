@@ -28,9 +28,15 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 @property (nonatomic) NSTimeInterval volumeInterval;    // 0.05 s: at most one volume frame per interval
 @property (nonatomic) NSUInteger missedPollsLimit;      // 4 polls unanswered, then the retry burst
 @property (nonatomic) NSUInteger retryBurst;            // 4 polls to the dead address before re-discovery
-// 0.107 s: a pair of 01 08 to the adapter, as GLM polls it. 0 polls it only
-// at start.
+// TRAP: polled less often than GLM polls it, the adapter may take over
+// while System runs, at the knob's level, which the ceiling does not bound.
+// Only qlmctl's --adapter-poll polls less, with the knob at or below the
+// volume, for docs/experiments.md's Part B.
+// 0.107 s: a round of 01 08 to the adapter, as GLM polls it. 0 polls it
+// only at start.
 @property (nonatomic) NSTimeInterval adapterPollInterval;
+// 2: GLM's round is a pair, 2.4 ms apart (docs/adapter-status.md).
+@property (nonatomic) NSUInteger adapterPollsPerRound;
 // YES: the cycle probes, leases, and polls monitors. NO talks to the adapter
 // alone, and sends the volume only once one is set.
 @property (nonatomic) BOOL discoversMonitors;

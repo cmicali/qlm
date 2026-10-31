@@ -586,7 +586,7 @@ The protocol has no clock of its own. These times are what GLM does, how the har
 | GLM's idle cycle: the probe, the volume, and one `08` to each monitor | About every 0.57 s. The notes measure 0.564 to 0.571 s. | `startup-idle`, from 10 s; 20.137 and 20.705 s, for two; the notes of `qlm-first-discover` and `qlm-standby-discover` |
 | qlm's cycle | A probe every 0.569 s in `qlm-first-discover`, and 0.570 s in `qlm-standby-discover` | `qlm-first-discover` and `qlm-standby-discover`, their notes; `QLMSystem.h` |
 | GLM's status polls | Pairs of `01 08`, 2.4 ms apart, a pair about every 107 ms. That's about 17 polls a second, and five pairs between two cycles. | [adapter-status.md](adapter-status.md#the-poll); `startup-idle`, 20.137 to 20.705 s |
-| qlm's status polls | A pair every 107 ms | `qlm-first-discover`; `QLMSystem.h` |
+| qlm's status polls | A pair every 107 ms. `qlmctl volume --adapter-poll` sends one at the interval it gives, for [experiments.md](experiments.md#the-flag)'s Part B. | `qlm-first-discover`; `QLMSystem.h`; `testAdapterPollSetsTheCadence` |
 | GLM's longest silence, while it runs | 0.22 s between two of its reports. 1.70 s between two `01 08` polls, in a group switch. | [adapter-status.md](adapter-status.md#how-the-adapter-knows-a-host-is-present) |
 | The adapter's status reply | Within about 1.5 ms | [adapter-status.md](adapter-status.md#the-poll) |
 | A monitor's reply | Within 7.1 ms, 1.6 ms at the median. The slowest is a `39`, whose reply spans two reports. | `qlm-control-all`, 8481.361 s |
