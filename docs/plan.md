@@ -74,7 +74,7 @@ What's left, in the order we'll do it. Most of it needs the monitors and the use
 4. The app adopts System's calls from #32, which is under way: the live ceiling in place of a new System, the stop's completion before a sleep, the typed bus reason, and System's rule for presence. Then the app's first run on the real adapter, at a low level, one monitor first.
 5. The knob's slow drift, in System, also under way. In `sleep-wake-darkwake`, GLM follows a 7 dB drift that qlm ignores until the knob's first turn.
 6. The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
-7. The [open questions in protocol.md](protocol.md#open-questions), such as whether the adapter escapes an address byte, and what level it applies with no knob in.
+7. The [open questions in protocol.md](protocol.md#open-questions), such as whether the adapter escapes an address byte, and what level it applies with no knob in. [experiments.md](experiments.md) is the script for a session that settles the ones a person at the desk can.
 8. A bump of usb-proxy's pin in `tools/pi/setup.sh`, dropping `tools/pi/usb-proxy.patch`, once upstream [AristoChen/usb-proxy#37](https://github.com/AristoChen/usb-proxy/pull/37) merges. That PR carries the patch's three fixes, and it's still open.
 
 ### What the captures and runs showed
