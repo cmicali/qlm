@@ -80,4 +80,39 @@
     XCTAssertEqualObjects([knob volumeForReading:-717 atTime:23 volume:@(-72.0)], @(-71.5));
 }
 
+// As the plug slides out, the reading jumps, and the first poll of a pair
+// reads it out 0.44 s after it first moved (volume-sweep, 25.11 to
+// 25.56 s). So a knob that comes out takes back its raises of the last
+// second, to the lowest the volume was before any of them. A follow from
+// before that stands. Then the knob rests again.
+- (void)testAKnobPulledOutTakesBackItsLastSecond {
+    QLMKnob *knob = [[QLMKnob alloc] init];
+    [knob volumeForReading:-400 atTime:0 volume:@(-40)];
+    XCTAssertEqualObjects([knob volumeForReading:-300 atTime:0.5 volume:@(-40)], @(-30.0));
+    XCTAssertEqualObjects([knob volumeForReading:-250 atTime:1.6 volume:@(-30.0)], @(-25.0));
+    XCTAssertEqualObjects([knob volumeForReading:-200 atTime:1.7 volume:@(-25.0)], @(-20.0));
+    XCTAssertEqualObjects([knob volumeAtUnplugAtTime:2.0 volume:@(-20.0)], @(-30.0));
+    XCTAssertNil([knob volumeForReading:-500 atTime:3 volume:@(-30.0)]);
+
+    [knob volumeForReading:-400 atTime:10 volume:@(-40)];
+    XCTAssertEqualObjects([knob volumeForReading:-300 atTime:11 volume:@(-40)], @(-30.0));
+    XCTAssertNil([knob volumeAtUnplugAtTime:12.01 volume:@(-30.0)]);
+}
+
+// In volume-sweep, the knob came out at its bottom stop, with GLM's level
+// above it. The jump took GLM's level down, from -56.5 dB to -99.0 at
+// 25.23 s, then up to -97.5 at 25.34 s. The lowering stands, and the raise
+// after it is taken back.
+- (void)testAKnobPulledOutKeepsALowerVolumeAndTakesBackARaiseAfterIt {
+    QLMKnob *knob = [[QLMKnob alloc] init];
+    [knob volumeForReading:-1004 atTime:0 volume:@(-56.5)];
+    XCTAssertEqualObjects([knob volumeForReading:-992 atTime:0.11 volume:@(-56.5)], @(-99.0));
+    XCTAssertNil([knob volumeAtUnplugAtTime:0.2 volume:@(-99.0)]);
+
+    [knob volumeForReading:-1004 atTime:1 volume:@(-56.5)];
+    XCTAssertEqualObjects([knob volumeForReading:-992 atTime:1.11 volume:@(-56.5)], @(-99.0));
+    XCTAssertEqualObjects([knob volumeForReading:-974 atTime:1.22 volume:@(-99.0)], @(-97.5));
+    XCTAssertEqualObjects([knob volumeAtUnplugAtTime:1.33 volume:@(-97.5)], @(-99.0));
+}
+
 @end

@@ -15,8 +15,19 @@ NS_ASSUME_NONNULL_BEGIN
 // is the volume now. With none set, the knob sets none.
 - (nullable NSNumber *)volumeForReading:(NSInteger)tenths atTime:(NSTimeInterval)time volume:(nullable NSNumber *)volume;
 
-// Forgets where the knob rests: at start, and when the knob comes out. Not
-// on a reconnect: GLM follows a knob turned while the adapter was away.
+// The knob came out at `time`. The volume to go back to, or nil to leave
+// `volume` alone: the lowest the volume was before any of the knob's follows
+// of the last second, when that is lower. So every raise in that second is
+// taken back, and no lowering. A follow from before it stands. Then it
+// forgets where the knob rests, as reset does.
+- (nullable NSNumber *)volumeAtUnplugAtTime:(NSTimeInterval)time volume:(nullable NSNumber *)volume;
+
+// A level set since stands, so a pull of the knob takes back none of the
+// follows before it.
+- (void)forgetFollows;
+
+// Forgets where the knob rests, and its follows: at start. Not on a
+// reconnect: GLM follows a knob turned while the adapter was away.
 - (void)reset;
 
 @end

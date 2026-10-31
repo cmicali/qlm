@@ -247,7 +247,9 @@ The hardware ID is how qlm knows a monitor. It maps one to one to the serial in 
 
 ### How sessions are counted
 
-GLM counts up from `02` at each launch, one per lease, in the order the monitors answer the probe. The count runs on within a launch, through a replug or a wake. qlm does the same. It counts up from `02` at each start, and on within a run, skipping `7D`, `7E`, and `F0`.[^qlm-count] Its first discovery found the six in GLM's order, and leased them GLM's sessions.
+GLM counts up from `02` at each launch, one per lease, in the order the monitors answer the probe. The count runs on within a launch, through a replug or a wake. No capture shows a session above `19`, which GLM leased after the replug in `unplug`.[^glm-count]
+
+qlm counts up from `02` at each start too: each run of `qlmctl`, and each launch of the app and each wake of the Mac, since the app stops System at the Mac's sleep. It keeps the sessions its checks found other monitors at, since a check whose reply is lost finds none. Within a run, it counts on, as GLM does. But after `19` it goes back to `02`, so a run that lasts a week never sends to a session no capture shows. Only a bus with more leases than fit from `02` to `19` gets one above it, and never `7D`, `7E`, or `F0`. The count skips a session a monitor holds, and one a check found another monitor at. It also skips the last session qlm leased each other monitor it knows, since a monitor whose replies were lost may still hold its lease, hidden from the probe. The monitor itself may get its own back: it answered the probe, so it holds none.[^qlm-count] qlm's first discovery found the six in GLM's order, and leased them GLM's sessions.
 
 | Host, and when | Sessions leased | Source |
 | --- | --- | --- |
@@ -310,7 +312,8 @@ So wait between hosts, to avoid the TRAP above: 1 minute with every monitor on, 
 [^setup-serial]: `startup-idle`, the leases at 8.432 to 8.481 s; #8.
 [^serial-digits]: #8.
 [^serial-length]: #9; `QLMReplies.h`.
-[^qlm-count]: #9; `QLMAddressIsLeasable`.
+[^glm-count]: The table below; `testGLMCountsFrom02AtLaunchAndNoCaptureGoesAbove19`.
+[^qlm-count]: #9; `QLMAddressIsLeasable`; `testARestartBeginsAgainAtTheFirstSession`; `testALongRunNeverSendsASessionAbove19`; `testARestartLeasesNoOneTheSessionAMonitorMayStillHold`; `testLeasesSkipAddressesThatNeedEscapingAndTheMulticast`.
 [^lost-session]: `group-switch-main-2x1-main-4x2`, 35.84 to 36.38 s; `standby-wake`, from 46.631 s.
 [^lapse]: `testALeaseLapsesUnderThreeSecondsAfterItsLastAnswer`; `testGLMsLeasesLapsedWithinThreeSeconds`. In `qlm-control-first`, one `qlmctl` run found the three by 499.75 s, and the next probed from 499.79 s.
 [^lease-lapse]: `qlm-app-first`, GLM's last poll to a monitor at 182.660 s, its last report at 182.770 s, the app's sync at 183.622 s, and its probes at 185.109 and 185.719 s; `testGLMsLeasesLapsedWithinThreeSeconds`.
@@ -789,6 +792,7 @@ qlm follows the same rule, with a few differences:
 | With no volume set | | The knob sets none. |
 | The burst | On every change it follows | Only when its volume changes |
 | The level | Now and then, the level of the change before | The reading's nearest step, under the ceiling |
+| When the knob comes out | Keeps the level the plug's jump left | Takes back every raise of the last second |
 | Source | [adapter-status.md](adapter-status.md#what-glm-does-with-the-knob); #18 | `QLMKnob`; `QLMKnobTests`; `QLMKnobGoldenTests` |
 
 We replayed the knob readings of those seven captures through qlm, on the virtual clock, with the app's polls. At every rest point but five, where GLM's level lagged, qlm's level is GLM's.[^knob-golden]
@@ -796,6 +800,8 @@ We replayed the knob readings of those seven captures through qlm, on the virtua
 In `qlm-control-first`, qlm jumped to the knob at its first real turn, then followed it. The highest level it sent was −41.5 dB, under a −35 dB ceiling.[^control-run-knob]
 
 In `qlm-app-first`, the knob reached its top stop, 0 dB, and its bottom. qlm never sent above its −35 dB ceiling, and at the bottom it sent the floor, `00 00 08`. But its volume followed the knob past the ceiling, and only the frame was capped. So each change still sent a burst: 102 bursts in 13.7 s, 75 of them with the level held at −35 dB.[^app-knob]
+
+The knob's reading jumps as its plug comes out. In `volume-sweep`, it moved from 25.11 s, and the first poll of a pair said `31` at 25.56 s, 0.44 s on. GLM followed the jump.[^knob-out] qlm follows it too. But when the reply says `31`, qlm takes back every raise the knob made in the last second. Its volume goes back to the lowest it was before any follow in that time, and stays there. A second holds the 0.44 s, and a poll's lateness at each end, with room. The take-back only ever lowers the level, so a wider window costs nothing in loudness. A lowering stands, and so does a follow from before the second, or from before a level the user set. So pulling the knob out never leaves the level louder than it was. In `volume-sweep`, the knob sat at its bottom stop, below GLM's level. The jump took the level down to −99.0 dB, up to −97.5, and back to −99.0, so qlm ends at −99.0.[^knob-out-qlm]
 
 ### Dim
 
@@ -1017,6 +1023,8 @@ No apply by qlm has run on the monitors or been measured yet. [measurement.md](m
 [^knob-lock]: `volume-sweep`, 25.44 s; its notes.
 [^control-run-knob]: `qlm-control-first`, 373.12 s; `testEveryLevelIsGLMsAndUnderTheCeiling`.
 [^app-knob]: `qlm-app-first`, 282.6 to 296.5 s; `testTheAppSentOnlyControlsUnderTheCeiling`; `QLMKnob.h`.
+[^knob-out]: `volume-sweep`, 25.11 to 25.56 s; [adapter-status.md](adapter-status.md#unplugging-volume-sweep).
+[^knob-out-qlm]: `QLMKnob.h`; `testAKnobPulledOutTakesBackItsLastSecond`; `testAKnobPulledOutKeepsALowerVolumeAndTakesBackARaiseAfterIt`; `testAKnobPulledOutTakesBackTheRaiseItJustMade`; `testAKnobPulledOutAtItsBottomStopInVolumeSweep`.
 [^dim-volume]: hlm §9; `mute-dim`, 51.24 s.
 [^dim-sequence]: `mute-dim`, 51.24 s on and 54.77 s off; `testDimIsGLMs`.
 [^dim-2d]: [refused-frames.md](refused-frames.md#broadcast-2d-00-and-3d-00-00).

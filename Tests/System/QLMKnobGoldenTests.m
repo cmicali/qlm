@@ -80,9 +80,35 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
     return NAN;
 }
 
-// The knob's position in an answered 01 08, the first of its pair, the only
+// One monitor, with the knob at `tenths`.
+static QLMFakeBus *QLMKnobBus(double tenths) {
+    QLMFakeMonitor *monitor = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes((const uint8_t[]){0x12, 0x2F, 0xA0}, 3)
+                                                             serialNumber:@"8330AP21000000"
+                                                               systemInfo:@"c-2;model-8330A"
+                                                              deviceClass:QLMTelemetryClassTwoWay];
+    QLMFakeBus *bus = [[QLMFakeBus alloc] initWithMonitors:@[monitor]];
+    bus.knobTenths = @(tenths);
+    return bus;
+}
+
+// System on the bus at `level`, under a 0 dB ceiling, polling the adapter
+// as the app does. No cycle restates the level.
+static QLMSystem *QLMStartAtLevel(QLMFakeBus *bus, QLMVirtualClock *time, double level) {
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.clock = time;
+    settings.ceilingDecibels = 0;
+    settings.cycleInterval = 1000;
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    [system start];
+    [time settle];
+    [system setVolumeDecibels:level];
+    [time settle];
+    return system;
+}
+
+// The adapter's status in an answered 01 08, the first of its pair, the only
 // one GLM reads, or NO. `lastPoll` is the time of the poll before.
-static BOOL QLMFirstKnobReading(QLMCaptureExchange *exchange, NSTimeInterval *lastPoll, NSInteger *tenths) {
+static BOOL QLMFirstStatus(QLMCaptureExchange *exchange, NSTimeInterval *lastPoll, QLMAdapterStatus *status) {
     QLMMessage message = exchange.message;
     if (message.address != QLMAddressAdapter || message.payload[0] != 0x08 || !exchange.answered) {
         return NO;
@@ -90,8 +116,13 @@ static BOOL QLMFirstKnobReading(QLMCaptureExchange *exchange, NSTimeInterval *la
     BOOL first = exchange.time - *lastPoll > 0.03;
     *lastPoll = exchange.time;
     QLMMessage reply = exchange.reply;
+    return first && QLMReplyAdapterStatus(&reply, status) == QLMAdapterStatusOK;
+}
+
+// The same, for the knob's position, or NO with the knob out.
+static BOOL QLMFirstKnobReading(QLMCaptureExchange *exchange, NSTimeInterval *lastPoll, NSInteger *tenths) {
     QLMAdapterStatus status;
-    if (!first || QLMReplyAdapterStatus(&reply, &status) != QLMAdapterStatusOK || !status.hasKnobPosition) {
+    if (!QLMFirstStatus(exchange, lastPoll, &status) || !status.hasKnobPosition) {
         return NO;
     }
     *tenths = status.knobTenths;
@@ -158,21 +189,8 @@ static double QLMLevelOfMessage(QLMMessage message) {
     }
 
     QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
-    QLMFakeMonitor *monitor = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes((const uint8_t[]){0x12, 0x2F, 0xA0}, 3)
-                                                             serialNumber:@"8330AP21000000"
-                                                               systemInfo:@"c-2;model-8330A"
-                                                              deviceClass:QLMTelemetryClassTwoWay];
-    QLMFakeBus *bus = [[QLMFakeBus alloc] initWithMonitors:@[monitor]];
-    bus.knobTenths = @(readings.firstObject.value);
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
-    settings.clock = time;
-    settings.ceilingDecibels = 0;
-    settings.cycleInterval = 1000;  // no cycle restates the level
-    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
-    [system start];
-    [time settle];
-    [system setVolumeDecibels:levels.firstObject.value];
-    [time settle];
+    QLMFakeBus *bus = QLMKnobBus(readings.firstObject.value);
+    QLMSystem *system = QLMStartAtLevel(bus, time, levels.firstObject.value);
 
     NSTimeInterval offset = time.now - readings.firstObject.time;
     NSUInteger checked = 0;
@@ -241,6 +259,78 @@ static double QLMLevelOfMessage(QLMMessage message) {
 // than a whole dB, and GLM keeps -64.5 dB. So does qlm.
 - (void)testAWanderOfADecibelMovesNothingInSleepWakeNoSleep {
     XCTAssertEqual([self replay:@"sleep-wake-no-sleep" compared:25 stale:0], 0u);
+}
+
+// volume-sweep: the knob rests at its bottom stop with GLM at -56.5 dB. As
+// the plug comes out, the reading jumps from 25.11 s. The test replays the
+// first reading of each pair from 20 to 30 s, as the others do, at the
+// app's polls. The last is -988, until the pair at 25.556 s says 31, the
+// knob is out. qlm follows the jump down to -99.0 dB, up to -97.5, and back
+// to -99.0 at -988. So when the knob reads out, the level is already the
+// lowest the jump left. There is nothing to take back, and no level goes
+// out after the 31.
+- (void)testAKnobPulledOutAtItsBottomStopInVolumeSweep {
+    NSMutableArray<QLMKnobMoment *> *readings = [NSMutableArray array];  // NAN: the knob is out
+    double glm = NAN;
+    NSTimeInterval lastPoll = -1;
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"volume-sweep", NULL).exchanges) {
+        if (exchange.time >= 30) {
+            break;
+        }
+        QLMMessage message = exchange.message;
+        if (exchange.time < 20) {
+            double level = QLMLevelOfMessage(message);
+            glm = isnan(level) ? glm : level;
+            continue;
+        }
+        QLMAdapterStatus status;
+        if (!QLMFirstStatus(exchange, &lastPoll, &status)) {
+            continue;
+        }
+        BOOL present = status.knob && status.hasKnobPosition;
+        [readings addObject:QLMMoment(exchange.time, present ? status.knobTenths : NAN)];
+    }
+    XCTAssertEqual(glm, -56.5);
+    NSUInteger out = [readings indexOfObjectPassingTest:^BOOL(QLMKnobMoment *moment, NSUInteger i, BOOL *stop) {
+        return isnan(moment.value);
+    }];
+    XCTAssertEqualWithAccuracy(readings[out].time, 25.554, 0.001);
+    XCTAssertEqual(readings[out - 1].value, -988);
+    XCTAssertEqual(readings.firstObject.value, -1004);
+    for (NSUInteger i = out; i < readings.count; i++) {
+        XCTAssertTrue(isnan(readings[i].value), @"%.3f s", readings[i].time);
+    }
+
+    QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+    QLMFakeBus *bus = QLMKnobBus(readings.firstObject.value);
+    QLMSystem *system = QLMStartAtLevel(bus, time, glm);
+
+    NSTimeInterval offset = time.now - readings.firstObject.time;
+    NSUInteger sentBeforeOut = 0;
+    NSMutableArray<NSNumber *> *followed = [NSMutableArray array];
+    for (QLMKnobMoment *reading in readings) {
+        [time advanceBy:reading.time + offset - time.now];
+        double level = QLMLastLevelSent(bus.sentMessages);
+        if (followed.lastObject == nil || followed.lastObject.doubleValue != level) {
+            [followed addObject:@(level)];
+        }
+        if (reading == readings[out]) {
+            sentBeforeOut = bus.sentMessages.count;
+        }
+        [bus perform:^{
+            bus.knobTenths = isnan(reading.value) ? nil : @(reading.value);
+        }];
+    }
+    [time advanceBy:30 + offset - time.now];
+    NSArray<NSData *> *sent = bus.sentMessages;
+    XCTAssertEqualObjects(followed, (@[@(-56.5), @(-99.0), @(-97.5), @(-99.0)]));
+    for (NSUInteger i = sentBeforeOut; i < sent.count; i++) {
+        XCTAssertTrue(isnan(QLMLevelOfRecord(sent[i])), @"%@", sent[i]);
+    }
+    XCTAssertEqualObjects(system.snapshot.volumeDecibels, @(-99.0));
+    XCTAssertFalse(system.snapshot.adapter.knobPresent);
+    [system stop];
+    [time settle];
 }
 
 // standby-wake: the knob was just plugged in, and its reading settles near

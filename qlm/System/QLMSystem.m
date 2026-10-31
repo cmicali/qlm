@@ -62,6 +62,11 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
 
 @end
 
+// The highest session any capture shows, from GLM or qlm (captures/unplug,
+// 69.241 s). No monitor has been sent a frame at one above it, so the count
+// wraps there, unless more monitors hold leases than fit below it.
+static const uint8_t QLMSessionHighest = 0x19;
+
 // GLM's spacing between the power steps.
 static const NSTimeInterval QLMSleepStepSpacing = 0.022;
 static const NSTimeInterval QLMWakePairSpacing = 0.2;
@@ -223,6 +228,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableDictionary<NSData *, QLMKnownLease *> *_knownLeases;
     // Sessions whose serial check another monitor answered. None is leased.
     NSMutableIndexSet *_foreignSessions;
+    // The last session each monitor was leased, or was given in the settings,
+    // by hardware ID.
+    NSMutableDictionary<NSData *, NSNumber *> *_lastSessions;
     NSUInteger _checksOut;  // serial checks queued or in flight; the probe leases nothing meanwhile
     NSUInteger _leaseEpoch;  // counts the drops of every record; see itemSending:then:
     QLMHandBack *_stoppedHandBack;
@@ -294,15 +302,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _clock = _settings.clock;
         _lastVolumeSend = -INFINITY;
         _monitors = [NSMutableArray array];
-        _nextSession = QLMAddressSessionFirst;
         _sends = [NSMutableArray array];
         _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
         _unstatedIDs = [NSMutableSet set];
         _stopCompletions = [NSMutableArray array];
         _knownLeases = [NSMutableDictionary dictionary];
+        _lastSessions = [NSMutableDictionary dictionary];
         for (QLMKnownLease *lease in settings.knownLeases) {
             if (lease.hardwareID.length == 3 && lease.serialNumber.length > 0 && QLMAddressIsLeasable(lease.session)) {
                 _knownLeases[lease.hardwareID] = lease;
+                _lastSessions[lease.hardwareID] = @(lease.session);
             }
         }
         _foreignSessions = [NSMutableIndexSet indexSet];
@@ -372,9 +381,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }];
 }
 
+// GLM counts sessions from 02 at each launch (docs/protocol.md: How
+// sessions are counted), and so does each start. The foreign sessions
+// stay: a check whose reply is lost finds none.
 - (void)beginRunning {
     _running = YES;
     _stoppedHandBack = nil;
+    _nextSession = QLMAddressSessionFirst;
     [_adapter startOnQueue:_queue clock:_clock];
     _dirty = YES;
     // GLM's opening, less what qlm never sends: the adapter's status, its
@@ -847,15 +860,32 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 #pragma mark - Discovery and leases
 
-- (uint8_t)takeSession {
-    for (unsigned attempt = 0; attempt < 256; attempt++) {
-        uint8_t candidate = _nextSession;
-        _nextSession = (uint8_t)(candidate >= QLMAddressSessionLast ? QLMAddressSessionFirst : candidate + 1);
-        if (!QLMAddressIsLeasable(candidate) || [_foreignSessions containsIndex:candidate]) {
-            continue;
+// The next session from 02 to QLMSessionHighest that no monitor holds, and
+// no check found another monitor at. Above it only once those are taken.
+// TRAP: a monitor whose replies were lost may still hold its lease, hidden
+// from the probe, with no check to find it. So no monitor gets the session
+// last leased another. Its own it may: it answered the probe, so it holds
+// none.
+- (uint8_t)takeSessionFor:(NSData *)identity {
+    NSMutableIndexSet *taken = [_foreignSessions mutableCopy];
+    [_lastSessions enumerateKeysAndObjectsUsingBlock:^(NSData *other, NSNumber *session, BOOL *stop) {
+        if (![other isEqualToData:identity]) {
+            [taken addIndex:session.unsignedCharValue];
         }
-        if ([self monitorAtSession:candidate] == nil) {
+    }];
+    for (QLMMonitorRecord *monitor in _monitors) {
+        [taken addIndex:monitor.session];
+    }
+    for (unsigned tried = 0; tried <= QLMSessionHighest - QLMAddressSessionFirst; tried++) {
+        uint8_t candidate = _nextSession;
+        _nextSession = candidate >= QLMSessionHighest ? QLMAddressSessionFirst : candidate + 1;
+        if (![taken containsIndex:candidate]) {
             return candidate;
+        }
+    }
+    for (unsigned candidate = QLMSessionHighest + 1; candidate <= QLMAddressSessionLast; candidate++) {
+        if (QLMAddressIsLeasable((uint8_t)candidate) && ![taken containsIndex:candidate]) {
+            return (uint8_t)candidate;
         }
     }
     return 0;
@@ -910,11 +940,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_monitors removeObject:stale];
         _dirty = YES;
     }
-    uint8_t session = [self takeSession];
+    uint8_t session = [self takeSessionFor:identity];
     if (session == 0) {
         _probing = NO;
         return;
     }
+    // Before the ack: a stop may drop it, and the monitor holds the lease.
+    _lastSessions[identity] = @(session);
     [self send:QLMCommandAssignSession(hardwareID, session) then:^(const QLMMessage *reply, NSError *error) {
         uint8_t acked = 0;
         if (reply != NULL && (!QLMReplySessionAck(reply, &acked) || acked != session)) {
@@ -1158,7 +1190,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // the mute state, then the level again (captures/standby-wake, 0.99 s).
 - (void)followKnob:(const QLMAdapterStatus *)status {
     if (!status->knob || !status->hasKnobPosition) {
-        [_knob reset];
+        // TRAP: the reading jumps as the plug slides out, and GLM follows
+        // the jump (captures/volume-sweep, 25.11 to 25.45 s). So a raise the
+        // knob made just before it read absent is taken back.
+        NSNumber *before = [_knob volumeAtUnplugAtTime:_clock.now volume:_volumeDecibels];
+        if (before != nil) {
+            _volumeDecibels = before;
+            _dirty = YES;
+            [self scheduleVolumeSend];
+        }
         return;
     }
     NSNumber *volume = [_knob volumeForReading:status->knobTenths atTime:_clock.now volume:_volumeDecibels];
@@ -1254,6 +1294,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (QLMCallNumber)setVolumeDecibels:(double)decibels {
     return [self call:^{
+        [self->_knob forgetFollows];
         self->_volumeDecibels = [self underCeiling:decibels];
         [self scheduleVolumeSend];
     }];
