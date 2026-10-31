@@ -14,7 +14,7 @@ static const NSTimeInterval QLMKnobFollowInterval = 2.54;
 // halfway between two steps.
 static double QLMKnobStep(NSInteger tenths) {
     double decibels = round((double)tenths / (10 * QLMVolumeDecibelsStep)) * QLMVolumeDecibelsStep;
-    return fmin(0, fmax(QLMVolumeDecibelsMin, decibels));
+    return fmin(QLMVolumeDecibelsMax, fmax(QLMVolumeDecibelsMin, decibels));
 }
 
 @implementation QLMKnob {

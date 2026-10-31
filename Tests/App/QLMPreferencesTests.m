@@ -44,10 +44,69 @@ static NSData *QLMID(uint8_t last) {
 // A ceiling the user saved stays, above the default or below it.
 - (void)testASavedCeilingStays {
     for (NSNumber *saved in @[@(-20), @(-45)]) {
-        _preferences.ceilingDecibels = saved.doubleValue;
+        XCTAssertTrue([_preferences saveCeilingDecibels:saved.doubleValue]);
         QLMPreferences *relaunched = [[QLMPreferences alloc] initWithDefaults:_defaults];
         XCTAssertEqual(relaunched.ceilingDecibels, saved.doubleValue);
     }
+}
+
+#pragma mark - Above 0 dB
+
+// 0 dB is the monitors' full level. Each level, saved at it, stays.
+- (void)testALevelAtFullLevelSaves {
+    XCTAssertTrue([_preferences saveCeilingDecibels:0]);
+    XCTAssertEqual(_preferences.ceilingDecibels, 0);
+    XCTAssertTrue([_preferences saveLowestDecibels:-10]);
+    XCTAssertEqual(_preferences.lowestDecibels, -10);
+    XCTAssertTrue([_preferences.adapterBus saveVolumeDecibels:0]);
+    XCTAssertEqual(_preferences.adapterBus.volumeDecibels, 0);
+}
+
+// Settings and the ceiling verb refuse a level above 0 dB first. Should one
+// reach the preferences, each save refuses it and keeps the old level.
+- (void)testASaveAboveFullLevelKeepsTheOldLevel {
+    XCTAssertTrue([_preferences saveCeilingDecibels:-45]);
+    XCTAssertTrue([_preferences saveLowestDecibels:-70]);
+    XCTAssertTrue([_preferences.adapterBus saveVolumeDecibels:-50]);
+    XCTAssertTrue([_preferences.fakeBus saveVolumeDecibels:-55]);
+    for (NSNumber *level in @[@(0.04), @(0.5), @(35), @(INFINITY), @(NAN)]) {
+        XCTAssertFalse([_preferences saveCeilingDecibels:level.doubleValue], @"%@", level);
+        XCTAssertFalse([_preferences saveLowestDecibels:level.doubleValue], @"%@", level);
+        XCTAssertFalse([_preferences.adapterBus saveVolumeDecibels:level.doubleValue], @"%@", level);
+        XCTAssertFalse([_preferences.fakeBus saveVolumeDecibels:level.doubleValue], @"%@", level);
+    }
+    QLMPreferences *relaunched = [[QLMPreferences alloc] initWithDefaults:_defaults];
+    XCTAssertEqual(relaunched.ceilingDecibels, -45);
+    XCTAssertEqual(relaunched.lowestDecibels, -70);
+    XCTAssertEqual(relaunched.adapterBus.volumeDecibels, -50);
+    XCTAssertEqual(relaunched.fakeBus.volumeDecibels, -55);
+}
+
+// A level kept above 0 dB, or one that is no number, reads as its default.
+// The ceiling falls to -30 dB, not to 0 dB. The two strings are what
+// `defaults write` keeps without -float, and doubleForKey: reads "loud" as
+// 0 dB.
+- (void)testAHandEditedLevelAboveFullLevelReadsAsTheDefault {
+    for (id kept in @[@(0.04), @(6), @(INFINITY), @(NAN), @"loud", @"-20", @[@(-20)]]) {
+        [_defaults setObject:kept forKey:@"QLMCeilingDecibels"];
+        [_defaults setObject:kept forKey:@"QLMLowestDecibels"];
+        [_defaults setObject:kept forKey:@"QLMVolumeDecibels"];
+        [_defaults setObject:kept forKey:@"QLMFakeVolumeDecibels"];
+        XCTAssertEqual(_preferences.ceilingDecibels, QLMCeilingLimit, @"%@", kept);
+        XCTAssertEqual(_preferences.lowestDecibels, -60, @"%@", kept);
+        XCTAssertEqual(_preferences.adapterBus.volumeDecibels, -40, @"%@", kept);
+        XCTAssertEqual(_preferences.fakeBus.volumeDecibels, -40, @"%@", kept);
+    }
+}
+
+// A hand-edited number at or under 0 dB still reads, held to the range.
+- (void)testAHandEditedLevelUnderFullLevelReads {
+    [_defaults setDouble:-12.3 forKey:@"QLMCeilingDecibels"];
+    [_defaults setDouble:-150 forKey:@"QLMLowestDecibels"];
+    [_defaults setDouble:-5 forKey:@"QLMVolumeDecibels"];
+    XCTAssertEqual(_preferences.ceilingDecibels, -12.5);
+    XCTAssertEqual(_preferences.lowestDecibels, -100);
+    XCTAssertEqual(_preferences.adapterBus.volumeDecibels, -12.5);
 }
 
 #pragma mark - Each bus keeps its own
@@ -55,9 +114,9 @@ static NSData *QLMID(uint8_t last) {
 // A level set on the fake bus never reaches the real monitors, nor theirs
 // the fake bus.
 - (void)testEachBusKeepsItsOwnLevel {
-    _preferences.fakeBus.volumeDecibels = -35;
+    XCTAssertTrue([_preferences.fakeBus saveVolumeDecibels:-35]);
     XCTAssertEqual(_preferences.adapterBus.volumeDecibels, -40);
-    _preferences.adapterBus.volumeDecibels = -50;
+    XCTAssertTrue([_preferences.adapterBus saveVolumeDecibels:-50]);
     XCTAssertEqual(_preferences.fakeBus.volumeDecibels, -35);
 }
 
