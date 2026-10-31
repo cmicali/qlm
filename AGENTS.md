@@ -53,9 +53,17 @@ These rules protect the monitors and the listener. They outrank any feature.
 
 - `vibe-libs/` is the [vibe-libs](https://github.com/cmicali/vibe-libs) submodule. Read `vibe-libs/AGENTS.md`, and the `AGENTS.md` of every piece you touch, before changing one.
 - **A change to a piece lands in vibe-libs first.** Then qlm bumps the submodule.
-- **qlm takes no piece yet**, so `project.yml` includes nothing from it. When a target takes its first piece, include `vibe-libs/vibe-libs.yml`, set `VIBE_LIBS_ROOT`, and list the pieces under `templates:`. The comment at the top of `project.yml` has the steps.
+- **The app takes two pieces**: `dev/DebugChannel` and `dev/DebugVerbs`, which bring `core/Common` and `core/Graphics`. `project.yml` includes `vibe-libs/vibe-libs.yml` and lists them under the app's `templates:`. A new piece goes there too.
 - **The protocol stays in qlm.** No other app needs it.
 - vibe-libs serves another app, which is closed source. **Never name it here.**
+
+## The debug channel
+
+- **A Debug build of the app answers commands.** `build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm --debug-cmd <verb> [args...]` sends one and prints the JSON reply. An unknown verb's reply lists every verb. The channel compiles to nothing in Release.
+- **qlm's own verbs call what the popover calls**: `dump_state` (the latest snapshot), `popover <show|close>`, `show_monitors`, `show_settings`, and `read_setup`. They reach System and Setups, never the adapter. **A verb that changes a level waits for its own plan.**
+- **The standard verbs are vibe-libs'**: `dump_build`, `dump_view_tree`, `dump_screenshot -`, `dump_health`, `quit`, and the input verbs, such as `click <x> <y>` and `key <key>`. The mouse verbs aim at the popover's window while it shows, else the key window. Coordinates are content-view points with a top-left origin. `dump_screenshot -` writes the PNG to stdout.
+- **Drive the app through the channel, never through System Events or AppleScript UI scripting.**
+- **TRAP: a Debug build reads the same settings as the installed app.** With the adapter switched on there, a launch drives the real bus. To test the channel, build with another bundle identifier, as `ARGS="PRODUCT_BUNDLE_IDENTIFIER=com.commonwealthrecordings.qlm.debug"` does, so the app starts on the fake bus.
 
 ## Names
 
