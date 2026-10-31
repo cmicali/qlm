@@ -35,7 +35,7 @@ double QLMNearestStepDecibels(double decibels) {
 
 // Refuses NaN too.
 static BOOL QLMIsSavableLevel(double decibels) {
-    return decibels <= 0;
+    return decibels <= QLMVolumeDecibelsMax;
 }
 
 // TRAP: doubleForKey: reads a string that is no number as 0 dB. So only a

@@ -121,7 +121,7 @@ static uint32_t QLMVolumeWordOf(const QLMMessage *message) {
 
 // QLMCommandVolume holds 0 dB to the ceiling, so its word is the ceiling's.
 static uint32_t QLMCeilingWord(double ceilingDecibels) {
-    QLMMessage top = QLMCommandVolume(0, ceilingDecibels);
+    QLMMessage top = QLMCommandVolume(QLMVolumeDecibelsMax, ceilingDecibels);
     return QLMVolumeWordOf(&top);
 }
 

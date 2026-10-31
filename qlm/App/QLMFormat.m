@@ -1,5 +1,6 @@
 #import "QLMFormat.h"
 
+#include "QLMCommands.h"
 #import "QLMSetup.h"
 
 NSString *const QLMEmDash = @"—";
@@ -14,7 +15,7 @@ NSString *QLMDecibelsText(double decibels) {
 }
 
 NSString *QLMTypedLevelRefusal(double decibels) {
-    if (decibels > 0) {
+    if (decibels > QLMVolumeDecibelsMax) {
         return [NSString stringWithFormat:@"%g\u00A0dB is above 0\u00A0dB, the monitors' full level.", decibels];
     }
     return nil;

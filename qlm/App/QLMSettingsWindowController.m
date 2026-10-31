@@ -356,7 +356,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.lowestStepper.doubleValue = lowest;
     self.ceilingField.doubleValue = ceiling;
     self.ceilingStepper.minValue = lowest + QLMVolumeRangeMinimumSpan;
-    self.ceilingStepper.maxValue = 0;
+    self.ceilingStepper.maxValue = QLMVolumeDecibelsMax;
     self.ceilingStepper.doubleValue = ceiling;
     [self showRangeRefusal:nil];
 }
