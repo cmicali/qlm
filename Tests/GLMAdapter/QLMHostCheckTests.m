@@ -163,6 +163,19 @@ static NSDictionary *QLMHIDClient(NSString *creator, id opened, id seized) {
     XCTAssertEqualWithAccuracy(adapter.replyTimeout, 0.1, 1e-9);
 }
 
+// A report IOKit did not take in time never went out, so its error is not
+// the timeout of a reply. Every other failure keeps its error.
+- (void)testAReportIOKitDidNotTakeIsNotSent {
+    XCTAssertNil(QLMHIDWriteError(kIOReturnSuccess));
+    NSError *timeout = QLMHIDWriteError(kIOReturnTimeout);
+    XCTAssertEqualObjects(timeout.domain, QLMAdapterErrorDomain);
+    XCTAssertEqual(timeout.code, QLMAdapterErrorNotTaken);
+    XCTAssertEqual(QLMHIDWriteError(kIOReturnExclusiveAccess).code, QLMAdapterErrorBusy);
+    NSError *other = QLMHIDWriteError(kIOReturnNotResponding);
+    XCTAssertEqual(other.code, QLMAdapterErrorDisconnected);
+    XCTAssertEqualObjects(other.localizedDescription, @"The GLM adapter did not take the report (0xe00002ed).");
+}
+
 // A failed seize refuses the adapter. qlm never opens it shared, where GLM
 // could open it too and drive the bus alongside qlm. The stand-in for IOKit
 // fails every open, so a shared retry shows as a second call.

@@ -74,10 +74,24 @@
     return delivered;
 }
 
-static NSData *QLMReportFor(QLMMessage message) {
-    uint8_t report[QLMReportLength];
-    QLMReportPackOutput(&message, report);
-    return QLMBytes(report, sizeof report);
+// Closes the device as when GLM appears, opens it again, and returns why the
+// link lost track, or nil.
+- (nullable NSError *)closeAndReopen {
+    QLMReportLink *link = _device.link;
+    __block NSError *failure = nil;
+    dispatch_sync(_queue, ^{
+        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
+        [link reopen];
+        failure = link.failure;
+    });
+    return failure;
+}
+
+// The adapter's serial in startup-idle.
+- (void)assertAdapterSerial:(const QLMMessage *)reply {
+    char text[QLMPayloadMax];
+    XCTAssertTrue(QLMReplyText(reply, text, sizeof text));
+    XCTAssertEqualObjects(@(text), @"H99999F000");
 }
 
 // A reply GLM got in its opening: 0 a status, 1 the adapter's name, which
@@ -209,7 +223,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 - (void)testClosingDuringAnOpensSyncLosesTrack {
     [self startDevice];
     NSError *failure = [self sendThenReopen:QLMCommandSerialNumber(QLMAddressAdapter)];
-    XCTAssertEqual(failure.code, QLMAdapterErrorDisconnected);
+    XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
     NSError *error = nil;
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
     XCTAssertEqualObjects(error, failure);
@@ -259,9 +273,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 
     XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
+    [self assertAdapterSerial:&reply];
     NSArray<NSData *> *sent = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter)),
                                 QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
     XCTAssertEqualObjects([self written], sent);
@@ -316,7 +328,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
         NSError *sendError = nil;
         answered = [self send:message reply:reply error:&sendError];
         failure = sendError;
-        return failure.code != QLMAdapterErrorDisconnected;
+        return failure.code != QLMAdapterErrorUnresponsive;
     } within:60];
     *error = failure;
     return answered;
@@ -324,9 +336,11 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 
 // The system info comes 800 ms late, and the sync's reply queues behind it,
 // past the sync's five timeouts. The link stalls rather than give up: the
-// held request and every send fail at once, and none is written. Once the
-// sync's reply comes, the link is in step, and the late reply has answered
-// nothing. The sync is overdue 300 ms in, 500 ms before the late reply.
+// held request and every send fail at once, and none is written. The sync
+// is overdue 300 ms in, 500 ms before the late reply, so the link sends a
+// second status poll. Its reply queues too. Once the first sync's reply
+// comes, the second's may still, so a system info drops it. The link is in
+// step, and the late reply has answered nothing.
 - (void)testAnOverdueSyncStallsTheLinkUntilItsReplyComes {
     QLMMessage reply;
     NSError *error = nil;
@@ -334,19 +348,90 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertFalse([self send:QLMCommandSystemInfo(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
-    XCTAssertEqual(error.code, QLMAdapterErrorDisconnected);
+    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
     XCTAssertEqualObjects(error.localizedDescription, @"The GLM adapter stopped answering.");
 
     XCTAssertTrue([self sendOnceInStep:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
-    NSArray<NSData *> *sent = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter)),
-                                QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
+    [self assertAdapterSerial:&reply];
+    NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
+    NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
+    NSArray<NSData *> *sent = @[info, poll, poll, info, QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
     XCTAssertEqualObjects([self written], sent);
-    XCTAssertEqual(_device.link.strayReplies, 1u);
+    XCTAssertEqual(_device.link.strayReplies, 2u);  // the late system info, and the second sync's status
     XCTAssertEqual(_device.link.timeouts, 2u);
+}
+
+// A status reply is lost, and then the reply to its sync, the system info.
+// That reply may still come, so the link sends another system info, whose
+// reply comes. It may be the first's, so a status poll then drops the rest.
+// The link is in step, and the serial query gets its own reply.
+- (void)testALostSyncReplyIsSyncedAgain {
+    _device.dropReplies = 2;
+    QLMMessage reply;
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandPoll(QLMAddressAdapter) reply:&reply error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
+    XCTAssertTrue([self sendOnceInStep:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
+    XCTAssertNil(error);
+    [self assertAdapterSerial:&reply];
+    NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
+    NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
+    NSArray<NSData *> *sent = @[poll, info, info, poll, QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
+    XCTAssertEqualObjects([self written], sent);
+    XCTAssertEqual(_device.link.timeouts, 2u);
+    XCTAssertEqual(_device.link.strayReplies, 0u);
+}
+
+// With the adapter silent, the link sends four syncs of one shape, each
+// waiting twice as long as the one before: 0.25, 0.5, 1, and 2 s here. Then
+// it sends nothing more, and every send fails at once. A status poll and a
+// system info may both come late now, so a close loses track.
+- (void)testASilentAdapterGetsFourSyncsThenNothing {
+    _device.silent = YES;
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandPoll(QLMAddressAdapter) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
+    NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
+    NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
+    NSArray<NSNumber *> *steps = @[@0.24, @0.02, @0.48, @0.02, @0.98, @0.02, @1.98, @0.02, @10];
+    NSArray<NSNumber *> *syncs = @[@1, @2, @2, @3, @3, @4, @4, @4, @4];
+    for (NSUInteger i = 0; i < steps.count; i++) {
+        [_time advanceBy:steps[i].doubleValue];
+        NSMutableArray<NSData *> *sent = [NSMutableArray arrayWithObject:poll];
+        for (NSUInteger sync = 0; sync < syncs[i].unsignedIntegerValue; sync++) {
+            [sent addObject:info];
+        }
+        XCTAssertEqualObjects([self written], sent, @"step %lu", (unsigned long)i);
+    }
+    XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
+    XCTAssertEqual([self written].count, 5u);
+
+    NSError *failure = [self closeAndReopen];
+    XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
+}
+
+// A stall whose late replies have one sync shape between them leaves the
+// other. A close and a reopen then keep track, and the open's syncs bring
+// the link back in step with no replug. No monitor holds session 30, so the
+// poll to it gets no reply here.
+- (void)testAReopenAfterAStallKeepsTrackWhileASyncIsLeft {
+    _device.silent = YES;
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandPoll(0x30) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
+    [_time advanceBy:1];
+    XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
+
+    NSError *failure = [self closeAndReopen];
+    XCTAssertNil(failure);
+    _device.silent = NO;
+    QLMMessage reply;
+    XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
+    XCTAssertNil(error);
+    [self assertAdapterSerial:&reply];
 }
 
 // The device closes with a request in flight, as when GLM appears, and
@@ -362,9 +447,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     NSError *error = nil;
     XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
+    [self assertAdapterSerial:&reply];
     NSArray<NSData *> *sent = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter)),
                                 QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)),
                                 QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
@@ -383,14 +466,8 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     NSUInteger before = [self deliveredReplies];
     XCTAssertFalse([self send:QLMCommandSystemInfo(QLMAddressAdapter) reply:NULL error:&error]);
     XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
-    QLMReportLink *link = _device.link;
-    __block NSError *failure = nil;
-    dispatch_sync(_queue, ^{
-        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
-        [link reopen];
-        failure = link.failure;
-    });
-    XCTAssertEqual(failure.code, QLMAdapterErrorDisconnected);
+    NSError *failure = [self closeAndReopen];
+    XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
     XCTAssertEqualObjects(failure.localizedDescription,
                           @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");
 
@@ -402,6 +479,46 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertEqualObjects(error, failure);
     NSArray<NSData *> *sent = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter))];
     XCTAssertEqualObjects([self written], sent);
+}
+
+// The open holds the first request behind its sync, so the rewrite runs as
+// the report is written, after the sync, and sees what holds then. The
+// allowlist checks what it gives: a rewrite to 05 fails, and writes nothing.
+- (void)testARewriteRunsAsTheReportIsWritten {
+    [self startDevice];
+    QLMReportLink *link = _device.link;
+    __block uint8_t word = 0x7F;
+    __block BOOL sent = NO;
+    [self run:^{
+        [link sendMessage:QLMCommandVolumeWord(0x7FFFFF, 0x7FFFFF)
+                  rewrite:^QLMMessage(QLMMessage message) {
+                      return QLMCommandVolumeWord((uint32_t)word << 16, 0x7FFFFF);
+                  }
+             replyHandler:^(const QLMMessage *reply, NSError *error) {
+                 XCTAssertNil(error);
+                 sent = YES;
+             }];
+        word = 0x01;
+    } until:^BOOL {
+        return sent;
+    }];
+    NSArray<NSData *> *opening = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter))];
+    XCTAssertEqualObjects([self written], [opening arrayByAddingObject:QLMReportFor(QLMCommandVolumeWord(0x010000, 0x7FFFFF))]);
+
+    __block BOOL refused = NO;
+    [self run:^{
+        [link sendMessage:QLMCommandKeepAlive()
+                  rewrite:^QLMMessage(QLMMessage message) {
+                      return QLMMakeMessage(0x02, 0x05, 0x04, 0x00);
+                  }
+             replyHandler:^(const QLMMessage *reply, NSError *refusal) {
+                 XCTAssertEqual(refusal.code, QLMAdapterErrorForbidden);
+                 refused = YES;
+             }];
+    } until:^BOOL {
+        return refused;
+    }];
+    XCTAssertEqual([self written].count, 3u);
 }
 
 - (void)testRefusesWhatTheAllowlistRefusesAndWritesNothing {

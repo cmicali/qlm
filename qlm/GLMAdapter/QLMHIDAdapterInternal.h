@@ -19,4 +19,8 @@ typedef IOReturn (^QLMHIDOpen)(IOHIDDeviceRef device, IOOptionBits options);
 
 @end
 
+// Why IOHIDDeviceSetReport did not take a report, or nil when it did. The
+// adapter closes the device on every error but QLMAdapterErrorNotTaken.
+NSError *_Nullable QLMHIDWriteError(IOReturn result);
+
 NS_ASSUME_NONNULL_END
