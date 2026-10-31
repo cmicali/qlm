@@ -153,6 +153,9 @@ static const CGFloat QLMSettingsTextWidth = 360;
     field.alignment = NSTextAlignmentRight;
     field.target = self;
     field.action = @selector(rangeChanged:);
+    // TRAP: by default only Return sends the action. In qlm-app-first, a
+    // ceiling typed and left was lost.
+    field.cell.sendsActionOnEndEditing = YES;
     [field.widthAnchor constraintEqualToConstant:64].active = YES;
     return field;
 }
@@ -184,6 +187,15 @@ static const CGFloat QLMSettingsTextWidth = 360;
     if (self.window.visible && [self renderHandBack]) {
         [self fitWindow];
     }
+}
+
+// The field's action saves it, and it goes as the field ends editing.
+- (void)endEditing {
+    [self.window makeFirstResponder:nil];
+}
+
+- (void)windowWillClose:(NSNotification *)notification {
+    [self endEditing];
 }
 
 // Login Items may have changed in System Settings meanwhile.

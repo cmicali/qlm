@@ -34,6 +34,9 @@ NS_ASSUME_NONNULL_BEGIN
 // open.
 - (void)refresh;
 
+// Saves a field still being edited, as Return would.
+- (void)endEditing;
+
 @end
 
 NS_ASSUME_NONNULL_END

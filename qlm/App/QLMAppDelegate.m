@@ -91,6 +91,7 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // Quit waits for the stop, so the hand-back level goes out before qlm does.
 // On the real monitors, a take-over that would raise the level asks first.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
+    [self.settingsController endEditing];
     QLMHandBack *handBack = self.monitorList.snapshot.handBack;
     if ([self takeOverRaisesLevel:handBack]) {
         [self activateApp];
