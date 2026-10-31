@@ -258,18 +258,23 @@
     NSRegularExpression *shape = [NSRegularExpression regularExpressionWithPattern:@"^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d\\.\\d{3}(Z|[+-]\\d\\d:\\d\\d)$"
                                                                            options:0
                                                                              error:NULL];
+    NSString *(^zoneOf)(NSString *) = ^NSString *(NSString *text) {
+        NSTextCheckingResult *match = [shape firstMatchInString:text options:0 range:NSMakeRange(0, text.length)];
+        return match != nil ? [text substringWithRange:[match rangeAtIndex:1]] : nil;
+    };
     parser.timeZone = NSTimeZone.localTimeZone;
-    NSString *offset = [parser stringFromDate:NSDate.date];
+    NSString *offset = zoneOf([parser stringFromDate:NSDate.date]);
     for (NSArray<NSString *> *args in @[@[@"dump_state"], @[@"dim", @"on"], @[@"dim", @"sideways"], @[@"volume", @"-20"]]) {
         NSDate *before = NSDate.date;
         NSString *at = [self run:args][@"at"];
         NSDate *after = NSDate.date;
-        XCTAssertEqual([shape numberOfMatchesInString:at options:0 range:NSMakeRange(0, at.length)], 1u, @"%@", at);
+        XCTAssertNotNil(zoneOf(at), @"%@", at);
         NSDate *ran = [parser dateFromString:at];
         XCTAssertGreaterThanOrEqual(ran.timeIntervalSinceReferenceDate, before.timeIntervalSinceReferenceDate - 0.001, @"%@", at);
         XCTAssertLessThanOrEqual(ran.timeIntervalSinceReferenceDate, after.timeIntervalSinceReferenceDate + 0.001, @"%@", at);
-        // The local zone's offset, not UTC's.
-        XCTAssertEqualObjects([at substringFromIndex:at.length - 6], [offset substringFromIndex:offset.length - 6], @"%@", at);
+        // The local zone's offset, not UTC's. TRAP: CI runs in UTC, so there
+        // the zone is Z, not an offset.
+        XCTAssertEqualObjects(zoneOf(at), offset, @"%@", at);
     }
 }
 
