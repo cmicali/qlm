@@ -53,4 +53,24 @@
     XCTAssertEqualObjects(QLMMicText([[QLMAdapterState alloc] init]), @"?");
 }
 
+// The mic in with no readings, a shape no capture has: 32 34 alone.
+- (void)testPrintsNoReadingsWhenTheReplyLacksThem {
+    QLMAdapterState *adapter = [[QLMAdapterState alloc] init];
+    adapter.hasStatus = YES;
+    adapter.micPresent = YES;
+    XCTAssertEqualObjects(QLMMicText(adapter), @"in, no readings");
+    adapter.micDE = @5;
+    XCTAssertEqualObjects(QLMMicText(adapter), @"in, DE 5, DD ?");
+}
+
+// After a missed 01 08, the line shows the last status read, and says so.
+- (void)testMarksTheReadingsStaleAfterAMissedPoll {
+    QLMAdapterState *adapter = [self adapterAfterFirstPollOf:@"startup-idle-mic"];
+    XCTAssertEqualObjects(QLMStaleText(adapter), @"");
+    adapter.missedPolls = 1;
+    XCTAssertEqualObjects(QLMMicText(adapter), @"in, DE 464255904, DD 2248271 (stale, 1 poll missed)");
+    adapter.missedPolls = 3;
+    XCTAssertEqualObjects(QLMStaleText(adapter), @" (stale, 3 polls missed)");
+}
+
 @end

@@ -229,9 +229,9 @@ static void QLMPrintKnob(QLMAdapterState *adapter) {
     if (!adapter.hasStatus) {
         printf("knob      ?\n");
     } else if (adapter.knobTenths == nil) {
-        printf("knob      none\n");
+        printf("knob      none%s\n", QLMStaleText(adapter).UTF8String);
     } else {
-        printf("knob      in, at %.1f dB\n", adapter.knobTenths.doubleValue / 10.0);
+        printf("knob      in, at %.1f dB%s\n", adapter.knobTenths.doubleValue / 10.0, QLMStaleText(adapter).UTF8String);
     }
 }
 
@@ -346,8 +346,7 @@ static int QLMPoll(int argc, const char *argv[]) {
     dispatch_queue_t printing = dispatch_queue_create("qlmctl.poll", DISPATCH_QUEUE_SERIAL);
     dispatch_semaphore_t failed = dispatch_semaphore_create(0);
     NSDate *start = [NSDate date];
-    __block NSNumber *lastKnob = nil;
-    __block BOOL knobShown = NO;
+    __block NSString *lastKnob = nil;
     __block NSString *lastMic = nil;
     __block BOOL reported = NO;
     [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
@@ -360,16 +359,12 @@ static int QLMPoll(int argc, const char *argv[]) {
             return;
         }
         double elapsed = [[NSDate date] timeIntervalSinceDate:start];
-        NSNumber *knob = snapshot.adapter.knobTenths;
-        BOOL sameKnob = knob == lastKnob || (knob != nil && [knob isEqual:lastKnob]);
-        if (snapshot.adapter.hasStatus && (!knobShown || !sameKnob)) {
-            if (knob != nil) {
-                printf("%7.2f s  knob at %.1f dB\n", elapsed, knob.doubleValue / 10.0);
-            } else {
-                printf("%7.2f s  no knob\n", elapsed);
-            }
+        NSNumber *tenths = snapshot.adapter.knobTenths;
+        NSString *knob = tenths != nil ? [NSString stringWithFormat:@"knob at %.1f dB", tenths.doubleValue / 10.0] : @"no knob";
+        knob = [knob stringByAppendingString:QLMStaleText(snapshot.adapter)];
+        if (snapshot.adapter.hasStatus && ![knob isEqualToString:lastKnob]) {
+            printf("%7.2f s  %s\n", elapsed, knob.UTF8String);
             lastKnob = knob;
-            knobShown = YES;
         }
         NSString *mic = QLMMicText(snapshot.adapter);
         if (snapshot.adapter.hasStatus && ![mic isEqualToString:lastMic]) {

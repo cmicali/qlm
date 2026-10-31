@@ -54,6 +54,8 @@ NS_ASSUME_NONNULL_BEGIN
 // The calibration mic's two readings, DE and DD. Nil, the default: no mic.
 @property (nonatomic, nullable) NSNumber *micDE;
 @property (nonatomic, nullable) NSNumber *micDD;
+// The mic in, with neither reading: 32 34 alone. No capture has this shape.
+@property (nonatomic) BOOL micWithoutReadings;
 @property (nonatomic) NSUInteger adapterDropReplies;
 
 // Runs the block on the bus's queue and waits for it.
