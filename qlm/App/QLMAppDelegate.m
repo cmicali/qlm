@@ -5,6 +5,7 @@
 #import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
 #import "QLMHIDAdapter.h"
+#import "QLMMainMenu.h"
 #import "QLMMonitorList.h"
 #import "QLMMonitorsWindowController.h"
 #import "QLMPopoverController.h"
@@ -61,6 +62,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @implementation QLMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    NSApp.mainMenu = QLMMainMenu();
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
     self.notifier = [[QLMNotifier alloc] init];
@@ -92,8 +94,8 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 }
 
 // Quit waits for the stop, so the hand-back level goes out before qlm does.
-// Every quit comes here: the popover's Quit, and logout, restart, and shut
-// down. qlm has no menu, so no Cmd-Q.
+// Every quit comes here: the popover's Quit, Cmd-Q, and logout, restart,
+// and shut down.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     [self.settingsController endEditing];
     if (![self mayStop:@"Quitting" anyway:@"Quit Anyway"]) {
