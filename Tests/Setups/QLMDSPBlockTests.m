@@ -224,6 +224,38 @@ static NSData *QLMDelayOf(QLMDSPBlock *block) {
     XCTAssertTrue([block.warnings.firstObject containsString:@"96000"]);
 }
 
+// GLM's 8351B block (captures/startup-idle, 8.646 to 8.727 s, to 03): a
+// two-way's, with 43 00 02 right after the level pair, and 4B 00 00 00 01
+// right after the crossover. The two come from the node's
+// GroupDelayCompensation:2 and BassExtensionXO(Hz):1, a guess matched at
+// those values only.
+- (void)testThreeWayBlockInGLMsOrder {
+    QLMSetupGroup *group = QLMReadFixtureSetup().groups[0];
+    NSError *error = nil;
+    QLMDSPBlock *threeWay = [QLMDSPBlock blockForNode:group.nodes[1] inGroup:group error:&error];
+    XCTAssertNotNil(threeWay, @"%@", error);
+    NSArray<NSData *> *payloads = threeWay.payloads;
+    for (NSData *payload in payloads) {
+        XCTAssertTrue(QLMFrameAllows(payload.bytes, payload.length), @"%@", payload);
+    }
+    // 17 01, 10 02, 10 01 00, 10 01 09, 43, PEQ x20, 3B, 4B, 3D, 40.
+    XCTAssertEqual(payloads.count, 29u);
+    QLMAssertBytes(payloads[3].bytes, payloads[3].length, 0x10, 0x01, 0x09, 0x00, 0x00, 0x00);
+    QLMAssertBytes(payloads[4].bytes, payloads[4].length, 0x43, 0x00, 0x02);
+    XCTAssertEqual(((const uint8_t *)payloads[5].bytes)[0], 0x10);
+    XCTAssertEqual(((const uint8_t *)payloads[24].bytes)[2], 19);
+    XCTAssertEqualObjects(payloads[25], threeWay.crossoverPayload);
+    QLMAssertBytes(payloads[26].bytes, payloads[26].length, 0x4B, 0x00, 0x00, 0x00, 0x01);
+    QLMAssertBytes(payloads[27].bytes, payloads[27].length, 0x3D, 0x00, 0x00);
+    XCTAssertEqualObjects(payloads[28], threeWay.routingPayloads[0]);
+
+    // A two-way gets neither.
+    for (NSData *payload in [QLMDSPBlock blockForNode:group.nodes[0] inGroup:group error:NULL].payloads) {
+        uint8_t opcode = ((const uint8_t *)payload.bytes)[0];
+        XCTAssertTrue(opcode != 0x43 && opcode != 0x4B, @"%@", payload);
+    }
+}
+
 // GLM sends a node that is off its block too (captures/startup-idle, 8.534
 // s), so every node gets one, keyed by its monitor's hardware ID.
 - (void)testBlocksByHardwareIDIncludeNodesThatAreOff {
@@ -241,7 +273,7 @@ static NSData *QLMDelayOf(QLMDSPBlock *block) {
     QLMSetupNode *unknownClass = [[QLMSetupNode alloc] init];
     unknownClass.className = @"FourwayGen3";
     unknownClass.hardwareID = twoByTwo.nodes[0].hardwareID;
-    broken.nodes = @[twoByTwo.nodes[1], unknownClass];
+    broken.nodes = @[twoByTwo.nodes[2], unknownClass];
     XCTAssertNil([QLMDSPBlock blocksByHardwareIDForGroup:broken error:&error]);
     XCTAssertEqual(error.code, QLMDSPBlockErrorClass);
 }
@@ -308,6 +340,52 @@ static NSData *QLMDelayOf(QLMDSPBlock *block) {
         [changed setValue:@1 forKey:key];
         XCTAssertNil([QLMDSPBlock blockForNode:changed inGroup:group error:&error], @"%@", key);
         XCTAssertEqual(error.code, QLMDSPBlockErrorLFE, @"%@", key);
+    }
+
+    // An 8351B whose GroupDelayCompensation or BassExtensionXO(Hz) is not the
+    // 2 and 1 of every capture is refused, since no capture maps 43 and 4B
+    // at any other value. A missing field is refused too.
+    QLMSetupNode *left = group.nodes[1];
+    NSArray<NSArray *> *changes = @[
+        @[@"groupDelayCompensation", @0], @[@"groupDelayCompensation", @1], @[@"groupDelayCompensation", @3],
+        @[@"groupDelayCompensation", @2.5], @[@"groupDelayCompensation", [NSNull null]], @[@"bassExtensionCrossover", @0],
+        @[@"bassExtensionCrossover", @2], @[@"bassExtensionCrossover", @1.5], @[@"bassExtensionCrossover", [NSNull null]],
+    ];
+    for (NSArray *change in changes) {
+        QLMSetupNode *changed = [[QLMSetupNode alloc] init];
+        changed.nodeClass = QLMSetupNodeClassThreeWay;
+        changed.input = left.input;
+        changed.bands = left.bands;
+        changed.groupDelayCompensation = left.groupDelayCompensation;
+        changed.bassExtensionCrossover = left.bassExtensionCrossover;
+        XCTAssertNotNil([QLMDSPBlock blockForNode:changed inGroup:group error:&error], @"%@", error);
+        [changed setValue:change[1] == [NSNull null] ? nil : change[1] forKey:change[0]];
+        XCTAssertNil([QLMDSPBlock blockForNode:changed inGroup:group error:&error], @"%@", change);
+        XCTAssertEqual(error.code, QLMDSPBlockErrorThreeWay, @"%@", change);
+    }
+
+    // So is one whose group's GroupDelayCompensation or bass extension
+    // fields differ from every captured group's 2, 0, 150, and 250, since
+    // those may drive 43 and 4B instead. The node's own fields stay at 2 and
+    // 1. A two-way in such a group still gets its block.
+    NSArray<NSArray *> *groupChanges = @[
+        @[@"groupDelayCompensation", @0], @[@"groupDelayCompensation", @1], @[@"groupDelayCompensation", [NSNull null]],
+        @[@"bassExtensionMode", @1], @[@"bassExtensionMode", [NSNull null]], @[@"bassExtensionCrossoverMin", @120],
+        @[@"bassExtensionCrossoverMin", [NSNull null]], @[@"bassExtensionCrossoverMax", @300],
+        @[@"bassExtensionCrossoverMax", [NSNull null]],
+    ];
+    for (NSArray *change in groupChanges) {
+        QLMSetupGroup *changed = [[QLMSetupGroup alloc] init];
+        changed.nodes = group.nodes;
+        changed.groupDelayCompensation = group.groupDelayCompensation;
+        changed.bassExtensionMode = group.bassExtensionMode;
+        changed.bassExtensionCrossoverMin = group.bassExtensionCrossoverMin;
+        changed.bassExtensionCrossoverMax = group.bassExtensionCrossoverMax;
+        XCTAssertNotNil([QLMDSPBlock blockForNode:left inGroup:changed error:&error], @"%@", error);
+        [changed setValue:change[1] == [NSNull null] ? nil : change[1] forKey:change[0]];
+        XCTAssertNil([QLMDSPBlock blockForNode:left inGroup:changed error:&error], @"%@", change);
+        XCTAssertEqual(error.code, QLMDSPBlockErrorThreeWay, @"%@", change);
+        XCTAssertNotNil([QLMDSPBlock blockForNode:group.nodes[0] inGroup:changed error:&error], @"%@: %@", change, error);
     }
 }
 

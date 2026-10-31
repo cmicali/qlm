@@ -14,7 +14,6 @@ static const double QLMDelayRate = 48000;  // delay is in 48 kHz samples on ever
 @property (nonatomic, readwrite) NSArray<NSData *> *payloads;
 @property (nonatomic, readwrite) NSArray<NSData *> *routingPayloads;
 @property (nonatomic, readwrite) NSData *crossoverPayload;
-@property (nonatomic, readwrite) NSArray<NSData *> *leftOutPayloads;
 @property (nonatomic, readwrite) NSArray<NSString *> *warnings;
 @end
 
@@ -32,6 +31,18 @@ static BOOL QLMLFEAsCaptured(QLMSetupNode *node) {
     NSNumber *crossover = node.lfeCrossoverFrequency;
     return node.lfePlus10.doubleValue == 0 && node.lfeChannel.doubleValue == 0 && node.lfeLevel.doubleValue == 0 &&
            node.subwooferGroupID.doubleValue == 0 && (crossover == nil || crossover.doubleValue == 120);
+}
+
+// Guess: 43 00 vv carries the node's GroupDelayCompensation, and 4B 00 00 00
+// vv its BassExtensionXO(Hz). Every capture has them at 2 and 1, so the
+// mapping is matched only there. Against it: the group has a
+// GroupDelayCompensation too, and its bass extension fields. Every captured
+// group holds 2, 0, 150, and 250, and those may drive the frames instead. So
+// the block also requires them. The 8351B is the only three-way captured.
+static BOOL QLMThreeWayAsCaptured(QLMSetupNode *node, QLMSetupGroup *group) {
+    return [node.groupDelayCompensation isEqual:@2] && [node.bassExtensionCrossover isEqual:@1] &&
+           [group.groupDelayCompensation isEqual:@2] && [group.bassExtensionMode isEqual:@0] &&
+           [group.bassExtensionCrossoverMin isEqual:@150] && [group.bassExtensionCrossoverMax isEqual:@250];
 }
 
 static BOOL QLMRateVerified(QLMSetupNodeClass nodeClass, double designRate) {
@@ -74,6 +85,10 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
     }
     if (node.nodeClass == QLMSetupNodeClassSubwoofer && !QLMLFEAsCaptured(node)) {
         if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorLFE, @"LFE fields that no capture maps");
+        return nil;
+    }
+    if (node.nodeClass == QLMSetupNodeClassThreeWay && !QLMThreeWayAsCaptured(node, group)) {
+        if (error != NULL) *error = QLMDSPBlockFail(QLMDSPBlockErrorThreeWay, @"three-way or group fields that no capture maps");
         return nil;
     }
     if (node.bands.count != QLMPEQSlots) {
@@ -170,9 +185,17 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
         [payloads addObject:sync];
         [payloads addObjectsFromArray:routing];
     } else {
+        BOOL threeWay = node.nodeClass == QLMSetupNodeClassThreeWay;
         [payloads addObjectsFromArray:@[prepare, delayed, leveled, levelUnknown]];
+        if (threeWay) {
+            [payloads addObject:QLMPayload(QLMCommandThreeWay43(0, node.groupDelayCompensation.unsignedCharValue))];
+        }
         [payloads addObjectsFromArray:slots];
-        [payloads addObjectsFromArray:@[crossed, sync]];
+        [payloads addObject:crossed];
+        if (threeWay) {
+            [payloads addObject:QLMPayload(QLMCommandThreeWay4B(0, node.bassExtensionCrossover.unsignedCharValue))];
+        }
+        [payloads addObject:sync];
         [payloads addObjectsFromArray:routing];
     }
 
@@ -182,12 +205,6 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
     block.payloads = payloads;
     block.routingPayloads = [routing copy];
     block.crossoverPayload = crossed;
-    block.leftOutPayloads = @[];
-    if (node.nodeClass == QLMSetupNodeClassThreeWay) {
-        static const uint8_t frame43[] = {0x43, 0x00, 0x02};
-        static const uint8_t frame4B[] = {0x4B, 0x00, 0x00, 0x00, 0x01};
-        block.leftOutPayloads = @[[NSData dataWithBytes:frame43 length:sizeof frame43], [NSData dataWithBytes:frame4B length:sizeof frame4B]];
-    }
     block.warnings = warnings;
     return block;
 }
