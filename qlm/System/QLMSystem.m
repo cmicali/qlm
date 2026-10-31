@@ -781,7 +781,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     for (QLMMonitorRecord *monitor in _monitors) {
         [taken addIndex:monitor.session];
     }
-    for (uint8_t attempt = QLMAddressSessionFirst; attempt <= QLMSessionHighest; attempt++) {
+    for (unsigned tried = 0; tried <= QLMSessionHighest - QLMAddressSessionFirst; tried++) {
         uint8_t candidate = _nextSession;
         _nextSession = candidate >= QLMSessionHighest ? QLMAddressSessionFirst : candidate + 1;
         if (![taken containsIndex:candidate]) {
@@ -1199,6 +1199,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (QLMCallNumber)setVolumeDecibels:(double)decibels {
     return [self call:^{
+        [self->_knob forgetFollows];
         self->_volumeDecibels = [self underCeiling:decibels];
         [self scheduleVolumeSend];
     }];

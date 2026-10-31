@@ -21,6 +21,10 @@ NS_ASSUME_NONNULL_BEGIN
 // forgets where the knob rests, as reset does.
 - (nullable NSNumber *)volumeAtUnplugAtTime:(NSTimeInterval)time volume:(nullable NSNumber *)volume;
 
+// A level set since stands, so a pull of the knob takes back none of the
+// follows before it.
+- (void)forgetFollows;
+
 // Forgets where the knob rests, and its follows: at start. Not on a
 // reconnect: GLM follows a knob turned while the adapter was away.
 - (void)reset;

@@ -48,6 +48,10 @@ static double QLMKnobStep(NSInteger tenths) {
 
 - (void)reset {
     _resting = NO;
+    [self forgetFollows];
+}
+
+- (void)forgetFollows {
     [_follows removeAllObjects];
 }
 

@@ -623,6 +623,12 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [_time advanceBy:1];
     expected = @[raisedRecord, raisedRecord, raisedRecord, raisedRecord];
     XCTAssertEqualObjects([self sentWithOpcode:0x1F from:before], expected);
+
+    // A level the user sets after the raise stands.
+    [self turnKnobTo:-400];
+    XCTAssertEqualObjects([self turnKnobTo:-300].volumeDecibels, @(-30));
+    [_system setVolumeDecibels:-35];
+    XCTAssertEqualObjects([self pullKnob].volumeDecibels, @(-35));
 }
 
 // Pulls the knob out, and waits until the snapshot shows it, with nothing
@@ -2477,7 +2483,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         if (bytes[0] == QLMAddressMulticast && record.length == 6 && bytes[1] == 0x02) {
             [leased addIndex:bytes[5]];
             XCTAssertLessThanOrEqual(bytes[5], 0x19, @"%@", record);
-        } else if (bytes[0] != QLMAddressBroadcast && bytes[0] != QLMAddressAdapter) {
+        } else if (QLMAddressIsLeasable(bytes[0])) {
             XCTAssertLessThanOrEqual(bytes[0], 0x19, @"%@", record);
         }
     }

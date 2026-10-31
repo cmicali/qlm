@@ -79,6 +79,32 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
     return NAN;
 }
 
+// One monitor, with the knob at `tenths`.
+static QLMFakeBus *QLMKnobBus(double tenths) {
+    QLMFakeMonitor *monitor = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes((const uint8_t[]){0x12, 0x2F, 0xA0}, 3)
+                                                             serialNumber:@"8330AP21000000"
+                                                               systemInfo:@"c-2;model-8330A"
+                                                              deviceClass:QLMTelemetryClassTwoWay];
+    QLMFakeBus *bus = [[QLMFakeBus alloc] initWithMonitors:@[monitor]];
+    bus.knobTenths = @(tenths);
+    return bus;
+}
+
+// System on the bus at `level`, under a 0 dB ceiling, polling the adapter
+// as the app does. No cycle restates the level.
+static QLMSystem *QLMStartAtLevel(QLMFakeBus *bus, QLMVirtualClock *time, double level) {
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.clock = time;
+    settings.ceilingDecibels = 0;
+    settings.cycleInterval = 1000;
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    [system start];
+    [time settle];
+    [system setVolumeDecibels:level];
+    [time settle];
+    return system;
+}
+
 @implementation QLMKnobGoldenTests
 
 // Replays the capture's knob readings. Checks `compared` rest points, and
@@ -134,21 +160,8 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
     }
 
     QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
-    QLMFakeMonitor *monitor = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes((const uint8_t[]){0x12, 0x2F, 0xA0}, 3)
-                                                             serialNumber:@"8330AP21000000"
-                                                               systemInfo:@"c-2;model-8330A"
-                                                              deviceClass:QLMTelemetryClassTwoWay];
-    QLMFakeBus *bus = [[QLMFakeBus alloc] initWithMonitors:@[monitor]];
-    bus.knobTenths = @(readings.firstObject.value);
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
-    settings.clock = time;
-    settings.ceilingDecibels = 0;
-    settings.cycleInterval = 1000;  // no cycle restates the level
-    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
-    [system start];
-    [time settle];
-    [system setVolumeDecibels:levels.firstObject.value];
-    [time settle];
+    QLMFakeBus *bus = QLMKnobBus(readings.firstObject.value);
+    QLMSystem *system = QLMStartAtLevel(bus, time, levels.firstObject.value);
 
     NSTimeInterval offset = time.now - readings.firstObject.time;
     NSUInteger checked = 0;
@@ -259,21 +272,8 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
     }
 
     QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
-    QLMFakeMonitor *monitor = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes((const uint8_t[]){0x12, 0x2F, 0xA0}, 3)
-                                                             serialNumber:@"8330AP21000000"
-                                                               systemInfo:@"c-2;model-8330A"
-                                                              deviceClass:QLMTelemetryClassTwoWay];
-    QLMFakeBus *bus = [[QLMFakeBus alloc] initWithMonitors:@[monitor]];
-    bus.knobTenths = @(readings.firstObject.value);
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
-    settings.clock = time;
-    settings.ceilingDecibels = 0;
-    settings.cycleInterval = 1000;
-    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
-    [system start];
-    [time settle];
-    [system setVolumeDecibels:glm];
-    [time settle];
+    QLMFakeBus *bus = QLMKnobBus(readings.firstObject.value);
+    QLMSystem *system = QLMStartAtLevel(bus, time, glm);
 
     NSTimeInterval offset = time.now - readings.firstObject.time;
     double levelBeforeOut = NAN;
