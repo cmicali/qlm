@@ -54,6 +54,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface QLMSnapshot ()
 
+@property (nonatomic, readwrite) QLMCallNumber lastCall;
 @property (nonatomic, readwrite) BOOL running;
 @property (nonatomic, readwrite) QLMAdapterState *adapter;
 @property (nonatomic, readwrite, nullable) NSError *adapterError;

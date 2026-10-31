@@ -16,6 +16,7 @@ enum {
     QLMVolumeWordDuck = 0x000002,
 };
 #define QLMVolumeDecibelsStep (0.5)
+#define QLMVolumeDecibelsMax (0.0)
 #define QLMVolumeDecibelsMin (-100.0)
 #define QLMDimDecibels (20.0)
 

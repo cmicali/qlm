@@ -14,7 +14,8 @@ NSString *QLMDecibelsText(double decibels);
 
 // Why a level typed for the ceiling, or the range's bottom, is refused, or
 // nil. 0 dB is the monitors' full level, so a level above it is refused, not
-// clamped: a clamp would make 35, typed for −35, the loudest ceiling.
+// clamped: a clamp would make 35, typed for −35, the loudest ceiling. It
+// refuses what the preferences refuse, NaN too.
 NSString *_Nullable QLMTypedLevelRefusal(double decibels);
 
 // Settings' level fields: one decimal, with a true minus sign. It refuses an

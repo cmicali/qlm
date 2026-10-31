@@ -287,36 +287,30 @@ NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *a
 
 #pragma mark - Waiting
 
-QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, BOOL (^action)(void), QLMSnapshotTest test) {
+QLMSnapshot *QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMCallNumber (^action)(void), QLMSnapshotTest test) {
+    QLMCallNumber after = 0;
+    if (action != nil) {
+        after = action();
+        if (after == 0) {
+            return nil;
+        }
+    }
     dispatch_semaphore_t passed = dispatch_semaphore_create(0);
     dispatch_queue_t queue = dispatch_queue_create("qlmctl.wait", DISPATCH_QUEUE_SERIAL);
     __block QLMSnapshot *result = nil;
     [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
-        if (result == nil && test(snapshot)) {
+        if (result == nil && snapshot.lastCall >= after && test(snapshot)) {
             result = snapshot;
             dispatch_semaphore_signal(passed);
         }
     } queue:queue];
-    if (action == nil || action()) {
-        [system.settings.clock wait:passed timeout:timeout];
-    }
+    [system.settings.clock wait:passed timeout:timeout];
     [system setSnapshotHandler:nil queue:queue];
     __block QLMSnapshot *found = nil;
     dispatch_sync(queue, ^{
         found = result;
     });
     return found;
-}
-
-QLMSnapshotTest QLMAfterReplay(QLMSnapshotTest test) {
-    __block BOOL replayed = NO;
-    return ^BOOL(QLMSnapshot *snapshot) {
-        if (!replayed) {
-            replayed = YES;
-            return NO;
-        }
-        return test(snapshot);
-    };
 }
 
 #pragma mark - The dry run
@@ -385,32 +379,16 @@ NSSet<NSData *> *QLMHardwareIDsForSerials(NSArray<NSString *> *serials, QLMSnaps
 QLMSnapshot *QLMWaitForEffect(QLMSystem *system, QLMSnapshot *discovered, NSArray<NSString *> *mutedSerials, QLMControlAction action,
                                QLMSnapshotTest effect, NSTimeInterval timeout, int *status) {
     *status = 0;
-    if (mutedSerials.count > 0) {
-        NSString *problem = nil;
-        NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(mutedSerials, discovered, &problem);
-        if (hardwareIDs == nil) {
-            fprintf(stderr, "qlmctl: --muted: %s\n", problem.UTF8String);
-            *status = EX_DATAERR;
-            return nil;
-        }
-        // TRAP: the record publishes a snapshot. Inside the action's wait, it
-        // passes a test the action leaves true, such as mute off of a monitor
-        // not muted, before the action's frames go out.
-        QLMSnapshot *recorded = QLMWaitForSnapshot(system, timeout, ^BOOL {
-            [system recordMutedHardwareIDs:hardwareIDs];
-            return YES;
-        }, QLMAfterReplay(^BOOL(QLMSnapshot *snapshot) {
-            return [hardwareIDs isSubsetOfSet:snapshot.mutedHardwareIDs];
-        }));
-        if (recorded == nil) {
-            fprintf(stderr, "qlmctl: --muted: the record did not show in %.0f s\n", timeout);
-            *status = EX_TEMPFAIL;
-            return nil;
-        }
+    NSString *problem = nil;
+    NSSet<NSData *> *hardwareIDs = QLMHardwareIDsForSerials(mutedSerials, discovered, &problem);
+    if (hardwareIDs == nil) {
+        fprintf(stderr, "qlmctl: --muted: %s\n", problem.UTF8String);
+        *status = EX_DATAERR;
+        return nil;
     }
-    return QLMWaitForSnapshot(system, timeout, ^BOOL {
-        *status = action(system, discovered);
-        return *status == 0;
+    return QLMWaitForSnapshot(system, timeout, ^QLMCallNumber {
+        [system recordMutedHardwareIDs:hardwareIDs];
+        return action(system, discovered, status);
     }, effect);
 }
 
@@ -434,13 +412,14 @@ NSString *QLMHandBackText(QLMHandBack *handBack) {
 }
 
 QLMControlAction QLMVolumeAction(double decibels, BOOL fewerAdapterPolls) {
-    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+    return ^QLMCallNumber(QLMSystem *system, QLMSnapshot *discovered, int *status) {
         NSNumber *knob = discovered.adapter.knobTenths;
         if (fewerAdapterPolls && knob == nil) {
             fputs("qlmctl: --adapter-poll needs the knob in. With fewer polls, the adapter may take over during the run, "
                   "at a level qlm can't know.\n",
                   stderr);
-            return EX_DATAERR;
+            *status = EX_DATAERR;
+            return 0;
         }
         if (fewerAdapterPolls) {
             // System's hand-back rule: the knob's word against the word that goes out.
@@ -452,32 +431,30 @@ QLMControlAction QLMVolumeAction(double decibels, BOOL fewerAdapterPolls) {
                 fprintf(stderr, "qlmctl: --adapter-poll needs the knob at or below %.1f dB, and it reads %.1f dB. With fewer "
                                 "polls, the adapter may take over during the run, at the knob's level. Turn the knob down first.\n",
                         QLMVolumeDecibelsForWord(word), knobDecibels);
-                return EX_DATAERR;
+                *status = EX_DATAERR;
+                return 0;
             }
         }
-        [system setVolumeDecibels:decibels];
-        return 0;
+        return [system setVolumeDecibels:decibels];
     };
 }
 
 QLMControlAction QLMDimAction(BOOL on, NSNumber *volumeDecibels) {
-    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+    return ^QLMCallNumber(QLMSystem *system, QLMSnapshot *discovered, int *status) {
         [system setDimmed:!on];
         if (volumeDecibels != nil) {
             [system setVolumeDecibels:volumeDecibels.doubleValue];
         }
-        [system setDimmed:on];
-        return 0;
+        return [system setDimmed:on];
     };
 }
 
 QLMControlAction QLMWakeAction(NSNumber *volumeDecibels) {
-    return ^int(QLMSystem *system, QLMSnapshot *discovered) {
+    return ^QLMCallNumber(QLMSystem *system, QLMSnapshot *discovered, int *status) {
         if (volumeDecibels != nil) {
             [system setVolumeDecibels:volumeDecibels.doubleValue];
         }
-        [system wake];
-        return 0;
+        return [system wake];
     };
 }
 
@@ -488,9 +465,8 @@ NSArray<NSData *> *QLMDryRunRecords(QLMSnapshot *discovered, QLMSystemSettings *
     mirrorSettings.adapterPollInterval = 0;
     QLMSystem *mirror = [[QLMSystem alloc] initWithAdapter:bus settings:mirrorSettings];
     NSUInteger count = discovered.monitors.count;
-    QLMSnapshot *found = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^BOOL {
-        [mirror start];
-        return YES;
+    QLMSnapshot *found = QLMWaitForSnapshot(mirror, QLMMirrorTimeout, ^QLMCallNumber {
+        return [mirror start];
     }, ^BOOL(QLMSnapshot *snapshot) {
         return snapshot.allIdentified && snapshot.monitors.count == count;
     });

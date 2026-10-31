@@ -78,6 +78,16 @@ static NSData *_Nullable QLMPacked(QLMMessage message) {
     }
 }
 
+// The top stop, QLMVolumeDecibelsMax, is 0 dB and sends 7F FF FF, as
+// section 4 of hlm's spec gives: GLM's level at 0 dB (volume-sweep, 34.05 s).
+- (void)testTheTopStopIsGLMs {
+    XCTAssertEqual(QLMVolumeDecibelsMax, 0.0);
+    XCTAssertEqual(QLMVolumeWordForDecibels(QLMVolumeDecibelsMax), 0x7FFFFFu);
+    QLMCaptureExchange *exchange = QLMExchangeAt(QLMReadCapture(@"volume-sweep", NULL), QLMSweepTimes[0]);
+    XCTAssertEqual(QLMVolumeWordOf(exchange.message), 0x7FFFFFu);
+    XCTAssertEqualObjects(exchange.outputReport, QLMPacked(QLMCommandVolume(QLMVolumeDecibelsMax, QLMVolumeDecibelsMax)));
+}
+
 // The bottom stop sends 00 00 08: the volume dragged to the bottom
 // (volume-sweep, 28.36 s).
 - (void)testTheBottomStopIsGLMs {

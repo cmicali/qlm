@@ -78,32 +78,25 @@ typedef NS_ENUM(NSInteger, QLMControlCommand) {
 
 typedef BOOL (^QLMSnapshotTest)(QLMSnapshot *snapshot);
 
-// Puts a snapshot handler in place, then runs the action, so the handler
-// sees every snapshot the action causes. Returns the first snapshot that
-// passes, or nil after the timeout. An action that returns NO sent nothing,
-// and the wait ends at once with nil.
-// TRAP: an action run before the handler is in place can finish first. The
-// handler then sees only the end state, as its replay, which a test made by
-// QLMAfterReplay skips, and the wait runs out.
-QLMSnapshot *_Nullable QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, BOOL (^_Nullable action)(void),
+// Runs the action, which returns the number of its last call to System,
+// then returns the first snapshot that carries that number or a later one
+// and passes, or nil after the timeout. An action that returns 0 sent
+// nothing, and the wait ends at once with nil. With no action, any snapshot
+// counts, the latest included.
+QLMSnapshot *_Nullable QLMWaitForSnapshot(QLMSystem *system, NSTimeInterval timeout, QLMCallNumber (^_Nullable action)(void),
                                           QLMSnapshotTest test);
 
-// TRAP: the snapshot replayed when a handler is put in place predates the
-// action, and a no-op can leave it already passing. This test skips it, so
-// only a snapshot published after the action counts.
-QLMSnapshotTest QLMAfterReplay(QLMSnapshotTest test);
+// Runs a command on System, given what discovery found. Returns the number
+// of its last call to System. 0 means it failed, and `status` has the exit
+// code.
+typedef QLMCallNumber (^QLMControlAction)(QLMSystem *system, QLMSnapshot *discovered, int *status);
 
-// Runs a command on System, given what discovery found. Returns an exit
-// code; 0 means the command went to System.
-typedef int (^QLMControlAction)(QLMSystem *system, QLMSnapshot *discovered);
-
-// A control, after discovery. First it records the monitors `mutedSerials`
-// names as muted, sending nothing, and waits for a snapshot that shows the
-// record. qlm cannot read a mute. Then it runs the action, and returns the
-// first snapshot after it that passes `effect`, or nil after the timeout.
-// `status` gets the action's exit code, or EX_DATAERR, with nothing
-// recorded, when a text names no single monitor, or EX_TEMPFAIL when the
-// record did not show.
+// A control, after discovery. It records the monitors `mutedSerials` names
+// as muted, sending nothing, since qlm cannot read a mute. Then it runs the
+// action, and returns the first snapshot after the action's last call that
+// passes `effect`, or nil after the timeout. `status` gets the action's exit
+// code, or EX_DATAERR, with nothing recorded, when a text names no single
+// monitor.
 QLMSnapshot *_Nullable QLMWaitForEffect(QLMSystem *system, QLMSnapshot *discovered, NSArray<NSString *> *mutedSerials,
                                         QLMControlAction action, QLMSnapshotTest effect, NSTimeInterval timeout, int *status);
 
