@@ -40,4 +40,8 @@ BOOL QLMStopMayRaiseLevel(QLMSnapshot *_Nullable snapshot);
 NSString *_Nullable QLMBusProblemTitle(QLMSnapshot *_Nullable snapshot);
 NSString *QLMBusProblemDetail(QLMSnapshot *snapshot);
 
+// System runs and tracks a monitor, so Mute, the power button, and the group
+// picker take a click. The debug channel's verbs refuse by it too.
+BOOL QLMSnapshotTracksMonitors(QLMSnapshot *_Nullable snapshot);
+
 NS_ASSUME_NONNULL_END

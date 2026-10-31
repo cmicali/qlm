@@ -47,6 +47,10 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // What the status item shows, so an unchanged snapshot does not redraw it.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
+#if DEBUG
+// A debug command's answer to the louder hand-back alert, while its quit runs.
+@property (nonatomic, nullable) NSNumber *debugQuitAnswer;
+#endif
 @end
 
 #if DEBUG
@@ -111,12 +115,18 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
     return [self.system snapshotNowWithin:QLMSnapshotAllowance] ?: self.monitorList.snapshot;
 }
 
-// Asks before a stop that may make the monitors louder. YES goes ahead.
+// Asks before a stop that may make the monitors louder. YES goes ahead. A
+// debug command's quit answers in place of the user.
 - (BOOL)mayStop:(NSString *)stop anyway:(NSString *)anyway {
     QLMSnapshot *now = [self snapshotNow];
     if (![self stopMayRaiseLevel:now]) {
         return YES;
     }
+#if DEBUG
+    if (self.debugQuitAnswer != nil) {
+        return self.debugQuitAnswer.integerValue == NSAlertSecondButtonReturn;
+    }
+#endif
     BOOL louder = now.handBack.kind == QLMHandBackLouder;
     NSAlert *alert = [[NSAlert alloc] init];
     alert.messageText = [NSString stringWithFormat:louder ? @"%@ makes the monitors louder" : @"%@ may make the monitors louder", stop];
@@ -435,6 +445,42 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 
 - (void)debugReadSetup {
     [self popoverControllerReadSetupAgain:self.popoverController];
+}
+
+- (QLMSystem *)debugSystem {
+    return self.system;
+}
+
+- (QLMPreferences *)debugPreferences {
+    return self.preferences;
+}
+
+// Settings draws the preferences as its window opens, so an open one keeps
+// the old value.
+- (void)debugVolumeRangeDidChange {
+    [self settingsDidChangeVolumeRange:self.settingsController];
+}
+
+- (void)debugAdapterDidChange {
+    [self settingsDidChangeAdapter:self.settingsController];
+}
+
+- (NSString *)debugQuitGLMTitle {
+    return self.popoverController.quitGLMTitle;
+}
+
+- (BOOL)debugQuitGLM {
+    return [self.popoverController quitGLM];
+}
+
+- (BOOL)debugQuitAsksFirst {
+    return [self stopMayRaiseLevel:[self snapshotNow]];
+}
+
+- (void)debugQuitAnswering:(BOOL)quitAnyway {
+    self.debugQuitAnswer = @(quitAnyway ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn);
+    [NSApp terminate:self];
+    self.debugQuitAnswer = nil;
 }
 
 @end
