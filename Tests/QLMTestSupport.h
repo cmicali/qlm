@@ -128,6 +128,12 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
 @property (nonatomic, readonly) NSArray<NSData *> *writtenReports;
 @property (nonatomic, readonly) NSUInteger unmatchedReports;  // reports the capture never sent
 @property (nonatomic, readonly) NSUInteger deliveredReplies;  // read on the queue
+// As the HID adapter's: once the link gave up, the device closes and opens
+// again under the link, which syncs anew. When unplugged, the device would
+// not open, and every send fails as with no adapter.
+@property (atomic) BOOL unplugged;
+// The clock's time at each call to reconnect.
+@property (atomic, readonly) NSArray<NSNumber *> *reconnectTimes;
 
 // A frame as the adapter delivers it: one input report per 63 bytes, each
 // starting with 3F and padded with zeros.

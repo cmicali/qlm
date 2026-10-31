@@ -94,8 +94,9 @@ typedef NS_ENUM(NSInteger, QLMBusProblem) {
 // warn with the snapshot's handBack, which keeps the last knob reading.
 typedef NS_ENUM(NSInteger, QLMAdapterProblem) {
     QLMAdapterProblemNone = 0,
-    // It stopped answering. qlm syncs a few times over about 7 s, then waits
-    // for a reply, and resumes once one comes.
+    // It stopped answering. qlm syncs a few times over about 7 s. Then it
+    // reopens the adapter and syncs again, at longer and longer waits, until
+    // a reply comes (reconnects).
     QLMAdapterProblemUnresponsive,
     // qlm lost track of its replies, and sends nothing until a replug.
     QLMAdapterProblemLostTrack,
@@ -142,13 +143,17 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) QLMAdapterState *adapter;
 // Why nothing reaches the bus: QLMAdapterErrorBusy while another host has
-// the adapter, QLMAdapterErrorDisconnected, QLMAdapterErrorUnresponsive, or
-// QLMAdapterErrorLostTrack. Nil once a send goes out.
+// the adapter, QLMAdapterErrorDisconnected, QLMAdapterErrorUnresponsive,
+// QLMAdapterErrorGaveUp, or QLMAdapterErrorLostTrack. Nil once a send goes
+// out.
 @property (nonatomic, readonly, nullable) NSError *adapterError;
 // The same, typed, so the app need not read GLMAdapter's error codes.
 @property (nonatomic, readonly) QLMBusProblem busProblem;
 // Set only while busProblem is NoAdapter. Read it first.
 @property (nonatomic, readonly) QLMAdapterProblem adapterProblem;
+// While the adapter is unresponsive, how many times System has reopened it
+// since its link gave up. 0 before the first.
+@property (nonatomic, readonly) NSUInteger reconnects;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed, at most the ceiling
 @property (nonatomic, readonly) double ceilingDecibels;            // every volume frame is capped at it

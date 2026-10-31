@@ -186,6 +186,8 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     NSMutableArray<NSArray<NSData *> *> *_replies;  // due, in order
     NSUInteger _repliesDue;
     NSTimeInterval _lastDue;  // on the clock
+    NSArray<NSNumber *> *_reconnectTimes;
+    NSError *_gone;  // after a reconnect found it unplugged
 }
 
 - (instancetype)initWithCapture:(QLMCapture *)capture {
@@ -196,6 +198,7 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
         _written = [NSMutableArray array];
         _replies = [NSMutableArray array];
         _unplayed = [NSMutableDictionary dictionary];
+        _reconnectTimes = @[];
         for (QLMCaptureExchange *exchange in capture.exchanges) {
             NSMutableArray<QLMCaptureExchange *> *same = _unplayed[exchange.outputReport];
             if (same == nil) {
@@ -289,11 +292,40 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     }
 }
 
+- (NSArray<NSNumber *> *)reconnectTimes {
+    @synchronized(self) {
+        return _reconnectTimes;
+    }
+}
+
+- (BOOL)reconnect {
+    @synchronized(self) {
+        _reconnectTimes = [_reconnectTimes arrayByAddingObject:@(_clock.now)];
+    }
+    if (!_link.gaveUp) {
+        return NO;
+    }
+    if (self.unplugged) {
+        _gone = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"IOKit did not make a HID device of the GLM adapter.");
+        [_link closeWithError:_gone];
+        return NO;
+    }
+    [_link resync];
+    return YES;
+}
+
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
-    [_link sendMessage:message replyHandler:handler];
+    [self sendMessage:message rewrite:nil replyHandler:handler];
 }
 
 - (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
+    NSError *gone = _gone;
+    if (gone != nil) {
+        [_clock async:_queue run:^{
+            handler(NULL, gone);
+        }];
+        return;
+    }
     [_link sendMessage:message rewrite:rewrite replyHandler:handler];
 }
 

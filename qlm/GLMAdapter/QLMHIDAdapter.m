@@ -209,15 +209,46 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         _problem = _link.failure;
         return;
     }
-    IOHIDDeviceRef device = IOHIDDeviceCreate(kCFAllocatorDefault, _service);
-    if (device == NULL) {
-        _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"IOKit did not make a HID device of the GLM adapter.");
-        return;
-    }
-    NSError *refusal = [self openDevice:device];
+    NSError *refusal = [self openService];
     if (refusal != nil) {
         _problem = refusal;
+        return;
     }
+    if (_link != nil) {
+        [_link reopen];
+        return;
+    }
+    __weak QLMHIDAdapter *weakSelf = self;
+    _link = [[QLMReportLink alloc] initWithQueue:_queue clock:_clock writer:^NSError *(const uint8_t *report) {
+        QLMHIDAdapter *strongSelf = weakSelf;
+        return strongSelf != nil ? [strongSelf writeReport:report]
+                                 : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
+    }];
+    _link.replyTimeout = _replyTimeout;
+}
+
+// Nil once the device is open, or why not.
+- (nullable NSError *)openService {
+    IOHIDDeviceRef device = IOHIDDeviceCreate(kCFAllocatorDefault, _service);
+    if (device == NULL) {
+        return QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"IOKit did not make a HID device of the GLM adapter.");
+    }
+    return [self openDevice:device];
+}
+
+- (BOOL)reconnect {
+    if (_device == NULL || !_link.gaveUp) {
+        return NO;
+    }
+    [self releaseDevice:NO];
+    NSError *refusal = [self openService];
+    if (refusal != nil) {
+        _problem = refusal;
+        [_link closeWithError:refusal];
+        return NO;
+    }
+    [_link resync];
+    return YES;
 }
 
 // TRAP: never fall back to a shared open. GLM could then open the adapter
@@ -258,18 +289,6 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                           QLMHIDStringProperty(device, CFSTR(kIOHIDProductKey)) ?: @"?",
                           QLMHIDStringProperty(device, CFSTR(kIOHIDManufacturerKey)) ?: @"?",
                           QLMHIDStringProperty(device, CFSTR(kIOHIDSerialNumberKey)) ?: @"?", location.unsignedIntValue];
-
-    if (_link != nil) {
-        [_link reopen];
-        return nil;
-    }
-    __weak QLMHIDAdapter *weakSelf = self;
-    _link = [[QLMReportLink alloc] initWithQueue:_queue clock:_clock writer:^NSError *(const uint8_t *report) {
-        QLMHIDAdapter *strongSelf = weakSelf;
-        return strongSelf != nil ? [strongSelf writeReport:report]
-                                 : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
-    }];
-    _link.replyTimeout = _replyTimeout;
     return nil;
 }
 
@@ -278,9 +297,14 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     if (_device == NULL) {
         return;
     }
+    [_link closeWithError:error];
+    [self releaseDevice:removed];
+}
+
+// Closes the device, and leaves the link to the caller.
+- (void)releaseDevice:(BOOL)removed {
     IOHIDDeviceRef device = _device;
     _device = NULL;
-    [_link closeWithError:error];
     _deviceDescription = removed ? @"the GLM adapter over USB, unplugged" : @"the GLM adapter over USB, closed";
     if (!removed) {
         IOHIDDeviceClose(device, kIOHIDOptionsTypeSeizeDevice);

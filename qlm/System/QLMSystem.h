@@ -76,6 +76,10 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // While the bus is refused or gone, no frame goes to a session. Once it comes
 // back, System drops every monitor, and takes each back only where its own
 // serial answers at the session it last held.
+// When the adapter's link gives up, System reopens the adapter, and the link
+// syncs again. It waits 1 s before the first reopen, then twice as long
+// before each next one, up to 30 s, until a send goes out, the adapter is
+// gone or refused, or a stop.
 @interface QLMSystem : NSObject
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter settings:(QLMSystemSettings *)settings;

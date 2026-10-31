@@ -2577,6 +2577,126 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(lost.handBack.knobDecibels, @(-100.4));
 }
 
+// A System on the capture device, behind the report link the HID adapter
+// uses, with startup-idle's six monitors found. Then the adapter goes
+// silent. It is polled every 0.1 s, so System hears within 0.1 s that the
+// link gave up.
+- (QLMCaptureDevice *)startOnASilentLink {
+    _settings.cycleInterval = 0.05;
+    _settings.adapterPollInterval = 0.1;
+    QLMCaptureDevice *device = [[QLMCaptureDevice alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
+    [self startSystemWithAdapter:device];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified && snapshot.idle;
+    }];
+    device.silent = YES;
+    return device;
+}
+
+// The link gives up on a silent adapter 7.5 s after its first sync
+// (QLMReportLinkTests). System reopens the adapter 1 s after it hears so,
+// and the link syncs again. Each wait is twice the one before, up to 30 s.
+// Once the adapter answers, the reopen's own sync brings the link back in
+// step. System takes every lease back by serial, as after any gap, and the
+// knob reading stays meanwhile for the take-over's warning
+// (captures/qlm-control-first/notes.md). A mute just after a reopen goes
+// out only once the link is back, and reopens nothing early: its 2B is
+// refused with System's own error, the old one. Every report is GLM's but
+// the 2Bs, so the syncs are frames a start sends too.
+- (void)testALinkThatGaveUpReopensAtABackoffUntilTheAdapterAnswers {
+    QLMCaptureDevice *device = [self startOnASilentLink];
+    QLMSnapshot *gaveUp = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError.code == QLMAdapterErrorGaveUp;
+    }];
+    XCTAssertEqual(gaveUp.adapterProblem, QLMAdapterProblemUnresponsive);
+    XCTAssertEqual(gaveUp.busProblem, QLMBusProblemNoAdapter);
+    XCTAssertEqual(gaveUp.reconnects, 0u);
+    XCTAssertEqualObjects(gaveUp.handBack.knobDecibels, @(-100.4));
+    XCTAssertTrue(gaveUp.adapter.identified);
+    XCTAssertEqual(device.reconnectTimes.count, 0u);
+    NSData *muted = gaveUp.monitors.firstObject.hardwareID;
+
+    NSArray<NSNumber *> *waits = @[@1, @2, @4, @8, @16, @30, @30];
+    for (NSUInteger attempt = 1; attempt < waits.count; attempt++) {
+        QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.reconnects == attempt;
+        }];
+        XCTAssertEqual(snapshot.adapterProblem, QLMAdapterProblemUnresponsive);
+        XCTAssertEqualObjects(snapshot.handBack.knobDecibels, @(-100.4));
+        if (attempt == 1) {
+            [_system setMuted:YES forMonitorWithHardwareID:muted];
+        }
+    }
+    [self waitUntil:^BOOL {
+        return device.link.gaveUp;
+    }];
+    device.silent = NO;
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError == nil && snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
+    }];
+    XCTAssertEqual(back.reconnects, 0u);
+    XCTAssertEqual(back.adapterProblem, QLMAdapterProblemNone);
+    XCTAssertTrue(QLMFindMonitor(back, muted).muted);
+    uint8_t mutedSession = QLMFindMonitor(back, muted).session;
+
+    // Between reopens: the link's 7.5 s of syncs, at most one adapter poll
+    // until System hears it gave up, then the wait.
+    NSArray<NSNumber *> *times = device.reconnectTimes;
+    XCTAssertEqual(times.count, waits.count);
+    for (NSUInteger i = 1; i < MIN(times.count, waits.count); i++) {
+        NSTimeInterval gap = times[i].doubleValue - times[i - 1].doubleValue;
+        XCTAssertGreaterThanOrEqual(gap, 7.5 + waits[i].doubleValue - 1e-6, @"reopen %lu", (unsigned long)i + 1);
+        XCTAssertLessThanOrEqual(gap, 7.5 + waits[i].doubleValue + 0.1 + 1e-6, @"reopen %lu", (unsigned long)i + 1);
+    }
+    [self stopSystem];
+    NSMutableSet<NSData *> *captured = [NSMutableSet set];
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"startup-idle", NULL).exchanges) {
+        [captured addObject:exchange.outputReport];
+    }
+    BOOL mutedHeard = NO;
+    for (NSData *report in device.writtenReports) {
+        const uint8_t *bytes = report.bytes;
+        BOOL state = bytes[2] == 0x2B && (bytes[3] == QLMMuteValueUnmuted || bytes[3] == QLMMuteValueMuted);
+        XCTAssertTrue([captured containsObject:report] || state, @"%@", report);
+        mutedHeard = mutedHeard || (state && bytes[1] == mutedSession && bytes[3] == QLMMuteValueMuted);
+    }
+    XCTAssertTrue(mutedHeard);
+}
+
+// The adapter is gone when System reopens it, before IOKit says so. The
+// open fails, and the adapter shows as no adapter. System reopens nothing
+// more, and the HID adapter waits for the adapter to arrive anew.
+- (void)testAnAdapterGoneAtAReopenEndsTheReconnects {
+    QLMCaptureDevice *device = [self startOnASilentLink];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.reconnects == 1;
+    }];
+    device.unplugged = YES;
+    QLMSnapshot *gone = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError.code == QLMAdapterErrorDisconnected;
+    }];
+    XCTAssertEqual(gone.busProblem, QLMBusProblemNoAdapter);
+    XCTAssertEqual(gone.adapterProblem, QLMAdapterProblemNone);
+    XCTAssertEqual(gone.reconnects, 0u);
+    XCTAssertEqual(device.reconnectTimes.count, 2u);
+    [_time advanceBy:120];
+    XCTAssertEqual(device.reconnectTimes.count, 2u);
+}
+
+// A stop while System waits to reopen the adapter ends the wait. Nothing is
+// reopened, and nothing more is written.
+- (void)testAStopDuringTheWaitEndsTheReconnects {
+    QLMCaptureDevice *device = [self startOnASilentLink];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError.code == QLMAdapterErrorGaveUp;
+    }];
+    [self stopAndWait];
+    NSUInteger written = device.writtenReports.count;
+    [_time advanceBy:120];
+    XCTAssertEqual(device.reconnectTimes.count, 0u);
+    XCTAssertEqual(device.writtenReports.count, written);
+}
+
 // IOHIDDeviceSetReport blocks up to the device's 5 s timeout when the
 // adapter stops taking reports (QLMHIDAdapter.m), and then nothing went out.
 // So a poll IOKit never took is no missed poll, and drops no monitor that

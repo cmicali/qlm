@@ -30,8 +30,9 @@ static QLMReplyShape QLMReplyShapeFor(const QLMMessage *message) {
 static const NSUInteger QLMSyncTimeouts = 5;
 static const NSUInteger QLMSyncAttempts = 4;
 
-static NSError *QLMStalledError(void) {
-    return QLMAdapterErrorMake(QLMAdapterErrorUnresponsive, @"The GLM adapter stopped answering.");
+static NSError *QLMStalledError(BOOL gaveUp) {
+    return gaveUp ? QLMAdapterErrorMake(QLMAdapterErrorGaveUp, @"The GLM adapter answered none of qlm's syncs.")
+                  : QLMAdapterErrorMake(QLMAdapterErrorUnresponsive, @"The GLM adapter stopped answering.");
 }
 
 @interface QLMReportLinkRequest : NSObject
@@ -124,7 +125,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         return;
     }
     if (_stalled) {
-        [self finish:handler reply:NULL error:QLMStalledError()];
+        [self finish:handler reply:NULL error:QLMStalledError(_gaveUp)];
         return;
     }
     if ((_waiting != nil && !_waiting.sync) || _held != nil) {
@@ -197,11 +198,22 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     _timeouts += 1;
     if (!_stalled) {
         _stalled = YES;
-        [self failHeld:QLMStalledError()];
+        [self failHeld:QLMStalledError(NO)];
     }
     if (_syncAttempts < QLMSyncAttempts) {
         [self writeSync:_waiting.shape];
+    } else {
+        _gaveUp = YES;
     }
+}
+
+- (void)resync {
+    if (!_gaveUp) {
+        return;
+    }
+    _gaveUp = NO;
+    _syncAttempts = 0;
+    [self writeSync:_waiting.shape];
 }
 
 // One sync of the run's shape. A sync that did not go out fails the request
@@ -289,6 +301,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         _waiting = nil;
         _generation += 1;
         _stalled = NO;
+        _gaveUp = NO;
         _syncsOut = 0;
         _syncAttempts = 0;
         if (another) {
@@ -323,6 +336,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     _waiting = nil;
     _generation += 1;
     _stalled = NO;
+    _gaveUp = NO;
     _syncsOut = 0;
     _syncAttempts = 0;
     if (waiting != nil) {

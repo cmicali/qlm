@@ -19,6 +19,7 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
     QLMAdapterErrorUnresponsive,  // the adapter stopped answering, so the link sends nothing but its syncs; nothing was sent
     QLMAdapterErrorLostTrack,     // the link lost track of the adapter's replies, and stays closed until a replug; nothing was sent
     QLMAdapterErrorNotTaken,      // the adapter did not take the report in time, so nothing went out
+    QLMAdapterErrorGaveUp,        // the link's syncs all went unanswered, so it sends nothing until a reply or a reconnect; nothing was sent
 };
 
 // One handler call per send, on the queue given to startOnQueue:clock:.
@@ -51,6 +52,11 @@ typedef QLMMessage (^QLMAdapterRewrite)(QLMMessage message);
 - (void)sendMessage:(QLMMessage)message
             rewrite:(nullable QLMAdapterRewrite)rewrite
        replyHandler:(QLMAdapterReplyHandler)handler;
+
+// After QLMAdapterErrorGaveUp: closes the device, opens it again, and syncs
+// anew. NO when the device is gone, or would not open. Sends then fail with
+// why, as with no adapter.
+- (BOOL)reconnect;
 
 @end
 

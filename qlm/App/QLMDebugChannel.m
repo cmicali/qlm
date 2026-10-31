@@ -136,6 +136,7 @@ static NSDictionary *QLMDebugSnapshot(QLMSnapshot *snapshot) {
         @"idle": @(snapshot.idle),
         @"busProblem": QLMDebugName(snapshot.busProblem, @[@"none", @"noAdapter", @"glm", @"otherHost"]),
         @"adapterProblem": QLMDebugName(snapshot.adapterProblem, @[@"none", @"unresponsive", @"lostTrack"]),
+        @"reconnects": @(snapshot.reconnects),
         @"adapterError": snapshot.adapterError.localizedDescription ?: NSNull.null,
         @"adapter": @{
             @"device": adapter.device ?: NSNull.null,

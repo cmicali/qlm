@@ -116,15 +116,29 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
 - (void)testTheBannerShowsTheAdaptersProblem {
     QLMSnapshot *unresponsive = QLMSnapshotWithProblem(QLMAdapterProblemUnresponsive, QLMHandBackLouder, @(-10), @(-50));
     XCTAssertEqualObjects(QLMBusProblemTitle(unresponsive), @"The adapter stopped answering");
-    NSString *detail = QLMBusProblemDetail(unresponsive);
-    XCTAssertTrue([detail containsString:@"about 7 s"], @"%@", detail);
-    XCTAssertTrue([detail containsString:QLMTakeOverText(unresponsive)], @"%@", detail);
+    XCTAssertEqualObjects(QLMBusProblemDetail(unresponsive),
+                          @"qlm tries again for about 7 s. Then it reopens the adapter, and keeps trying until the adapter answers. "
+                          @"About 2.6 s after qlm's last report, the adapter takes over at the knob's position. "
+                          @"The knob reads −10.0 dB, above qlm's −50.0 dB. At the take-over, the level would rise 40.0 dB.");
 
     QLMSnapshot *lost = QLMSnapshotWithProblem(QLMAdapterProblemLostTrack, QLMHandBackKnobLevel, @(-60), @(-50));
     XCTAssertEqualObjects(QLMBusProblemTitle(lost), @"qlm lost track of the adapter");
-    detail = QLMBusProblemDetail(lost);
-    XCTAssertTrue([detail containsString:@"Unplug the adapter"], @"%@", detail);
-    XCTAssertTrue([detail containsString:QLMTakeOverText(lost)], @"%@", detail);
+    XCTAssertEqualObjects(QLMBusProblemDetail(lost),
+                          @"qlm gave up on the adapter, and sends nothing more. Only a replug or a relaunch helps: unplug the "
+                          @"adapter and plug it back in, or quit qlm and open it again. About 2.6 s after qlm's last report, the "
+                          @"adapter takes over at the knob's position. The knob reads −60.0 dB, at or below qlm's −50.0 dB. At "
+                          @"the take-over, the level would not rise.");
+}
+
+// While System reopens the adapter, the banner says so, with the attempt.
+- (void)testTheBannerSaysWhenQlmIsReconnecting {
+    QLMSnapshot *reconnecting = QLMSnapshotWithProblem(QLMAdapterProblemUnresponsive, QLMHandBackUnknown, nil, @(-50));
+    reconnecting.reconnects = 3;
+    XCTAssertEqualObjects(QLMBusProblemTitle(reconnecting), @"The adapter stopped answering");
+    XCTAssertEqualObjects(QLMBusProblemDetail(reconnecting),
+                          @"qlm is reconnecting, attempt 3. It reopens the adapter at longer waits, up to 30 s apart, until the "
+                          @"adapter answers. About 2.6 s after qlm's last report, the adapter takes over at the knob's position. "
+                          @"The level at the take-over is unknown, since no knob is in.");
 }
 
 - (void)testTheBannerShowsTheBusProblemOtherwise {

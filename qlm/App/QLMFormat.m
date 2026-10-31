@@ -153,18 +153,22 @@ NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
     NSString *action = nil;
     switch (snapshot.adapterProblem) {
     case QLMAdapterProblemUnresponsive:
-        action = @"qlm tries again for about 7 s, then waits for a reply, and resumes once one comes.";
+        action = snapshot.reconnects == 0
+                     ? @"qlm tries again for about 7 s. Then it reopens the adapter, and keeps trying until the adapter answers."
+                     : [NSString stringWithFormat:@"qlm is reconnecting, attempt %lu. It reopens the adapter at longer waits, up to "
+                                                  @"30 s apart, until the adapter answers.",
+                                                  (unsigned long)snapshot.reconnects];
         break;
     case QLMAdapterProblemLostTrack:
-        action = @"Unplug the adapter, and plug it back in. qlm sends nothing until then.";
+        action = @"qlm gave up on the adapter, and sends nothing more. Only a replug or a relaunch helps: unplug the adapter and "
+                 @"plug it back in, or quit qlm and open it again.";
         break;
     case QLMAdapterProblemNone:
         break;
     }
     // System keeps the adapter's last knob reading meanwhile.
     if (action != nil) {
-        return [NSString stringWithFormat:@"%@ Meanwhile the adapter takes over at the knob's level, about 2.6 s after the last "
-                                          @"report it took. %@",
+        return [NSString stringWithFormat:@"%@ About 2.6 s after qlm's last report, the adapter takes over at the knob's position. %@",
                                           action, QLMTakeOverText(snapshot)];
     }
     switch (snapshot.busProblem) {
