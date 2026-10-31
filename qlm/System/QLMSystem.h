@@ -69,8 +69,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // its status. It runs discovery, the session leases, the poll cycle, and
 // volume. After a change it publishes an immutable snapshot once nothing is
 // queued for the bus or in flight. Every method may be called from any thread.
-// Each command returns its call's number, and a snapshot that carries it
-// follows (QLMSnapshot's lastCall).
+// Each command returns its call's number. Once the call has run on System's
+// queue, a snapshot that carries it follows (QLMSnapshot's lastCall).
 // While the bus is refused or gone, no frame goes to a session. Once it comes
 // back, System drops every monitor, and takes each back only where its own
 // serial answers at the session it last held.

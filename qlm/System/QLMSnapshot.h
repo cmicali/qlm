@@ -132,9 +132,9 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // The whole system at one moment. Immutable.
 @interface QLMSnapshot : NSObject
 
-// The last call to System that ran before this was made, or 0 before any.
-// A snapshot that carries a call's number, or a later one, reflects that
-// call.
+// The last call that ran on System's queue before this snapshot was made,
+// or 0 before any. TRAP: its frames may not have gone out. A volume
+// coalesced behind its timer leaves the snapshot idle.
 @property (nonatomic, readonly) QLMCallNumber lastCall;
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) QLMAdapterState *adapter;
