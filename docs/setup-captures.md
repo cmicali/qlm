@@ -28,7 +28,7 @@ The owner ran the short form on 2026-10-31: Parts A, B, and J. Part G didn't run
 
 | # | After A, B, and J |
 | --- | --- |
-| S1 | Settled for the 8351B's peaking bands at 96 kHz. They match to the bit across frequency, from 25 Hz to 18 kHz, gain, from −20 dB to +6 dB, and Q, from 0.1 to 20.[^s1-bands] Its four shelves match too, now. One, 8000 Hz at −5 dB, missed by a bit in four of its five floats, until qlm rounded the shelf's w0 to float, as GLM does.[^s1-shelf] 48 kHz and 12 kHz wait for Parts C and D. |
+| S1 | Settled for the 8351B's peaking bands at 96 kHz. They match to the bit across frequency, from 25 Hz to 18 kHz, gain, from −20 dB to +6 dB, and Q, from 0.1 to 20.[^s1-bands] Its four shelves match too, now. One, 8000 Hz at −5 dB, missed by a bit in four of its five floats, until qlm took the shelf's w0 as a float.[^s1-shelf] That one shelf decides it. It matches a w0 rounded from double and one computed in float arithmetic, so the next capture needs the shelves under Part B. 48 kHz and 12 kHz wait for Parts C and D. |
 | S2 to S6 | Open. Parts C to I haven't run. |
 | S7 | Holds for 69 more stops, 154 in all, every one the known 14 bytes.[^s7] |
 
@@ -150,6 +150,7 @@ Part B changes only the Left 8351B. The Right stays as it was, so the same captu
    - one boosted, if GLM allows a boost;
    - one set to 0 dB, which should go out as `1, 0, 0, 0, 0`.
 2. B2, the shelves. Move both low shelves and both high shelves to new frequencies and gains, one of each pair cut and one boosted.
+3. In the next capture, B3, the high shelves at 5000, 10000, 11000, 13000, and 15000 Hz, each at −5 dB, one per step, at 96 kHz. A w0 rounded from double and one computed in float arithmetic give different coefficients at each. So these tell which GLM uses (protocol.md's open question 20).
 
 Each band is checked on its own, so one step can change several. The one rule is that each band's settings are known from the snapshot.
 
@@ -270,7 +271,7 @@ Then one PR adds the captures, and it's mostly data. `QLMDSPBlockGoldenTests` ch
 [^lfe]: [refused-frames.md](refused-frames.md), on `3C`, `3E`, and `42`; `QLMDSPBlock`.
 [^first-session]: `captures/setup-a-baseline`, `setup-b-peq-8351b`, and `setup-j-restore`, and their notes.
 [^s1-bands]: `setup-b-peq-8351b`, snapshot `1`, the Main 4x2 apply at 182.460 s; `QLMDSPBlockGoldenTests`.
-[^s1-shelf]: `setup-b-peq-8351b`, slot `03` at 300.007 s; `testShelvesTakeAFloatW0`.
+[^s1-shelf]: `setup-b-peq-8351b`, slot `03` at 265.754 s, live from the editor, and at 300.029 s, in the pass; `testShelvesTakeAFloatW0`.
 [^s7]: `testEveryGeneratorStopIsTheKnownOne`: 15 in `setup-a-baseline`, 36 in `setup-b-peq-8351b`, and 18 in `setup-j-restore`.
 [^live]: `setup-b-peq-8351b`, 49.989 to 117.849 s and 230.501 to 265.754 s, and the confirms at 167.774 and 287.885 s.
 [^own-fields]: `setup-b-peq-8351b`, `setups/0.sam` against `setups/1.sam`.

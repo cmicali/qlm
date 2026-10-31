@@ -1,16 +1,16 @@
 # setup-j-restore
 
-Part J of [setup-captures.md](../../docs/setup-captures.md): GLM opening Main.sam again after the session, and switching to the group the owner uses. Recorded 2026-10-31 through the Raspberry Pi 5 inline proxy (usb-proxy with `tools/pi/usb-proxy.patch`), on usbmon1. The adapter was device 1:2. No mic, and the volume knob on the adapter.
+Part J of [setup-captures.md](../../docs/setup-captures.md): GLM opening Main.sam again after the session, and switching to the group the user uses. Recorded 2026-10-31 through the Raspberry Pi 5 inline proxy (usb-proxy with `tools/pi/usb-proxy.patch`), on usbmon1. The adapter was device 1:2. No mic, and the volume knob on the adapter.
 
 GLM had run since `setup-b-peq-8351b`, with `qlm-g.sam` open on Main 4x2. The capture has no `setups/`: GLM applied Main.sam itself, and `Tests/Setups/Fixtures/Main.sam` is its redacted copy.
 
 | Time (EDT) | Seconds | What happened |
 | --- | --- | --- |
 | 16:41:39 | 0 | Capture started. |
-| 16:42:12 | 33.0 | The owner opened Main.sam in GLM. GLM asked the adapter for `39`, `19 01`, and `51 82` again, and kept every lease. |
+| 16:42:12 | 33.0 | The user opened Main.sam in GLM. GLM asked the adapter for `39`, `19 01`, and `51 82` again, and kept every lease. |
 | 16:42:12 | 33.1 | GLM applied Main 4x2: six passes, from 33.113 s, to sessions `0C`, `0E`, `0F`, `14`, `15`, and `16`. |
 | 16:42:13 | 34.6 | GLM applied Main 4x2 again: six passes, from 34.551 s, to the same sessions, in the setup's device order. |
-| 16:42:22 | 43.0 | The owner switched to Main 2x1, the group they use. Three passes, from 43.049 s. |
+| 16:42:22 | 43.0 | The user switched to Main 2x1, the group they use. Three passes, from 43.049 s. |
 | | | Music played at a low level, and sounded as it did before the session. |
 | 16:43:06 | | Capture stopped. |
 

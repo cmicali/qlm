@@ -5,7 +5,7 @@ Part B of [setup-captures.md](../../docs/setup-captures.md): GLM applying a copy
 The setup:
 
 - GLM 5.2.1 had run since `setup-a-baseline`, on Main 4x2, with all six monitors on.
-- The copy was `qlm-g.sam`, a Save As of Main.sam made for Part G. The owner then found that GLM shows no control for the 8351B's `GroupDelayCompensation` or `BassExtensionXO(Hz)` outside the group definition, which needs a recalibration. So Part G didn't run, and the copy served Part B.
+- The copy was `qlm-g.sam`, a Save As of Main.sam made for Part G. The user then found that GLM shows no control for the 8351B's `GroupDelayCompensation` or `BassExtensionXO(Hz)` outside the group definition, which needs a recalibration. So Part G didn't run, and the copy served Part B.
 - `setups/0.sam` is the copy before any change. It equals a redacted Main.sam apart from the `Modified` date and the `Volume` line, and it equals `setup-a-baseline`'s snapshot.
 - Every change was to the Left 8351B's node in Main 4x2, in its Acoustic editor. Main 2x1's Left is a separate node, and stayed as it was.
 
@@ -14,14 +14,14 @@ The setup:
 | 16:35:22 | 0 | Capture started. The six held sessions `03`, `05`, `06`, `08`, `09`, and `0A`. |
 | 16:35:44 | 22.5 | GLM broadcast a bare `03` twice, 0.6 ms apart, and polled no monitor after it. It asked the adapter for `39`, `19 01`, and `51 82`, sent the wake pairs, and from 23.760 s leased all six again, at `0B` to `10`. |
 | 16:35:45 | 23.9 | GLM applied Main 4x2 on its own, before any change: six passes, from 23.863 s. |
-| 16:36:12 | 50.0 | B1. The owner edited the Left's bands. GLM sent each change at once, as a lone `10 0E` to the Left's session `0C`, 13 frames to slots `04` to `09`, until 117.849 s. |
-| 16:38:10 | 167.8 | The owner confirmed the editor. GLM sent the Left its level, now −0.2 dB, its delay, and `10 01 09`, and no block. The owner saved the copy, and kept `setups/1.sam`. |
-| 16:38:19 | 177.3 | The owner switched to Main 2x1: three passes, from 177.333 s. |
-| 16:38:24 | 182.5 | The owner switched back to Main 4x2: nine passes, from 182.460 s. The 8330As got theirs at `0D` and `0B`, then at new sessions `11` and `12`. GLM cut the 7350A's at `10` short after slot `09`, at 183.450 s, and sent it whole at `13`. |
-| 16:39:12 | 230.5 | B2. The owner edited the Left's four shelves. GLM sent each to slots `00` to `03` as it changed, 8 frames, until 265.754 s. |
-| 16:40:10 | 287.9 | The owner confirmed the editor. GLM sent the level, the delay, and `10 01 09` again. The owner saved the copy, and kept `setups/2.sam`. |
-| 16:40:17 | 295.1 | The owner switched to Main 2x1: three passes, from 295.062 s. |
-| 16:40:22 | 300.0 | The owner switched back to Main 4x2: nine passes, from 300.007 s. The 8330As got theirs at `12` and `11`, then at `14` and `15`. GLM cut the 7350A's at `13` short after slot `00`, at 300.973 s, and sent it whole at `16`. |
+| 16:36:12 | 50.0 | B1. The user edited the Left's bands. GLM sent each change at once, as a lone `10 0E` to the Left's session `0C`, 13 frames to slots `04` to `09`, until 117.849 s. |
+| 16:38:10 | 167.8 | The user confirmed the editor. GLM sent the Left its level, now −0.2 dB, its delay, and `10 01 09`, and no block. The user saved the copy, and kept `setups/1.sam`. |
+| 16:38:19 | 177.3 | The user switched to Main 2x1: three passes, from 177.333 s. |
+| 16:38:24 | 182.5 | The user switched back to Main 4x2: nine passes, from 182.460 s. The 8330As got theirs at `0D` and `0B`, then at new sessions `11` and `12`. GLM cut the 7350A's at `10` short after slot `09`, at 183.450 s, and sent it whole at `13`. |
+| 16:39:12 | 230.5 | B2. The user edited the Left's four shelves. GLM sent each to slots `00` to `03` as it changed, 8 frames, until 265.754 s. |
+| 16:40:10 | 287.9 | The user confirmed the editor. GLM sent the level, the delay, and `10 01 09` again. The user saved the copy, and kept `setups/2.sam`. |
+| 16:40:17 | 295.1 | The user switched to Main 2x1: three passes, from 295.062 s. |
+| 16:40:22 | 300.0 | The user switched back to Main 4x2: nine passes, from 300.007 s. The 8330As got theirs at `12` and `11`, then at `14` and `15`. GLM cut the 7350A's at `13` short after slot `00`, at 300.973 s, and sent it whole at `16`. |
 | 16:40:45 | | Capture stopped. |
 
 The Pi logged under-voltage dips that day, eight in all, two of them during GLM's launch before `setup-a-baseline`. None broke a capture.
@@ -41,11 +41,11 @@ The Pi logged under-voltage dips that day, eight in all, two of them during GLM'
 
 A plain notch, with no "+", refuses a boost. Only the "+" bands take one, so Notch 6 went to 0 dB in place of a boost.
 
-The diff also holds three changes the owner didn't make:
+The diff also holds three changes the user didn't make:
 
 - The Left's `Level_Sensitivity` went from −0.17 to −0.2, the rounded value the editor shows.
 - Its `CalibrationStatusFlag` went from 3 to 4.
-- Each band the owner touched lost its second decimal: frequency and Q now have one. So Notch 4+ moved from 183.64 Hz to 183.6 Hz, and its Q from 7.54 to 7.5, though the owner set only its gain. Notch 7 on, untouched, kept two.
+- Each band the user touched lost its second decimal: frequency and Q now have one. So Notch 4+ moved from 183.64 Hz to 183.6 Hz, and its Q from 7.54 to 7.5, though the user set only its gain. Notch 7 on, untouched, kept two.
 
 `Volume` went from −64.5 to −56.5, the knob's level at the save.
 
@@ -65,7 +65,7 @@ GLM showed "Positive gain warning: Total sum of correction with positive gain ex
 ## What the capture showed
 
 - **The 8351B's peaking bands match across their range.** After B1, `compare-apply` with snapshot `1` matches every band to the bit: Q from 0.1 to 20, 18 kHz, a −20 dB cut, a +6 dB boost, and two bands at 0 dB sent as the bypass.
-- **One shelf didn't match, until the fix.** After B2, High Shelf 2, 8000 Hz at −5 dB, came out of qlm's design a bit off in four of its five floats. GLM sent `66 95 27 3F F9 7A 0E BF D5 2F A2 3C 30 8E 84 3F 34 21 1D BE` to slot `03`, and qlm built `… FA 7A 0E BF D9 2F A2 3C 31 8E 84 3F 35 21 1D BE`. GLM rounds a shelf's w0 to float before its sine and cosine. With that, all four shelves match. The low shelves and High Shelf 1+ matched before it too.
+- **One shelf didn't match, until the fix.** After B2, High Shelf 2, 8000 Hz at −5 dB, came out of qlm's design a bit off in four of its five floats. GLM sent `66 95 27 3F F9 7A 0E BF D5 2F A2 3C 30 8E 84 3F 34 21 1D BE` to slot `03`, live at 265.754 s and in the pass at 300.029 s. qlm built `… FA 7A 0E BF D9 2F A2 3C 31 8E 84 3F 35 21 1D BE`. With the shelf's w0 as a float, all four shelves match. This shelf alone decides that. It doesn't tell a w0 rounded from double from one computed in float arithmetic. The low shelves and High Shelf 1+ matched before it too.
 - **Main 2x1's Left is its own node.** Its passes match snapshots `1` and `2` unchanged.
 - **The generator stop didn't change.** All 36 stops are the known 14 bytes.
 - **GLM sends a band as it's edited.** Each change in the editor went out at once, as one `10 0E` to the monitor's session, outside any block. Confirming the editor sent the level, the delay, and `10 01 09`, and no block. GLM applied each change in a block only at the next group switch.
@@ -80,5 +80,5 @@ GLM showed "Positive gain warning: Total sum of correction with positive gain ex
 
 ## Not explained
 
-- What made GLM send `03`, re-read the adapter, and apply Main 4x2 at 22.5 s. The owner made no change then. GLM kept counting sessions from `0B`, so it didn't relaunch. Opening Main.sam in `setup-j-restore` re-read the adapter, but sent no `03` and leased nothing.
+- What made GLM send `03`, re-read the adapter, and apply Main 4x2 at 22.5 s. The user made no change then. GLM kept counting sessions from `0B`, so it didn't relaunch. Opening Main.sam in `setup-j-restore` re-read the adapter, but sent no `03` and leased nothing.
 - Why the 8330As got a second pass at a new session in both switches here, but not in `setup-a-baseline`, where they were leased before their first.

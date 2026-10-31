@@ -417,7 +417,7 @@ The payload of 10 0E, with each field's size in bytes
 └───────┴──────┴──────┴──────┴──────┴──────┴──────┴────┘
 ```
 
-GLM designs in double precision, rounds the six raw coefficients to float, and normalizes in float.[^peq-design] A shelf's w0 is rounded to float before its sine and cosine. Designed from a w0 in double, an 8 kHz high shelf at −5 dB misses GLM's by a bit or more in four of its five floats.[^shelf-w0] The peaking bands match GLM's with w0 in either precision, so the captures can't say which GLM uses there. qlm keeps it in double.
+GLM designs in double precision, rounds the six raw coefficients to float, and normalizes in float.[^peq-design] A shelf's w0 is a float. One captured shelf decides it: designed from a w0 in double, an 8 kHz high shelf at −5 dB misses GLM's by a bit or more in four of its five floats.[^shelf-w0] qlm rounds a w0 computed in double, and that matches it and every other captured shelf. A w0 computed in float arithmetic matches them all too. The two forms differ on other shelves, so the captures don't rule out the second (open question 20). The peaking bands match GLM's with w0 in either precision, so the captures can't say which GLM uses there. qlm keeps it in double.
 
 The design rate is 48 kHz for the 8330A, and 12 kHz for the subwoofers.[^peq-rate] The 8351B's bands match a 96 kHz design to the bit, and no 48 kHz design. They match across frequency, from 25 Hz to 18 kHz, gain, from −20 dB to +6 dB, and Q, from 0.1 to 20, and so do its four shelves.[^peq-range-8351b] No measurement confirms that rate yet.[^peq-rate-8351b]
 
@@ -451,7 +451,7 @@ The input index, the source, a pair selector, and the AES3 channel.[^routing] In
 [^peq-rate]: hlm §4.
 [^peq-rate-8351b]: #10; `QLMDSPBlockGoldenTests`.
 [^peq-twenty]: #9; `QLMDSPBlockGoldenTests`.
-[^shelf-w0]: `setup-b-peq-8351b`, slot `03` at 300.007 s; `testShelvesTakeAFloatW0`.
+[^shelf-w0]: `setup-b-peq-8351b`, slot `03` at 265.754 s, live from the editor, and at 300.029 s, in the pass; `testShelvesTakeAFloatW0`.
 [^peq-range-8351b]: `setup-b-peq-8351b`, the Main 4x2 applies at 182.460 and 300.007 s, and its notes; `QLMDSPBlockGoldenTests`.
 [^peq-live]: `setup-b-peq-8351b`, 49.989 to 117.849 s and 230.501 to 265.754 s; the confirms at 167.774 and 287.885 s.
 [^crossover]: [refused-frames.md](refused-frames.md#43-00-02-and-4b-00-00-00-01-to-the-8351b).
@@ -1109,6 +1109,7 @@ On or in standby, monitors drop a quiet host's leases, within 23 s to 210 s ([Wh
 | 17 | Which telemetry tags and meters are still open? | [telemetry.md](telemetry.md#open-questions) |
 | 18 | What is the bare `04` that ends two telemetry replies, after `8A`? | [Telemetry](#telemetry) |
 | 19 | What does a broadcast `03` do, and what made GLM send it? | [refused-frames.md](refused-frames.md#broadcast-03) |
+| 20 | Does GLM compute a shelf's w0 in double and round it to float, or in float arithmetic? | Both match every captured shelf. High shelves at 5000, 10000, 11000, 13000, and 15000 Hz, −5 dB, at 96 kHz tell them apart ([setup-captures.md](setup-captures.md#part-b-peq-on-the-8351b)). |
 
 ## Sources
 

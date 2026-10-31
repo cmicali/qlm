@@ -124,10 +124,11 @@
 }
 
 // The Left 8351B's four shelves in setup-b-peq-8351b's setups/2.sam went to
-// 00 to 03 at 300.007 s: low shelves at 60 Hz +3 dB and 150 Hz -4 dB, and
-// high shelves at 3000 Hz +2 dB and 8000 Hz -5 dB. The 8 kHz shelf takes a
-// w0 rounded to float. Designed from a w0 in double, it misses GLM's by a
-// bit or more in b1, b2, a1, and a2.
+// 00 to 03 in the pass from 300.007 s, and live as they were edited: low
+// shelves at 60 Hz +3 dB and 150 Hz -4 dB, and high shelves at 3000 Hz
+// +2 dB and 8000 Hz -5 dB. The 8 kHz shelf went to 03 at 265.754 s and
+// 300.029 s. It alone decides that w0 is a float: designed from a w0 in
+// double, it misses GLM's by a bit or more in b1, b2, a1, and a2.
 - (void)testShelvesTakeAFloatW0 {
     [self assertBiquad:QLMBiquadLowShelf(60, 3, QLMBiquadLowShelfQ, 96000) packsTo:@"E8 24 80 3F 63 78 FE BF 29 A8 7C 3F 7B 78 FE 3F CD F1 7C BF"];
     [self assertBiquad:QLMBiquadLowShelf(150, -4, QLMBiquadLowShelfQ, 96000) packsTo:@"49 0C 7F 3F 5B 5F FB BF 5B B7 77 3F A3 5E FB 3F 15 C5 76 BF"];

@@ -12,8 +12,8 @@ The setup:
 | Time (EDT) | Seconds | What happened |
 | --- | --- | --- |
 | 16:29:30 | 0 | Capture started. GLM was open and idle, on Main 4x2. |
-| 16:30:09 | 39.6 | The owner switched to Main 2x1. The routing pass starts at 39.627 s, and the DSP pass at 40.127 s: three passes, to the Left 8351B at `03`, the Right at `06`, and the 7370A at `05`. |
-| 16:30:16 | 46.6 | The owner switched back to Main 4x2. Seven passes, from 46.580 s: the Left, the Right, and the 7370A at their sessions, the 7350A at its old session `07`, the Rear Right and Rear Left 8330A at new sessions `08` and `09`, and the 7350A again at `0A`. |
+| 16:30:09 | 39.6 | The user switched to Main 2x1. The routing pass starts at 39.627 s, and the DSP pass at 40.127 s: three passes, to the Left 8351B at `03`, the Right at `06`, and the 7370A at `05`. |
+| 16:30:16 | 46.6 | The user switched back to Main 4x2. Seven passes, from 46.580 s: the Left, the Right, and the 7370A at their sessions, the 7350A at its old session `07`, the Rear Right and Rear Left 8330A at new sessions `08` and `09`, and the 7350A again at `0A`. |
 | 16:30:52 | | Capture stopped. |
 
 The Pi logged under-voltage dips that day, eight in all, two of them during GLM's launch before this capture. None broke a capture.
