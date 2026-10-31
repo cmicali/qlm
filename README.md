@@ -89,7 +89,7 @@ Within a run, qlm takes leases back. At each start, it asks each monitor it knew
 
 Over USB, it's a supervised test, run at a low level with one monitor first. It needs `--volume`, the level the apply restores, and `--ceiling`. `--muted` and `--seconds` work as they do for the controls. A group with a model whose filter design rate is unverified also needs `--unverified-rate`, on any bus. Only 48 kHz for a two-way and 12 kHz for a subwoofer are confirmed, and the 8351B's design rate is 96 kHz. Without the flag, `qlmctl` refuses before it opens the bus.
 
-[docs/measurement.md](docs/measurement.md) is that test's procedure. GLM applies a group and REW measures it, then `qlmctl` applies the same group and REW measures again. The result decides whether the 8351B's refusal lifts.
+Captures decide whether the 8351B's refusal lifts. We record GLM applying setups made with varied settings, and qlm's apply must match GLM's byte for byte. [docs/measurement.md](docs/measurement.md) is an optional check after that: GLM applies a group and REW measures it, then `qlmctl` applies the same group and REW measures again.
 
 ## Disclaimer
 

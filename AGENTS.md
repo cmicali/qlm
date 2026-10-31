@@ -2,7 +2,7 @@
 
 Guidance for any coding agent working in this repository.
 
-qlm is a native Mac controller for Genelec SAM monitors. It talks to them through the GLM network adapter. It replaces GLM for status, volume, mute, dim, power, and group switching. It never calibrates. `qlmctl`'s controls and the app have run on all six monitors of one system. **The group apply has run only on the fake bus.** The plan is [docs/plan.md](docs/plan.md), and its "Where things stand" section says what is built and what waits. Read it before changing anything here.
+qlm is a native Mac controller for Genelec SAM monitors. It talks to them through the GLM network adapter. It replaces GLM for status, volume, mute, dim, power, and group switching. It never calibrates. The app and `qlmctl`'s controls have run on all six monitors of one system, though `qlmctl mute` only on one. **The group apply has run only on the fake bus.** The plan is [docs/plan.md](docs/plan.md), and its "Where things stand" section says what is built and what waits. Read it before changing anything here.
 
 ## Building
 

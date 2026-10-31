@@ -1092,7 +1092,7 @@ On or in standby, monitors drop a quiet host's leases, within 23 s to 210 s ([Wh
 | 9 | What is the analog routing frame, for input 4? | No group in the setup uses it (#8). |
 | 10 | What does the adapter do with `01 2B 01`, and does it keep a mute of its own through the hand-back? | [refused-frames.md](refused-frames.md#open) |
 | 11 | What does `82` select in `01 51 82`, and what is `219000`? | [refused-frames.md](refused-frames.md#open) |
-| 12 | What is the 8351B's design rate? | Its bands match 96 kHz on the wire, and a measurement must confirm it ([measurement.md](measurement.md)). |
+| 12 | What is the 8351B's design rate? | Its bands match 96 kHz on the wire, as the setup file's `SR:96000` says. Captures of setups with varied settings must confirm it across their range. [measurement.md](measurement.md) is an optional check. |
 | 13 | Why does GLM's level sometimes lag a change it followed? Why does a knob just plugged in bring a burst for a single tenth? | The rule itself is in [Volume and the knob](#volume-and-the-knob). `sleep-wake-darkwake`, 138.96 s; `standby-wake`, 0.98 s; [adapter-status.md](adapter-status.md#open) |
 | 14 | Does a woken monitor stay muted until a host sends its state? | [telemetry.md](telemetry.md#open-questions) |
 | 15 | What does `c-` mean in the system info, given that `84` reads `02` for the 8351B? | [System info](#system-info) |
