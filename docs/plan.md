@@ -52,6 +52,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - The default ceiling is −30 dB, qlmctl's highest without `--allow-high-ceiling`, and the field saves as it ends editing (#52).
   - After a wake with no group active, it says the monitors play without their group's settings until GLM applies the group. System's snapshot carries that. With a group active, System already sends GLM's apply at wake to each monitor leased again (#53).
   - It names each monitor as the setup file does, and forgets the fake bus's monitors when the setting changes (#53).
+  - A logout, restart, or shutdown no longer waits on the louder hand-back's alert, which hung a Mac left to restart overnight. Where the user's quit asks, it mutes every monitor first, so the take-over can't make them louder, and the next launch starts muted.
 
 ### The captures, the kits, and the docs
 

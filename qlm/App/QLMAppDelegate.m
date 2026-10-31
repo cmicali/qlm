@@ -22,6 +22,8 @@
 // allowance for a sleep. A stop sends at most the hand-back level, then
 // closes the adapter.
 static const NSTimeInterval QLMStopAllowance = 3;
+// How long a logout, restart, or shutdown waits for mute all to go out.
+static const NSTimeInterval QLMMuteAllowance = 1;
 // How long a stop's warning waits for System's snapshot now.
 static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 
@@ -58,6 +60,16 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @interface QLMAppDelegate (Debug) <QLMDebugApp>
 @end
 #endif
+
+// The quit Apple event's reason, or 0 with none.
+static OSType QLMQuitReason(void) {
+    NSAppleEventDescriptor *event = NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+    if (event.eventClass != kCoreEventClass || event.eventID != kAEQuitApplication) {
+        return 0;
+    }
+    NSAppleEventDescriptor *reason = [event attributeDescriptorForKeyword:kAEQuitReason] ?: [event paramDescriptorForKeyword:kAEQuitReason];
+    return reason.typeCodeValue;
+}
 
 @implementation QLMAppDelegate
 
@@ -98,11 +110,40 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // and shut down.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     [self.settingsController endEditing];
-    if (![self mayStop:@"Quitting" anyway:@"Quit Anyway"]) {
-        return NSTerminateCancel;
+    QLMSnapshot *now = [self snapshotNow];
+    switch (QLMQuitStepFor([self stopMayRaiseLevel:now], QLMQuitReason())) {
+    case QLMQuitStepAsk:
+        if (![self askBeforeStop:@"Quitting" anyway:@"Quit Anyway" now:now]) {
+            return NSTerminateCancel;
+        }
+        break;
+    case QLMQuitStepMuteFirst:
+        [self muteAllAndWait];
+        break;
+    case QLMQuitStepStop:
+        break;
     }
     [self stopSystemAndWait];
     return NSTerminateNow;
+}
+
+// A logout, restart, or shutdown can't wait on the louder hand-back's alert,
+// and a Mac left to restart overnight would hang on it. So every monitor is
+// muted before qlm lets go. A mute outlasts the host (docs/protocol.md), so
+// the take-over can't make them louder. The record keeps mute all, so the
+// next launch starts muted. TRAP: a stop drops what is still queued, so
+// this waits for the mute's frames to go out.
+- (void)muteAllAndWait {
+    QLMCallNumber call = [self.system setAllMuted:YES];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:QLMMuteAllowance];
+    while (deadline.timeIntervalSinceNow > 0) {
+        QLMSnapshot *latest = self.monitorList.snapshot;
+        if (latest.lastCall >= call && latest.idle) {
+            return;
+        }
+        [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
+    }
+    NSLog(@"qlm: mute all did not go out within %.0f s of the quit.", QLMMuteAllowance);
 }
 
 // Only on the real monitors: on the fake bus a take-over moves no level.
@@ -117,13 +158,14 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
     return [self.system snapshotNowWithin:QLMSnapshotAllowance] ?: self.monitorList.snapshot;
 }
 
-// Asks before a stop that may make the monitors louder. YES goes ahead. A
-// debug command's quit answers in place of the user.
+// Asks before a stop that may make the monitors louder. YES goes ahead.
 - (BOOL)mayStop:(NSString *)stop anyway:(NSString *)anyway {
     QLMSnapshot *now = [self snapshotNow];
-    if (![self stopMayRaiseLevel:now]) {
-        return YES;
-    }
+    return ![self stopMayRaiseLevel:now] || [self askBeforeStop:stop anyway:anyway now:now];
+}
+
+// A debug command's quit answers in place of the user.
+- (BOOL)askBeforeStop:(NSString *)stop anyway:(NSString *)anyway now:(QLMSnapshot *)now {
 #if DEBUG
     if (self.debugQuitAnswer != nil) {
         return self.debugQuitAnswer.integerValue == NSAlertSecondButtonReturn;

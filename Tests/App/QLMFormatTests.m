@@ -64,6 +64,26 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     }
 }
 
+// The user's own quit asks before a louder take-over, and one with no knob
+// in. A logout, restart, or shutdown can't wait on an alert, so it mutes
+// first instead. A take-over at the knob's level needs neither. Source:
+// kAEQuitReason in AERegistry.h.
+- (void)testAQuitByTheMacMutesWhereTheUsersQuitAsks {
+    QLMSnapshot *louder = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
+    QLMSnapshot *noKnob = QLMSnapshotWith(QLMHandBackUnknown, nil, @(-50));
+    QLMSnapshot *knobLevel = QLMSnapshotWith(QLMHandBackKnobLevel, @(-60), @(-50));
+    const OSType byTheMac[] = {kAEQuitAll, kAELogOut, kAEReallyLogOut, kAERestart, kAEShutDown};
+    for (size_t i = 0; i < sizeof byTheMac / sizeof byTheMac[0]; i++) {
+        OSType reason = byTheMac[i];
+        XCTAssertEqual(QLMQuitStepFor(QLMStopMayRaiseLevel(louder), reason), QLMQuitStepMuteFirst, @"%u", (unsigned)reason);
+        XCTAssertEqual(QLMQuitStepFor(QLMStopMayRaiseLevel(noKnob), reason), QLMQuitStepMuteFirst, @"%u", (unsigned)reason);
+        XCTAssertEqual(QLMQuitStepFor(QLMStopMayRaiseLevel(knobLevel), reason), QLMQuitStepStop, @"%u", (unsigned)reason);
+    }
+    XCTAssertEqual(QLMQuitStepFor(QLMStopMayRaiseLevel(louder), 0), QLMQuitStepAsk);
+    XCTAssertEqual(QLMQuitStepFor(QLMStopMayRaiseLevel(noKnob), 0), QLMQuitStepAsk);
+    XCTAssertEqual(QLMQuitStepFor(QLMStopMayRaiseLevel(knobLevel), 0), QLMQuitStepStop);
+}
+
 // The knob is read before the level, as in qlmctl's note.
 - (void)testTheTakeOverTextSaysWhy {
     XCTAssertEqualObjects(QLMTakeOverText(QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50))),
