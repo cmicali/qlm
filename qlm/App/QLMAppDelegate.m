@@ -156,6 +156,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
         adapter = bus;
     }
     self.bus = bus;
+    [self.monitorList forgetMonitors];
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.preferences.ceilingDecibels;
     [self.kept fillSettings:settings];
@@ -238,9 +239,9 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // one is not handed to another. The new System starts once the old has let
 // go, so the two never hold the adapter at once. Dim carries over, read
 // from the old System's last snapshot. Each bus keeps its own level, mute
-// record, and leases.
-// The active group and the fake bus's state do not carry over. A second
-// change during a restart finds the new System already made, and stops.
+// record, and leases. The active group, the fake bus's state, and the
+// monitors seen do not carry over. A second change during a restart finds
+// the new System already made, and stops.
 - (void)restartSystem {
     QLMSystem *old = self.system;
     [old setSnapshotHandler:nil queue:dispatch_get_main_queue()];
@@ -313,6 +314,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
                 return;
             }
             strongSelf.setup = setup;
+            strongSelf.alerts.setup = setup;
             strongSelf.setupError = setup == nil ? error : nil;
             strongSelf.popoverController.setup = setup;
             [strongSelf.settingsController showSetup:setup error:strongSelf.setupError];

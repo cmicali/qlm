@@ -37,12 +37,12 @@ static NSView *QLMSpacer(void) {
     return spacer;
 }
 
-// One monitor's line: its status dot, model, serial, state, and mute toggle.
+// One monitor's line: its status dot, model, name, state, and mute toggle.
 @interface QLMMonitorRow : NSObject
 @property (nonatomic, readonly) NSStackView *view;
 @property (nonatomic, readonly) NSImageView *dot;
 @property (nonatomic, readonly) NSTextField *model;
-@property (nonatomic, readonly) NSTextField *serial;
+@property (nonatomic, readonly) NSTextField *name;
 @property (nonatomic, readonly) NSTextField *detail;
 @property (nonatomic, readonly) NSButton *muteButton;
 @property (nonatomic, weak) QLMPopoverController *owner;
@@ -54,6 +54,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMBannerView *banner;
 @property (nonatomic) QLMBannerView *setupBanner;
+@property (nonatomic) QLMBannerView *groupBanner;
 @property (nonatomic) NSTextField *deviceLabel;
 @property (nonatomic) NSTextField *messageLabel;
 @property (nonatomic) NSSlider *volumeSlider;
@@ -66,7 +67,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSPopUpButton *groupPicker;
 @property (nonatomic) NSTextField *summaryLabel;
 @property (nonatomic) NSStackView *monitorsStack;
-@property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry, as the list only appends
+@property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry
 @property (nonatomic) NSTimeInterval sliderMovedAt;
 @property (nonatomic) BOOL askedGLMToQuit;  // until GLM lets go of the adapter
 // GLM holds the adapter and runs, as of checkedProblem. GLM starts and
@@ -89,17 +90,16 @@ static NSView *QLMSpacer(void) {
         [_dot.widthAnchor constraintEqualToConstant:10].active = YES;
         _model = [NSTextField labelWithString:@""];
         [_model.widthAnchor constraintEqualToConstant:52].active = YES;
-        _serial = QLMSmallLabel(@"");
-        _serial.font = [NSFont monospacedSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
-        _serial.lineBreakMode = NSLineBreakByTruncatingMiddle;
-        [_serial setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+        _name = QLMSmallLabel(@"");
+        _name.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        [_name setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
         _detail = QLMSmallLabel(@"");
         _detail.alignment = NSTextAlignmentRight;
         _muteButton = [NSButton buttonWithImage:[[NSImage alloc] init] target:self action:@selector(muteClicked:)];
         _muteButton.bordered = NO;
         _muteButton.imagePosition = NSImageOnly;
         [_muteButton.widthAnchor constraintEqualToConstant:18].active = YES;
-        _view = [NSStackView stackViewWithViews:@[_dot, _model, _serial, QLMSpacer(), _detail, _muteButton]];
+        _view = [NSStackView stackViewWithViews:@[_dot, _model, _name, QLMSpacer(), _detail, _muteButton]];
         _view.orientation = NSUserInterfaceLayoutOrientationHorizontal;
         _view.spacing = 6;
     }
@@ -113,7 +113,10 @@ static NSView *QLMSpacer(void) {
     self.dot.contentTintColor = QLMPresenceColor(entry.presence);
     self.dot.toolTip = QLMPresenceName(entry.presence);
     self.model.stringValue = monitor.model ?: @"?";
-    self.serial.stringValue = monitor.serialNumber ?: @"";
+    // The setup's name tells the Left 8351B from the Right, where the serial
+    // can't (qlm-app-first).
+    self.name.stringValue = QLMMonitorLabel(monitor, self.owner.setup) ?: @"";
+    self.name.toolTip = monitor.serialNumber;
     self.detail.stringValue = entry.presence == QLMMonitorPresenceOnline ? QLMTemperatureText(monitor.temperature) : QLMEntryStatusText(entry);
     self.muteButton.enabled = entry.tracked;
     if (mutedChanged) {
@@ -171,6 +174,7 @@ static NSView *QLMSpacer(void) {
     self.setupBanner.actionButton.target = self;
     self.setupBanner.actionButton.action = @selector(readSetupAgainClicked:);
     self.setupBanner.actionButton.hidden = NO;
+    self.groupBanner = [[QLMBannerView alloc] initWithTextWidth:contentWidth - 50 style:QLMBannerStyleNotice];
 
     NSTextField *title = [NSTextField labelWithString:@"qlm"];
     title.font = [NSFont systemFontOfSize:NSFont.systemFontSize + 1 weight:NSFontWeightSemibold];
@@ -249,7 +253,7 @@ static NSView *QLMSpacer(void) {
     footer.spacing = 6;
 
     NSArray<NSView *> *fullWidth = @[
-        self.banner, self.setupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
+        self.banner, self.setupBanner, self.groupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
         [self separator], monitorsHeader, self.monitorsStack, [self separator], footer,
     ];
     NSStackView *stack = [NSStackView stackViewWithViews:fullWidth];
@@ -423,6 +427,9 @@ static NSView *QLMSpacer(void) {
     NSString *changed = self.changedSetupName;
     [self.setupBanner showTitle:changed == nil ? nil : [NSString stringWithFormat:@"GLM saved %@", changed]
                          detail:@"Read it again for its new groups."];
+    [self.groupBanner showTitle:snapshot.wokeWithoutGroup ? @"The monitors play without their group's settings" : nil
+                         detail:@"qlm woke them, and applies no group with a model whose filter design rate is unverified. "
+                                @"They play on their stored settings until GLM applies the group."];
     self.deviceLabel.stringValue = snapshot.adapter.device ?: @"";
     self.deviceLabel.toolTip = snapshot.adapter.systemInfo;
     [self renderVolume:snapshot];
@@ -509,6 +516,11 @@ static NSView *QLMSpacer(void) {
         }
         self.rows[i].entry = monitors[i];
         counts[monitors[i].presence] += 1;
+    }
+    // The list forgets its monitors when System changes bus.
+    while (self.rows.count > monitors.count) {
+        [self.rows.lastObject.view removeFromSuperview];
+        [self.rows removeLastObject];
     }
 
     NSMutableArray<NSString *> *summary = [NSMutableArray array];

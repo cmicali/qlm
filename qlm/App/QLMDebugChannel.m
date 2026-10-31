@@ -152,6 +152,7 @@ static NSDictionary *QLMDebugSnapshot(QLMSnapshot *snapshot) {
         @"dimmed": @(snapshot.dimmed),
         @"applying": @(snapshot.applying),
         @"activeGroupName": snapshot.activeGroupName ?: NSNull.null,
+        @"wokeWithoutGroup": @(snapshot.wokeWithoutGroup),
         @"mutingAll": @(snapshot.mutingAll),
         @"allMuted": @(snapshot.allMuted),
         @"anyOn": @(snapshot.anyOn),

@@ -12,12 +12,6 @@ static const NSInteger QLMHotHysteresis = 5;
 // Between two alerts of one kind for one monitor, at least this long.
 static const NSTimeInterval QLMAlertInterval = 10 * 60;
 
-// The monitor as a person names it: its model and serial.
-static NSString *QLMMonitorName(QLMMonitorState *monitor) {
-    NSString *model = monitor.model ?: @"Monitor";
-    return monitor.serialNumber != nil ? [NSString stringWithFormat:@"%@ %@", model, monitor.serialNumber] : model;
-}
-
 // Stable across leases, for the notification's identifier.
 static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
     NSMutableString *key = [NSMutableString string];
@@ -46,6 +40,13 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
         _lastAlerts = [NSMutableDictionary dictionary];
     }
     return self;
+}
+
+// Its model and its name, as the setup gives it, else its serial.
+- (NSString *)nameOf:(QLMMonitorState *)monitor {
+    NSString *model = monitor.model ?: @"Monitor";
+    NSString *label = QLMMonitorLabel(monitor, self.setup);
+    return label != nil ? [NSString stringWithFormat:@"%@ %@", model, label] : model;
 }
 
 // Records the alert unless one of its kind went out for the monitor within
@@ -93,11 +94,11 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
         QLMMonitorState *monitor = dropped.firstObject;
         [_notifier postIdentifier:[@"drop-" stringByAppendingString:QLMMonitorKey(monitor)]
                             title:[NSString stringWithFormat:@"%@ dropped off the bus", monitor.model ?: @"A monitor"]
-                             body:[NSString stringWithFormat:@"%@ stopped answering. qlm finds it again when it answers.", QLMMonitorName(monitor)]];
+                             body:[NSString stringWithFormat:@"%@ stopped answering. qlm finds it again when it answers.", [self nameOf:monitor]]];
     } else if (dropped.count > 1) {
         NSMutableArray<NSString *> *names = [NSMutableArray array];
         for (QLMMonitorState *monitor in dropped) {
-            [names addObject:QLMMonitorName(monitor)];
+            [names addObject:[self nameOf:monitor]];
         }
         [_notifier postIdentifier:@"drops"
                             title:[NSString stringWithFormat:@"%lu monitors dropped off the bus", (unsigned long)dropped.count]
@@ -119,7 +120,7 @@ static NSString *QLMMonitorKey(QLMMonitorState *monitor) {
             if ([self mayAlert:@"hot" monitor:monitor]) {
                 [_notifier postIdentifier:[@"hot-" stringByAppendingString:QLMMonitorKey(monitor)]
                                     title:[NSString stringWithFormat:@"%@ runs hot", monitor.model ?: @"A monitor"]
-                                     body:[NSString stringWithFormat:@"%@ reads %@. qlm alerts at %@.", QLMMonitorName(monitor),
+                                     body:[NSString stringWithFormat:@"%@ reads %@. qlm alerts at %@.", [self nameOf:monitor],
                                                                      QLMTemperatureText(temperature), QLMTemperatureText(QLMHotTemperature)]];
             }
         }

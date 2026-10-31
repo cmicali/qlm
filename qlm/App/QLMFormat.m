@@ -1,5 +1,7 @@
 #import "QLMFormat.h"
 
+#import "QLMSetup.h"
+
 NSString *const QLMEmDash = @"—";
 
 // A no-break space keeps the unit on the number's line.
@@ -9,6 +11,10 @@ NSString *QLMDecibelsText(double decibels) {
         number = @"0.0";
     }
     return [[number stringByReplacingOccurrencesOfString:@"-" withString:@"−"] stringByAppendingString:@"\u00A0dB"];
+}
+
+NSString *QLMMonitorLabel(QLMMonitorState *monitor, QLMSetup *setup) {
+    return [setup deviceWithHardwareID:monitor.hardwareID].name ?: monitor.serialNumber;
 }
 
 NSString *QLMTemperatureText(NSInteger temperature) {
