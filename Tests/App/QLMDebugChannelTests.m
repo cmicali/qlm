@@ -423,10 +423,12 @@
     QLMMessage expected = QLMCommandVolume(-40.5, -30);
     NSData *record = QLMAdapterRecord(&expected);
     QLMFakeBus *bus = _bus;
+    QLMSystem *system = _app.debugSystem;
+    // The level lands within 50 ms of the last, so its frame waits on the
+    // timer, and the snapshot follows the frame.
     XCTAssertTrue([_time runUntil:^BOOL {
-        return [bus.sentMessages containsObject:record];
+        return [bus.sentMessages containsObject:record] && [system.snapshot.volumeDecibels isEqual:@(-40.5)];
     } within:1]);
-    XCTAssertEqualObjects(_app.debugSystem.snapshot.volumeDecibels, @(-40.5));
     // The slider's top is the ceiling.
     XCTAssertEqualObjects(([self runOK:@[@"volume", @"-30.2"]][@"volumeDecibels"]), @(-30));
     [self assertEveryFrameSafeUnder:-30];
