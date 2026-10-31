@@ -20,6 +20,15 @@ QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *knob, NSNumber *vol
     return handBack;
 }
 
+QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID) {
+    for (QLMMonitorState *monitor in snapshot.monitors) {
+        if ([monitor.hardwareID isEqualToData:hardwareID]) {
+            return monitor;
+        }
+    }
+    return nil;
+}
+
 NSData *QLMReportFor(QLMMessage message) {
     uint8_t report[QLMReportLength];
     QLMReportPackOutput(&message, report);

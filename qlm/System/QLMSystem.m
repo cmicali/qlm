@@ -206,7 +206,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSMutableArray<dispatch_block_t> *_sends;
     BOOL _inFlight;
     BOOL _running;
-    BOOL _stopping;        // sending the hand-back level before it lets go
+    BOOL _stopping;        // sending the hand-back level, or mute all, before it lets go
     BOOL _startAfterStop;  // a start that came while stopping
     NSMutableArray<dispatch_block_t> *_stopCompletions;
     // Each identified monitor's last session and serial, by hardware ID,
@@ -384,6 +384,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (QLMCallNumber)stopWithCompletion:(dispatch_block_t)completion {
+    return [self stopMuting:NO completion:completion];
+}
+
+- (QLMCallNumber)stopMutingIfLouderWithCompletion:(dispatch_block_t)completion {
+    return [self stopMuting:YES completion:completion];
+}
+
+- (QLMCallNumber)stopMuting:(BOOL)mutes completion:(nullable dispatch_block_t)completion {
     dispatch_block_t copied = [completion copy];
     return [self call:^{
         self->_startAfterStop = NO;
@@ -401,16 +409,26 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_stoppedHandBack = handBack;
         [self cancelTimers];
         [self->_sends removeAllObjects];
-        if (handBack.kind != QLMHandBackKnobLevel) {
+        // TRAP: the adapter takes over at the knob's position about 2.6 s
+        // after the host goes quiet (captures/qlm-control-first/notes.md).
+        // With the knob at or below the level qlm sends, qlm sends the
+        // knob's level first, and the take-over changes nothing. Else a
+        // mute, which outlasts the host (captures/qlm-control-first,
+        // 648.7 s), keeps it from making the monitors louder.
+        BOOL knobLevel = handBack.kind == QLMHandBackKnobLevel;
+        if (!knobLevel && !mutes) {
             [self finishStop];
             return;
         }
-        // TRAP: the adapter takes over at the knob's position about 2.6 s
-        // after the host goes quiet (captures/qlm-control-first/notes.md).
-        // The knob is at or below the level qlm sends, so qlm sends the
-        // knob's level first, and the take-over changes nothing.
         self->_stopping = YES;
-        [self send:[self knobOrBottomLevel] then:nil];
+        if (knobLevel) {
+            [self send:[self knobOrBottomLevel] then:nil];
+        } else {
+            [self muteAll:YES];
+            // A record keeper takes only a running System's record, so this
+            // one carries mute all before the stop ends.
+            [self publish];
+        }
         [self afterSends:^{
             [self finishStop];
         }];
@@ -1305,25 +1323,28 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (QLMCallNumber)setAllMuted:(BOOL)muted {
     return [self call:^{
-        if (!self->_running) {
-            return;
+        if (self->_running) {
+            [self muteAll:muted];
         }
-        [self->_unstatedIDs unionSet:self->_mutedIDs];
-        if (muted) {
-            for (QLMMonitorRecord *monitor in self->_monitors) {
-                [self->_mutedIDs addObject:monitor.hardwareID];
-            }
-        } else {
-            [self->_mutedIDs removeAllObjects];
-        }
-        for (QLMMonitorRecord *monitor in self->_monitors) {
-            monitor.needsState = monitor.needsState || !monitor.isOn;
-            [self->_unstatedIDs addObject:monitor.hardwareID];
-        }
-        [self->_liftedIDs removeAllObjects];
-        self->_mutingAll = muted;
-        [self sendMuteAllState];
     }];
+}
+
+- (void)muteAll:(BOOL)muted {
+    [_unstatedIDs unionSet:_mutedIDs];
+    if (muted) {
+        for (QLMMonitorRecord *monitor in _monitors) {
+            [_mutedIDs addObject:monitor.hardwareID];
+        }
+    } else {
+        [_mutedIDs removeAllObjects];
+    }
+    for (QLMMonitorRecord *monitor in _monitors) {
+        monitor.needsState = monitor.needsState || !monitor.isOn;
+        [_unstatedIDs addObject:monitor.hardwareID];
+    }
+    [_liftedIDs removeAllObjects];
+    _mutingAll = muted;
+    [self sendMuteAllState];
 }
 
 // The adapter's own mute, at 01: on while mute all holds, with no mute

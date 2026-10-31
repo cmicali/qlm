@@ -2,6 +2,8 @@
 
 #include <math.h>
 
+#import <CoreServices/CoreServices.h>
+
 #import "QLMPreferences.h"
 #import "QLMSetup.h"
 
@@ -131,6 +133,22 @@ NSString *QLMHandBackLine(QLMSnapshot *snapshot) {
 BOOL QLMStopMayRaiseLevel(QLMSnapshot *snapshot) {
     BOOL holds = snapshot.busProblem == QLMBusProblemNone || snapshot.adapterProblem != QLMAdapterProblemNone;
     return snapshot.running && holds && snapshot.handBack.kind != QLMHandBackKnobLevel;
+}
+
+QLMQuitStep QLMQuitStepFor(BOOL stopMayRaiseLevel, OSType reason) {
+    if (!stopMayRaiseLevel) {
+        return QLMQuitStepStop;
+    }
+    switch (reason) {
+    case kAEQuitAll:
+    case kAELogOut:
+    case kAEReallyLogOut:
+    case kAERestart:
+    case kAEShutDown:
+        return QLMQuitStepMuteFirst;
+    default:
+        return QLMQuitStepAsk;
+    }
 }
 
 NSString *QLMBusProblemTitle(QLMSnapshot *snapshot) {

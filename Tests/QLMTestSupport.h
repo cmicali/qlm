@@ -36,6 +36,9 @@ NSData *QLMBytes(const uint8_t *bytes, size_t length);
 // A hand-back as System would give it.
 QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume);
 
+// The snapshot's monitor with this hardware ID, or nil.
+QLMMonitorState *_Nullable QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID);
+
 // The output report a message packs into, 64 bytes.
 NSData *QLMReportFor(QLMMessage message);
 

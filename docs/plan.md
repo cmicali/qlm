@@ -6,7 +6,7 @@
 
 This section is a snapshot of main: what has run on the real adapter, what each layer holds, what we decided and learned on the way, and what comes next. [protocol.md](protocol.md) holds the protocol itself, with a source for every fact, so this section links to it rather than restate it.
 
-Main passes 423 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
+Main passes 445 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
 
 ### What has run where
 
@@ -43,6 +43,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - says when a wake went out with no group active, so the woken monitors play without their group's settings (#53).
   - numbers each call to a command, and stamps each snapshot with the last call that ran on its queue before it. So a wait in `qlmctl` takes only a snapshot from after its own action, whatever else publishes meanwhile (#60).
   - counts a volume held by its 50 ms coalescing as work in flight. So a stamped call's frames are out or queued, and once a snapshot is idle, none is left to go out (#66).
+  - has a stop for when no one can answer. Where the take-over would be louder, or is unknown, it sends mute all before it lets go. It publishes the record with mute all while it still runs, so the app keeps it (#70).
 - Setups reads GLM 5 setup files strictly, designs the filters, and builds each monitor's DSP block, checked against every captured pass. It also watches the setup file, and calls back once a save settles (#28). The 8351B's block now has GLM's `43 00 02` and `4B 00 00 00 01`, built from the node's `GroupDelayCompensation` and `BassExtensionXO(Hz)`. That mapping is a guess, matched only at the captured 2 and 1, so the block refuses any other value. It also requires the group's `GroupDelayCompensation` and bass extension fields at their captured values, since those might drive the frames instead (#68).
 - `qlmctl` has `info`, `discover`, `poll`, and `setup`, and all of Phase 2's controls. The controls run behind gates: a ceiling the user states, at most −30 dB without `--allow-high-ceiling`, and a `--dry-run` that sends only discovery. Each also runs on the fake bus with `--fake`, or a capture with `--replay`. `dim` now sends GLM's whole sequence, `--muted` names the monitors already muted in GLM, and at exit `qlmctl` prints what the hand-back did (#27, #29, #32). `info` and `poll` print the calibration mic's two readings as raw counts. After a missed poll, the knob and mic lines say they are stale. `apply-group` prints GLM's whole apply. Over USB it's a supervised test, and it needs `--volume`, `--ceiling`, and, for a group with an 8351B, `--unverified-rate` (#32). `compare-apply` reads a setup file and a capture, opens no bus, and checks each of GLM's DSP passes against qlm's block, for the setup captures. A pass GLM cut short is checked against the block's start.
 - The app has the menu bar popover, a monitors window, Settings, a banner for adapter errors, and a panel that plays the fake bus. A setting, off by default, drives the real adapter instead. The banner offers to quit GLM when GLM holds the adapter. The app stops System at sleep and starts it at wake, posts a notification when a monitor drops off or runs hot, and offers to read the setup again when GLM saves it (#28). A Debug build answers a debug channel, whose verbs are the app's own controls, so a script can run a supervised test on the monitors one step at a time (#50, #51). `make check-release` fails if a Release build holds any of it (#51). `make install` puts the app in `/Applications`, and `qlmctl` in `~/.local/bin`, for daily use (#46). Since its first run (#43):
@@ -52,6 +53,8 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - The default ceiling is −30 dB, qlmctl's highest without `--allow-high-ceiling`, and the field saves as it ends editing (#52).
   - After a wake with no group active, it says the monitors play without their group's settings until GLM applies the group. System's snapshot carries that. With a group active, System already sends GLM's apply at wake to each monitor leased again (#53).
   - It names each monitor as the setup file does, and forgets the fake bus's monitors when the setting changes (#53).
+  - A logout, restart, or shutdown no longer waits on the louder hand-back's alert, which hung a Mac left to restart overnight. Where the user's quit asks, it mutes every monitor first, so the take-over can't make them louder. The record keeps mute all, so the next launch restates the mutes (#70).
+  - Its notifications play no sound, since the Mac's sound likely plays through the monitors. Each fires once until its cause clears: a dropped monitor back and on, or a hot one cooled. A sleep while dimmed, whose take-over is louder every time, alerts at most once a day. The alerts' rules have tests now (#70).
 
 ### The captures, the kits, and the docs
 
