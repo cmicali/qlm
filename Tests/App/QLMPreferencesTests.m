@@ -4,10 +4,11 @@
 #import "QLMPreferences.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMSystem.h"
+#import "QLMTestSupport.h"
 
 static NSData *QLMID(uint8_t last) {
     const uint8_t bytes[3] = {0x11, 0x4B, last};
-    return [NSData dataWithBytes:bytes length:3];
+    return QLMBytes(bytes, sizeof bytes);
 }
 
 // The app's preferences, over a defaults domain of the test's own.

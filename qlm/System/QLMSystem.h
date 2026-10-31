@@ -79,8 +79,10 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // The snapshot System would publish now. The latest one may lag, since
 // System publishes only once nothing is queued for the bus or in flight.
 // Decide from this one what must not miss a change, such as whether a stop
-// makes the monitors louder. TRAP: it waits for System's queue.
-- (QLMSnapshot *)snapshotNow;
+// makes the monitors louder. Nil when System's queue is still busy after
+// `seconds`: it waits up to 5 s on each report an adapter does not take.
+// Never from System's queue.
+- (nullable QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds;
 
 - (void)start;
 // Before it lets go, sends the knob's level when the knob is at or below the

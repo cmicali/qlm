@@ -5,9 +5,18 @@
 #include "QLMReplies.h"
 #import "QLMReportLink.h"
 #import "QLMSetupReader.h"
+#import "QLMSnapshotInternal.h"
 
 NSData *QLMBytes(const uint8_t *bytes, size_t length) {
     return [NSData dataWithBytes:bytes length:length];
+}
+
+QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *knob, NSNumber *volume) {
+    QLMHandBack *handBack = [[QLMHandBack alloc] init];
+    handBack.kind = kind;
+    handBack.knobDecibels = knob;
+    handBack.volumeDecibels = volume;
+    return handBack;
 }
 
 NSData *QLMReportFor(QLMMessage message) {

@@ -21,8 +21,12 @@ NSInteger QLMMeterCounts(NSInteger raw);
 // On the main queue: it keeps one formatter.
 NSString *QLMReplyAgeText(NSDate *_Nullable date);
 
-// What a stop would do to the level now, from the snapshot's hand-back.
-// Nil while no volume is set, and for no snapshot.
+// What the adapter's take-over does to the level, from the snapshot's
+// hand-back: the knob against qlm's level, or why the level is unknown.
+NSString *QLMTakeOverText(QLMSnapshot *snapshot);
+
+// The same as a line for Settings, "Now: the knob reads ...". Nil before
+// the adapter's status reads, and for no snapshot.
 NSString *_Nullable QLMHandBackLine(QLMSnapshot *_Nullable snapshot);
 
 // Whether a stop now may make the monitors louder: qlm holds the adapter,
@@ -30,10 +34,6 @@ NSString *_Nullable QLMHandBackLine(QLMSnapshot *_Nullable snapshot);
 // the adapter is refused or gone, qlm sent nothing, so a stop hands nothing
 // back.
 BOOL QLMStopMayRaiseLevel(QLMSnapshot *_Nullable snapshot);
-
-// What the take-over does to the level: the knob against qlm's level, or
-// why the level is unknown.
-NSString *QLMStopRiseText(QLMSnapshot *snapshot);
 
 // The banner's lines: the snapshot's adapterProblem, else its busProblem.
 // The title is nil when there is none.

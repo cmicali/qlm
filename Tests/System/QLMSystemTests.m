@@ -534,12 +534,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
 
     // The top stop, 0 dB, holds the volume at the -20 dB ceiling.
-    [_bus perform:^{
-        self->_bus.knobTenths = @(0);
-    }];
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return [snapshot.volumeDecibels isEqual:@(-20)];
-    }];
+    XCTAssertEqualObjects([self turnKnobTo:0].volumeDecibels, @(-20));
     const uint8_t ceiling[] = {QLMAddressBroadcast, 0x1F, 0x0C, 0xCC, 0xCC};
     levels = [self sentWithOpcode:0x1F from:before];
     XCTAssertGreaterThan(levels.count, 0u);
@@ -581,15 +576,8 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 // Surprises). Now the volume stops at the ceiling, and a turn that leaves it
 // there sends nothing. Below it, the knob moves the volume again.
 - (void)testTheKnobAboveTheCeilingHoldsTheVolumeAtIt {
-    _settings.cycleInterval = 10;
     _settings.adapterPollInterval = 0.01;
-    [self startSystem];
-    [self waitForDiscovery];
-    [_system setVolumeDecibels:-30];
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return [snapshot.volumeDecibels isEqual:@(-30)] && snapshot.idle;
-    }];
-
+    [self startWithKnob:@(-300) volume:@(-30)];
     XCTAssertEqualObjects([self turnKnobTo:-100].volumeDecibels, @(-20));
     NSUInteger before = _bus.sentMessages.count;
     for (NSNumber *tenths in @[@(-50), @(0), @(-150)]) {
@@ -612,23 +600,33 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 // that has not gone out yet: here, one below the knob, which makes the
 // take-over louder.
 - (void)testASnapshotOfNowSeesALevelNotYetPublished {
-    _settings.cycleInterval = 10;
-    _bus.knobTenths = @(-500);
-    [self startSystem];
-    [self waitForDiscovery];
-    [_system setVolumeDecibels:-30];
-    QLMSnapshot *published = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return [snapshot.volumeDecibels isEqual:@(-30)] && snapshot.idle;
-    }];
-    XCTAssertEqual(published.handBack.kind, QLMHandBackKnobLevel);
-
+    XCTAssertEqual([self startWithKnob:@(-500) volume:@(-30)].handBack.kind, QLMHandBackKnobLevel);
     [_system wake];  // its holds keep the bus busy
     [_system setVolumeDecibels:-60];
     [_time settle];
     XCTAssertEqual(_system.snapshot.handBack.kind, QLMHandBackKnobLevel);
-    QLMSnapshot *now = [_system snapshotNow];
+    QLMSnapshot *now = [_system snapshotNowWithin:1];
     XCTAssertEqualObjects(now.volumeDecibels, @(-60));
     XCTAssertEqual(now.handBack.kind, QLMHandBackLouder);
+}
+
+// System's queue may wait on a report the adapter does not take. A snapshot
+// of now then gives up, rather than hold its caller, the main queue.
+- (void)testASnapshotOfNowGivesUpOnABusyQueue {
+    [self startWithKnob:@(-500) volume:@(-30)];
+    dispatch_semaphore_t holding = dispatch_semaphore_create(0);
+    dispatch_semaphore_t release = dispatch_semaphore_create(0);
+    QLMFakeBus *bus = _bus;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^{
+        [bus perform:^{  // on System's queue
+            dispatch_semaphore_signal(holding);
+            dispatch_semaphore_wait(release, DISPATCH_TIME_FOREVER);
+        }];
+    });
+    dispatch_semaphore_wait(holding, DISPATCH_TIME_FOREVER);
+    XCTAssertNil([_system snapshotNowWithin:0.05]);
+    dispatch_semaphore_signal(release);
+    XCTAssertNotNil([_system snapshotNowWithin:1]);
 }
 
 // Never drive the bus while GLM runs: while the adapter is busy, the

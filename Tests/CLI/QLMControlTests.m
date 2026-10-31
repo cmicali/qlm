@@ -366,14 +366,6 @@ static NSArray<NSData *> *QLMPair(void) {
     XCTAssertEqual(status, EX_DATAERR);
 }
 
-static QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume) {
-    QLMHandBack *handBack = [[QLMHandBack alloc] init];
-    handBack.kind = kind;
-    handBack.knobDecibels = knob;
-    handBack.volumeDecibels = volume;
-    return handBack;
-}
-
 // qlmctl's note at exit says what the stop did. A louder take-over names
 // both levels.
 - (void)testTheHandBackNoteSaysWhatTheStopDid {

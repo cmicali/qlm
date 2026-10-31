@@ -66,6 +66,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         _defaults = defaults;
         _prefix = [prefix copy];
         _preferences = preferences;
+        [defaults registerDefaults:@{[self key:QLMVolumeName]: @(-40)}];
     }
     return self;
 }
@@ -161,9 +162,8 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     if (![snapshot.liftedHardwareIDs isEqualToSet:self.liftedHardwareIDs]) {
         self.liftedHardwareIDs = snapshot.liftedHardwareIDs;
     }
-    NSArray<NSDictionary *> *leases = QLMLeasesPlist(snapshot.knownLeases);
-    if (![leases isEqualToArray:[_defaults arrayForKey:[self key:QLMLeasesName]] ?: @[]]) {
-        [_defaults setObject:leases forKey:[self key:QLMLeasesName]];
+    if (![QLMLeasesPlist(snapshot.knownLeases) isEqualToArray:[_defaults arrayForKey:[self key:QLMLeasesName]] ?: @[]]) {
+        self.knownLeases = snapshot.knownLeases;
     }
 }
 
@@ -189,8 +189,6 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         [defaults registerDefaults:@{
             QLMCeilingKey: @([[QLMSystemSettings alloc] init].ceilingDecibels),
             QLMLowestKey: @(-60),
-            [QLMAdapterBusPrefix stringByAppendingString:QLMVolumeName]: @(-40),
-            [QLMFakeBusPrefix stringByAppendingString:QLMVolumeName]: @(-40),
             QLMWakesAtLaunchKey: @NO,
             QLMUsesAdapterKey: @NO,
         }];

@@ -2,6 +2,7 @@
 
 #import "QLMFormat.h"
 #import "QLMSnapshotInternal.h"
+#import "QLMTestSupport.h"
 
 // A running System's snapshot on the real adapter, with the knob and qlm's
 // level as given. A nil knob was never read, or no knob is in.
@@ -9,9 +10,16 @@ static QLMSnapshot *QLMSnapshotWith(QLMHandBackKind kind, NSNumber *_Nullable kn
     QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
     snapshot.running = YES;
     snapshot.adapter.hasStatus = YES;
-    snapshot.handBack.kind = kind;
-    snapshot.handBack.knobDecibels = knob;
-    snapshot.handBack.volumeDecibels = volume;
+    snapshot.handBack = QLMMakeHandBack(kind, knob, volume);
+    return snapshot;
+}
+
+// The same, with an adapter that is open but no use. busProblem is
+// NoAdapter meanwhile.
+static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBackKind kind, NSNumber *knob, NSNumber *volume) {
+    QLMSnapshot *snapshot = QLMSnapshotWith(kind, knob, volume);
+    snapshot.busProblem = QLMBusProblemNoAdapter;
+    snapshot.adapterProblem = problem;
     return snapshot;
 }
 
@@ -50,27 +58,35 @@ static QLMSnapshot *QLMSnapshotWith(QLMHandBackKind kind, NSNumber *_Nullable kn
 // be louder. PR #49 keeps its knob reading for this.
 - (void)testAStopWithTheAdaptersProblemMayStillRaiseTheLevel {
     for (NSNumber *problem in @[@(QLMAdapterProblemUnresponsive), @(QLMAdapterProblemLostTrack)]) {
-        QLMSnapshot *louder = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
-        louder.busProblem = QLMBusProblemNoAdapter;
-        louder.adapterProblem = problem.integerValue;
-        XCTAssertTrue(QLMStopMayRaiseLevel(louder), @"%@", problem);
-        QLMSnapshot *quieter = QLMSnapshotWith(QLMHandBackKnobLevel, @(-60), @(-50));
-        quieter.busProblem = QLMBusProblemNoAdapter;
-        quieter.adapterProblem = problem.integerValue;
-        XCTAssertFalse(QLMStopMayRaiseLevel(quieter), @"%@", problem);
+        QLMAdapterProblem adapterProblem = problem.integerValue;
+        XCTAssertTrue(QLMStopMayRaiseLevel(QLMSnapshotWithProblem(adapterProblem, QLMHandBackLouder, @(-10), @(-50))), @"%@", problem);
+        XCTAssertFalse(QLMStopMayRaiseLevel(QLMSnapshotWithProblem(adapterProblem, QLMHandBackKnobLevel, @(-60), @(-50))), @"%@", problem);
     }
 }
 
-- (void)testTheRiseTextSaysWhy {
-    XCTAssertEqualObjects(QLMStopRiseText(QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50))),
+// The knob is read before the level, as in qlmctl's note.
+- (void)testTheTakeOverTextSaysWhy {
+    XCTAssertEqualObjects(QLMTakeOverText(QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50))),
                           @"The knob reads −10.0 dB, above qlm's −50.0 dB. At the take-over, the level would rise 40.0 dB.");
-    XCTAssertEqualObjects(QLMStopRiseText(QLMSnapshotWith(QLMHandBackUnknown, nil, @(-50))),
-                          @"No knob is in, so the level at the take-over is unknown.");
+    XCTAssertEqualObjects(QLMTakeOverText(QLMSnapshotWith(QLMHandBackKnobLevel, @(-60), @(-50))),
+                          @"The knob reads −60.0 dB, at or below qlm's −50.0 dB. At the take-over, the level would not rise.");
+    XCTAssertEqualObjects(QLMTakeOverText(QLMSnapshotWith(QLMHandBackUnknown, nil, nil)),
+                          @"The level at the take-over is unknown, since no knob is in.");
     QLMSnapshot *unread = QLMSnapshotWith(QLMHandBackUnknown, nil, @(-50));
     unread.adapter.hasStatus = NO;
-    XCTAssertEqualObjects(QLMStopRiseText(unread), @"qlm has not read the knob yet, so the level at the take-over is unknown.");
-    XCTAssertEqualObjects(QLMStopRiseText(QLMSnapshotWith(QLMHandBackUnknown, @(-10), nil)),
-                          @"qlm has set no level, so the level at the take-over is unknown.");
+    XCTAssertEqualObjects(QLMTakeOverText(unread), @"The level at the take-over is unknown, since qlm has not read the knob yet.");
+    XCTAssertEqualObjects(QLMTakeOverText(QLMSnapshotWith(QLMHandBackUnknown, @(-10), nil)),
+                          @"The level at the take-over is unknown, since qlm has set no level.");
+}
+
+// Settings' line says the same, from the adapter's first status on.
+- (void)testSettingsLineSaysTheSame {
+    XCTAssertEqualObjects(QLMHandBackLine(QLMSnapshotWith(QLMHandBackUnknown, nil, @(-50))),
+                          @"Now: the level at the take-over is unknown, since no knob is in.");
+    QLMSnapshot *unread = QLMSnapshotWith(QLMHandBackUnknown, nil, @(-50));
+    unread.adapter.hasStatus = NO;
+    XCTAssertNil(QLMHandBackLine(unread));
+    XCTAssertNil(QLMHandBackLine(nil));
 }
 
 #pragma mark - The banner
@@ -78,21 +94,17 @@ static QLMSnapshot *QLMSnapshotWith(QLMHandBackKind kind, NSNumber *_Nullable kn
 // PR #49: read adapterProblem before busProblem, which is NoAdapter while
 // it is set. Each says what to do, and what the take-over does.
 - (void)testTheBannerShowsTheAdaptersProblem {
-    QLMSnapshot *unresponsive = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
-    unresponsive.busProblem = QLMBusProblemNoAdapter;
-    unresponsive.adapterProblem = QLMAdapterProblemUnresponsive;
+    QLMSnapshot *unresponsive = QLMSnapshotWithProblem(QLMAdapterProblemUnresponsive, QLMHandBackLouder, @(-10), @(-50));
     XCTAssertEqualObjects(QLMBusProblemTitle(unresponsive), @"The adapter stopped answering");
     NSString *detail = QLMBusProblemDetail(unresponsive);
     XCTAssertTrue([detail containsString:@"about 7 s"], @"%@", detail);
-    XCTAssertTrue([detail containsString:QLMStopRiseText(unresponsive)], @"%@", detail);
+    XCTAssertTrue([detail containsString:QLMTakeOverText(unresponsive)], @"%@", detail);
 
-    QLMSnapshot *lost = QLMSnapshotWith(QLMHandBackKnobLevel, @(-60), @(-50));
-    lost.busProblem = QLMBusProblemNoAdapter;
-    lost.adapterProblem = QLMAdapterProblemLostTrack;
+    QLMSnapshot *lost = QLMSnapshotWithProblem(QLMAdapterProblemLostTrack, QLMHandBackKnobLevel, @(-60), @(-50));
     XCTAssertEqualObjects(QLMBusProblemTitle(lost), @"qlm lost track of the adapter");
     detail = QLMBusProblemDetail(lost);
     XCTAssertTrue([detail containsString:@"Unplug the adapter"], @"%@", detail);
-    XCTAssertTrue([detail containsString:@"at or below qlm's"], @"%@", detail);
+    XCTAssertTrue([detail containsString:QLMTakeOverText(lost)], @"%@", detail);
 }
 
 - (void)testTheBannerShowsTheBusProblemOtherwise {

@@ -1598,12 +1598,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return state;
 }
 
-// TRAP: from System's queue, it would wait for itself.
-- (QLMSnapshot *)snapshotNow {
+- (QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds {
     __block QLMSnapshot *snapshot = nil;
-    dispatch_sync(_queue, ^{
+    dispatch_semaphore_t made = dispatch_semaphore_create(0);
+    dispatch_async(_queue, ^{
         snapshot = [self makeSnapshot];
+        dispatch_semaphore_signal(made);
     });
+    if (dispatch_semaphore_wait(made, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(seconds * NSEC_PER_SEC))) != 0) {
+        return nil;
+    }
     return snapshot;
 }
 
