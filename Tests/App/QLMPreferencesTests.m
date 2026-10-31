@@ -215,6 +215,28 @@ static NSData *QLMID(uint8_t last) {
     XCTAssertEqual(fake.knownLeases.count, 0u);
 }
 
+// AGENTS.md's Safety rule: the app applies no group with a model whose filter
+// design rate is unverified, the 8351B, so System refuses each one. The app's
+// settings are QLMSystemSettings' defaults, its ceiling, and either bus's
+// fill, as QLMAppDelegate makes them, and none allows an unverified rate.
+// No source of the app's sets allowsUnverifiedRates.
+- (void)testTheAppNeverAllowsAnUnverifiedRate {
+    [_preferences.adapterBus keepFromSnapshot:[self runningSnapshot]];
+    for (QLMBusPreferences *bus in @[_preferences.adapterBus, _preferences.fakeBus]) {
+        QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+        settings.ceilingDecibels = _preferences.ceilingDecibels;
+        [bus fillSettings:settings];
+        XCTAssertFalse(settings.allowsUnverifiedRates);
+    }
+    NSString *app = QLMRepositoryPath(@"qlm/App");
+    NSArray<NSString *> *sources = [NSFileManager.defaultManager contentsOfDirectoryAtPath:app error:NULL];
+    XCTAssertGreaterThan(sources.count, 0u);
+    for (NSString *name in sources) {
+        NSString *text = [NSString stringWithContentsOfFile:[app stringByAppendingPathComponent:name] encoding:NSUTF8StringEncoding error:NULL];
+        XCTAssertFalse([text containsString:@"allowsUnverifiedRates"], @"%@", name);
+    }
+}
+
 // A snapshot from before System starts carries an empty record, so it keeps
 // nothing. One from after a stop keeps the volume only.
 - (void)testOnlyARunningSystemsRecordIsKept {

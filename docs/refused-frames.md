@@ -1,6 +1,6 @@
 # Frames GLM sends that qlm does not
 
-GLM sends some frames that qlm refuses or leaves out. The allowlist refuses `05`, `43`, `4B`, `22` and `51` to the adapter, and a broadcast `03`. `testEveryOutputReportRepacksByteForByte`, in `Tests/GLMProtocol/QLMGoldenTests.m`, pins that set. The allowlist accepts the rest. Broadcast `2D 00`, and `3C`, `3E`, and `42` to a subwoofer, were refused too, and are now allowed with exactly GLM's payloads. System now sends them, broadcast `3D`, and `2B` to the adapter, as GLM does. It does not send the wake at startup. This doc says what each one does, and whether qlm needs it. [The group apply](#the-group-apply) says what System's apply sends against GLM's.
+GLM sends some frames that qlm refuses or leaves out. The allowlist refuses `05`, `22` and `51` to the adapter, and a broadcast `03`. `testEveryOutputReportRepacksByteForByte`, in `Tests/GLMProtocol/QLMGoldenTests.m`, pins that set. The allowlist accepts the rest. Broadcast `2D 00`, `3C`, `3E`, and `42` to a subwoofer, and `43` and `4B` to the 8351B, were refused too, and are now allowed with exactly GLM's payloads. System now sends them, broadcast `3D`, and `2B` to the adapter, as GLM does. It does not send the wake at startup. This doc says what each one does, and whether qlm needs it. [The group apply](#the-group-apply) says what System's apply sends against GLM's.
 
 A time is seconds into that capture's `reports.txt`. "hlm §7" is section 7 of hlm's spec, `docs/Genelec GLM Protocol.13.md` in robcazzaro/hlm, revision 13, at commit `c08ced9`. Its facts are restated here in our own words. **Guess:** marks a guess. The code is as of this doc's last change.
 
@@ -10,7 +10,7 @@ A time is seconds into that capture's `reports.txt`. "hlm §7" is section 7 of h
 | --- | --- | --- | --- |
 | `05 04 …` | Every monitor's DSP block, and a group switch's routing pass | Refused | No. AGENTS.md forbids `05`. |
 | `3C`, `3E`, `42` | Each subwoofer's DSP block | Allowed, `00 00` to a session only. Sent in each subwoofer's block. | Phase 3, to match GLM's apply. Done. |
-| `43 00 02`, `4B 00 00 00 01` | Each 8351B's DSP block | Refused | Phase 3, once the 8351B's rate is verified |
+| `43 00 02`, `4B 00 00 00 01` | Each 8351B's DSP block | Allowed, these payloads to a session only. Built from the 8351B's node, and sent in its block. | Phase 3, to match GLM's apply. Done. The 8351B's refusal still stands. |
 | `FF 2D 00` | With `FF 3D 00 00`: startup, wake, group switch, dim, and knob unplug | Allowed, as a broadcast only. Sent in dim, and at the end of each group apply. | Phase 2, for dim. Phase 3, for the apply. Done. |
 | `FF 3D 00 00` | Right after every `FF 2D 00` | Accepted. Sent with `2D 00`. | As for `2D` |
 | `01 22` | Once per connection | Refused | No |
@@ -101,15 +101,19 @@ Across 12 captures: `3C` 52 times, `3E` 52, and `42` 26.
 
 ### `43 00 02` and `4B 00 00 00 01`, to the 8351B
 
-**Where.** Only to the two 8351B. `43 00 02` follows the level pair `10 01 00` and `10 01 09`, before the PEQ slots. `4B 00 00 00 01` follows `3B`, before `3D`. In `startup-idle`: to `03` at 8.650 and 8.725 s, and to `06` at 9.048 and 9.116 s. Across 15 captures: `43` 47 times and `4B` 47, always with these payloads.
+**Where.** Only to the two 8351B. `43 00 02` follows the level pair `10 01 00` and `10 01 09`, before the PEQ slots. `4B 00 00 00 01` follows `3B`, before `3D`. In `startup-idle`: to `03` at 8.650 and 8.725 s, and to `06` at 9.048 and 9.116 s. Across the 15 captures `QLMDSPBlockGoldenTests` reads: `43` 47 times and `4B` 47, always with these payloads.
 
 **What the captures show.** The 8351B answers `01 09`. One `01 7E` came from an 8351B still waking (`standby-wake`, 46.784 s, to `11`). No later reply can be tied to them. The payloads stay put when the group changes. Main 2x1 has a 60 Hz crossover and `RateFlatness` and `RateCorrelated` at −1 (`startup-idle`, `3B 00 3C` at 8.723 s). Main 4x2 has 85 Hz and both at 0 (`standby-wake`, `3B 00 55` at 46.775 s). Both send the same `43` and `4B`. So do the Left's blocks after its bands and shelves changed (`setup-b-peq-8351b`, 182.460 and 300.007 s).
 
-**The setup file.** The 8351B nodes, class `ThreewayGen2`, carry fields the 8330A nodes lack. Two hold the same value in every group: `GroupDelayCompensation:2` and `BassExtensionXO(Hz):1`. **Guess:** `43 00 02` carries the first, and `4B 00 00 00 01` the second, which sits next to the crossover as `4B` follows `3B`. Against the first: the 7350A also has `GroupDelayCompensation:2`, and gets no `43`.
+**The setup file.** The 8351B nodes, class `ThreewayGen2`, carry fields the 8330A nodes lack. Two hold the same value in every group: `GroupDelayCompensation:2` and `BassExtensionXO(Hz):1`. No other node has either one, the subwoofers' included. **Guess:** `43 00 02` carries the first, and `4B 00 00 00 01` the second, which sits next to the crossover as `4B` follows `3B`. Against the first: each group has a `GroupDelayCompensation:2` of its own, and no other model gets a `43`. This doc once said the 7350A's node has the field. It doesn't, in `Main.sam` or in any setup in `captures/`. The group's field is the one every monitor shares.
 
 **hlm.** §7 has neither opcode. §4 and Appendix B item 1 leave the 83x1 filter design rate open.
 
-**Need.** Phase 3, but only after the 8351B's rate is verified. Until then AGENTS.md refuses any group apply with an 8351B, so qlm never needs them. Then allow exactly `43 00 02` and `4B 00 00 00 01`, to the 8351B only, where GLM sends them. Neither is on the never-send list.
+**Need.** Phase 3, so that qlm's apply is GLM's byte for byte. Neither is on the never-send list.
+
+**Now.** qlm builds both. `QLMDSPBlock` takes `43 00 vv` from the node's `GroupDelayCompensation`, and `4B 00 00 00 vv` from its `BassExtensionXO(Hz)`, in GLM's places. It does so for any three-way, class `ThreewayGen2`, since it lays out the rest of the block by class too. The 8351B is the only three-way in the captures. The mapping is the guess above, matched only at 2 and 1. So the block refuses an 8351B whose fields hold anything else, or are missing, with `QLMDSPBlockErrorThreeWay`, as it refuses a subwoofer's LFE fields. The group's own `GroupDelayCompensation`, `Group_BE_Mode`, `Group_BE_XOMin`, and `Group_BE_XOMax` might drive the frames instead. They hold 2, 0, 150, and 250 in all 20 groups of the five setups in the repository, so the block requires those too, with the same refusal. The allowlist takes exactly `43 00 02` and `4B 00 00 00 01`, and the encoder sends them only to a session. `QLMFrameTests` covers both. `QLMDSPBlockGoldenTests` checks all 47 of the 8351B's captured passes against qlm's block, frame for frame, with nothing left out. They all match.
+
+The 8351B's refusal is unchanged. System still refuses a group apply with an 8351B, since its design rate is unverified, except in `qlmctl apply-group`'s supervised test behind `--unverified-rate`. The app refuses always. That supervised test now sends `43` and `4B` as GLM does. `apply-group --dry-run` prints them, and still ends with REFUSED. What the frames set, and whether the guess holds at other values, needs Part G of [setup-captures.md](setup-captures.md).
 
 ### Broadcast `2D 00` and `3D 00 00`
 
@@ -198,11 +202,11 @@ Mute all sends the volume once (46.188 s), then `01 2B 01`, then `2B 03` to each
 
 **Where.** Twice, 0.6 ms apart, in `setup-b-peq-8351b` at 22.461 s. No other capture holds it. The payload is the bare opcode.
 
-**What the captures show.** A broadcast gets no reply. GLM polled no monitor after it. It asked the adapter for `39`, `19 01`, and `51 82`, sent the wake pairs, and at its next probe, 1.5 s after their last poll, all six monitors answered. GLM leased them `0B` to `10` and applied Main 4x2. A monitor that holds a lease ignores the probe, and the shortest lapse we've timed is 2.45 s. So something dropped the leases: the `03`, or the wake pairs after it. A wake drops a woken monitor's lease, but no capture shows a wake sent to monitors already on. GLM didn't relaunch: it kept counting sessions. The owner made no change then. Opening Main.sam in `setup-j-restore` re-read the adapter too, but sent no `03` and leased nothing.
+**What the captures show.** A broadcast gets no reply. GLM polled no monitor after it. It asked the adapter for `39`, `19 01`, and `51 82`, sent the wake pairs, and at its next probe, 1.5 s after their last poll, all six monitors answered. GLM leased them `0B` to `10` and applied Main 4x2. A monitor that holds a lease ignores the probe, and the shortest lapse we've timed is 2.45 s. So something dropped the leases: the `03`, or the wake pairs after it. `setup-j-restore` rules out the wake. Opening Main.sam there, GLM sent the same three wake pairs to six monitors that were on, with every other broadcast of setup B's window but the `03` and the level. The probe after them, at 34.993 s, got no answer, and each monitor answered its next poll at its session. So the `03` dropped the leases (`testABroadcast03DropsEveryLease`). GLM didn't relaunch: it kept counting sessions. The owner made no change then. Opening Main.sam in `setup-j-restore` re-read the adapter too, but sent no `03` and leased nothing.
 
 **hlm.** §7 has no opcode `03`. `03` appears only as `3A 03`, power.
 
-**Guess:** `03` tells every monitor to drop its lease, so GLM can set the system up again from the probe. The capture can't tell it from the wake.
+**Guess:** GLM sends it to set the system up again from the probe. Nothing in the capture shows what set it off.
 
 **Need.** None. qlm takes leases back by serial, and never needs to drop them. Keep it refused.
 
@@ -212,7 +216,7 @@ Mute all sends the volume once (46.188 s), then `01 2B 01`, then `2B 03` to each
 | --- | --- | --- |
 | `2D 00` | Allowed: this payload only, as a broadcast only. System sends it right before `FF 3D 00 00`. | Done, in Phase 2 for dim's byte match |
 | `3C 00 00`, `3E 00 00`, `42 00 00` | Allowed: these payloads only, to a session only. System sends them to subwoofers only. | Done, in Phase 3 |
-| `43 00 02`, `4B 00 00 00 01` | Allow these payloads only. System sends them to the 8351B only. | Once the 8351B's rate is verified |
+| `43 00 02`, `4B 00 00 00 01` | Allowed: these payloads only, to a session only. System sends them to the 8351B only. | Done, in Phase 3 |
 | `05 …` | Keep refused. | Never. AGENTS.md forbids it. |
 | `01 22`, `01 51 82` | Keep refused. | Not needed |
 | `FF 03` | Keep refused. | Not needed |
@@ -222,7 +226,7 @@ The allowlist accepts by opcode, with finer checks for `02`, `10`, and `3A`. `2D
 
 ## The group apply
 
-GLM sends two kinds of apply. `QLMApplySequence` builds both, System sends them, and `qlmctl apply-group --dry-run` prints them. `QLMApplyGoldenTests` diffs each against all eight captured applies, once GLM's cycle and the frames qlm skips are left out. "In device order" is the setup's device list. "On" means the monitor's last telemetry says on.
+GLM sends two kinds of apply. `QLMApplySequence` builds both, System sends them, and `qlmctl apply-group --dry-run` prints them. `QLMApplyGoldenTests` diffs each against all eight captured applies, once GLM's cycle and the generator stop are left out. "In device order" is the setup's device list. "On" means the monitor's last telemetry says on.
 
 **At launch and wake** (`startup-idle`, 8.534 to 9.901 s). For each new monitor, in lease order: `FF 04`, a subwoofer's `3B`, `05 04`, `17 01`, a two-way's extra `FF 04`, the rest of its block, `39`, and `19 01`. Off nodes get their block too. Then a round to the other monitors that are on, and the pair. Each new monitor gets its state right after its next poll. System sends this as its first apply, and to any monitor leased while a group is active, once the probe finds no more.
 
@@ -230,7 +234,7 @@ GLM sends two kinds of apply. `QLMApplySequence` builds both, System sends them,
 
 1. `FF 1F 00 00 08`, then the duck, `FF 1F 00 00 02`.
 2. `FF 3A 03 7F` twice.
-3. The routing pass, in the group's node order. A node that is on gets `3A 03 01` twice, and one that is off `3A 03 02`. A subwoofer gets `3B`. Then `05 04`, the state if the monitor is on, the routing frames, and the state again.
+3. The routing pass, in the group's node order. A node that is on gets `3A 03 01` twice, and one that is off `3A 03 02`. A subwoofer gets `3B`. Then `05 04`, the state if the monitor is on, the routing frames, and the state again. A monitor the switch leaves off gets its routing too, with the new group's crossover, and no DSP pass (`setup-a-baseline`, the 7350A at 40.049 s).
 4. A round, then the DSP pass in device order: `FF 04` for every node, and the block of each one that is on.
 5. `01 2B 00`, two rounds, the volume three times, a round, and the pair.
 
@@ -243,9 +247,9 @@ The tests match byte for byte for the apply at launch, the one after a wake, and
 - **GLM left out the last round and the pair** in `group-switch-main-2x2-main-2x1`, though it sent them in the other five.
 - **A monitor woken into the group loses its lease.** GLM then applies its block at the new lease beside the switch's restore. System sends the restore, then the block.
 - **GLM ran the switch twice** in `group-switch-main-2x1-main-2x2`, after the 7350A lost its lease. The test compares the first pass.
-- **GLM cuts a pass short when it leases the monitor again.** In `setup-b-peq-8351b`, at 183.450 and 300.973 s, the 7350A took a new session mid-pass. GLM stopped its pass at the old one, and sent the whole block at the new one. The short pass is the block's start, frame for frame, and `compare-apply` checks it as that.
+- **GLM cuts a pass short when it leases the monitor again.** In `setup-b-peq-8351b`, at 183.450 and 300.973 s, the 7350A took a new session mid-pass. GLM stopped its pass at the old one, and sent the whole block at the new one. The short pass is the block's start, frame for frame, and `compare-apply` checks it as that. No frame before a pass's `3D` marks the cut, since GLM's cycle polls a session and sends its state mid-pass (`setup-j-restore`, 35.009 and 35.013 s, to `0E`). So `compare-apply` ends a short pass at the next `17 01`.
 
-Any group with an 8351B is still refused for a real apply: every node's block must build at a verified rate, on or off. The dry run still prints such a group, and ends with REFUSED.
+Any group with an 8351B is still refused for a real apply: every node's block must build at a verified rate, on or off. The dry run still prints such a group, `43` and `4B` included, and ends with REFUSED.
 
 ## Open
 
@@ -259,10 +263,10 @@ Any group with an 8351B is still refused for a real apply: every node's block mu
    Pick levels where `43` reads well above `80` at both. Keep both low, as AGENTS.md asks. The bus tap reads the adapter's `F0 1F` level directly. A setup with no knob attached is a separate case.
 2. **Whether `01 22` or `01 51 82` changes the adapter's bus behavior,** such as its defer broadcast. The bus tap, with qlm running without them, can show it.
 3. **What the `2D` and `3D` pair does to the subwoofers,** and whether their busy marker means a write to flash.
-4. **What `3C`, `3E`, `42`, `43`, and `4B` carry.** A capture of a setup change to the LFE fields, `GroupDelayCompensation`, or `BassExtensionXO` would map them.
+4. **What `3C`, `3E`, `42`, `43`, and `4B` carry.** A capture of a setup change to the LFE fields, `GroupDelayCompensation`, or `BassExtensionXO` would map them. qlm builds `43` and `4B` from the 8351B's two fields, matched only at 2 and 1.
 5. **What the adapter does with `01 2B 01`,** and whether a mute survives the hand-back.
 6. **What `82` selects in `01 51 82`,** and what `219000` is.
-7. **What a broadcast `03` does, and what made GLM send it** in `setup-b-peq-8351b`.
+7. **What made GLM send a broadcast `03`** in `setup-b-peq-8351b`. It drops every lease.
 
 ## Sources
 

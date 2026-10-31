@@ -189,7 +189,7 @@ Start the Pi capture now, if you record.
 
 ### Step 5: qlm from a cold start
 
-qlm leaves out two frames GLM sends to the 8351B: `43 00 02` and `4B 00 00 00 01` ([refused-frames.md](refused-frames.md)). GLM sends the same payloads in every group. So in step 3, the 8351B still held GLM's values, and the measurement could not tell whether they matter. A monitor switched on fresh holds whatever its flash has. This step measures qlm's apply on such monitors. It is also what the app will do: the apply at launch, on monitors just switched on.
+qlm leaves out the generator stop GLM sends each monitor, `05 04 …` ([refused-frames.md](refused-frames.md)). It used to leave out the 8351B's `43 00 02` and `4B 00 00 00 01` too, and now sends them as GLM does. In step 3, the monitors still held what GLM's apply left, so the measurement could not tell whether the stop matters. A monitor switched on fresh holds whatever its flash has. This step measures qlm's apply on such monitors. It is also what the app will do: the apply at launch, on monitors just switched on.
 
 1. Quit GLM. The power cycle next drops every lease, so there is no need to wait.
 2. With no signal playing, switch every monitor off at its power switch. Wait 10 s. Switch them all on, and wait 60 s.
@@ -215,7 +215,7 @@ qlm leaves out two frames GLM sends to the 8351B: `43 00 02` and `4B 00 00 00 01
 
 6. Let `qlmctl` run out. Relaunch GLM.
 
-A pass here, with step 3's, says that what qlm leaves out does not change the sound. A fail here, after step 3 passed, points at those two frames, or at other state the flash holds.
+A pass here, with step 3's, says that what qlm leaves out does not change the sound. A fail here, after step 3 passed, points at the generator stop, or at other state the flash holds.
 
 Stop the Pi capture, if you record.
 
@@ -282,7 +282,7 @@ Routing is which input and AES channel each monitor plays: its `40` frames, from
 | A difference only near the crossover | A subwoofer's block, a delay, or the crossover (`3B`). Check the System Delays. |
 | A PEQ band's shape, at the wrong frequency | A band designed at the wrong rate. The dry run rules this out for the frames GLM sends, so look for a setup file that differs from GLM's. |
 | Small differences scattered across the band, worst at the edges | Noise, or something moved. Steps 1.6 and 4.4 show which. |
-| A pass in step 3, and a fail in step 5 | The frames qlm leaves out, or other state in the monitors' flash. |
+| A pass in step 3, and a fail in step 5 | The generator stop qlm leaves out, or other state in the monitors' flash. |
 
 `--table` prints every compared frequency, for a closer look. Look at the unsmoothed measurements in REW too.
 

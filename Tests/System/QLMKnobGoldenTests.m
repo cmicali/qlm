@@ -3,6 +3,7 @@
 #include <math.h>
 
 #import "QLMFakeBus.h"
+#import "QLMKnob.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
 #include "QLMCommands.h"
@@ -79,6 +80,39 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
     return NAN;
 }
 
+// The knob's position in an answered 01 08, the first of its pair, the only
+// one GLM reads, or NO. `lastPoll` is the time of the poll before.
+static BOOL QLMFirstKnobReading(QLMCaptureExchange *exchange, NSTimeInterval *lastPoll, NSInteger *tenths) {
+    QLMMessage message = exchange.message;
+    if (message.address != QLMAddressAdapter || message.payload[0] != 0x08 || !exchange.answered) {
+        return NO;
+    }
+    BOOL first = exchange.time - *lastPoll > 0.03;
+    *lastPoll = exchange.time;
+    QLMMessage reply = exchange.reply;
+    QLMAdapterStatus status;
+    if (!first || QLMReplyAdapterStatus(&reply, &status) != QLMAdapterStatusOK || !status.hasKnobPosition) {
+        return NO;
+    }
+    *tenths = status.knobTenths;
+    return YES;
+}
+
+// An 01 2B within 150 ms of the change in the reading at `changed`, as each
+// of GLM's knob bursts has. `changed` is below 0 before any change.
+static BOOL QLMIsKnobBurst(QLMCaptureExchange *exchange, NSTimeInterval changed) {
+    QLMMessage message = exchange.message;
+    return message.address == QLMAddressAdapter && message.payload[0] == 0x2B && changed >= 0 && exchange.time - changed <= 0.15;
+}
+
+// The level of a volume frame, as QLMLevelOfRecord gives it, or NAN.
+static double QLMLevelOfMessage(QLMMessage message) {
+    if (message.address != QLMAddressBroadcast || message.payload[0] != 0x1F) {
+        return NAN;
+    }
+    return QLMLevelOfRecord(QLMAdapterRecord(&message));
+}
+
 @implementation QLMKnobGoldenTests
 
 // Replays the capture's knob readings. Checks `compared` rest points, and
@@ -94,31 +128,21 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
     NSTimeInterval lastPoll = -1;
     NSTimeInterval lastChange = -1;
     for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
-        QLMMessage message = exchange.message;
-        double level = QLMLevelOfRecord(QLMAdapterRecord(&message));
+        double level = QLMLevelOfMessage(exchange.message);
         if (!isnan(level)) {
             [levels addObject:QLMMoment(exchange.time, level)];
         }
-        if (message.address != QLMAddressAdapter) {
-            continue;
-        }
-        if (message.payload[0] == 0x2B && exchange.time - lastChange <= 0.15) {
+        if (QLMIsKnobBurst(exchange, lastChange)) {
             [bursts addObject:QLMMoment(exchange.time, QLMLevelOfTenths(readings.lastObject.value))];
         }
-        if (message.payload[0] != 0x08 || !exchange.answered) {
+        NSInteger tenths = 0;
+        if (!QLMFirstKnobReading(exchange, &lastPoll, &tenths)) {
             continue;
         }
-        BOOL first = exchange.time - lastPoll > 0.03;
-        lastPoll = exchange.time;
-        QLMMessage reply = exchange.reply;
-        QLMAdapterStatus status;
-        if (!first || QLMReplyAdapterStatus(&reply, &status) != QLMAdapterStatusOK || !status.hasKnobPosition) {
-            continue;
-        }
-        if (readings.count > 0 && readings.lastObject.value != status.knobTenths) {
+        if (readings.count > 0 && readings.lastObject.value != tenths) {
             lastChange = exchange.time;
         }
-        [readings addObject:QLMMoment(exchange.time, status.knobTenths)];
+        [readings addObject:QLMMoment(exchange.time, tenths)];
     }
 
     // Each rest point, as the index of its last reading.
@@ -223,6 +247,106 @@ static double QLMLastLevelSent(NSArray<NSData *> *sent) {
 // the bottom.
 - (void)testAJustPluggedKnobIsGLMsInStandbyWake {
     [self replay:@"standby-wake" compared:6 stale:0];
+}
+
+// GLM's knob bursts in `scenario`: the level frames, then 01 2B, within
+// 150 ms of a change in the reading. Each carries the level of the reading
+// it answers, or the level of the reading GLM answered before it, or rested
+// at. Counts the second kind in `lagged`.
+- (NSUInteger)burstsIn:(NSString *)scenario lagged:(NSUInteger *)lagged {
+    NSUInteger bursts = 0;
+    NSTimeInterval lastPoll = -1;
+    NSTimeInterval changed = -1;
+    NSInteger tenths = 0;
+    double followed = NAN;
+    double level = NAN;
+    BOOL afterLevel = NO;
+    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+        double sent = QLMLevelOfMessage(exchange.message);
+        if (!isnan(sent)) {
+            level = sent;
+            afterLevel = YES;
+            continue;
+        }
+        NSInteger reading = 0;
+        if (QLMFirstKnobReading(exchange, &lastPoll, &reading)) {
+            if (isnan(followed)) {
+                followed = QLMLevelOfTenths(reading);
+            } else if (reading != tenths) {
+                changed = exchange.time;
+            }
+            tenths = reading;
+        } else if (afterLevel && QLMIsKnobBurst(exchange, changed)) {
+            double answered = QLMLevelOfTenths(tenths);
+            if (level != answered) {
+                XCTAssertEqual(level, followed, @"%@, %.3f s", scenario, exchange.time);
+                *lagged += 1;
+            }
+            followed = answered;
+            bursts += 1;
+        }
+        afterLevel = NO;
+    }
+    return bursts;
+}
+
+// Across the seven captures with the knob, no burst carries a level but the
+// reading's or the one GLM answered before it. That lag is GLM's, and comes
+// most in a fast turn: 52 of knob-sweep's 168 bursts.
+- (void)testEachBurstCarriesTheReadingsLevelOrTheOneBefore {
+    NSUInteger lagged = 0;
+    NSUInteger bursts = [self burstsIn:@"knob-sweep" lagged:&lagged];
+    XCTAssertEqual(bursts, 168u);
+    XCTAssertEqual(lagged, 52u);
+    for (NSString *scenario in @[@"sleep-wake-darkwake", @"sleep-wake-no-sleep", @"startup-idle", @"startup-idle-mic",
+                                 @"standby-wake", @"unplug-proxy-hang"]) {
+        bursts += [self burstsIn:scenario lagged:&lagged];
+    }
+    XCTAssertEqual(bursts, 308u);
+    XCTAssertEqual(lagged, 72u);
+}
+
+// standby-wake starts with the knob just plugged in, reading -1001. GLM
+// bursts for a change of one tenth at 0.983 s, not for the changes at 1.335,
+// 1.548, and 1.657 s, and again at 1.766 s, 20 tenths on. That is GLM's rule
+// if the plug's first reading started a spell 1.21 to 1.55 s before the
+// capture: it is 13 tenths from -988, the last reading GLM followed before
+// the knob came out in volume-sweep, at 25.44 s.
+- (void)testAKnobJustPluggedInIsTheTailOfASpell {
+    NSMutableArray<NSNumber *> *changes = [NSMutableArray array];
+    NSMutableArray<NSNumber *> *readings = [NSMutableArray array];
+    NSMutableSet<NSNumber *> *answered = [NSMutableSet set];
+    NSTimeInterval lastPoll = -1;
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"standby-wake", NULL).exchanges) {
+        if (exchange.time > 1.8) {
+            break;
+        }
+        NSInteger reading = 0;
+        if (QLMFirstKnobReading(exchange, &lastPoll, &reading)) {
+            if (readings.count == 0 || readings.lastObject.integerValue != reading) {
+                [changes addObject:@(exchange.time)];
+                [readings addObject:@(reading)];
+            }
+        } else if (changes.count > 1 && QLMIsKnobBurst(exchange, changes.lastObject.doubleValue)) {
+            [answered addObject:changes.lastObject];
+        }
+    }
+    XCTAssertEqualObjects(readings, (@[@-1001, @-1002, @-1001, @-1000, @-993, @-982]));
+    XCTAssertEqual(answered.count, 2u);
+
+    for (NSNumber *plug in @[@-1.0, @-1.22, @-1.54, @-1.7]) {
+        QLMKnob *knob = [[QLMKnob alloc] init];
+        [knob volumeForReading:-988 atTime:-60 volume:@(-50)];
+        [knob volumeForReading:-1001 atTime:plug.doubleValue volume:@(-50)];
+        NSMutableSet<NSNumber *> *followed = [NSMutableSet set];
+        for (NSUInteger i = 1; i < readings.count; i++) {
+            if ([knob volumeForReading:readings[i].integerValue atTime:changes[i].doubleValue volume:@(-50)] != nil) {
+                [followed addObject:changes[i]];
+            }
+        }
+        BOOL inSpell = plug.doubleValue < -1.2 && plug.doubleValue > -1.56;
+        XCTAssertEqual([followed isEqualToSet:answered], inSpell, @"a plug at %@ s", plug);
+    }
 }
 
 @end

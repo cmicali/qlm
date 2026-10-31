@@ -78,6 +78,9 @@ BOOL QLMIsControl(QLMMessage message);
 // A lease: 02, a hardware ID, and a session, to the multicast address.
 BOOL QLMIsLease(QLMMessage message);
 
+// A poll of a monitor: 08 to a session.
+BOOL QLMIsMonitorPoll(QLMMessage message);
+
 // A volume frame's 24-bit word.
 uint32_t QLMVolumeWordOf(QLMMessage message);
 

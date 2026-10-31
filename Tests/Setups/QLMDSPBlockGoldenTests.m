@@ -146,7 +146,7 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
         XCTAssertNotNil(group, @"%@: %s", scenario, QLMGoldenApplies[r].group);
         NSArray<NSString *> *expected = [@(QLMGoldenApplies[r].passes) componentsSeparatedByString:@" "];
         NSArray<QLMCapturedPass *> *captured =
-            QLMPassesInCapture(QLMReadCapture(scenario, NULL), QLMGoldenApplies[r].from, QLMGoldenApplies[r].to);
+            QLMPassesInCapture(QLMReadCapture(scenario, NULL), QLMGoldenApplies[r].from, QLMGoldenApplies[r].to, NULL);
         XCTAssertEqual(captured.count, expected.count, @"%@", scenario);
         for (NSUInteger i = 0; i < MIN(captured.count, expected.count); i++) {
             NSArray<NSString *> *parts = [expected[i] componentsSeparatedByString:@":"];
@@ -167,9 +167,8 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
 
 // Every captured pass matches its node's block, setting for setting, and
 // no other node's. A pass GLM cut short matches the block's start, and
-// only the 7350A's two in setup-b-peq-8351b are. What qlm leaves out is
-// exactly its class's extras. Where the capture holds the session's reply
-// to 39, its model is the node's.
+// only the 7350A's two in setup-b-peq-8351b are. Where the capture holds
+// the session's reply to 39, its model is the node's.
 - (void)testEveryCapturedPassMatchesItsBlock {
     NSUInteger payloads = 0;
     NSUInteger identified = 0;
@@ -189,8 +188,8 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
             XCTAssertNotNil(block, @"%@", error);
             QLMBlockComparison *comparison = [QLMBlockComparison comparisonOfBlock:block withPass:pass.captured];
             if (node == pass.node) {
-                XCTAssertEqual(comparison.differenceCount, 0u, @"%@, %@: %@ %@ %@ %@", pass, node.serial, comparison.changed,
-                               comparison.glmOnly, comparison.missingLeftOut, comparison.qlmOnly);
+                XCTAssertEqual(comparison.differenceCount, 0u, @"%@, %@: %@ %@ %@", pass, node.serial, comparison.changed,
+                               comparison.glmOnly, comparison.qlmOnly);
             } else {
                 XCTAssertNotEqual(comparison.differenceCount, 0u, @"%@ also matches %@", pass, node.serial);
             }
@@ -238,7 +237,7 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
     NSUInteger stops = 0;
     for (size_t r = 0; r < sizeof QLMGoldenApplies / sizeof QLMGoldenApplies[0]; r++) {
         QLMCapture *capture = QLMReadCapture(@(QLMGoldenApplies[r].capture), NULL);
-        for (QLMCapturedStop *stop in QLMGeneratorStopsInCapture(capture, QLMGoldenApplies[r].from, QLMGoldenApplies[r].to)) {
+        for (QLMSessionFrame *stop in QLMGeneratorStopsInCapture(capture, QLMGoldenApplies[r].from, QLMGoldenApplies[r].to)) {
             XCTAssertEqualObjects(stop.payload, QLMHex(@"05 04 00 00 00 FF FF EA 00 01 90 00 02 DA"), @"%s at %.3f s",
                                   QLMGoldenApplies[r].capture, stop.time);
             XCTAssertTrue(QLMIsKnownGeneratorStop(stop.payload));
@@ -248,28 +247,23 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
     XCTAssertEqual(stops, 154u);
 }
 
-// A two-way's pass is its block in order, the 8351B's two extras aside: 43
-// right after the level pair, and 4B right after the crossover. They are
-// its block's leftOutPayloads, and only its.
-- (void)testTwoWayPassesAreTheBlockInOrder {
+// A two-way's or an 8351B's pass is its block in order, frame for frame,
+// with nothing left out. The 8351B's has 43 00 02 right after the level
+// pair, and 4B 00 00 00 01 right after the crossover, in every pass.
+- (void)testTwoWayAndThreeWayPassesAreTheBlockInOrder {
     NSUInteger checked = 0;
+    NSUInteger threeWays = 0;
     for (QLMGoldenPass *pass in [self passes]) {
-        QLMDSPBlock *block = [QLMDSPBlock blockForNode:pass.node inGroup:pass.group error:NULL];
         if (pass.node.nodeClass == QLMSetupNodeClassSubwoofer) {
-            XCTAssertEqualObjects(block.leftOutPayloads, @[], @"%@", pass);
             continue;
         }
-        NSMutableArray<NSData *> *glm = [pass.captured.payloads mutableCopy];
+        NSArray<NSData *> *glm = pass.captured.payloads;
         if (pass.node.nodeClass == QLMSetupNodeClassThreeWay) {
             XCTAssertEqualObjects(glm[4], QLMHex(@"43 00 02"), @"%@", pass);
             XCTAssertEqualObjects(glm[26], QLMHex(@"4B 00 00 00 01"), @"%@", pass);
-            XCTAssertEqualObjects(block.leftOutPayloads, (@[glm[4], glm[26]]), @"%@", pass);
-            [glm removeObjectAtIndex:26];
-            [glm removeObjectAtIndex:4];
-        } else {
-            XCTAssertEqualObjects(block.leftOutPayloads, @[], @"%@", pass);
+            threeWays += 1;
         }
-        NSArray<NSData *> *mine = block.payloads;
+        NSArray<NSData *> *mine = [QLMDSPBlock blockForNode:pass.node inGroup:pass.group error:NULL].payloads;
         XCTAssertEqual(glm.count, mine.count, @"%@", pass);
         for (NSUInteger j = 0; j < MIN(glm.count, mine.count); j++) {
             XCTAssertEqualObjects(glm[j], mine[j], @"%@, frame %lu", pass, (unsigned long)j);
@@ -277,6 +271,7 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
         checked += 1;
     }
     XCTAssertEqual(checked, 83u);
+    XCTAssertEqual(threeWays, 47u);
 }
 
 // A subwoofer's pass is its block in order, frame for frame. One cut short
@@ -329,6 +324,8 @@ static QLMSetupNode *QLMNodeAtRate(QLMSetupNode *node, double sampleRate) {
     QLMSetupNode *moved = [[QLMSetupNode alloc] init];
     moved.nodeClass = node.nodeClass;
     moved.input = node.input;
+    moved.groupDelayCompensation = node.groupDelayCompensation;
+    moved.bassExtensionCrossover = node.bassExtensionCrossover;
     NSMutableArray<QLMSetupBand *> *bands = [NSMutableArray array];
     for (QLMSetupBand *band in node.bands) {
         QLMSetupBand *copy = [[QLMSetupBand alloc] init];
@@ -360,19 +357,123 @@ static QLMSetupNode *QLMNodeAtRate(QLMSetupNode *node, double sampleRate) {
         XCTAssertEqual(block.designRate, 96000);
         XCTAssertFalse(block.rateVerified);
         NSArray<NSData *> *at48 = [QLMDSPBlock blockForNode:QLMNodeAtRate(pass.node, 48000) inGroup:pass.group error:NULL].payloads;
+        XCTAssertEqual(at48.count, block.payloads.count);
         for (NSData *payload in pass.captured.payloads) {
             const uint8_t *bytes = payload.bytes;
             if (bytes[0] != 0x10 || bytes[1] != 0x0E) {
                 continue;
             }
-            XCTAssertEqualObjects(payload, block.payloads[4 + bytes[2]]);
+            // Slot 0 follows 43 00 02.
+            XCTAssertEqualObjects(payload, block.payloads[5 + bytes[2]]);
             if (memcmp(bytes + 3, bypass, sizeof bypass) != 0) {
-                XCTAssertNotEqualObjects(payload, at48[4 + bytes[2]]);
+                XCTAssertNotEqualObjects(payload, at48[5 + bytes[2]]);
                 [filters addObject:payload];
             }
         }
     }
     XCTAssertEqual(filters.count, 49u);
+}
+
+// GLM sends a band as it's edited, as one 10 0E to the monitor's session,
+// outside any pass. In setup-b-peq-8351b, B1 sent the Left 8351B's session
+// 0C 13 of them, to slots 04 to 09, from 49.989 to 117.849 s, and B2 sent
+// it 8, to slots 00 to 03, from 230.501 to 265.754 s. Each follows 0C's pass
+// in its row's window. Each slot's last is the slot as the next snapshot's
+// block sends it: 1.sam after B1, and 2.sam after B2. The ones before it
+// are values the editor passed through.
+- (void)testLiveBandEditsAreTheNextSnapshots {
+    const struct {
+        double from;
+        double to;
+        const char *next;
+        NSUInteger count;
+        double first;
+        double last;
+        uint8_t slots[2];
+    } edits[] = {
+        {0, 170, "captures/setup-b-peq-8351b/setups/1.sam", 13, 49.989, 117.849, {0x04, 0x09}},
+        {181, 290, "captures/setup-b-peq-8351b/setups/2.sam", 8, 230.501, 265.754, {0x00, 0x03}},
+    };
+    QLMCapture *capture = QLMReadCapture(@"setup-b-peq-8351b", NULL);
+    for (size_t e = 0; e < sizeof edits / sizeof edits[0]; e++) {
+        NSArray<QLMSessionFrame *> *outside = nil;
+        QLMPassesInCapture(capture, edits[e].from, edits[e].to, &outside);
+        NSMutableArray<QLMSessionFrame *> *bands = [NSMutableArray array];
+        NSMutableDictionary<NSNumber *, QLMSessionFrame *> *lastBySlot = [NSMutableDictionary dictionary];
+        for (QLMSessionFrame *frame in outside) {
+            const uint8_t *bytes = frame.payload.bytes;
+            if (bytes[0] == 0x10 && bytes[1] == 0x0E) {
+                [bands addObject:frame];
+                lastBySlot[@(bytes[2])] = frame;
+                XCTAssertEqual(frame.session, 0x0C, @"%.3f s", frame.time);
+                XCTAssertEqual(frame.follows.session, 0x0C, @"%.3f s", frame.time);
+            }
+        }
+        XCTAssertEqual(bands.count, edits[e].count, @"%s", edits[e].next);
+        XCTAssertEqualWithAccuracy(bands.firstObject.time, edits[e].first, 0.0005);
+        XCTAssertEqualWithAccuracy(bands.lastObject.time, edits[e].last, 0.0005);
+
+        QLMSetup *next = QLMReadGoldenSetup(@(edits[e].next));
+        QLMSetupGroup *group = [next groupNamed:@"Main 4x2"];
+        QLMDSPBlock *block = [QLMDSPBlock blockForNode:[group nodeWithSerial:@"1000002"] inGroup:group error:NULL];
+        XCTAssertEqual(lastBySlot.count, (NSUInteger)(edits[e].slots[1] - edits[e].slots[0] + 1), @"%s", edits[e].next);
+        for (NSNumber *slot in lastBySlot) {
+            XCTAssertGreaterThanOrEqual(slot.unsignedCharValue, edits[e].slots[0]);
+            XCTAssertLessThanOrEqual(slot.unsignedCharValue, edits[e].slots[1]);
+            QLMSessionFrame *frame = lastBySlot[slot];
+            XCTAssertEqualObjects(frame.payload, QLMBlockSetting(block, frame.payload), @"%s, %.3f s", edits[e].next, frame.time);
+        }
+        for (QLMSessionFrame *frame in bands) {
+            if (lastBySlot[@(((const uint8_t *)frame.payload.bytes)[2])] != frame) {
+                XCTAssertNotEqualObjects(frame.payload, QLMBlockSetting(block, frame.payload), @"%.3f s", frame.time);
+            }
+        }
+    }
+}
+
+// compare-apply's output and exit code, given its arguments.
+static int QLMRunCompareApply(NSArray<NSString *> *arguments, NSString **output) {
+    char *text = NULL;
+    size_t length = 0;
+    FILE *out = open_memstream(&text, &length);
+    FILE *err = fopen("/dev/null", "w");
+    int status = QLMCompareApply(arguments, out, err);
+    fclose(out);
+    fclose(err);
+    *output = [[NSString alloc] initWithBytes:text length:length encoding:NSUTF8StringEncoding];
+    free(text);
+    return status;
+}
+
+// --check-outside on every row: each frame GLM sent outside a pass in the
+// row's window is explained, by the pass it routes, the row's block, or a
+// switch's routing to a monitor it leaves off. The two rows of
+// setup-b-peq-8351b with live edits are the exception. Their last edits,
+// and the level each confirm sends (167.774 and 287.885 s), are the next
+// snapshot's. Against it, every frame outside a pass is explained.
+- (void)testEveryRowExplainsWhatGLMSentOutsideAPass {
+    for (size_t r = 0; r < sizeof QLMGoldenApplies / sizeof QLMGoldenApplies[0]; r++) {
+        NSString *capture = @(QLMGoldenApplies[r].capture);
+        BOOL edited = [capture isEqualToString:@"setup-b-peq-8351b"] && (QLMGoldenApplies[r].from == 0 || QLMGoldenApplies[r].from == 181);
+        NSString *setup = @(QLMGoldenApplies[r].setup);
+        if (edited) {
+            setup = [setup stringByReplacingOccurrencesOfString:QLMGoldenApplies[r].from == 0 ? @"0.sam" : @"1.sam"
+                                                     withString:QLMGoldenApplies[r].from == 0 ? @"1.sam" : @"2.sam"];
+        }
+        NSMutableArray<NSString *> *arguments = [@[
+            QLMRepositoryPath(setup), QLMRepositoryPath([NSString stringWithFormat:@"captures/%@/reports.txt", capture]), @"--group",
+            @(QLMGoldenApplies[r].group), @"--from", [NSString stringWithFormat:@"%g", QLMGoldenApplies[r].from], @"--check-outside"
+        ] mutableCopy];
+        if (!isinf(QLMGoldenApplies[r].to)) {
+            [arguments addObjectsFromArray:@[@"--to", [NSString stringWithFormat:@"%g", QLMGoldenApplies[r].to]]];
+        }
+        NSString *output = nil;
+        int status = QLMRunCompareApply(arguments, &output);
+        XCTAssertTrue([output containsString:@" passed through, and 0 not explained.\n"] ||
+                          ![output containsString:@"outside a pass:"],
+                      @"%@ from %g s: %@", capture, QLMGoldenApplies[r].from, output);
+        XCTAssertEqual(status, edited ? QLMCompareApplyDiffers : 0, @"%@ from %g s: %@", capture, QLMGoldenApplies[r].from, output);
+    }
 }
 
 @end

@@ -5,6 +5,7 @@
 #import "QLMDSPBlock.h"
 #import "QLMTestSupport.h"
 #include "QLMCommands.h"
+#include "QLMFrame.h"
 #include "QLMReplies.h"
 
 // Sources: the six group switches in captures/group-switch-*, the apply at
@@ -15,10 +16,9 @@
 // capture's own sessions, and diffs it against what GLM sent. Both sides
 // leave out GLM's cycle, which runs beside its apply: the adapter's polls,
 // the probes, the leases, the polls, the volume after a probe, and each new
-// monitor's 39 and 19 01 before its block. GLM's side also leaves out the
-// frames qlm skips: 05 04, which is never-send, and the 8351B's 43 00 02 and
-// 4B 00 00 00 01, refused while its rate is unverified. What remains must
-// match byte for byte, but for the differences each test lists and explains.
+// monitor's 39 and 19 01 before its block. GLM's side also leaves out 05 04,
+// which is never-send. What remains must match byte for byte, but for the
+// differences each test lists and explains.
 @interface QLMApplyGoldenTests : XCTestCase
 @end
 
@@ -134,8 +134,7 @@ static NSString *QLMHexOf(NSData *record) {
 }
 
 static BOOL QLMIsSkipped(const QLMMessage *message) {
-    uint8_t opcode = message->payload[0];
-    return opcode == 0x05 || (opcode == 0x43 && message->length == 3) || (opcode == 0x4B && message->length == 5);
+    return message->payload[0] == 0x05;
 }
 
 // GLM's frames from `from` to `to`, less its cycle and the frames qlm skips.
@@ -385,6 +384,58 @@ static NSArray<NSString *> *QLMDiff(NSArray<QLMCapturedFrame *> *glm, NSArray<NS
 - (void)testWakeApply {
     NSArray<NSString *> *differences = [self enumerationIn:@"standby-wake" group:@"Main 4x2" from:47.70 to:49.09];
     [self assertDifferences:differences are:@[] scenario:@"wake"];
+}
+
+// What qlmctl apply-group --dry-run prints for Main 4x2: the records of the
+// switch, and with --launch of the apply at launch, at sessions from 02 in
+// node order, every monitor on. Each 8351B's block now carries 43 00 02
+// right after the level pair, and 4B 00 00 00 01 right after the crossover.
+// No other monitor gets either.
+- (void)testTheDryRunSendsThe8351BsTwoFrames {
+    QLMSetupGroup *group = QLMFixtureGroup(@"Main 4x2");
+    NSDictionary<NSData *, QLMDSPBlock *> *blocks = [self blocksFor:group];
+    NSMutableArray<QLMApplyMonitor *> *monitors = [NSMutableArray array];
+    NSMutableSet<NSNumber *> *threeWays = [NSMutableSet set];
+    uint8_t session = QLMAddressSessionFirst;
+    for (QLMSetupNode *node in group.nodes) {
+        if (node.nodeClass == QLMSetupNodeClassThreeWay) {
+            [threeWays addObject:@(session)];
+        }
+        QLMApplyMonitor *monitor = [[QLMApplyMonitor alloc] initWithHardwareID:node.hardwareID session:session++];
+        monitor.on = YES;
+        [monitors addObject:monitor];
+    }
+    XCTAssertEqual(threeWays.count, 2u);
+    QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:group monitors:monitors adapterMuted:NO];
+    NSArray<NSArray<NSData *> *> *applies = @[
+        [sequence switchWithBlocks:blocks volume:QLMCommandVolume(-40, -30)],
+        [sequence enumerationOf:monitors blocks:blocks],
+    ];
+    for (NSArray<NSData *> *records in applies) {
+        NSMutableSet<NSNumber *> *with43 = [NSMutableSet set];
+        NSMutableSet<NSNumber *> *with4B = [NSMutableSet set];
+        for (NSUInteger i = 0; i < records.count; i++) {
+            const uint8_t *bytes = records[i].bytes;
+            const uint8_t *previous = i > 0 ? records[i - 1].bytes : NULL;
+            if (records[i].length < 2 || (bytes[1] != 0x43 && bytes[1] != 0x4B)) {
+                continue;
+            }
+            XCTAssertTrue([threeWays containsObject:@(bytes[0])], @"%@", records[i]);
+            XCTAssertTrue(QLMFrameAllows(bytes + 1, records[i].length - 1), @"%@", records[i]);
+            XCTAssertEqual(previous[0], bytes[0], @"%@", records[i]);
+            if (bytes[1] == 0x43) {
+                XCTAssertEqualObjects(QLMHexOf(records[i]), ([NSString stringWithFormat:@"%02X 43 00 02", bytes[0]]));
+                XCTAssertTrue(previous[1] == 0x10 && previous[2] == 0x01 && previous[3] == 0x09, @"%@", records[i - 1]);
+                [with43 addObject:@(bytes[0])];
+            } else {
+                XCTAssertEqualObjects(QLMHexOf(records[i]), ([NSString stringWithFormat:@"%02X 4B 00 00 00 01", bytes[0]]));
+                XCTAssertEqual(previous[1], 0x3B, @"%@", records[i - 1]);
+                [with4B addObject:@(bytes[0])];
+            }
+        }
+        XCTAssertEqualObjects(with43, threeWays);
+        XCTAssertEqualObjects(with4B, threeWays);
+    }
 }
 
 @end
