@@ -664,10 +664,9 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 }
 
 // The reading jumps as the plug slides out, and GLM follows the jump
-// (captures/volume-sweep, 25.11 to 25.45 s). Here the knob jumps up, then
+// (captures/volume-sweep, 25.11 to 25.56 s). Here the knob jumps up, then
 // reads absent a poll later. System takes the raise back with one frame at
-// the level before it, and stays there. A raise older than half a second
-// stands.
+// the level before it, and stays there. A raise older than a second stands.
 - (void)testAKnobPulledOutTakesBackTheRaiseItJustMade {
     _settings.adapterPollInterval = 0.107;
     [self startWithKnob:@(-400) volume:@(-40)];
@@ -686,7 +685,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self turnKnobTo:-400];
     before = _bus.sentMessages.count;
     XCTAssertEqualObjects([self turnKnobTo:-300].volumeDecibels, @(-30));
-    [_time advanceBy:0.6];
+    [_time advanceBy:1.1];
     XCTAssertEqualObjects([self pullKnob].volumeDecibels, @(-30));
     [_time advanceBy:1];
     expected = @[raisedRecord, raisedRecord, raisedRecord, raisedRecord];

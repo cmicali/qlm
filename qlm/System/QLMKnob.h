@@ -16,8 +16,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSNumber *)volumeForReading:(NSInteger)tenths atTime:(NSTimeInterval)time volume:(nullable NSNumber *)volume;
 
 // The knob came out at `time`. The volume to go back to, or nil to leave
-// `volume` alone: the volume before the knob's follows of the last half
-// second, when that is lower. A follow from before that stands. Then it
+// `volume` alone: the lowest the volume was before any of the knob's follows
+// of the last second, when that is lower. So every raise in that second is
+// taken back, and no lowering. A follow from before it stands. Then it
 // forgets where the knob rests, as reset does.
 - (nullable NSNumber *)volumeAtUnplugAtTime:(NSTimeInterval)time volume:(nullable NSNumber *)volume;
 

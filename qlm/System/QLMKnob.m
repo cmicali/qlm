@@ -9,10 +9,11 @@ static const NSInteger QLMKnobMoveTenths = 11;
 // GLM followed a change 2.53 s after the one that moved it, and none from
 // 2.55 s.
 static const NSTimeInterval QLMKnobFollowInterval = 2.54;
-// As the plug came out, the reading moved from 25.11 s and read absent at
-// 25.45 s, 0.33 s on (captures/volume-sweep). Half a second holds that, and
-// a poll more.
-static const NSTimeInterval QLMKnobUnplugWindow = 0.5;
+// As the plug came out, the reading moved from 25.11 s, and the first poll
+// of a pair read it out at 25.56 s, 0.44 s on (captures/volume-sweep). qlm
+// may read the first move and the 31 each a poll late, 0.107 s. A second
+// holds all that with room, and a take-back only lowers the level.
+static const NSTimeInterval QLMKnobUnplugWindow = 1;
 
 // The nearest step, from QLMVolumeDecibelsMin to 0 dB. No tenth falls
 // halfway between two steps.
@@ -63,9 +64,12 @@ static double QLMKnobStep(NSInteger tenths) {
 
 - (NSNumber *)volumeAtUnplugAtTime:(NSTimeInterval)time volume:(NSNumber *)volume {
     [self forgetFollowsBefore:time];
-    NSNumber *before = _follows.firstObject.volumeBefore;
+    NSNumber *lowest = volume;
+    for (QLMKnobFollow *follow in volume != nil ? _follows : @[]) {
+        lowest = follow.volumeBefore.doubleValue < lowest.doubleValue ? follow.volumeBefore : lowest;
+    }
     [self reset];
-    return before != nil && volume != nil && before.doubleValue < volume.doubleValue ? before : nil;
+    return lowest != volume ? lowest : nil;
 }
 
 - (NSNumber *)volumeForReading:(NSInteger)tenths atTime:(NSTimeInterval)time volume:(NSNumber *)volume {

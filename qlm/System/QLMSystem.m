@@ -382,13 +382,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 // GLM counts sessions from 02 at each launch (docs/protocol.md: How
-// sessions are counted), and so does each start. The checks of the known
-// leases find the foreign sessions again.
+// sessions are counted), and so does each start. The foreign sessions
+// stay: a check whose reply is lost finds none.
 - (void)beginRunning {
     _running = YES;
     _stoppedHandBack = nil;
     _nextSession = QLMAddressSessionFirst;
-    [_foreignSessions removeAllIndexes];
     [_adapter startOnQueue:_queue clock:_clock];
     _dirty = YES;
     // GLM's opening, less what qlm never sends: the adapter's status, its
