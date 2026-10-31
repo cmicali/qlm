@@ -73,4 +73,37 @@ static QLMSnapshot *QLMSnapshotWith(QLMHandBackKind kind, NSNumber *_Nullable kn
                           @"qlm has set no level, so the level at the take-over is unknown.");
 }
 
+#pragma mark - The banner
+
+// PR #49: read adapterProblem before busProblem, which is NoAdapter while
+// it is set. Each says what to do, and what the take-over does.
+- (void)testTheBannerShowsTheAdaptersProblem {
+    QLMSnapshot *unresponsive = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
+    unresponsive.busProblem = QLMBusProblemNoAdapter;
+    unresponsive.adapterProblem = QLMAdapterProblemUnresponsive;
+    XCTAssertEqualObjects(QLMBusProblemTitle(unresponsive), @"The adapter stopped answering");
+    NSString *detail = QLMBusProblemDetail(unresponsive);
+    XCTAssertTrue([detail containsString:@"about 7 s"], @"%@", detail);
+    XCTAssertTrue([detail containsString:QLMStopRiseText(unresponsive)], @"%@", detail);
+
+    QLMSnapshot *lost = QLMSnapshotWith(QLMHandBackKnobLevel, @(-60), @(-50));
+    lost.busProblem = QLMBusProblemNoAdapter;
+    lost.adapterProblem = QLMAdapterProblemLostTrack;
+    XCTAssertEqualObjects(QLMBusProblemTitle(lost), @"qlm lost track of the adapter");
+    detail = QLMBusProblemDetail(lost);
+    XCTAssertTrue([detail containsString:@"Unplug the adapter"], @"%@", detail);
+    XCTAssertTrue([detail containsString:@"at or below qlm's"], @"%@", detail);
+}
+
+- (void)testTheBannerShowsTheBusProblemOtherwise {
+    QLMSnapshot *snapshot = QLMSnapshotWith(QLMHandBackUnknown, nil, nil);
+    XCTAssertNil(QLMBusProblemTitle(snapshot));
+    XCTAssertNil(QLMBusProblemTitle(nil));
+    snapshot.busProblem = QLMBusProblemNoAdapter;
+    XCTAssertEqualObjects(QLMBusProblemTitle(snapshot), @"No adapter");
+    XCTAssertEqualObjects(QLMBusProblemDetail(snapshot), @"Connect the GLM adapter by USB.");
+    snapshot.busProblem = QLMBusProblemGLM;
+    XCTAssertEqualObjects(QLMBusProblemTitle(snapshot), @"GLM has the adapter");
+}
+
 @end

@@ -95,8 +95,13 @@ NSString *QLMStopRiseText(QLMSnapshot *snapshot) {
     return [why stringByAppendingString:@", so the level at the take-over is unknown."];
 }
 
-NSString *QLMBusProblemTitle(QLMBusProblem problem) {
-    switch (problem) {
+NSString *QLMBusProblemTitle(QLMSnapshot *snapshot) {
+    switch (snapshot.adapterProblem) {
+    case QLMAdapterProblemUnresponsive: return @"The adapter stopped answering";
+    case QLMAdapterProblemLostTrack: return @"qlm lost track of the adapter";
+    case QLMAdapterProblemNone: break;
+    }
+    switch (snapshot.busProblem) {
     case QLMBusProblemNoAdapter: return @"No adapter";
     case QLMBusProblemGLM: return @"GLM has the adapter";
     case QLMBusProblemOtherHost: return @"Another app has the adapter";
@@ -107,6 +112,18 @@ NSString *QLMBusProblemTitle(QLMBusProblem problem) {
 
 // The error's sentence only names the other host. Nothing decides by it.
 NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
+    // PR #49 keeps the adapter's last knob reading meanwhile.
+    NSString *takeOver = [NSString stringWithFormat:@"Meanwhile the adapter takes over at the knob's level, about 2.6 s after "
+                                                    @"the last report it took. %@",
+                                                    QLMStopRiseText(snapshot)];
+    switch (snapshot.adapterProblem) {
+    case QLMAdapterProblemUnresponsive:
+        return [@"qlm tries again for about 7 s, then waits for a reply, and resumes once one comes. " stringByAppendingString:takeOver];
+    case QLMAdapterProblemLostTrack:
+        return [@"Unplug the adapter, and plug it back in. qlm sends nothing until then. " stringByAppendingString:takeOver];
+    case QLMAdapterProblemNone:
+        break;
+    }
     switch (snapshot.busProblem) {
     case QLMBusProblemNoAdapter: return @"Connect the GLM adapter by USB.";
     case QLMBusProblemGLM: return @"qlm drives nothing while GLM runs. Quit GLM to hand the monitors to qlm.";

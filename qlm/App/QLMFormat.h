@@ -35,9 +35,9 @@ BOOL QLMStopMayRaiseLevel(QLMSnapshot *_Nullable snapshot);
 // why the level is unknown.
 NSString *QLMStopRiseText(QLMSnapshot *snapshot);
 
-// The banner's lines for the snapshot's busProblem. The title is nil when
-// there is none.
-NSString *_Nullable QLMBusProblemTitle(QLMBusProblem problem);
+// The banner's lines: the snapshot's adapterProblem, else its busProblem.
+// The title is nil when there is none.
+NSString *_Nullable QLMBusProblemTitle(QLMSnapshot *_Nullable snapshot);
 NSString *QLMBusProblemDetail(QLMSnapshot *snapshot);
 
 NS_ASSUME_NONNULL_END

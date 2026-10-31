@@ -14,10 +14,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
-// Turns the monitor list's updates into alerts: a monitor System drops, and
-// one that runs hot at 70 °C. Each monitor gets at most one alert of each
-// kind every 10 minutes. While System is stopped or the adapter is refused,
-// a drop says nothing: the banner covers it. On the main queue.
+// Turns the monitor list's updates into alerts: a monitor System drops, one
+// that runs hot at 70 °C, and an adapter that stops answering while its
+// take-over may make the monitors louder. Each monitor gets at most one
+// alert of each kind every 10 minutes. While System is stopped or the
+// adapter is refused, a drop says nothing: the banner covers it. On the
+// main queue.
 @interface QLMMonitorAlerts : NSObject
 
 - (instancetype)initWithNotifier:(QLMNotifier *)notifier;
