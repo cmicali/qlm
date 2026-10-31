@@ -385,8 +385,8 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 
 // With the adapter silent, the link sends four syncs of one shape, each
 // waiting twice as long as the one before: 0.25, 0.5, 1, and 2 s here. Then
-// it sends nothing more, and every send fails at once. A status poll and a
-// system info may both come late now, so a close loses track.
+// it gives up: it sends nothing more, and every send fails at once. A status
+// poll and a system info may both come late now, so a close loses track.
 - (void)testASilentAdapterGetsFourSyncsThenNothing {
     _device.silent = YES;
     NSError *error = nil;
@@ -405,11 +405,78 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
         XCTAssertEqualObjects([self written], sent, @"step %lu", (unsigned long)i);
     }
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
-    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
+    XCTAssertEqual(error.code, QLMAdapterErrorGaveUp);
+    XCTAssertEqualObjects(error.localizedDescription, @"The GLM adapter answered none of qlm's syncs.");
+    XCTAssertTrue([self gaveUp]);
     XCTAssertEqual([self written].count, 5u);
 
     NSError *failure = [self closeAndReopen];
     XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
+    XCTAssertFalse([self gaveUp]);
+}
+
+- (BOOL)gaveUp {
+    __block BOOL gaveUp = NO;
+    QLMReportLink *link = _device.link;
+    dispatch_sync(_queue, ^{
+        gaveUp = link.gaveUp;
+    });
+    return gaveUp;
+}
+
+- (void)resync {
+    QLMReportLink *link = _device.link;
+    [_time async:_queue run:^{
+        [link resync];
+    }];
+    [_time settle];
+}
+
+// A resync, after the device opened again under the link, is another run
+// of the same shape. The silent adapter gets four more
+// system infos, and the link gives up again. Once the adapter answers, the
+// third run's first sync brings a reply. Earlier syncs' replies may follow,
+// so a status poll drops them, and the serial query gets its own reply.
+- (void)testAResyncSendsAnotherRunOfTheSameShape {
+    _device.silent = YES;
+    NSError *error = nil;
+    XCTAssertFalse([self send:QLMCommandPoll(QLMAddressAdapter) reply:NULL error:&error]);
+    [_time advanceBy:10];
+    XCTAssertTrue([self gaveUp]);
+    NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
+    NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
+    NSArray<NSData *> *sent = @[poll, info, info, info, info];
+    XCTAssertEqualObjects([self written], sent);
+
+    [self resync];
+    XCTAssertFalse([self gaveUp]);
+    XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
+    XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
+    [_time advanceBy:3.74];
+    XCTAssertFalse([self gaveUp]);
+    [_time advanceBy:0.02];
+    XCTAssertTrue([self gaveUp]);
+    sent = [sent arrayByAddingObjectsFromArray:@[info, info, info, info]];
+    XCTAssertEqualObjects([self written], sent);
+    [_time advanceBy:10];
+    XCTAssertEqualObjects([self written], sent);
+
+    _device.silent = NO;
+    [self resync];
+    QLMMessage reply;
+    XCTAssertTrue([self sendOnceInStep:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
+    XCTAssertNil(error);
+    [self assertAdapterSerial:&reply];
+    sent = [sent arrayByAddingObjectsFromArray:@[info, poll, QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))]];
+    XCTAssertEqualObjects([self written], sent);
+    XCTAssertEqual(_device.link.strayReplies, 0u);
+}
+
+// Only a link that gave up resyncs.
+- (void)testAResyncBeforeGivingUpSendsNothing {
+    NSUInteger before = [self written].count;
+    [self resync];
+    XCTAssertEqual([self written].count, before);
 }
 
 // A stall whose late replies have one sync shape between them leaves the

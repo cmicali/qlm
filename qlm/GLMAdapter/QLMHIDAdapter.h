@@ -18,8 +18,11 @@ NS_ASSUME_NONNULL_BEGIN
 // let it seize the device, that too is a refusal.
 //
 // Each arrival of the adapter gets one report link, kept across closes and
-// reopens. If the link loses track of the adapter's replies, the adapter
-// opens again only once it arrives anew, after a replug.
+// reopens. If the link gives up, reconnect closes the device and opens it
+// again under the same link. The link stays given up across a reopen that
+// fails, until the next, or until the adapter goes or another host takes it.
+// If the link loses track of the adapter's replies, the adapter opens again
+// only once it arrives anew, after a replug.
 @interface QLMHIDAdapter : NSObject <QLMAdapter>
 
 @property (nonatomic) NSTimeInterval replyTimeout;  // the report link's, 0.1 s
