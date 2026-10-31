@@ -2,6 +2,8 @@
 
 #import "QLMSnapshot.h"
 
+@class QLMSetup;
+
 NS_ASSUME_NONNULL_BEGIN
 
 // What a value with no reading shows.
@@ -9,6 +11,10 @@ extern NSString *const QLMEmDash;
 
 // "−30.0 dB", with a true minus sign.
 NSString *QLMDecibelsText(double decibels);
+
+// What a person calls the monitor: its name in the setup file, else its
+// serial. Nil with neither.
+NSString *_Nullable QLMMonitorLabel(QLMMonitorState *monitor, QLMSetup *_Nullable setup);
 
 // "38 °C", or an em dash when absent.
 NSString *QLMTemperatureText(NSInteger temperature);

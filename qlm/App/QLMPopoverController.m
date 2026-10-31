@@ -37,12 +37,12 @@ static NSView *QLMSpacer(void) {
     return spacer;
 }
 
-// One monitor's line: its status dot, model, serial, state, and mute toggle.
+// One monitor's line: its status dot, model, name, state, and mute toggle.
 @interface QLMMonitorRow : NSObject
 @property (nonatomic, readonly) NSStackView *view;
 @property (nonatomic, readonly) NSImageView *dot;
 @property (nonatomic, readonly) NSTextField *model;
-@property (nonatomic, readonly) NSTextField *serial;
+@property (nonatomic, readonly) NSTextField *name;
 @property (nonatomic, readonly) NSTextField *detail;
 @property (nonatomic, readonly) NSButton *muteButton;
 @property (nonatomic, weak) QLMPopoverController *owner;
@@ -89,17 +89,16 @@ static NSView *QLMSpacer(void) {
         [_dot.widthAnchor constraintEqualToConstant:10].active = YES;
         _model = [NSTextField labelWithString:@""];
         [_model.widthAnchor constraintEqualToConstant:52].active = YES;
-        _serial = QLMSmallLabel(@"");
-        _serial.font = [NSFont monospacedSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
-        _serial.lineBreakMode = NSLineBreakByTruncatingMiddle;
-        [_serial setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
+        _name = QLMSmallLabel(@"");
+        _name.lineBreakMode = NSLineBreakByTruncatingMiddle;
+        [_name setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
         _detail = QLMSmallLabel(@"");
         _detail.alignment = NSTextAlignmentRight;
         _muteButton = [NSButton buttonWithImage:[[NSImage alloc] init] target:self action:@selector(muteClicked:)];
         _muteButton.bordered = NO;
         _muteButton.imagePosition = NSImageOnly;
         [_muteButton.widthAnchor constraintEqualToConstant:18].active = YES;
-        _view = [NSStackView stackViewWithViews:@[_dot, _model, _serial, QLMSpacer(), _detail, _muteButton]];
+        _view = [NSStackView stackViewWithViews:@[_dot, _model, _name, QLMSpacer(), _detail, _muteButton]];
         _view.orientation = NSUserInterfaceLayoutOrientationHorizontal;
         _view.spacing = 6;
     }
@@ -113,7 +112,14 @@ static NSView *QLMSpacer(void) {
     self.dot.contentTintColor = QLMPresenceColor(entry.presence);
     self.dot.toolTip = QLMPresenceName(entry.presence);
     self.model.stringValue = monitor.model ?: @"?";
-    self.serial.stringValue = monitor.serialNumber ?: @"";
+    // The setup's name tells the Left 8351B from the Right, where the serial
+    // can't (qlm-app-first). A serial shows in a monospaced font.
+    NSString *name = QLMMonitorLabel(monitor, self.owner.setup);
+    BOOL named = name != nil && ![name isEqualToString:monitor.serialNumber];
+    self.name.stringValue = name ?: @"";
+    self.name.font = named ? [NSFont systemFontOfSize:NSFont.smallSystemFontSize]
+                           : [NSFont monospacedSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
+    self.name.toolTip = named ? monitor.serialNumber : nil;
     self.detail.stringValue = entry.presence == QLMMonitorPresenceOnline ? QLMTemperatureText(monitor.temperature) : QLMEntryStatusText(entry);
     self.muteButton.enabled = entry.tracked;
     if (mutedChanged) {

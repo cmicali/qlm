@@ -89,6 +89,26 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertNil(QLMHandBackLine(nil));
 }
 
+#pragma mark - Names
+
+// In qlm-app-first, the user couldn't tell the Left 8351B from the Right by
+// serial. The setup file names each device, matched by hardware ID.
+- (void)testAMonitorIsNamedAsTheSetupNamesIt {
+    QLMSetup *setup = QLMReadFixtureSetup();
+    QLMMonitorState *left = [[QLMMonitorState alloc] init];
+    left.hardwareID = setup.devices[0].hardwareID;
+    left.serialNumber = @"8351BP21002711";
+    XCTAssertEqualObjects(QLMMonitorLabel(left, setup), @"Left");
+    XCTAssertEqualObjects(QLMMonitorLabel(left, nil), @"8351BP21002711");
+
+    const uint8_t unknown[3] = {0x01, 0x02, 0x03};
+    QLMMonitorState *stranger = [[QLMMonitorState alloc] init];
+    stranger.hardwareID = QLMBytes(unknown, sizeof unknown);
+    XCTAssertNil(QLMMonitorLabel(stranger, setup));
+    stranger.serialNumber = @"8320APM21001234";
+    XCTAssertEqualObjects(QLMMonitorLabel(stranger, setup), @"8320APM21001234");
+}
+
 #pragma mark - The banner
 
 // PR #49: read adapterProblem before busProblem, which is NoAdapter while
