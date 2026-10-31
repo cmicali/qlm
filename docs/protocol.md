@@ -247,7 +247,9 @@ The hardware ID is how qlm knows a monitor. It maps one to one to the serial in 
 
 ### How sessions are counted
 
-GLM counts up from `02` at each launch, one per lease, in the order the monitors answer the probe. The count runs on within a launch, through a replug or a wake. qlm does the same. It counts up from `02` at each start, and on within a run, skipping `7D`, `7E`, and `F0`.[^qlm-count] Its first discovery found the six in GLM's order, and leased them GLM's sessions.
+GLM counts up from `02` at each launch, one per lease, in the order the monitors answer the probe. The count runs on within a launch, through a replug or a wake. No capture shows a session above `19`, which GLM leased after the replug in `unplug`.[^glm-count]
+
+qlm counts up from `02` at each start too: each run of `qlmctl`, and each launch of the app and each wake of the Mac, since the app stops System at the Mac's sleep. At a start, qlm also forgets which sessions its checks found other monitors at, and its checks find them again. Within a run, it counts on, as GLM does. But after `19` it goes back to `02`, so a run that lasts a week never sends to a session no capture shows. Only a bus with more leases than fit from `02` to `19` gets one above it, and never `7D`, `7E`, or `F0`. The count skips a session a monitor holds, and one a check found another monitor at. It also skips the last session qlm leased each other monitor it knows, since a monitor whose replies were lost may still hold its lease, hidden from the probe. The monitor itself may get its own back: it answered the probe, so it holds none.[^qlm-count] qlm's first discovery found the six in GLM's order, and leased them GLM's sessions.
 
 | Host, and when | Sessions leased | Source |
 | --- | --- | --- |
@@ -304,7 +306,8 @@ So wait between hosts, to avoid the TRAP above: 1 minute with every monitor on, 
 [^setup-serial]: `startup-idle`, the leases at 8.432 to 8.481 s; #8.
 [^serial-digits]: #8.
 [^serial-length]: #9; `QLMReplies.h`.
-[^qlm-count]: #9; `QLMAddressIsLeasable`.
+[^glm-count]: The table below; `testGLMCountsFrom02AtLaunchAndNoCaptureGoesAbove19`.
+[^qlm-count]: #9; `QLMAddressIsLeasable`; `testARestartBeginsAgainAtTheFirstSession`; `testALongRunNeverSendsASessionAbove19`; `testARestartLeasesNoOneTheSessionAMonitorMayStillHold`; `testLeasesSkipAddressesThatNeedEscapingAndTheMulticast`.
 [^lost-session]: `group-switch-main-2x1-main-4x2`, 35.84 to 36.38 s; `standby-wake`, from 46.631 s.
 [^lease-lapse]: `qlm-app-first`, GLM's last poll to a monitor at 182.660 s, its last report at 182.770 s, the app's sync at 183.622 s, and its probes at 185.109 and 185.719 s; `testGLMsLeasesLapsedWithinThreeSeconds`.
 [^runs-lapse]: Each gap runs from qlm's last report, after `dim on`, to the next run's first probe. Every monitor answered the probes that followed. `qlm-control-first`, 548.329 to 557.974 s, with the Left 8351B in standby; `qlm-control-all`, 441.956 to 451.664 s and 8410.490 to 8420.218 s. After each `sleep`, with every monitor in standby, all answered too, 9.1 to 9.8 s later: `qlm-control-first`, 818.068 to 827.672 s; `qlm-control-all`, 565.136 to 574.915 s and 8472.153 to 8481.287 s.

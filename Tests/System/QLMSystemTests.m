@@ -2421,6 +2421,149 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertNil(QLMFindMonitor(moved, _right.hardwareID));
 }
 
+// No capture has a frame to a session above 19, from GLM or qlm. The
+// highest is GLM's lease of 19 in unplug, at 69.241 s. GLM leases from 02 at
+// each launch: in startup-idle, startup-idle-mic, and knob-sweep. So System
+// counts from 02 at each start, and wraps after 19.
+- (void)testGLMCountsFrom02AtLaunchAndNoCaptureGoesAbove19 {
+    uint8_t highest = 0;
+    for (NSString *scenario in QLMCaptureScenarios()) {
+        NSNumber *firstLease = nil;
+        for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
+            QLMMessage message = exchange.message;
+            if (QLMAddressIsLeasable(message.address)) {
+                highest = MAX(highest, message.address);
+            }
+            if (QLMIsLease(message)) {
+                highest = MAX(highest, message.payload[4]);
+                firstLease = firstLease ?: @(message.payload[4]);
+            }
+        }
+        if ([@[@"startup-idle", @"startup-idle-mic", @"knob-sweep"] containsObject:scenario]) {
+            XCTAssertEqualObjects(firstLease, @(QLMAddressSessionFirst), @"%@", scenario);
+        }
+    }
+    XCTAssertEqual(highest, 0x19);
+}
+
+// Both leases lapse, and System waits until the probe has found both
+// monitors again, at new sessions.
+- (QLMSnapshot *)lapseAndFindAgain:(QLMSnapshot *)last {
+    uint8_t left = QLMFindMonitor(last, _left.hardwareID).session;
+    uint8_t right = QLMFindMonitor(last, _right.hardwareID).session;
+    [self lapseLeases];
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *newLeft = QLMFindMonitor(snapshot, self->_left.hardwareID);
+        QLMMonitorState *newRight = QLMFindMonitor(snapshot, self->_right.hardwareID);
+        return newLeft.identified && newRight.identified && newLeft.session != left && newRight.session != right;
+    }];
+}
+
+// One System runs all week. Over an hour on the clock here, the leases lapse
+// 40 times, so the count goes round from 02 to 19 more than three times.
+// No frame goes to a session above 19, the highest any capture shows.
+- (void)testALongRunNeverSendsASessionAbove19 {
+    _settings.cycleInterval = 0.57;
+    [self startSystem];
+    [_system setVolumeDecibels:-40];
+    QLMSnapshot *snapshot = [self waitForDiscovery];
+    NSMutableIndexSet *leased = [NSMutableIndexSet indexSet];
+    for (int i = 0; i < 40; i++) {
+        snapshot = [self lapseAndFindAgain:snapshot];
+        [_time advanceBy:90];
+    }
+    for (NSData *record in _bus.sentMessages) {
+        const uint8_t *bytes = record.bytes;
+        if (bytes[0] == QLMAddressMulticast && record.length == 6 && bytes[1] == 0x02) {
+            [leased addIndex:bytes[5]];
+            XCTAssertLessThanOrEqual(bytes[5], 0x19, @"%@", record);
+        } else if (bytes[0] != QLMAddressBroadcast && bytes[0] != QLMAddressAdapter) {
+            XCTAssertLessThanOrEqual(bytes[0], 0x19, @"%@", record);
+        }
+    }
+    XCTAssertEqualObjects(leased, [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0x02, 0x18)]);
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:0], 82u);
+}
+
+// GLM counts from 02 at each launch, and each start does too. Here the
+// count has reached 09 when System stops. The right's lease lapses, and the
+// left still holds its own. At the restart, System asks each old session
+// for its serial before it leases anything, takes the left back at its
+// session, and leases the right 02.
+- (void)testARestartBeginsAgainAtTheFirstSession {
+    _settings.cycleInterval = 0.57;
+    [self startSystem];
+    QLMSnapshot *snapshot = [self waitForDiscovery];
+    for (int i = 0; i < 3; i++) {
+        snapshot = [self lapseAndFindAgain:snapshot];
+    }
+    uint8_t leftSession = QLMFindMonitor(snapshot, _left.hardwareID).session;
+    uint8_t rightSession = QLMFindMonitor(snapshot, _right.hardwareID).session;
+    XCTAssertEqual(MAX(leftSession, rightSession), 0x09);
+    [self stopAndWait];
+    [_bus perform:^{
+        self->_right.session = 0;
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system start];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.running && received.monitors.count == 2 && received.allIdentified;
+    }];
+    XCTAssertEqual(QLMFindMonitor(again, _left.hardwareID).session, leftSession);
+    XCTAssertEqual(QLMFindMonitor(again, _right.hardwareID).session, QLMAddressSessionFirst);
+    NSArray<NSData *> *sent = [self sentFrom:before matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return bytes[0] == QLMAddressMulticast || (bytes[0] != QLMAddressAdapter && message.length == 3 && bytes[1] == 0x19);
+    }];
+    QLMMessage firstCheck = QLMCommandSerialNumber(MIN(leftSession, rightSession));
+    QLMMessage secondCheck = QLMCommandSerialNumber(MAX(leftSession, rightSession));
+    const uint8_t rightID[3] = {0x44, 0x55, 0x66};
+    QLMMessage lease = QLMCommandAssignSession(rightID, QLMAddressSessionFirst);
+    XCTAssertGreaterThanOrEqual(sent.count, 3u);
+    XCTAssertEqualObjects([sent subarrayWithRange:NSMakeRange(0, 3)],
+                          (@[QLMAdapterRecord(&firstCheck), QLMAdapterRecord(&secondCheck), QLMAdapterRecord(&lease)]));
+}
+
+// A monitor whose replies are lost takes its lease all the same, and hides
+// from the probe while it holds it. Here the right's serial is never read,
+// so no check finds it after the restart. The count starts at 02 again, but
+// the session the right last held goes to no other monitor.
+- (void)testARestartLeasesNoOneTheSessionAMonitorMayStillHold {
+    const uint8_t thirdID[3] = {0x77, 0x88, 0x99};
+    QLMFakeMonitor *third = [[QLMFakeMonitor alloc] initWithHardwareID:[NSData dataWithBytes:thirdID length:3] serialNumber:@"8320apm21009999"
+                                                            systemInfo:@"c-1;model-8320A" deviceClass:QLMTelemetryClassTwoWay];
+    _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right, third]];
+    _right.dropReplies = 1000;
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).identified && QLMFindMonitor(snapshot, third.hardwareID).identified &&
+               QLMFindMonitor(snapshot, self->_right.hardwareID) == nil;
+    }];
+    [self stopAndWait];
+    __block uint8_t hidden = 0;
+    [_bus perform:^{
+        hidden = self->_right.session;
+        self->_left.session = 0;
+        third.session = 0;
+    }];
+    XCTAssertNotEqual(hidden, 0);
+
+    NSUInteger before = _bus.sentMessages.count;
+    [_system start];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && QLMFindMonitor(snapshot, self->_left.hardwareID).identified &&
+               QLMFindMonitor(snapshot, third.hardwareID).identified;
+    }];
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 2u);
+    XCTAssertEqual([self sentFrom:before to:[NSIndexSet indexSetWithIndex:hidden]].count, 0u);
+    [_bus perform:^{
+        XCTAssertEqual(self->_left.session, QLMAddressSessionFirst);
+        XCTAssertNotEqual(third.session, hidden);
+        XCTAssertEqual(self->_right.session, hidden);
+    }];
+}
+
 // Every frame sent from `start` on to any of `sessions`.
 - (NSArray<NSData *> *)sentFrom:(NSUInteger)start to:(NSIndexSet *)sessions {
     return [self sentFrom:start matching:^BOOL(NSData *message) {
