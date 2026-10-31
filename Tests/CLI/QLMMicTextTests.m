@@ -7,9 +7,8 @@
 #import "QLMTestSupport.h"
 
 // The mic, and the knob's staleness, as qlmctl's info and poll print them,
-// from System on a replay. The
-// readings' meaning is unconfirmed (docs/adapter-status.md), so they print as
-// raw counts.
+// from System on a replay. The readings' meaning is unconfirmed
+// (docs/adapter-status.md), so they print as raw counts.
 @interface QLMMicTextTests : XCTestCase
 @end
 
