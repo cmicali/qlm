@@ -607,6 +607,30 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// The latest snapshot waits until nothing is queued for the bus or in
+// flight. A snapshot of now does not, so a stop decided from it sees a level
+// that has not gone out yet: here, one below the knob, which makes the
+// take-over louder.
+- (void)testASnapshotOfNowSeesALevelNotYetPublished {
+    _settings.cycleInterval = 10;
+    _bus.knobTenths = @(-500);
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    QLMSnapshot *published = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-30)] && snapshot.idle;
+    }];
+    XCTAssertEqual(published.handBack.kind, QLMHandBackKnobLevel);
+
+    [_system wake];  // its holds keep the bus busy
+    [_system setVolumeDecibels:-60];
+    [_time settle];
+    XCTAssertEqual(_system.snapshot.handBack.kind, QLMHandBackKnobLevel);
+    QLMSnapshot *now = [_system snapshotNow];
+    XCTAssertEqualObjects(now.volumeDecibels, @(-60));
+    XCTAssertEqual(now.handBack.kind, QLMHandBackLouder);
+}
+
 // Never drive the bus while GLM runs: while the adapter is busy, the
 // snapshot says why and nothing goes out. Once it frees up, discovery runs.
 - (void)testABusyAdapterShowsAndNothingGoesOut {

@@ -1598,6 +1598,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return state;
 }
 
+// TRAP: from System's queue, it would wait for itself.
+- (QLMSnapshot *)snapshotNow {
+    __block QLMSnapshot *snapshot = nil;
+    dispatch_sync(_queue, ^{
+        snapshot = [self makeSnapshot];
+    });
+    return snapshot;
+}
+
 - (void)publishIfSettled {
     if (_dirty && [self isIdle]) {
         [self publish];
@@ -1606,6 +1615,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)publish {
     _dirty = NO;
+    QLMSnapshot *snapshot = [self makeSnapshot];
+    self.snapshot = snapshot;
+    QLMSnapshotHandler handler = _snapshotHandler;
+    if (handler != nil && _snapshotQueue != NULL) {
+        [_clock async:_snapshotQueue run:^{
+            handler(snapshot);
+        }];
+    }
+}
+
+- (QLMSnapshot *)makeSnapshot {
     NSMutableArray<QLMMonitorState *> *states = [NSMutableArray arrayWithCapacity:_monitors.count];
     BOOL allIdentified = _monitors.count > 0;
     BOOL allMuted = _monitors.count > 0;
@@ -1664,13 +1684,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return [a.serialNumber compare:b.serialNumber];
     }];
     snapshot.anyOn = anyOn;
-    self.snapshot = snapshot;
-    QLMSnapshotHandler handler = _snapshotHandler;
-    if (handler != nil && _snapshotQueue != NULL) {
-        [_clock async:_snapshotQueue run:^{
-            handler(snapshot);
-        }];
-    }
+    return snapshot;
 }
 
 @end

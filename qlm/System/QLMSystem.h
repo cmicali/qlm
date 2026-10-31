@@ -76,6 +76,12 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // The handler gets the latest snapshot at once, then every one published.
 - (void)setSnapshotHandler:(nullable QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue;
 
+// The snapshot System would publish now. The latest one may lag, since
+// System publishes only once nothing is queued for the bus or in flight.
+// Decide from this one what must not miss a change, such as whether a stop
+// makes the monitors louder. TRAP: it waits for System's queue.
+- (QLMSnapshot *)snapshotNow;
+
 - (void)start;
 // Before it lets go, sends the knob's level when the knob is at or below the
 // level System sends, so the adapter's take-over changes nothing. The
