@@ -66,7 +66,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSPopUpButton *groupPicker;
 @property (nonatomic) NSTextField *summaryLabel;
 @property (nonatomic) NSStackView *monitorsStack;
-@property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry, as the list only appends
+@property (nonatomic) NSMutableArray<QLMMonitorRow *> *rows;  // one per entry
 @property (nonatomic) NSTimeInterval sliderMovedAt;
 @property (nonatomic) BOOL askedGLMToQuit;  // until GLM lets go of the adapter
 // GLM holds the adapter and runs, as of checkedProblem. GLM starts and
@@ -509,6 +509,11 @@ static NSView *QLMSpacer(void) {
         }
         self.rows[i].entry = monitors[i];
         counts[monitors[i].presence] += 1;
+    }
+    // The list forgets its monitors when System changes bus.
+    while (self.rows.count > monitors.count) {
+        [self.rows.lastObject.view removeFromSuperview];
+        [self.rows removeLastObject];
     }
 
     NSMutableArray<NSString *> *summary = [NSMutableArray array];

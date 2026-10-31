@@ -29,12 +29,15 @@ NSString *QLMPresenceName(QLMMonitorPresence presence);
 // presence's name.
 NSString *QLMEntryStatusText(QLMMonitorEntry *entry);
 
-// The latest snapshot, and every monitor seen since launch. System drops a
+// The latest snapshot, and every monitor seen on this bus. System drops a
 // monitor that stops answering, and the list keeps it, offline. Entries
-// only append, in the order first seen. On the main queue.
+// only append, in the order first seen, until the list forgets them. On the
+// main queue.
 @interface QLMMonitorList : NSObject
 
 - (void)updateWithSnapshot:(QLMSnapshot *)snapshot;
+// Forgets every monitor seen, for a System on another bus.
+- (void)forgetMonitors;
 
 @property (nonatomic, readonly, nullable) QLMSnapshot *snapshot;
 @property (nonatomic, readonly) NSArray<QLMMonitorEntry *> *entries;

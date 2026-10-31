@@ -52,6 +52,13 @@ NSString *QLMEntryStatusText(QLMMonitorEntry *entry) {
     return self;
 }
 
+- (void)forgetMonitors {
+    [_order removeAllObjects];
+    [_lastStates removeAllObjects];
+    _entries = @[];
+    _dropped = @[];
+}
+
 - (void)updateWithSnapshot:(QLMSnapshot *)snapshot {
     _snapshot = snapshot;
     NSMutableSet<NSData *> *tracked = [NSMutableSet setWithCapacity:snapshot.monitors.count];
