@@ -6,8 +6,6 @@
 - (void)redo:(nullable id)sender;
 @end
 
-// Each action goes to the first responder: the field editor, the key
-// window, then NSApp.
 NSMenu *QLMMainMenu(void) {
     NSMenu *app = [[NSMenu alloc] initWithTitle:@"qlm"];
     [app addItemWithTitle:@"Quit qlm" action:@selector(terminate:) keyEquivalent:@"q"];

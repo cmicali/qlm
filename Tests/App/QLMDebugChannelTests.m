@@ -436,12 +436,11 @@
     XCTAssertEqualObjects(([self runOK:@[@"ceiling", @"-100"]][@"ceilingDecibels"]), @(-50));
 }
 
-// The verb refuses what Settings' field refuses: a ceiling above 0 dB. A
-// clamp made 6, or 35 typed for −35, the loudest ceiling.
+// The verb refuses what Settings' field refuses, before the preferences
+// bound it. 0 dB itself goes through.
 - (void)testACeilingAboveFullLevelIsRefused {
     NSUInteger mark = _bus.sentMessages.count;
-    XCTAssertEqualObjects(([self errorOf:@[@"ceiling", @"6"]]), @"6 dB is above 0 dB, the monitors' full level.");
-    for (NSString *decibels in @[@"35", @"0.04", @"+3"]) {
+    for (NSString *decibels in @[@"6", @"0.04", @"+3"]) {
         XCTAssertEqualObjects(([self errorOf:@[@"ceiling", decibels]]), QLMTypedLevelRefusal(decibels.doubleValue), @"%@", decibels);
     }
     XCTAssertEqual(_app.debugPreferences.ceilingDecibels, -30);

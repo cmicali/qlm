@@ -174,7 +174,6 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [self reloadSetupNames];
     [self renderSetup];
     [self renderRange];
-    [self showRangeRefusal:nil];
     [self renderLaunch];
     [self renderHandBack];
     [self fitWindow];
@@ -270,7 +269,6 @@ static const CGFloat QLMSettingsTextWidth = 360;
         self.preferences.lowestDecibels = control.doubleValue;
     }
     [self renderRange];
-    [self showRangeRefusal:nil];
     [self.delegate settingsDidChangeVolumeRange:self];
 }
 
@@ -287,10 +285,11 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 // The note's row shows only with a refusal.
 - (void)showRangeRefusal:(nullable NSString *)refusal {
-    if ([self.rangeNote.stringValue isEqualToString:refusal ?: @""]) {
+    NSString *text = refusal ?: @"";
+    if ([self.rangeNote.stringValue isEqualToString:text]) {
         return;
     }
-    self.rangeNote.stringValue = refusal ?: @"";
+    self.rangeNote.stringValue = text;
     [self.grid cellForView:self.rangeNote].row.hidden = refusal == nil;
     [self fitWindow];
 }
@@ -355,6 +354,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.ceilingStepper.minValue = lowest + QLMVolumeRangeMinimumSpan;
     self.ceilingStepper.maxValue = 0;
     self.ceilingStepper.doubleValue = ceiling;
+    [self showRangeRefusal:nil];
 }
 
 // Asks macOS for the login item's status, so only when the window shows.

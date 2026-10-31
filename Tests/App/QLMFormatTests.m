@@ -140,8 +140,7 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
 
 #pragma mark - A typed level
 
-// 0 dB is the monitors' full level. Settings once clamped a level above it,
-// so 35, typed for −35, made the loudest ceiling.
+// The refusal names the level as typed, unrounded.
 - (void)testALevelAboveFullLevelIsRefused {
     XCTAssertEqualObjects(QLMTypedLevelRefusal(35), @"35 dB is above 0 dB, the monitors' full level.");
     XCTAssertEqualObjects(QLMTypedLevelRefusal(0.04), @"0.04 dB is above 0 dB, the monitors' full level.");
@@ -149,8 +148,7 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertNil(QLMTypedLevelRefusal(-35));
 }
 
-// Settings' fields refuse what the rule refuses, and an empty field, which
-// read as 0 dB. The preferences bound every level they take.
+// Settings' fields refuse what the rule refuses, and an empty field.
 - (void)testTheLevelFieldsRefuseALevelAboveFullLevelAndAnEmptyField {
     QLMDecibelsFormatter *formatter = [[QLMDecibelsFormatter alloc] init];
     NSDictionary<NSString *, NSString *> *refused = @{
