@@ -207,6 +207,39 @@
     XCTAssertEqual(QLMFrameEncode(&other, out, sizeof out, &length), QLMFrameErrorForbidden);
 }
 
+// docs/refused-frames.md, "43 00 02 and 4B 00 00 00 01, to the 8351B": GLM
+// sends each only to an 8351B's session, and always with these bytes
+// (captures/startup-idle, 8.650 and 8.725 s). The allowlist takes exactly
+// those two payloads.
+- (void)testTheAllowlistTakesTheThreeWayFramesOnlyAsCapturedToASession {
+    uint8_t out[QLMFrameMax];
+    size_t length = 0;
+    const uint8_t frame43[] = {0x43, 0x00, 0x02};
+    const uint8_t frame4B[] = {0x4B, 0x00, 0x00, 0x00, 0x01};
+    XCTAssertTrue(QLMFrameAllows(frame43, sizeof frame43));
+    XCTAssertTrue(QLMFrameAllows(frame4B, sizeof frame4B));
+    const uint8_t refused[][6] = {
+        {0x43}, {0x43, 0x00}, {0x43, 0x00, 0x00}, {0x43, 0x00, 0x01}, {0x43, 0x00, 0x03}, {0x43, 0x01, 0x02},
+        {0x43, 0x00, 0x02, 0x00}, {0x4B}, {0x4B, 0x00, 0x00, 0x00}, {0x4B, 0x00, 0x00, 0x00, 0x00},
+        {0x4B, 0x00, 0x00, 0x00, 0x02}, {0x4B, 0x01, 0x00, 0x00, 0x01}, {0x4B, 0x00, 0x00, 0x01, 0x01},
+        {0x4B, 0x00, 0x00, 0x00, 0x01, 0x00},
+    };
+    const size_t lengths[] = {1, 2, 3, 3, 3, 3, 4, 1, 4, 5, 5, 5, 5, 6};
+    for (size_t i = 0; i < sizeof lengths / sizeof lengths[0]; i++) {
+        XCTAssertFalse(QLMFrameAllows(refused[i], lengths[i]), @"entry %zu", i);
+    }
+
+    const uint8_t addresses[] = {QLMAddressSessionFirst, 0x03, 0x0C, QLMAddressSessionLast,
+                                 QLMAddressAdapter, QLMAddressMulticast, QLMAddressBroadcast};
+    for (size_t i = 0; i < sizeof addresses; i++) {
+        QLMFrameStatus expected = QLMAddressIsLeasable(addresses[i]) ? QLMFrameOK : QLMFrameErrorForbidden;
+        QLMMessage built43 = QLMCommandThreeWay43(addresses[i], 0x02);
+        XCTAssertEqual(QLMFrameEncode(&built43, out, sizeof out, &length), expected, @"43 to %02X", addresses[i]);
+        QLMMessage built4B = QLMCommandThreeWay4B(addresses[i], 0x01);
+        XCTAssertEqual(QLMFrameEncode(&built4B, out, sizeof out, &length), expected, @"4B to %02X", addresses[i]);
+    }
+}
+
 // Section 7 and section 9's group apply: what qlm does send.
 - (void)testTheAllowlistAcceptsWhatQLMSends {
     const uint8_t allowed[][5] = {

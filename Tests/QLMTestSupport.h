@@ -36,6 +36,9 @@ NSData *QLMBytes(const uint8_t *bytes, size_t length);
 // A hand-back as System would give it.
 QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume);
 
+// The snapshot's monitor with this hardware ID, or nil.
+QLMMonitorState *_Nullable QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID);
+
 // The output report a message packs into, 64 bytes.
 NSData *QLMReportFor(QLMMessage message);
 
@@ -77,6 +80,9 @@ BOOL QLMIsControl(QLMMessage message);
 
 // A lease: 02, a hardware ID, and a session, to the multicast address.
 BOOL QLMIsLease(QLMMessage message);
+
+// A poll of a monitor: 08 to a session.
+BOOL QLMIsMonitorPoll(QLMMessage message);
 
 // A volume frame's 24-bit word.
 uint32_t QLMVolumeWordOf(QLMMessage message);

@@ -103,7 +103,7 @@ The 2.5 s is tight. A change 2.53 s after the move that started a spell still mo
 
 Each change GLM follows brings a burst of `2B` frames, to every monitor and as `01 2B 00` to address `01`, even when the level stays. Changes it doesn't follow bring none.[^bursts] **Guess:** GLM refreshes the mute and LED state on every change it follows.
 
-A few things don't fit cleanly. Now and then, GLM's burst carries the level of the change before, and GLM catches up at its next change.[^lag] After a reconnect, GLM can be slow: in `unplug-proxy-hang`, it followed the knob's 55 dB move 0.7 s after the adapter came back.[^reconnect] And in `standby-wake`, which starts with the knob just plugged in, GLM sends a burst for a change of a single tenth, without moving its level. Nothing else in that capture breaks the rule.[^plugged]
+A few things don't fit cleanly. A burst carries either the level of the reading it answers or the level of the reading GLM answered before it, and never another. 72 of the 308 bursts in the seven captures with the knob carry the one before.[^lag] After a reconnect, GLM can be slow: in `unplug-proxy-hang`, it followed the knob's 55 dB move 0.7 s after the adapter came back.[^reconnect] And in `standby-wake`, which starts with the knob just plugged in, GLM sends a burst for a change of a single tenth, without moving its level. It fits as the tail of a spell. The plug's first reading, −1001, is 13 tenths from −988, the last reading GLM followed before the knob came out in `volume-sweep`. The capture starts after the plug, so this is a fit: a spell started 1.21 to 1.55 s before the capture gives GLM's bursts there exactly.[^plugged]
 
 qlm follows the same rule ([protocol.md](protocol.md#volume-and-the-knob)).
 
@@ -114,9 +114,9 @@ qlm follows the same rule ([protocol.md](protocol.md#volume-and-the-knob)).
 [^darkwake]: `sleep-wake-darkwake`. Spells start at 26.33, 29.82, 37.33, and 53.99 s, among others. The capture starts with GLM already running, so the reading GLM last followed before it is inferred: −731, the only value that fits the first spell and GLM's −73.0 dB level.
 [^spell]: `sleep-wake-darkwake`, 132.02 s, followed, and 28.88 s, not.
 [^bursts]: `knob-sweep`, where 168 of the 169 `01 2B` frames come within 150 ms of a `DF` change, and the other as GLM opens (7.20 s); `sleep-wake-darkwake`, where the changes outside a spell bring none.
-[^lag]: `sleep-wake-darkwake`, 138.96 s, where GLM followed −665 but sent −67.5 dB, then −66.5 dB at 141.36 s. Also at 181.59, 196.11, and 461.49 s.
+[^lag]: `sleep-wake-darkwake`, 138.96 s, where GLM followed −665 but sent −67.5 dB, then −66.5 dB at 141.36 s. Also at 181.59, 196.11, and 461.49 s. The count: `testEachBurstCarriesTheReadingsLevelOrTheOneBefore`.
 [^reconnect]: `unplug-proxy-hang`, 106.24 and 106.94 s.
-[^plugged]: `standby-wake`, 0.98 s.
+[^plugged]: `standby-wake`, 0.98 to 1.77 s; `volume-sweep`, 25.44 s; `testAKnobJustPluggedInIsTheTailOfASpell`.
 
 ## How the adapter knows a host is present
 
@@ -155,7 +155,7 @@ qlm follows the same rule ([protocol.md](protocol.md#volume-and-the-knob)).
 
 ## Open
 
-- Why GLM's level sometimes lags a change it followed, and why a knob just plugged in brings a burst for a single tenth (`standby-wake`, 0.98 s). The rule itself is in [What GLM does with the knob](#what-glm-does-with-the-knob).
+- Why GLM's burst sometimes carries the level of the reading it answered before. It never carries anything else ([What GLM does with the knob](#what-glm-does-with-the-knob)).
 - What `DE` and `DD` measure, and their scale. Nobody recorded GLM's displayed readings.
 - The adapter's host timeout, and which frames reset it: any report, or only `01 08`. The takeover happens on the monitor bus, which USB cannot see. The bus tap can.
 - Whether one poll per cycle holds the adapter as well as GLM's pairs.

@@ -20,6 +20,15 @@ QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *knob, NSNumber *vol
     return handBack;
 }
 
+QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID) {
+    for (QLMMonitorState *monitor in snapshot.monitors) {
+        if ([monitor.hardwareID isEqualToData:hardwareID]) {
+            return monitor;
+        }
+    }
+    return nil;
+}
+
 NSData *QLMReportFor(QLMMessage message) {
     uint8_t report[QLMReportLength];
     QLMReportPackOutput(&message, report);
@@ -110,6 +119,10 @@ BOOL QLMIsControl(QLMMessage message) {
 
 BOOL QLMIsLease(QLMMessage message) {
     return message.address == QLMAddressMulticast && message.length == 5 && message.payload[0] == 0x02;
+}
+
+BOOL QLMIsMonitorPoll(QLMMessage message) {
+    return QLMAddressIsLeasable(message.address) && message.payload[0] == 0x08;
 }
 
 uint32_t QLMVolumeWordOf(QLMMessage message) {

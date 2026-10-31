@@ -46,7 +46,7 @@ static void QLMPrintUsage(FILE *stream) {
             "                                 print, or send, every frame of a switch to the group, or with\n"
             "                                 --launch, of the apply at launch and wake. --volume is the level\n"
             "                                 the apply restores.\n"
-            "  compare-apply <file.sam> <reports.txt> --group NAME [--from S] [--to S]\n"
+            "  compare-apply <file.sam> <reports.txt> --group NAME [--from S] [--to S] [--check-outside]\n"
             "                                 compare GLM's DSP passes in a capture of one group's apply with\n"
             "                                 qlm's blocks from the setup file. It reads the two files and opens\n"
             "                                 no bus.\n"
@@ -99,15 +99,25 @@ static void QLMPrintUsage(FILE *stream) {
             "only those from --from to --to seconds into the capture when given. Give each apply its own run,\n"
             "with its group and window. It matches each pass to the node of that group whose block differs\n"
             "from it in the fewest settings, then in order. Only nodes of the model the session's 39 reply\n"
-            "names count. When the setup holds the hardware ID the session's lease names, as a raw setup file\n"
-            "does and a redacted one doesn't, only that node counts. A node is one monitor, so a second\n"
-            "session can't match it, unless the capture leases that session, as when a monitor is leased\n"
-            "again. It prints each pass's node, then every setting whose frame differs, as GLM's then qlm's,\n"
-            "every frame only GLM sent, every frame only qlm would send, and the 8351B's 43 00 02 and\n"
-            "4B 00 00 00 01, which qlm leaves out. It checks every generator stop, 05 04, in the window, pass\n"
-            "or no pass. A left-out frame or a stop with other bytes is a frame only GLM sent. It exits 0\n"
-            "when every pass matches and every stop is the known one, %d when not, %d for an argument it\n"
-            "doesn't know or no --group, and %d for a file it can't read, a group the setup lacks, or no pass.\n",
+            "names count, the reply after the session's last lease before the pass. When the setup holds the\n"
+            "hardware ID that lease names, as a raw setup file does and a redacted one doesn't, only that\n"
+            "node counts. A node is one monitor, so a second session can't match it, unless the capture\n"
+            "leases that session, as when a monitor is leased again. It prints each pass's node, then every\n"
+            "setting whose frame differs, as GLM's then qlm's, every frame only GLM sent, and every frame\n"
+            "only qlm would send. It checks every generator stop, 05 04, in the window, pass or no pass. A\n"
+            "stop with other bytes is a frame only GLM sent.\n"
+            "It also lists, as GLM, outside a pass, every DSP frame in the window that no pass holds, and\n"
+            "says what explains it. A switch's routing frames, 3B and 40, are listed before the pass they\n"
+            "route, and explained when that pass sends the same. One to a monitor with no pass right after it\n"
+            "is routing for a monitor the switch leaves off. Any other frame is listed after the session's\n"
+            "pass before it, or before its next one. A setting, such as a band GLM sends as it's edited,\n"
+            "counts by its last frame per session in the window, which is explained when it's the frame the\n"
+            "session's node's block sends. The ones before it passed through. With no pass at the session in\n"
+            "the window, its node is the one node of the group of its model, if there's one. By default,\n"
+            "these frames change no verdict. With --check-outside, any frame not explained differs, and a\n"
+            "window with frames outside a pass but no pass is compared. It exits 0 when every pass matches\n"
+            "and every stop is the known one, %d when not, %d for an argument it doesn't know or no --group,\n"
+            "and %d for a file it can't read, a group the setup lacks, or nothing to compare.\n",
             QLMAdapterPollLimit, [[QLMSystemSettings alloc] init].adapterPollInterval, QLMDimDecibels, QLMCeilingLimit,
             QLMCompareApplyDiffers, EX_USAGE, EX_DATAERR);
 }
@@ -851,9 +861,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         QLMMessage message = QLMApplyMessage(record);
         QLMPrintFrame(&message, NULL, NULL);
     }
-    printf("%lu frames. Not sent, though GLM sends them: 05 04 before each block, and the 8351B's 43 00 02 and "
-           "4B 00 00 00 01.\n",
-           (unsigned long)records.count);
+    printf("%lu frames. Not sent, though GLM sends it: 05 04 before each block.\n", (unsigned long)records.count);
     printf("%s\n", allowed ? "every node's rate is verified: an apply would be allowed"
                             : "REFUSED: a node's design rate is unverified, so an apply runs only as its supervised "
                               "test, with --unverified-rate");

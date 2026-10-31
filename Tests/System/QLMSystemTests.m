@@ -267,15 +267,6 @@
     }];
 }
 
-static QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID) {
-    for (QLMMonitorState *monitor in snapshot.monitors) {
-        if ([monitor.hardwareID isEqualToData:hardwareID]) {
-            return monitor;
-        }
-    }
-    return nil;
-}
-
 - (QLMSnapshot *)waitForDiscovery {
     return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.anyOn;
@@ -1646,6 +1637,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     group.groupSensitivity = source.groupSensitivity;
     group.crossover = source.crossover;
     group.crossoverGlobalMode = source.crossoverGlobalMode;
+    group.groupDelayCompensation = source.groupDelayCompensation;
+    group.bassExtensionMode = source.bassExtensionMode;
+    group.bassExtensionCrossoverMin = source.bassExtensionCrossoverMin;
+    group.bassExtensionCrossoverMax = source.bassExtensionCrossoverMax;
     group.videoDelay = source.videoDelay;
     group.subwooferBypass = source.subwooferBypass;
     group.lowShelf = source.lowShelf;
@@ -2233,6 +2228,49 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects([self stopAndCollect:&stopped], @[]);
     XCTAssertEqual(stopped.handBack.kind, QLMHandBackUnknown);
     XCTAssertNil(stopped.handBack.volumeDecibels);
+}
+
+// A stop no one can answer, such as a restart's, mutes every monitor first
+// where the take-over would be louder or is unknown, and the record keeps
+// it. A mute outlasts the host (captures/qlm-control-first, 648.7 s). At
+// the knob's level, it hands back as any stop does.
+- (void)testAStopMutingIfLouderMutesAllWhereTheTakeOverIsLouder {
+    for (NSNumber *tenths in @[@(-300), [NSNull null]]) {
+        [self startWithKnob:tenths == (id)[NSNull null] ? nil : tenths volume:@(-40)];
+        [_bus perform:^{
+            self->_left.muteValue = 0;
+            self->_right.muteValue = 0;
+        }];
+        NSUInteger before = _bus.sentMessages.count;
+        QLMSystem *system = _system;
+        QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return !snapshot.running;
+        } after:^{
+            [system stopMutingIfLouderWithCompletion:nil];
+        }];
+        XCTAssertNotEqual(stopped.handBack.kind, QLMHandBackKnobLevel, @"%@", tenths);
+        XCTAssertTrue(stopped.mutingAll, @"%@", tenths);
+        XCTAssertGreaterThan([self sentWithOpcode:0x2B from:before].count, 0u, @"%@", tenths);
+        [_bus perform:^{
+            XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted, @"%@", tenths);
+            XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted, @"%@", tenths);
+        }];
+        [self lapseLeases];
+    }
+
+    [self startWithKnob:@(-600) volume:@(-40)];
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSystem *system = _system;
+    QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stopMutingIfLouderWithCompletion:nil];
+    }];
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
+        return YES;
+    }], @[QLMAdapterRecord(&knob)]);
+    XCTAssertFalse(stopped.mutingAll);
 }
 
 // A start while the stop sends the knob's level runs once the stop is done.
@@ -2923,7 +2961,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 
 // AGENTS.md's Safety rule refuses a group with an unverified model, the
 // 8351B, but for qlmctl's supervised test, which sets allowsUnverifiedRates.
+// The setting is off by default. The supervised test's block carries 43 00 02
+// and 4B 00 00 00 01, as GLM's does. The refused apply sends neither.
 - (void)testOnlyTheSupervisedSettingAppliesAnUnverifiedRate {
+    XCTAssertFalse([[QLMSystemSettings alloc] init].allowsUnverifiedRates);
     _settings.cycleInterval = 10;
     const uint8_t leftID[3] = {0x0F, 0x42, 0x42};  // the fixture's 1000002, the Left 8351B
     _left = [[QLMFakeMonitor alloc] initWithHardwareID:QLMBytes(leftID, 3) serialNumber:@"8351BP21001234"
@@ -2943,12 +2984,19 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         [_system setVolumeDecibels:-40];
         NSUInteger before = _bus.sentMessages.count;
         NSError *error = [self applyGroup:left];
+        uint8_t session = QLMFindMonitor(_system.snapshot, _left.hardwareID).session;
         if (allowed.boolValue) {
             XCTAssertNil(error);
             XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 1u);
+            const uint8_t frame43[] = {session, 0x43, 0x00, 0x02};
+            const uint8_t frame4B[] = {session, 0x4B, 0x00, 0x00, 0x00, 0x01};
+            XCTAssertEqualObjects([self sentWithOpcode:0x43 from:before], @[QLMBytes(frame43, sizeof frame43)]);
+            XCTAssertEqualObjects([self sentWithOpcode:0x4B from:before], @[QLMBytes(frame4B, sizeof frame4B)]);
         } else {
             XCTAssertEqual(error.code, QLMSystemErrorUnverifiedRate);
             XCTAssertEqual([self sentWithOpcode:0x17 from:before].count, 0u);
+            XCTAssertEqual([self sentWithOpcode:0x43 from:before].count, 0u);
+            XCTAssertEqual([self sentWithOpcode:0x4B from:before].count, 0u);
         }
         [self stopAndWait];
     }

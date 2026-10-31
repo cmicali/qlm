@@ -1,10 +1,12 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMControl.h"
+#import "QLMFakeBus.h"
 #import "QLMPreferences.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
+#include "QLMCommands.h"
 
 static NSData *QLMID(uint8_t last) {
     const uint8_t bytes[3] = {0x11, 0x4B, last};
@@ -215,6 +217,28 @@ static NSData *QLMID(uint8_t last) {
     XCTAssertEqual(fake.knownLeases.count, 0u);
 }
 
+// AGENTS.md's Safety rule: the app applies no group with a model whose filter
+// design rate is unverified, the 8351B, so System refuses each one. The app's
+// settings are QLMSystemSettings' defaults, its ceiling, and either bus's
+// fill, as QLMAppDelegate makes them, and none allows an unverified rate.
+// No source of the app's sets allowsUnverifiedRates.
+- (void)testTheAppNeverAllowsAnUnverifiedRate {
+    [_preferences.adapterBus keepFromSnapshot:[self runningSnapshot]];
+    for (QLMBusPreferences *bus in @[_preferences.adapterBus, _preferences.fakeBus]) {
+        QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+        settings.ceilingDecibels = _preferences.ceilingDecibels;
+        [bus fillSettings:settings];
+        XCTAssertFalse(settings.allowsUnverifiedRates);
+    }
+    NSString *app = QLMRepositoryPath(@"qlm/App");
+    NSArray<NSString *> *sources = [NSFileManager.defaultManager contentsOfDirectoryAtPath:app error:NULL];
+    XCTAssertGreaterThan(sources.count, 0u);
+    for (NSString *name in sources) {
+        NSString *text = [NSString stringWithContentsOfFile:[app stringByAppendingPathComponent:name] encoding:NSUTF8StringEncoding error:NULL];
+        XCTAssertFalse([text containsString:@"allowsUnverifiedRates"], @"%@", name);
+    }
+}
+
 // A snapshot from before System starts carries an empty record, so it keeps
 // nothing. One from after a stop keeps the volume only.
 - (void)testOnlyARunningSystemsRecordIsKept {
@@ -236,6 +260,78 @@ static NSData *QLMID(uint8_t last) {
     NSArray<QLMKnownLease *> *leases = _preferences.adapterBus.knownLeases;
     XCTAssertEqual(leases.count, 1u);
     XCTAssertEqual(leases.firstObject.session, 6);
+}
+
+#pragma mark - A stop no one can answer
+
+// A System on the fake bus and the virtual clock, started from the record
+// kept, and keeping each snapshot's record as the app does.
+- (QLMSystem *)systemOn:(QLMFakeBus *)bus clock:(QLMVirtualClock *)time keeping:(QLMBusPreferences *)kept {
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.clock = time;
+    [kept fillSettings:settings];
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
+        [kept keepFromSnapshot:snapshot];
+    } queue:dispatch_get_main_queue()];
+    [system start];
+    [system setVolumeDecibels:-40];
+    return system;
+}
+
+- (void)stop:(QLMSystem *)system clock:(QLMVirtualClock *)time muting:(BOOL)mutes {
+    __block BOOL stopped = NO;
+    dispatch_block_t completion = ^{
+        stopped = YES;
+    };
+    if (mutes) {
+        [system stopMutingIfLouderWithCompletion:completion];
+    } else {
+        [system stopWithCompletion:completion];
+    }
+    XCTAssertTrue([time runUntil:^BOOL {
+        return stopped;
+    } within:60]);
+}
+
+// A logout, restart, or shutdown mutes every monitor where the take-over
+// would be louder (#70). The app keeps only a running System's record, yet
+// keeps that mute all, so the next launch restates the mutes. Else it would
+// start unmuted, and its next round would unmute the monitors.
+- (void)testTheMutingStopsRecordOutlastsALaunch {
+    QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
+    [bus perform:^{
+        bus.knobTenths = @(-300);
+    }];
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    QLMSystem *system = [self systemOn:bus clock:time keeping:kept];
+    XCTAssertTrue([time runUntil:^BOOL {
+        QLMSnapshot *snapshot = system.snapshot;
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle && snapshot.handBack.kind == QLMHandBackLouder;
+    } within:60]);
+    [self stop:system clock:time muting:YES];
+    XCTAssertTrue(kept.mutingAll);
+    XCTAssertEqual(kept.mutedHardwareIDs.count, 2u);
+
+    __block BOOL heard = YES;
+    [bus perform:^{
+        for (QLMFakeMonitor *monitor in bus.monitors) {
+            monitor.muteValue = 0;
+        }
+    }];
+    QLMSystem *relaunched = [self systemOn:bus clock:time keeping:kept];
+    XCTAssertTrue([time runUntil:^BOOL {
+        [bus perform:^{
+            heard = YES;
+            for (QLMFakeMonitor *monitor in bus.monitors) {
+                heard = heard && monitor.muteValue == QLMMuteValueMuted;
+            }
+        }];
+        return heard;
+    } within:60], @"the next System never restated the mutes");
+    XCTAssertTrue(relaunched.snapshot.mutingAll);
+    [self stop:relaunched clock:time muting:NO];
 }
 
 @end

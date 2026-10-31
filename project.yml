@@ -162,6 +162,7 @@ targets:
       # The app's debug verbs, and the app's code they and the tests read.
       # TRAP: AppKit can't make a view here. Hostless, NSApplication won't
       # start, and any view's layer asks for it.
+      - qlm/App/QLMAlerts.m
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
       - qlm/App/QLMMonitorList.m

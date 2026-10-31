@@ -186,7 +186,9 @@ The diff after F1 to F3 shows whether GLM moves the two rates along with the cro
 
 > **Not run on 2026-10-31.** GLM 5.2.1 shows no control for `GroupDelayCompensation` or `BassExtensionXO(Hz)` outside the group definition. The group definition's "Extended Phase Linearity" switch is the likely owner of `GroupDelayCompensation`, and changing it needs a recalibration. So Part G needs [the file-edit route](#when-glm-doesnt-show-a-setting), or a session with a recalibration.
 
-This part matters most. GLM sends two frames to the 8351Bs that qlm leaves out, always with the same bytes. `43 00 02` follows the level pair, before the PEQ slots. `4B 00 00 00 01` follows `3B`.[^43-4b] The 8351B's node has two fields the 8330A's lacks, and both hold the same value in every group: `GroupDelayCompensation:2` and `BassExtensionXO(Hz):1`. Our guess is that `43` carries the first and `4B` the second. Against that, the 7350A has `GroupDelayCompensation:2` too, and gets no `43`.
+This part matters most. GLM sends two frames to the 8351Bs, always with the same bytes. `43 00 02` follows the level pair, before the PEQ slots. `4B 00 00 00 01` follows `3B`.[^43-4b] The 8351B's node has two fields no other node has, and both hold the same value in every group: `GroupDelayCompensation:2` and `BassExtensionXO(Hz):1`. Our guess is that `43` carries the first and `4B` the second. qlm now builds both frames from those fields, but only at 2 and 1. Against the guess, each group has a `GroupDelayCompensation:2` of its own, and no other model gets a `43`.
+
+qlm refuses an 8351B whose fields hold any other value, or whose group's `GroupDelayCompensation`, `Group_BE_Mode`, `Group_BE_XOMin`, or `Group_BE_XOMax` differ from 2, 0, 150, and 250. So for any copy in Part G, `compare-apply` says `qlm builds no block` for that node, and exits 1. Its pass is then shown against the other 8351B, so a `43` or `4B` that GLM changed shows as GLM's frame against qlm's.
 
 Each step changes one field to each other value GLM offers, one value per step:
 
@@ -247,6 +249,16 @@ With the notes, those times give each apply's window, from a second or more befo
 ```bash
 qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --group "$GROUP" --from $FROM --to $TO
 ```
+
+Each run also lists, as `GLM, outside a pass`, the DSP frames no pass holds, and what explains each one. A switch's routing frames come before the pass they route. A step's live edits come after the edited monitor's pass before them, each band with its slot, and so does the level, delay, and `10 01 09` GLM sends when you confirm the editor. Each slot's last edit should be the slot as the block sends it, and the ones before it are values the editor passed through.
+
+The edits come before the step's save, so check them against the step's own snapshot, not the one before. Run the window of the apply before the edits again, with the step's snapshot and `--check-outside`:
+
+```bash
+qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --group "Main 4x2" --from $FROM --to $TO --check-outside
+```
+
+The summary should say `0 not explained`. The edited monitor's pass in that window is from the step before, so it differs, and the run exits 1. That pass is what names the monitor's node. A redacted snapshot holds no hardware IDs, and a window with no pass names a node only by model, so it can't tell the two 8351Bs apart.
 
 `compare-apply` matches passes only within the group it's given. Main.sam's Group_4 is nearly a copy of Main 4x2, and these steps change only Main 4x2. So a match across groups could put a changed node's pass on Group_4's old copy, and hide the change.
 

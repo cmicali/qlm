@@ -66,7 +66,7 @@ typedef struct {
     int16_t sensor83;     // 83, second byte
     int16_t deviceClass;  // 84, first byte
     int16_t stateMetric;  // 84, second byte, meaning unknown
-    int32_t wakeSteps;    // 8A: 0 at a wake, one more about every 240 s; one frame in 30 s
+    int32_t wakeSteps;    // 8A: the seconds since the wake over 256, so 49 is its low byte; one frame in 30 s
     uint8_t unknownTag;   // where the walk stopped, or 0
 } QLMTelemetry;
 

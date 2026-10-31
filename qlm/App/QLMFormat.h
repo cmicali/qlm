@@ -53,6 +53,19 @@ NSString *_Nullable QLMHandBackLine(QLMSnapshot *_Nullable snapshot);
 // back.
 BOOL QLMStopMayRaiseLevel(QLMSnapshot *_Nullable snapshot);
 
+// What a quit does before qlm lets go.
+typedef NS_ENUM(NSInteger, QLMQuitStep) {
+    QLMQuitStepStop = 0,   // the take-over is no louder
+    QLMQuitStepAsk,        // the user's own quit asks first
+    QLMQuitStepMuteFirst,  // a logout, restart, or shutdown mutes every monitor
+};
+
+// `reason` is the quit Apple event's kAEQuitReason, or 0 with none, as at
+// Cmd-Q and the popover's Quit. A logout, restart, or shutdown can't wait
+// on an alert, so where the user's quit asks, it stops with System's
+// stopMutingIfLouderWithCompletion:.
+QLMQuitStep QLMQuitStepFor(BOOL stopMayRaiseLevel, OSType reason);
+
 // The banner's lines: the snapshot's adapterProblem, else its busProblem.
 // The title is nil when there is none.
 NSString *_Nullable QLMBusProblemTitle(QLMSnapshot *_Nullable snapshot);
