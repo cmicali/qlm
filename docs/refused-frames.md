@@ -202,11 +202,11 @@ Mute all sends the volume once (46.188 s), then `01 2B 01`, then `2B 03` to each
 
 **Where.** Twice, 0.6 ms apart, in `setup-b-peq-8351b` at 22.461 s. No other capture holds it. The payload is the bare opcode.
 
-**What the captures show.** A broadcast gets no reply. GLM polled no monitor after it. It asked the adapter for `39`, `19 01`, and `51 82`, sent the wake pairs, and at its next probe, 1.5 s after their last poll, all six monitors answered. GLM leased them `0B` to `10` and applied Main 4x2. A monitor that holds a lease ignores the probe, and the shortest lapse we've timed is 2.45 s. So something dropped the leases: the `03`, or the wake pairs after it. A wake drops a woken monitor's lease, but no capture shows a wake sent to monitors already on. GLM didn't relaunch: it kept counting sessions. The owner made no change then. Opening Main.sam in `setup-j-restore` re-read the adapter too, but sent no `03` and leased nothing.
+**What the captures show.** A broadcast gets no reply. GLM polled no monitor after it. It asked the adapter for `39`, `19 01`, and `51 82`, sent the wake pairs, and at its next probe, 1.5 s after their last poll, all six monitors answered. GLM leased them `0B` to `10` and applied Main 4x2. A monitor that holds a lease ignores the probe, and the shortest lapse we've timed is 2.45 s. So something dropped the leases: the `03`, or the wake pairs after it. `setup-j-restore` rules out the wake. Opening Main.sam there, GLM sent the same three wake pairs to six monitors that were on, with every other broadcast of setup B's window but the `03` and the level. The probe after them, at 34.993 s, got no answer, and each monitor answered its next poll at its session. So the `03` dropped the leases (`testABroadcast03DropsEveryLease`). GLM didn't relaunch: it kept counting sessions. The owner made no change then. Opening Main.sam in `setup-j-restore` re-read the adapter too, but sent no `03` and leased nothing.
 
 **hlm.** §7 has no opcode `03`. `03` appears only as `3A 03`, power.
 
-**Guess:** `03` tells every monitor to drop its lease, so GLM can set the system up again from the probe. The capture can't tell it from the wake.
+**Guess:** GLM sends it to set the system up again from the probe. Nothing in the capture shows what set it off.
 
 **Need.** None. qlm takes leases back by serial, and never needs to drop them. Keep it refused.
 
@@ -266,7 +266,7 @@ Any group with an 8351B is still refused for a real apply: every node's block mu
 4. **What `3C`, `3E`, `42`, `43`, and `4B` carry.** A capture of a setup change to the LFE fields, `GroupDelayCompensation`, or `BassExtensionXO` would map them. qlm builds `43` and `4B` from the 8351B's two fields, matched only at 2 and 1.
 5. **What the adapter does with `01 2B 01`,** and whether a mute survives the hand-back.
 6. **What `82` selects in `01 51 82`,** and what `219000` is.
-7. **What a broadcast `03` does, and what made GLM send it** in `setup-b-peq-8351b`.
+7. **What made GLM send a broadcast `03`** in `setup-b-peq-8351b`. It drops every lease.
 
 ## Sources
 

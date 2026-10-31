@@ -112,6 +112,10 @@ BOOL QLMIsLease(QLMMessage message) {
     return message.address == QLMAddressMulticast && message.length == 5 && message.payload[0] == 0x02;
 }
 
+BOOL QLMIsMonitorPoll(QLMMessage message) {
+    return QLMAddressIsLeasable(message.address) && message.payload[0] == 0x08;
+}
+
 uint32_t QLMVolumeWordOf(QLMMessage message) {
     return (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
 }
