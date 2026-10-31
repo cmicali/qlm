@@ -151,6 +151,8 @@ The app's second run on all six monitors. It checks the fixes made since `qlm-ap
 
   A key that doesn't exist reads as 0 too. If it reads 1, don't launch. Ask the user to turn it off, and run `defaults write com.commonwealthrecordings.qlm QLMUsesAdapter -bool false` only on their word.
 
+The calibration mic stays out of the adapter for the whole run. `qlm-mic-discovery`, below, comes after it.
+
 Keep the whole `defaults read` from step 3 in the log. It is the per-bus check's "before". If `QLMVolumeDecibels` isn't −50, ask whether to write −50, so the monitors come on at the run's level.
 
 ### The steps
@@ -217,6 +219,133 @@ These fixes need a fault or a race that no verb or hand can make safely. Each ha
 [^gap]: #49, fixes 2 and 3. `testANewSystemChecksTheLeasesItIsGivenBeforeLeasing` and `testARestartTakesBackLeasesStillHeld`, in `Tests/System/QLMSystemTests.m`. #52 gives the new System the leases saved under `QLMKnownLeases`.
 [^lapse]: `docs/protocol.md`, "When the host goes quiet". In `qlm-app-first`, the monitors dropped GLM's leases within 3.1 s.
 [^wake]: #53, fix 1. `testAWakeWithNoGroupActiveSaysSo` and `testAGroupAppliedAfterAWakeEndsIt`, in `Tests/System/QLMSystemTests.m`. In `qlm-app-first`, the woken monitors sounded a little different until GLM's launch applied the group.
+
+## The mic's discovery: `qlm-mic-discovery`
+
+A capture of its own, run after `qlm-app-second`, to decode what the adapter reports with the calibration mic in. qlm parses the mic's fields already, but nobody knows their scale.[^mic-known] This capture is the first one made to find out. It drives no app. `qlmctl poll` is the host, and the user makes every change by hand: the mic, the room's sound, and the knob. The mic stays out for every other run, so this one comes last, with the app quit.
+
+The rules above still hold, with `qlmctl` in place of the verbs:
+
+- **GLM stays closed, and so does the app.** One host at a time: `pgrep -lx qlm` finds nothing, and no other `qlmctl` runs.
+- **`poll` sends nothing new.** It sends the adapter's status poll and identity queries, the probe, the leases, and the monitors' polls. It sends no level, so the monitors keep the one the app's last stop left: the knob's, about −55 dB after `qlm-app-second`.[^poll-level] The ceiling stays −35 dB, and the level stays at −50 dB or lower.
+- **Never send `51`, the mic serial query.** genlc names it, and GLM sends `01 51 82` as it opens. GLMProtocol's allowlist refuses `51` to the adapter. Only a capture of GLM can show more of it.
+- **The signal is off whenever the knob is out.** With no knob, the level the adapter applies at a take-over is unknown.[^no-knob]
+
+### Before the capture
+
+1. Build `qlmctl` with `make cli`. Use this path:
+
+   ```bash
+   C=build/DerivedData/Build/Products/Release/qlmctl
+   ```
+
+2. Check that the app quit, with `pgrep -lx qlm`, and that GLM is closed.
+3. With the mic out, read the adapter:
+
+   ```bash
+   "$C" info
+   ```
+
+   `mic` must read `none`, and the knob −50 dB or lower. If the knob reads higher, ask the user to turn it down first. The adapter applies it at once, since no host runs.
+4. Set up REW's generator: pink noise on the Right channel only, off, at −40 dBFS. One monitor keeps the distance step simple.
+5. Put the mic on a stand, on the Right 8351B's axis, 0.5 m from it. Mark the spot, and the spot at 1 m.
+6. Ask the user to start `sudo ./pi/capture.sh qlm-mic-discovery` on the Pi, and to tell you the time it printed. That is the run's zero.
+
+### The steps
+
+Steps 1 to 5 run under one `poll`. Start it in the background, with its output in the capture's folder:
+
+```bash
+"$C" poll --seconds 600 > captures/qlm-mic-discovery/poll-1.txt
+```
+
+`poll` prints the knob and each monitor's telemetry, not the mic. So log each hand action's time when the user says it's done, with `date +%T`. `reports.txt` gives the exact poll later. If `poll` exits early, the adapter takes over at the knob, which changes nothing. Ask before starting it again.
+
+| Step | What the user does | Seconds | What it settles |
+| --- | --- | --- | --- |
+| 1 | The mic out. Then plug it in. Then pull it out again. | 10 out, 20 in, 10 out | How the adapter reports a hot-plug: the shape goes from `33 30 36 DF` to `32 34 DE DD 30 36 DF` and back. How many polls the change takes, and whether `34` ever appears alone. |
+| 2 | Plug the mic in at the 0.5 m spot. The room silent, and the noise off. | 30 | The floor of `DE` and `DD` |
+| 3 | The noise on, at −40, −30, and −20 dBFS in turn | 30 each | Whether `DD` steps by a fixed ratio per 10 dB, and which: linear in pressure or in power, or already in dB. Whether `DE` takes the same steps. |
+| 4 | The noise off. Three sharp claps or finger snaps near the mic, 10 s apart. | 40 | Whether `DE` spikes and `DD` barely moves, which would confirm peak against average |
+| 5 | The noise on at −30 dBFS. The mic at 0.5 m, then moved to 1 m. Then the noise off. | 30 each | The change against the 6 dB a doubled distance gives in free space. A room gives less. |
+
+Step 6 runs under its own `poll`, with the noise off throughout:
+
+```bash
+"$C" poll --seconds 60 > captures/qlm-mic-discovery/poll-2.txt
+```
+
+| Step | What the user does | Seconds | What it settles |
+| --- | --- | --- | --- |
+| 6 | The mic in, the noise off. Pull the knob out, wait, and plug it back in before `poll` ends. Leave the knob where it was. | 20 out | The one shape no capture has: mic in, knob out. `poll` prints `no knob` while it's out. |
+
+If REW's top step leaves `DD` at its floor, stop. Don't raise the monitors' level. A louder test is the user's call, at −50 dB or lower.
+
+After step 6, ask the user to stop the capture, then to unplug the mic.
+
+### After the capture
+
+Convert the capture, with the adapter's number that `capture.sh` printed, as `captures/README.md` says. Then pull `DE`, `DD`, and the shape from each status reply in a window of seconds. `DE` and `DD` read as unsigned and big-endian, and `DF` as signed.
+
+```bash
+python3 -I - captures/qlm-mic-discovery/reports.txt 100 130 <<'EOF'
+import sys
+path, start, end = sys.argv[1], float(sys.argv[2]), float(sys.argv[3])
+sizes = {0: 0, 1: 1, 2: 2, 3: 4}
+known = {'30', '31', '32', '33', '34', '36', 'DD', 'DE', 'DF'}
+for line in open(path):
+    if line.startswith('#'):
+        continue
+    time, way, *hexes = line.split()
+    if way != 'in' or not start <= float(time) <= end:
+        continue
+    raw = bytes.fromhex(''.join(hexes))[1:]
+    if 0x7E not in raw:
+        continue
+    raw = raw[:raw.index(0x7E)]
+    frame, i = bytearray(), 0
+    while i < len(raw):
+        if raw[i] == 0x7D:
+            i += 1
+            frame.append(raw[i] ^ 0x20)
+        else:
+            frame.append(raw[i])
+        i += 1
+    if frame[:2] != b'\x01\x09' or frame[2] not in (0x30, 0x31, 0x32, 0x33):
+        continue
+    fields, i = [], 2
+    while i < len(frame) - 2:
+        tag, size = frame[i], sizes[frame[i] >> 6]
+        value = int.from_bytes(frame[i + 1:i + 1 + size], 'big', signed=tag == 0xDF) if size else None
+        fields.append(f'{tag:02X}' if value is None else f'{tag:02X}={value}')
+        i += 1 + size
+    if all(f[:2] in known for f in fields):
+        print(time, ' '.join(fields))
+EOF
+```
+
+It walks the tags by their top two bits, as [adapter-status.md](../../../docs/adapter-status.md) infers. It prints only replies made of the known tags. So `01 51 82`'s ASCII reply, which also starts with `32`, drops out, and so would a status reply with a new tag. Count the replies it drops in each window, and look at any that aren't the serial query's.
+
+What each result would mean, against the guesses in adapter-status.md:
+
+| Step | If | Then |
+| --- | --- | --- |
+| 1 | The shape changes within a poll or two of the plug, both ways | The adapter reports the mic live, and qlm can show a hot-plug. |
+| 1 | `34` shows without `32`, or `32` without `34` | `34` isn't tied to `32`. The guess that it opens the readings falls. |
+| 2 | `DD` holds steady and `DE` wanders above it | The floor of each. Every later reading is read against it. |
+| 3 | `DD`'s median rises about 3.16 times per 10 dB | `DD` is linear in pressure. |
+| 3 | About 10 times per 10 dB | `DD` is linear in power. |
+| 3 | By a fixed amount per 10 dB | `DD` is already in dB, or another log scale. |
+| 3 | `DE` takes the same steps as `DD` | Both share one scale, and the first poll of each pair still reading higher keeps the peak guess. |
+| 4 | `DE` spikes in the poll after each clap, and `DD` barely moves | `DE` is a peak since the last read, and `DD` an average. How long `DD` takes to settle gives its window. |
+| 5 | The readings drop by about 6 dB, in step 3's scale | The mic reads the sound field as expected. A smaller drop is the room. |
+| 6 | The shape is `32 34 DE DD 31` | The mic and knob fields are independent. Any other shape goes into the shape table as found. |
+
+A decoded fact lands in `docs/adapter-status.md` and `docs/protocol.md`, with this capture and its seconds as its source, in the capture's PR. Add the scenario to `captures/README.md`'s list there too. The mic serial query stays off limits, whatever this capture shows.
+
+[^mic-known]: `docs/adapter-status.md`, "The mic: `DE` and `DD`". `qlm/GLMProtocol/QLMReplies.c` parses `mic`, `micDE`, and `micDD`. `QLMSnapshot` has `micPresent`. `qlmctl info` prints `mic in` or `mic none`, and no command prints the readings yet. The captures with the mic in are `startup-idle-mic` and `knob-sweep`.
+[^poll-level]: `qlmctl`'s usage, for what `poll` sends. `docs/experiments.md`, Part C: `poll` sends no level, and while it runs, the adapter keeps what it applied.
+[^no-knob]: `docs/experiments.md`, Part C, Q4. Its steps keep the signal off at every take-over with no knob, for the same reason.
 
 ## After the run
 
