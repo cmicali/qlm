@@ -19,7 +19,7 @@ These come from `AGENTS.md`'s Safety section. They outrank the user's plan and t
 - **One host at a time.** Never run `qlmctl` against the adapter while the app runs, and never run a second qlm, the installed one included.
 - **A louder hand-back needs the user's own yes.** When `dump_state` gives `snapshot.handBack.kind` as `louder`, the adapter raises the level about 2.6 s after qlm quits. Run `quit_answering anyway` only after the user says so. Otherwise suggest they turn the knob down first.
 - **If anything sounds wrong, run `mute_all on` at once**, then ask. It needs no permission. Tell the user it ran.
-- **Quit with `quit_answering`, never vibe-libs' `quit`.** The standard `quit` runs inside the channel's drain. There the quit's wait for System's stop can only time out, and a louder hand-back puts up the alert while the channel waits.
+- **Quit with `quit_answering`, never vibe-libs' `quit`.** The standard `quit` terminates inside a main-queue block. There the app's wait for System's stop can only time out, 3 s later, and a louder hand-back puts up the alert while the channel waits.
 
 ## The client
 
@@ -63,6 +63,8 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
   - `volumeDecibels` as set, before dim. `ceilingDecibels`, the one System caps at. `dimmed`, `allMuted`, `mutingAll`, `anyOn`, `applying`, and `activeGroupName`.
   - `handBack`: `kind` (`knobLevel`, `louder`, or `unknown`), `knobDecibels`, `volumeDecibels` (the level sent, dimmed and under the ceiling), and the app's `line` about it.
   - `monitors`: each one's serial, model, class, hardware ID, session, status, mute, and offline state, with its missed polls and temperature.
+
+After `ceiling` or `adapter`, an open Settings window shows the old value until it opens again. `dump_state` reads the new one.
 
 `quit_answering` replies before the app quits. Check it went with `pgrep -x qlm`. `quitting` is false only when the alert would show and the answer was `cancel`.
 

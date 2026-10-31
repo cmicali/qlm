@@ -15,7 +15,8 @@
 #import "QLMSnapshot.h"
 #import "QLMSystem.h"
 
-typedef NSDictionary *_Nonnull (^QLMDebugHandler)(NSArray<NSString *> *tokens, id<QLMDebugApp> app);
+// Nil for a bad argument: the reply is then the verb's usage.
+typedef NSDictionary *_Nullable (^QLMDebugHandler)(NSArray<NSString *> *tokens, id<QLMDebugApp> app);
 
 #define QLM_HANDLER ^NSDictionary *(NSArray<NSString *> *tokens, id<QLMDebugApp> app)
 
@@ -33,13 +34,16 @@ static NSString *QLMDebugTimeText(NSDate *date) {
 }
 
 // Every reply of qlm's own verbs carries "at", taken before the verb runs,
-// so it marks the action, not the reply.
+// so it marks the action, not the reply. The usage gives the arguments, one
+// per <placeholder>, so the handler runs only with that many.
 static NSDictionary *QLMDebugVerb(NSString *usage, QLMDebugHandler handler) {
+    NSUInteger arguments = [usage componentsSeparatedByString:@"<"].count - 1;
     return VibeDebugCmd(usage, 0, ^NSString *(NSArray<NSString *> *tokens, NSString *commandId, id<QLMDebugApp> app) {
         NSString *at = QLMDebugTimeText(NSDate.date);
-        NSMutableDictionary *reply = [handler(tokens, app) mutableCopy];
-        reply[@"at"] = at;
-        return VibeJSONString(reply);
+        NSDictionary *reply = tokens.count == 1 + arguments ? handler(tokens, app) : nil;
+        NSMutableDictionary *json = [reply ?: @{@"error": [@"usage: " stringByAppendingString:usage]} mutableCopy];
+        json[@"at"] = at;
+        return VibeJSONString(json);
     });
 }
 
@@ -52,16 +56,24 @@ static NSDictionary *QLMDebugError(NSString *format, ...) {
     return @{@"error": message};
 }
 
-static NSDictionary *QLMDebugUsageError(NSArray<NSString *> *tokens) {
-    return QLMDebugError(@"usage: %@", QLMDebugSpecForVerb(tokens[0])[@"usage"]);
+// One of the popover's controls, which takes no click while disabled: the
+// slider and Dim while System is stopped, and Mute and the power button
+// while it tracks no monitor too.
+static NSDictionary *QLMDebugControl(NSString *usage, BOOL needsMonitors, QLMDebugHandler handler) {
+    return QLMDebugVerb(usage, QLM_HANDLER {
+        QLMSnapshot *snapshot = app.debugSnapshot;
+        if (!snapshot.running) {
+            return QLMDebugError(@"System is not running");
+        }
+        if (needsMonitors && !QLMSnapshotTracksMonitors(snapshot)) {
+            return QLMDebugError(@"System tracks no monitor yet");
+        }
+        return handler(tokens, app);
+    });
 }
 
-static BOOL QLMDebugSwitch(NSArray<NSString *> *tokens, BOOL *on) {
-    return tokens.count == 2 && VibeParseOnOff(tokens, on);
-}
-
-static BOOL QLMDebugDecibelsArgument(NSArray<NSString *> *tokens, double *decibels) {
-    return tokens.count == 2 && VibeParseDouble(tokens[1], decibels) && isfinite(*decibels);
+static BOOL QLMDebugParseDecibels(NSString *token, double *decibels) {
+    return VibeParseDouble(token, decibels) && isfinite(*decibels);
 }
 
 // One decimal, as the app shows it. A knob's tenths over ten would print as
@@ -158,20 +170,6 @@ static NSDictionary *QLMDebugWindows(id<QLMDebugApp> app) {
     return @{@"ok": @YES, @"popoverShown": @(app.debugPopover.isShown), @"windows": visible};
 }
 
-// The popover's controls take no click while disabled, and the verbs refuse
-// the same: the slider and Dim while System is stopped, and Mute and the
-// power button while it tracks no monitor too.
-static NSDictionary *_Nullable QLMDebugRefusal(id<QLMDebugApp> app, BOOL needsMonitors) {
-    QLMSnapshot *snapshot = app.debugSnapshot;
-    if (!snapshot.running) {
-        return QLMDebugError(@"System is not running");
-    }
-    if (needsMonitors && snapshot.monitors.count == 0) {
-        return QLMDebugError(@"System tracks no monitor yet");
-    }
-    return nil;
-}
-
 static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
     return @[
         QLMDebugVerb(@"dump_state", QLM_HANDLER {
@@ -189,15 +187,14 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             return reply;
         }),
         QLMDebugVerb(@"popover <show|close>", QLM_HANDLER {
-            NSString *action = tokens.count == 2 ? tokens[1] : @"";
-            if ([action isEqualToString:@"show"]) {
+            if ([tokens[1] isEqualToString:@"show"]) {
                 [app debugShowPopover];
             }
-            else if ([action isEqualToString:@"close"]) {
+            else if ([tokens[1] isEqualToString:@"close"]) {
                 [app.debugPopover close];
             }
             else {
-                return QLMDebugUsageError(tokens);
+                return nil;
             }
             return QLMDebugWindows(app);
         }),
@@ -216,14 +213,10 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         }),
         // The slider: GLM's 0.5 dB steps, from the range's bottom to the
         // ceiling. A level outside it is refused, not moved into it.
-        QLMDebugVerb(@"volume <dB>", QLM_HANDLER {
+        QLMDebugControl(@"volume <dB>", NO, QLM_HANDLER {
             double decibels = 0;
-            if (!QLMDebugDecibelsArgument(tokens, &decibels)) {
-                return QLMDebugUsageError(tokens);
-            }
-            NSDictionary *refusal = QLMDebugRefusal(app, NO);
-            if (refusal != nil) {
-                return refusal;
+            if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
+                return nil;
             }
             double lowest = app.debugPreferences.lowestDecibels;
             double ceiling = app.debugPreferences.ceilingDecibels;
@@ -237,8 +230,8 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // Settings' ceiling. The preferences bound it, as they do a typed one.
         QLMDebugVerb(@"ceiling <dB>", QLM_HANDLER {
             double decibels = 0;
-            if (!QLMDebugDecibelsArgument(tokens, &decibels)) {
-                return QLMDebugUsageError(tokens);
+            if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
+                return nil;
             }
             app.debugPreferences.ceilingDecibels = decibels;
             [app debugVolumeRangeDidChange];
@@ -248,8 +241,8 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // adapter". A change starts a new System.
         QLMDebugVerb(@"adapter <on|off>", QLM_HANDLER {
             BOOL on = NO;
-            if (!QLMDebugSwitch(tokens, &on)) {
-                return QLMDebugUsageError(tokens);
+            if (!VibeParseOnOff(tokens, &on)) {
+                return nil;
             }
             BOOL changed = on != app.debugPreferences.usesAdapter;
             if (changed) {
@@ -261,8 +254,8 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // A monitor's mute button takes a click while System tracks it.
         QLMDebugVerb(@"mute <serial> <on|off>", QLM_HANDLER {
             BOOL on = NO;
-            if (tokens.count != 3 || !VibeParseOnOff(@[tokens[0], tokens[2]], &on)) {
-                return QLMDebugUsageError(tokens);
+            if (!VibeParseOnOff(@[tokens[0], tokens[2]], &on)) {
+                return nil;
             }
             NSMutableArray<NSString *> *serials = [NSMutableArray array];
             for (QLMMonitorState *monitor in app.debugSnapshot.monitors) {
@@ -278,54 +271,32 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             return QLMDebugError(@"System tracks no monitor %@. It tracks: %@", tokens[1],
                                  serials.count > 0 ? [serials componentsJoinedByString:@", "] : @"none");
         }),
-        QLMDebugVerb(@"mute_all <on|off>", QLM_HANDLER {
+        QLMDebugControl(@"mute_all <on|off>", YES, QLM_HANDLER {
             BOOL on = NO;
-            if (!QLMDebugSwitch(tokens, &on)) {
-                return QLMDebugUsageError(tokens);
-            }
-            NSDictionary *refusal = QLMDebugRefusal(app, YES);
-            if (refusal != nil) {
-                return refusal;
+            if (!VibeParseOnOff(tokens, &on)) {
+                return nil;
             }
             [app.debugSystem setAllMuted:on];
             return @{@"ok": @YES, @"allMuted": @(on)};
         }),
-        QLMDebugVerb(@"dim <on|off>", QLM_HANDLER {
+        QLMDebugControl(@"dim <on|off>", NO, QLM_HANDLER {
             BOOL on = NO;
-            if (!QLMDebugSwitch(tokens, &on)) {
-                return QLMDebugUsageError(tokens);
-            }
-            NSDictionary *refusal = QLMDebugRefusal(app, NO);
-            if (refusal != nil) {
-                return refusal;
+            if (!VibeParseOnOff(tokens, &on)) {
+                return nil;
             }
             [app.debugSystem setDimmed:on];
             return @{@"ok": @YES, @"dimmed": @(on)};
         }),
         // The power button reads Standby while a monitor is on, and Wake
         // while none is. Each verb takes only its own reading.
-        QLMDebugVerb(@"standby", QLM_HANDLER {
-            if (tokens.count != 1) {
-                return QLMDebugUsageError(tokens);
-            }
-            NSDictionary *refusal = QLMDebugRefusal(app, YES);
-            if (refusal != nil) {
-                return refusal;
-            }
+        QLMDebugControl(@"standby", YES, QLM_HANDLER {
             if (!app.debugSnapshot.anyOn) {
                 return QLMDebugError(@"no monitor is on, so the power button reads Wake");
             }
             [app.debugSystem sleep];
             return @{@"ok": @YES};
         }),
-        QLMDebugVerb(@"wake", QLM_HANDLER {
-            if (tokens.count != 1) {
-                return QLMDebugUsageError(tokens);
-            }
-            NSDictionary *refusal = QLMDebugRefusal(app, YES);
-            if (refusal != nil) {
-                return refusal;
-            }
+        QLMDebugControl(@"wake", YES, QLM_HANDLER {
             if (app.debugSnapshot.anyOn) {
                 return QLMDebugError(@"a monitor is on, so the power button reads Standby");
             }
@@ -334,9 +305,6 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         }),
         // GLM may ask to save first. It is never forced.
         QLMDebugVerb(@"quit_glm", QLM_HANDLER {
-            if (tokens.count != 1) {
-                return QLMDebugUsageError(tokens);
-            }
             NSString *title = app.debugQuitGLMTitle;
             if (title == nil) {
                 return QLMDebugError(@"the banner offers no Quit GLM");
@@ -349,34 +317,31 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // Not vibe-libs' quit, whose terminate runs inside a main-queue block.
         // TRAP: there the quit's wait for System's stop can only time out,
         // since the stop's completion waits for that block. So this quit runs
-        // from the run loop, after the reply. A cancelled one stops nothing,
-        // so it runs here.
+        // from the run loop, after the reply. Where the alert would show, a
+        // cancel does nothing.
         QLMDebugVerb(@"quit_answering <cancel|anyway>", QLM_HANDLER {
-            NSString *answer = tokens.count == 2 ? tokens[1].lowercaseString : @"";
+            NSString *answer = tokens[1].lowercaseString;
             BOOL anyway = [answer isEqualToString:@"anyway"];
             if (!anyway && ![answer isEqualToString:@"cancel"]) {
-                return QLMDebugUsageError(tokens);
+                return nil;
             }
             BOOL asks = app.debugQuitAsksFirst;
             BOOL quitting = !asks || anyway;
+            if (quitting) {
+                __weak id<QLMDebugApp> weakApp = app;
+                CFRunLoopRef main = CFRunLoopGetMain();
+                CFRunLoopPerformBlock(main, kCFRunLoopCommonModes, ^{
+                    [weakApp debugQuitAnswering:anyway];
+                });
+                CFRunLoopWakeUp(main);
+            }
             QLMSnapshot *snapshot = app.debugSnapshot;
-            NSDictionary *reply = @{
+            return @{
                 @"ok": @YES,
                 @"asksFirst": @(asks),
                 @"quitting": @(quitting),
                 @"handBack": snapshot ? QLMDebugHandBack(snapshot) : NSNull.null,
             };
-            if (!quitting) {
-                [app debugQuitAnswering:NO];
-                return reply;
-            }
-            __weak id<QLMDebugApp> weakApp = app;
-            CFRunLoopRef main = CFRunLoopGetMain();
-            CFRunLoopPerformBlock(main, kCFRunLoopCommonModes, ^{
-                [weakApp debugQuitAnswering:anyway];
-            });
-            CFRunLoopWakeUp(main);
-            return reply;
         }),
     ];
 }

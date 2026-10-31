@@ -4,6 +4,7 @@
 #include <unistd.h>
 
 #import "DebugCommandDispatch.h"
+#import "QLMApplySequence.h"
 #import "QLMDebugChannel.h"
 #import "QLMFakeBus.h"
 #import "QLMPreferences.h"
@@ -19,12 +20,6 @@
 // Settings' own actions, which each verb calls.
 @interface QLMDebugChannelTests : XCTestCase
 @end
-
-// A frame as the fake bus records it: the address byte, then the payload.
-static QLMMessage QLMMessageOfRecord(NSData *record) {
-    const uint8_t *bytes = record.bytes;
-    return QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
-}
 
 // The app's side, as QLMAppDelegate gives it. It never makes a HID adapter.
 @interface QLMTestDebugApp : NSObject <QLMDebugApp>
@@ -201,7 +196,7 @@ static QLMMessage QLMMessageOfRecord(NSData *record) {
     uint32_t ceilingWord = QLMVolumeWordForDecibels(ceilingDecibels);
     NSUInteger volumes = 0;
     for (NSData *record in _bus.sentMessages) {
-        QLMMessage message = QLMMessageOfRecord(record);
+        QLMMessage message = QLMApplyMessage(record);
         XCTAssertTrue(QLMFrameAllows(message.payload, message.length), @"%@", record);
         if (message.address == QLMAddressBroadcast && message.length == 4 && message.payload[0] == 0x1F) {
             XCTAssertLessThanOrEqual(QLMVolumeWordOf(message), ceilingWord, @"%@", record);
@@ -220,7 +215,7 @@ static QLMMessage QLMMessageOfRecord(NSData *record) {
     NSArray<NSData *> *sent = _bus.sentMessages;
     for (NSUInteger i = mark; i < sent.count; i++) {
         NSData *record = sent[i];
-        QLMMessage message = QLMMessageOfRecord(record);
+        QLMMessage message = QLMApplyMessage(record);
         XCTAssertTrue(!QLMIsControl(message) || [record isEqualToData:level], @"%@", record);
     }
 }
@@ -281,7 +276,10 @@ static QLMMessage QLMMessageOfRecord(NSData *record) {
 - (void)testABadArgumentGetsTheUsageAndSendsNothing {
     NSUInteger mark = _bus.sentMessages.count;
     NSDictionary<NSString *, NSArray<NSArray<NSString *> *> *> *cases = @{
-        @"popover <show|close>": @[@[@"popover"], @[@"popover", @"open"]],
+        @"dump_state": @[@[@"dump_state", @"now"]],
+        @"show_monitors": @[@[@"show_monitors", @"all"]],
+        @"read_setup": @[@[@"read_setup", @"Main.sam"]],
+        @"popover <show|close>": @[@[@"popover"], @[@"popover", @"open"], @[@"popover", @"show", @"now"]],
         @"volume <dB>": @[@[@"volume"], @[@"volume", @"loud"], @[@"volume", @"nan"], @[@"volume", @"inf"], @[@"volume", @"-40", @"-41"]],
         @"ceiling <dB>": @[@[@"ceiling"], @[@"ceiling", @"-35dB"], @[@"ceiling", @"-inf"]],
         @"adapter <on|off>": @[@[@"adapter"], @[@"adapter", @"yes"]],
@@ -528,11 +526,8 @@ static QLMMessage QLMMessageOfRecord(NSData *record) {
     for (NSArray<NSString *> *args in @[@[@"mute_all", @"on"], @[@"standby"], @[@"wake"]]) {
         XCTAssertEqualObjects([self errorOf:args], @"System tracks no monitor yet", @"%@", args);
     }
-    [_time advanceBy:1];
-    for (NSUInteger i = mark; i < _bus.sentMessages.count; i++) {
-        NSData *record = _bus.sentMessages[i];
-        XCTAssertFalse(QLMIsControl(QLMMessageOfRecord(record)), @"%@", record);
-    }
+    // No level is set yet, so nothing at all.
+    [self assertNothingSentSince:mark];
     [self runOK:@[@"dim", @"on"]];
     [self runOK:@[@"volume", @"-50"]];
     [self waitUntil:^BOOL(QLMSnapshot *snapshot) {
@@ -557,16 +552,17 @@ static QLMMessage QLMMessageOfRecord(NSData *record) {
     XCTAssertEqualObjects(reply[@"quitting"], @NO);
     XCTAssertEqualObjects(reply[@"asksFirst"], @YES);
     XCTAssertEqualObjects(reply[@"handBack"][@"kind"], @"knobLevel");
-    XCTAssertEqualObjects(_app.actions, @[@"quit, cancel"]);
+    [NSRunLoop.mainRunLoop runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    XCTAssertEqualObjects(_app.actions, @[]);
 
     // The quit itself waits for the reply to go out.
     reply = [self runOK:@[@"quit_answering", @"anyway"]];
     XCTAssertEqualObjects(reply[@"quitting"], @YES);
-    XCTAssertEqualObjects(_app.actions, @[@"quit, cancel"]);
+    XCTAssertEqualObjects(_app.actions, @[]);
     [self turnRunLoopUntil:^BOOL {
-        return self->_app.actions.count == 2;
+        return self->_app.actions.count == 1;
     }];
-    XCTAssertEqualObjects(_app.actions, (@[@"quit, cancel", @"quit anyway"]));
+    XCTAssertEqualObjects(_app.actions, @[@"quit anyway"]);
 }
 
 - (void)testQuitWithNoAlertQuitsWhateverTheAnswer {

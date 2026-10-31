@@ -68,7 +68,7 @@ These rules protect the monitors and the listener. They outrank any feature.
 - **`.claude/skills/app-hardware-run` runs a supervised test on the real monitors** through these verbs, one step at a time. Follow it for any run on the hardware.
 - **The standard verbs are vibe-libs'**: `dump_build`, `dump_view_tree`, `dump_screenshot -`, `dump_health`, `quit`, and the input verbs, such as `click <x> <y>` and `key <key>`. The mouse verbs aim at the popover's window while it shows, else the key window. Coordinates are content-view points with a top-left origin. `dump_screenshot -` writes the PNG to stdout.
 - **Drive the app through the channel, never through System Events or AppleScript UI scripting.**
-- **TRAP: vibe-libs' `quit` terminates inside the channel's drain, a main-queue block.** There the app's wait for System's stop can only time out, so the hand-back may not finish. Quit with `quit_answering`.
+- **TRAP: vibe-libs' `quit` terminates inside a main-queue block.** There the app's wait for System's stop can only time out, 3 s later, so the hand-back may not finish. Quit with `quit_answering`.
 - **The channel ships in no Release build.** `make check-release` builds the app in both configurations. It fails if a symbol or string of the channel, qlm's or the pieces', is in the Release app. It first finds each one in the Debug app, so it can't go stale.
 - **TRAP: a Debug build reads the same settings as the installed app.** With the adapter switched on there, a launch drives the real bus. To test the channel, build with another bundle identifier, as `ARGS="PRODUCT_BUNDLE_IDENTIFIER=com.commonwealthrecordings.qlm.debug"` does, so the app starts on the fake bus.
 

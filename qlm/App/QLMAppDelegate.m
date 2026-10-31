@@ -466,22 +466,14 @@ static const NSTimeInterval QLMStopAllowance = 3;
     return self.preferences;
 }
 
-// Settings draws the preferences as its window opens, so an open one draws
-// them again.
+// Settings draws the preferences as its window opens, so an open one keeps
+// the old value.
 - (void)debugVolumeRangeDidChange {
     [self settingsDidChangeVolumeRange:self.settingsController];
-    [self debugRedrawSettings];
 }
 
 - (void)debugAdapterDidChange {
     [self settingsDidChangeAdapter:self.settingsController];
-    [self debugRedrawSettings];
-}
-
-- (void)debugRedrawSettings {
-    if (self.settingsController.window.visible) {
-        [self.settingsController showWindow:self];
-    }
 }
 
 - (NSString *)debugQuitGLMTitle {

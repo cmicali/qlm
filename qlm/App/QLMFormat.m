@@ -98,3 +98,7 @@ NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
     }
     return snapshot.adapterError.localizedDescription ?: @"Another process holds the GLM adapter.";
 }
+
+BOOL QLMSnapshotTracksMonitors(QLMSnapshot *snapshot) {
+    return snapshot.running && snapshot.monitors.count > 0;
+}

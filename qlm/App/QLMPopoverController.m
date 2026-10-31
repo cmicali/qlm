@@ -356,7 +356,6 @@ static NSView *QLMSpacer(void) {
 // Asks politely, as the Dock's Quit does. GLM may ask to save first, and it
 // is never forced. The adapter opens on its own once GLM lets go.
 - (BOOL)quitGLM {
-    [self checkGLMHolds];
     if (!self.glmHolds || self.askedGLMToQuit) {
         return NO;
     }
@@ -366,7 +365,6 @@ static NSView *QLMSpacer(void) {
 }
 
 - (NSString *)quitGLMTitle {
-    [self checkGLMHolds];
     if (!self.glmHolds) {
         return nil;
     }
@@ -410,8 +408,10 @@ static NSView *QLMSpacer(void) {
     [self.groupPicker selectItemAtIndex:index >= 0 ? index : 0];
 }
 
-// viewWillAppear draws on opening.
+// viewWillAppear draws on opening. The Quit GLM button's state follows every
+// snapshot, since a script reads it with the popover closed.
 - (void)refresh {
+    [self checkGLMHolds];
     if (self.isViewLoaded && self.view.window.visible) {
         [self render];
     }
@@ -427,7 +427,7 @@ static NSView *QLMSpacer(void) {
     self.deviceLabel.toolTip = snapshot.adapter.systemInfo;
     [self renderVolume:snapshot];
 
-    BOOL haveMonitors = snapshot.running && snapshot.monitors.count > 0;
+    BOOL haveMonitors = QLMSnapshotTracksMonitors(snapshot);
     self.muteButton.state = snapshot.allMuted ? NSControlStateValueOn : NSControlStateValueOff;
     self.muteButton.enabled = haveMonitors;
     self.dimButton.state = snapshot.dimmed ? NSControlStateValueOn : NSControlStateValueOff;
@@ -459,8 +459,6 @@ static NSView *QLMSpacer(void) {
     quit.title = title ?: @"";
 }
 
-// The banner draws only while the popover shows, so a script's check runs
-// this too.
 - (void)checkGLMHolds {
     QLMBusProblem problem = self.monitorList.snapshot.busProblem;
     if (problem != self.checkedProblem) {
