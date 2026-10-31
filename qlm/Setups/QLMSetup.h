@@ -123,6 +123,7 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly) NSArray<NSString *> *unknownKeys;
 
 - (nullable QLMSetupDevice *)deviceWithSerial:(NSString *)serial;
+- (nullable QLMSetupGroup *)groupNamed:(NSString *)name;
 // The device a monitor on the bus is, matched by its three-byte hardware ID.
 - (nullable QLMSetupDevice *)deviceWithHardwareID:(NSData *)hardwareID;
 

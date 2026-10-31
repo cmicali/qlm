@@ -14,6 +14,7 @@ static const double QLMDelayRate = 48000;  // delay is in 48 kHz samples on ever
 @property (nonatomic, readwrite) NSArray<NSData *> *payloads;
 @property (nonatomic, readwrite) NSArray<NSData *> *routingPayloads;
 @property (nonatomic, readwrite) NSData *crossoverPayload;
+@property (nonatomic, readwrite) NSArray<NSData *> *leftOutPayloads;
 @property (nonatomic, readwrite) NSArray<NSString *> *warnings;
 @end
 
@@ -181,6 +182,12 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
     block.payloads = payloads;
     block.routingPayloads = [routing copy];
     block.crossoverPayload = crossed;
+    block.leftOutPayloads = @[];
+    if (node.nodeClass == QLMSetupNodeClassThreeWay) {
+        static const uint8_t frame43[] = {0x43, 0x00, 0x02};
+        static const uint8_t frame4B[] = {0x4B, 0x00, 0x00, 0x00, 0x01};
+        block.leftOutPayloads = @[[NSData dataWithBytes:frame43 length:sizeof frame43], [NSData dataWithBytes:frame4B length:sizeof frame4B]];
+    }
     block.warnings = warnings;
     return block;
 }

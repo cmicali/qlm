@@ -22,6 +22,12 @@ extern const NSTimeInterval QLMAdapterPollLimit;
 NSDictionary<NSString *, NSString *> *_Nullable QLMQueryArguments(NSString *command, NSArray<NSString *> *arguments,
                                                                   NSString *_Nullable *_Nonnull problem);
 
+// compare-apply's: a setup file and a capture's reports.txt, then --group,
+// which it needs, and --from and --to, each at most once. The files map from "setup" and
+// "reports". Nil, with the reason in `problem`, for anything else, or a
+// window that is not from before to, in seconds from 0.
+NSDictionary<NSString *, NSString *> *_Nullable QLMCompareArguments(NSArray<NSString *> *arguments, NSString *_Nullable *_Nonnull problem);
+
 typedef NS_ENUM(NSInteger, QLMControlCommand) {
     QLMControlCommandVolume,
     QLMControlCommandMute,

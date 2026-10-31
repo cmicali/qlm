@@ -7,7 +7,6 @@
 #import "QLMSetupInternal.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
-#include "QLMCRC.h"
 #include "QLMCommands.h"
 #include "QLMReplies.h"
 #include "QLMReport.h"
@@ -446,25 +445,7 @@ static NSString *const QLMFuzzCountRefused = @"a group apply refused";
 // A reply as the adapter frames it: the CRC over the address and payload,
 // then 7E and 7D escaped, then the flag (docs/protocol.md, Framing).
 static NSData *QLMFuzzReplyFrame(QLMMessage reply) {
-    uint8_t raw[1 + QLMPayloadMax + 2];
-    raw[0] = reply.address;
-    memcpy(raw + 1, reply.payload, reply.length);
-    uint16_t crc = QLMCRC16GSM(raw, 1 + reply.length);
-    raw[1 + reply.length] = (uint8_t)(crc >> 8);
-    raw[2 + reply.length] = (uint8_t)crc;
-    uint8_t frame[QLMFrameMax];
-    size_t count = 0;
-    frame[count++] = raw[0];
-    for (size_t i = 1; i < 3 + reply.length; i++) {
-        if (raw[i] == QLMFrameFlag || raw[i] == QLMFrameEscape) {
-            frame[count++] = QLMFrameEscape;
-            frame[count++] = raw[i] ^ QLMFrameEscapeXor;
-        } else {
-            frame[count++] = raw[i];
-        }
-    }
-    frame[count++] = QLMFrameFlag;
-    return [NSData dataWithBytes:frame length:count];
+    return QLMUncheckedFrame(reply);
 }
 
 // What another host may leave on the way when it lets go of the adapter
