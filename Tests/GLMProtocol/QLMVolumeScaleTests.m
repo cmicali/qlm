@@ -61,10 +61,6 @@ static NSData *_Nullable QLMPacked(QLMMessage message) {
     return QLMBytes(report, sizeof report);
 }
 
-static uint32_t QLMVolumeWordOf(QLMMessage message) {
-    return (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
-}
-
 // Each step's word, and the frame GLM sent at the time given, byte for byte.
 - (void)testEveryStepIsTheLevelGLMSent {
     QLMCapture *capture = QLMReadCapture(@"volume-sweep", NULL);

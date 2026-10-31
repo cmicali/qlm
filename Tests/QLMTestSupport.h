@@ -63,6 +63,12 @@ QLMCapture *_Nullable QLMReadCapture(NSString *scenario, NSError **error);
 // the probe, or a lease.
 BOOL QLMIsControl(QLMMessage message);
 
+// A lease: 02, a hardware ID, and a session, to the multicast address.
+BOOL QLMIsLease(QLMMessage message);
+
+// A volume frame's 24-bit word.
+uint32_t QLMVolumeWordOf(QLMMessage message);
+
 // Each output report in captures/<scenario> whose payload starts with `opcode`.
 NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
 
@@ -75,9 +81,16 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
                                                      of:(NSString *)scenario
                                                    from:(NSTimeInterval)time
                                                    keep:(BOOL (*_Nullable)(QLMMessage))keep;
+// The same, keeping QLMIsControl's frames.
+- (nullable NSArray<QLMCaptureExchange *> *)qlm_controls:(NSUInteger)count of:(NSString *)scenario from:(NSTimeInterval)time;
 // The exchange's output report is `message`'s, as qlm packs it.
 - (void)qlm_assertExchange:(QLMCaptureExchange *)exchange is:(QLMMessage)message;
 - (void)qlm_assertExchange:(QLMCaptureExchange *)exchange isExchange:(QLMCaptureExchange *)other;
+// A lease the monitor acked, then `level` within `seconds` of it.
+- (void)qlm_assertLease:(QLMCaptureExchange *)lease
+              thenLevel:(QLMCaptureExchange *)next
+                     is:(QLMMessage)level
+                 within:(NSTimeInterval)seconds;
 
 @end
 

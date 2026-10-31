@@ -22,30 +22,17 @@ static QLMMessage QLMAppLevel(double decibels) {
     return QLMCommandVolume(decibels, QLMAppCeiling);
 }
 
-static BOOL QLMIsLease(QLMMessage message) {
-    return message.address == QLMAddressMulticast && message.length == 5 && message.payload[0] == 0x02;
-}
-
-static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
-    return message.address == expected.address && message.length == expected.length &&
-           memcmp(message.payload, expected.payload, message.length) == 0;
-}
-
 - (NSArray<QLMCaptureExchange *> *)exchanges {
     return QLMReadCapture(QLMAppScenario, NULL).exchanges;
-}
-
-- (nullable NSArray<QLMCaptureExchange *> *)controls:(NSUInteger)count of:(NSString *)scenario from:(NSTimeInterval)time {
-    return [self qlm_frames:count of:scenario from:time keep:QLMIsControl];
 }
 
 // GLM's last report is at 182.770 s. The app's first is the open's sync,
 // `01 39`, 0.85 s later. Turned on while GLM ran, the app sent nothing.
 - (void)testTheAppWaitedForGLMToQuit {
     NSArray<QLMCaptureExchange *> *exchanges = [self exchanges];
-    QLMMessage sync = QLMCommandSystemInfo(QLMAddressAdapter);
+    NSData *sync = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
     NSUInteger first = [exchanges indexOfObjectPassingTest:^BOOL(QLMCaptureExchange *exchange, NSUInteger i, BOOL *stop) {
-        return QLMMessageIs(exchange.message, sync);
+        return [exchange.outputReport isEqualToData:sync];
     }];
     XCTAssertNotEqual(first, NSNotFound);
     if (first == NSNotFound || first == 0) {
@@ -59,9 +46,11 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
 // them, at 182.660 s. The app's probes at 184.0, 184.5, and 185.1 s got
 // `01 7E`. The one at 185.72 s found the Rear Right 8330A.
 - (void)testGLMsLeasesLapsedWithinThreeSeconds {
+    const NSTimeInterval lastPoll = 182.660137;
+    NSData *probe = QLMReportFor(QLMCommandProbe());
     NSMutableArray<QLMCaptureExchange *> *probes = [NSMutableArray array];
     for (QLMCaptureExchange *exchange in [self exchanges]) {
-        if (exchange.time > QLMAppStart && exchange.time < 185.72 && QLMMessageIs(exchange.message, QLMCommandProbe())) {
+        if (exchange.time > QLMAppStart && exchange.time < 185.72 && [exchange.outputReport isEqualToData:probe]) {
             [probes addObject:exchange];
         }
     }
@@ -76,8 +65,8 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
     uint8_t hardwareID[3] = {0};
     XCTAssertTrue(QLMReplyHardwareID(&reply, hardwareID));
     QLMAssertBytes(hardwareID, sizeof hardwareID, 0x12, 0x2F, 0xAB);
-    XCTAssertGreaterThan(probes[2].time - 182.660137, 2.4);
-    XCTAssertLessThan(probes[3].time - 182.660137, 3.1);
+    XCTAssertGreaterThan(probes[2].time - lastPoll, 2.4);
+    XCTAssertLessThan(probes[3].time - lastPoll, 3.1);
 }
 
 // Each of the app's 30 leases, at four launches and a wake, is acked, and
@@ -92,13 +81,8 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
             continue;
         }
         leases += 1;
-        QLMMessage reply = lease.reply;
-        uint8_t session = 0;
-        XCTAssertTrue(QLMReplySessionAck(&reply, &session), @"%.6f s", lease.time);
-        XCTAssertEqual(session, lease.message.payload[4], @"%.6f s", lease.time);
         double decibels = lease.time < 900 ? -45 : (lease.time < 1000 ? -50 : -35);
-        [self qlm_assertExchange:exchanges[i + 1] is:QLMAppLevel(decibels)];
-        XCTAssertLessThan(exchanges[i + 1].time - lease.time, 0.005, @"%.6f s", lease.time);
+        [self qlm_assertLease:lease thenLevel:exchanges[i + 1] is:QLMAppLevel(decibels) within:0.005];
     }
     XCTAssertEqual(leases, 30u);
 }
@@ -127,8 +111,7 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
             continue;
         }
         XCTAssertEqual(message.address, QLMAddressBroadcast, @"%.6f s", exchange.time);
-        uint32_t word = (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
-        XCTAssertLessThanOrEqual(QLMVolumeDecibelsForWord(word), QLMAppCeiling + 0.01, @"%.6f s", exchange.time);
+        XCTAssertLessThanOrEqual(QLMVolumeDecibelsForWord(QLMVolumeWordOf(message)), QLMAppCeiling + 0.01, @"%.6f s", exchange.time);
         XCTAssertTrue([glm containsObject:exchange.outputReport], @"%.6f s", exchange.time);
         [levels addObject:exchange.outputReport];
     }
@@ -140,8 +123,8 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
 // two rounds of 2B 04 to the six, then the level again. GLM's first turn in
 // knob-sweep, 19.24 s, has that shape and the same level, -41.5 dB.
 - (void)testTheKnobsBurstIsGLMs {
-    NSArray<QLMCaptureExchange *> *app = [self controls:17 of:QLMAppScenario from:417.310490];
-    NSArray<QLMCaptureExchange *> *glm = [self controls:4 of:@"knob-sweep" from:19.241470];
+    NSArray<QLMCaptureExchange *> *app = [self qlm_controls:17 of:QLMAppScenario from:417.310490];
+    NSArray<QLMCaptureExchange *> *glm = [self qlm_controls:4 of:@"knob-sweep" from:19.241470];
     if (app == nil || glm == nil) {
         return;
     }
@@ -149,10 +132,8 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
         [self qlm_assertExchange:app[i] isExchange:glm[0]];
     }
     [self qlm_assertExchange:app[3] isExchange:glm[3]];
-    for (NSUInteger round = 0; round < 2; round++) {
-        for (uint8_t session = 0x02; session <= 0x07; session++) {
-            [self qlm_assertExchange:app[4 + round * 6 + (session - 0x02)] is:QLMCommandMute(session, QLMMuteValueUnmuted)];
-        }
+    for (NSUInteger i = 0; i < 12; i++) {
+        [self qlm_assertExchange:app[4 + i] is:QLMCommandMute((uint8_t)(0x02 + i % 6), QLMMuteValueUnmuted)];
     }
     [self qlm_assertExchange:app[16] isExchange:glm[0]];
 }
@@ -166,8 +147,11 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
         uint8_t muted;
     } mutes[] = {{606.082228, 0x03}, {612.718836, 0x06}};
     for (size_t m = 0; m < sizeof mutes / sizeof mutes[0]; m++) {
-        NSArray<QLMCaptureExchange *> *run = [self controls:12 of:QLMAppScenario from:mutes[m].time];
-        for (NSUInteger i = 0; run != nil && i < 12; i++) {
+        NSArray<QLMCaptureExchange *> *run = [self qlm_controls:12 of:QLMAppScenario from:mutes[m].time];
+        if (run == nil) {
+            continue;
+        }
+        for (NSUInteger i = 0; i < 12; i++) {
             uint8_t session = (uint8_t)(0x02 + i % 6);
             uint8_t value = session == mutes[m].muted ? QLMMuteValueMuted : QLMMuteValueUnmuted;
             [self qlm_assertExchange:run[i] is:QLMCommandMute(session, value)];
@@ -185,8 +169,8 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
         uint8_t value;
     } runs[] = {{666.411292, 46.188342, QLMMuteValueMuted}, {670.556644, 48.595249, QLMMuteValueUnmuted}};
     for (size_t r = 0; r < sizeof runs / sizeof runs[0]; r++) {
-        NSArray<QLMCaptureExchange *> *app = [self controls:14 of:QLMAppScenario from:runs[r].app];
-        NSArray<QLMCaptureExchange *> *glm = [self controls:14 of:@"mute-dim" from:runs[r].glm];
+        NSArray<QLMCaptureExchange *> *app = [self qlm_controls:14 of:QLMAppScenario from:runs[r].app];
+        NSArray<QLMCaptureExchange *> *glm = [self qlm_controls:14 of:@"mute-dim" from:runs[r].glm];
         if (app == nil || glm == nil) {
             continue;
         }
@@ -203,7 +187,7 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
 // whole dim from mute-dim, 51.24 s: the new level twice, a round of 2B 04,
 // then 2D 00 and 3D 00 00.
 - (void)testDimIsGLMs {
-    NSArray<QLMCaptureExchange *> *glm = [self controls:10 of:@"mute-dim" from:51.240592];
+    NSArray<QLMCaptureExchange *> *glm = [self qlm_controls:10 of:@"mute-dim" from:51.240592];
     if (glm == nil) {
         return;
     }
@@ -212,7 +196,7 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
         QLMMessage level;
     } runs[] = {{694.007031, QLMCommandDim(-45, QLMAppCeiling)}, {697.624131, QLMAppLevel(-45)}};
     for (size_t r = 0; r < sizeof runs / sizeof runs[0]; r++) {
-        NSArray<QLMCaptureExchange *> *run = [self controls:10 of:QLMAppScenario from:runs[r].time];
+        NSArray<QLMCaptureExchange *> *run = [self qlm_controls:10 of:QLMAppScenario from:runs[r].time];
         if (run == nil) {
             continue;
         }
@@ -230,10 +214,10 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
 // 1232.64 s, is its three pairs, then 0.24 s after the last the level and
 // the pair, as GLM's ends in standby-wake at 47.01 s.
 - (void)testStandbyAndWakeAreGLMs {
-    NSArray<QLMCaptureExchange *> *standby = [self controls:4 of:QLMAppScenario from:1219.405584];
-    NSArray<QLMCaptureExchange *> *glmStandby = [self controls:4 of:@"standby-wake" from:34.855835];
-    NSArray<QLMCaptureExchange *> *wake = [self controls:9 of:QLMAppScenario from:1232.643009];
-    NSArray<QLMCaptureExchange *> *glmWake = [self controls:5 of:@"standby-wake" from:47.008166];
+    NSArray<QLMCaptureExchange *> *standby = [self qlm_controls:4 of:QLMAppScenario from:1219.405584];
+    NSArray<QLMCaptureExchange *> *glmStandby = [self qlm_controls:4 of:@"standby-wake" from:34.855835];
+    NSArray<QLMCaptureExchange *> *wake = [self qlm_controls:9 of:QLMAppScenario from:1232.643009];
+    NSArray<QLMCaptureExchange *> *glmWake = [self qlm_controls:5 of:@"standby-wake" from:47.008166];
     if (standby == nil || glmStandby == nil || wake == nil || glmWake == nil) {
         return;
     }
@@ -281,8 +265,8 @@ static BOOL QLMMessageIs(QLMMessage message, QLMMessage expected) {
     QLMCaptureExchange *lastLevel = nil;
     QLMCaptureExchange *lastReport = nil;
     for (QLMCaptureExchange *exchange in exchanges) {
-        if (exchange.time < QLMAppStart || exchange.time > 760) {
-            continue;
+        if (exchange.time > 760) {
+            break;
         }
         lastReport = exchange;
         if (exchange.message.payload[0] == 0x1F) {

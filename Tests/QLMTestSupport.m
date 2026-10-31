@@ -2,7 +2,7 @@
 
 #include <math.h>
 
-#include "QLMReport.h"
+#include "QLMReplies.h"
 #import "QLMReportLink.h"
 #import "QLMSetupReader.h"
 
@@ -73,6 +73,14 @@ BOOL QLMIsControl(QLMMessage message) {
     }
 }
 
+BOOL QLMIsLease(QLMMessage message) {
+    return message.address == QLMAddressMulticast && message.length == 5 && message.payload[0] == 0x02;
+}
+
+uint32_t QLMVolumeWordOf(QLMMessage message) {
+    return (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
+}
+
 NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     NSMutableSet<NSData *> *reports = [NSMutableSet set];
     for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
@@ -107,14 +115,30 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     return nil;
 }
 
+- (nullable NSArray<QLMCaptureExchange *> *)qlm_controls:(NSUInteger)count of:(NSString *)scenario from:(NSTimeInterval)time {
+    return [self qlm_frames:count of:scenario from:time keep:QLMIsControl];
+}
+
 - (void)qlm_assertExchange:(QLMCaptureExchange *)exchange is:(QLMMessage)message {
-    uint8_t report[QLMReportLength];
-    XCTAssertEqual(QLMReportPackOutput(&message, report), QLMReportOK, @"%.6f s", exchange.time);
-    XCTAssertEqualObjects(exchange.outputReport, QLMBytes(report, sizeof report), @"%.6f s", exchange.time);
+    XCTAssertEqualObjects(exchange.outputReport, QLMReportFor(message), @"%.6f s", exchange.time);
 }
 
 - (void)qlm_assertExchange:(QLMCaptureExchange *)exchange isExchange:(QLMCaptureExchange *)other {
     XCTAssertEqualObjects(exchange.outputReport, other.outputReport, @"%.6f s against %.6f s", exchange.time, other.time);
+}
+
+- (void)qlm_assertLease:(QLMCaptureExchange *)lease
+              thenLevel:(QLMCaptureExchange *)next
+                     is:(QLMMessage)level
+                 within:(NSTimeInterval)seconds {
+    XCTAssertTrue(QLMIsLease(lease.message), @"%.6f s", lease.time);
+    XCTAssertTrue(lease.answered, @"%.6f s", lease.time);
+    QLMMessage reply = lease.reply;
+    uint8_t session = 0;
+    XCTAssertTrue(QLMReplySessionAck(&reply, &session), @"%.6f s", lease.time);
+    XCTAssertEqual(session, lease.message.payload[4], @"%.6f s", lease.time);
+    [self qlm_assertExchange:next is:level];
+    XCTAssertLessThan(next.time - lease.time, seconds, @"%.6f s", lease.time);
 }
 
 @end

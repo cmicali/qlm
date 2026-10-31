@@ -1,9 +1,6 @@
 #import "QLMTestSupport.h"
 
-#include <math.h>
-
 #include "QLMCommands.h"
-#include "QLMReport.h"
 
 // Sources: captures/qlm-control-first, qlm's first control run on the
 // monitors, and its notes.md. GLM's last report there is at 17.45 s, so every
@@ -29,36 +26,6 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
     return controls;
 }
 
-// `count` control frames of `scenario`, from the one at `time` to the half
-// millisecond. Nil, after a failure, when there are fewer.
-- (nullable NSArray<QLMCaptureExchange *> *)controls:(NSUInteger)count of:(NSString *)scenario from:(NSTimeInterval)time {
-    NSMutableArray<QLMCaptureExchange *> *run = [NSMutableArray array];
-    for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
-        if (run.count == 0 && fabs(exchange.time - time) >= 0.0005) {
-            continue;
-        }
-        if (!QLMIsControl(exchange.message)) {
-            continue;
-        }
-        [run addObject:exchange];
-        if (run.count == count) {
-            return run;
-        }
-    }
-    XCTFail(@"%@ has %lu of %lu control frames from %.6f s", scenario, (unsigned long)run.count, (unsigned long)count, time);
-    return nil;
-}
-
-- (void)assertExchange:(QLMCaptureExchange *)exchange is:(QLMMessage)message {
-    uint8_t report[QLMReportLength];
-    XCTAssertEqual(QLMReportPackOutput(&message, report), QLMReportOK, @"%.6f s", exchange.time);
-    XCTAssertEqualObjects(exchange.outputReport, QLMBytes(report, sizeof report), @"%.6f s", exchange.time);
-}
-
-- (void)assertExchange:(QLMCaptureExchange *)exchange isExchange:(QLMCaptureExchange *)glm {
-    XCTAssertEqualObjects(exchange.outputReport, glm.outputReport, @"%.6f s against GLM's at %.6f s", exchange.time, glm.time);
-}
-
 // Every opcode qlm sent beyond discovery is a level, a mute, or a power step.
 - (void)testTheRunSentOnlyControls {
     NSArray<QLMCaptureExchange *> *controls = QLMRunControls();
@@ -81,7 +48,7 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
         if (message.address != QLMAddressBroadcast || message.length != 4 || message.payload[0] != 0x1F) {
             continue;
         }
-        uint32_t word = (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
+        uint32_t word = QLMVolumeWordOf(message);
         [levels addObject:exchange.outputReport];
         XCTAssertTrue([glm containsObject:exchange.outputReport], @"%.6f s", exchange.time);
         XCTAssertLessThanOrEqual(QLMVolumeDecibelsForWord(word), QLMRunCeiling + 0.01, @"%.6f s", exchange.time);
@@ -91,13 +58,13 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
 
 // The volume runs, 180.16 and 274.76 s: -45 and -60 dB, every cycle.
 - (void)testTheVolumeRunsAreGLMsLevels {
-    NSArray<QLMCaptureExchange *> *minus45 = [self controls:27 of:@"qlm-control-first" from:180.157041];
-    NSArray<QLMCaptureExchange *> *minus60 = [self controls:27 of:@"qlm-control-first" from:274.758405];
+    NSArray<QLMCaptureExchange *> *minus45 = [self qlm_controls:27 of:@"qlm-control-first" from:180.157041];
+    NSArray<QLMCaptureExchange *> *minus60 = [self qlm_controls:27 of:@"qlm-control-first" from:274.758405];
     for (QLMCaptureExchange *exchange in minus45) {
-        [self assertExchange:exchange is:QLMCommandVolume(-45, QLMRunCeiling)];
+        [self qlm_assertExchange:exchange is:QLMCommandVolume(-45, QLMRunCeiling)];
     }
     for (QLMCaptureExchange *exchange in minus60) {
-        [self assertExchange:exchange is:QLMCommandVolume(-60, QLMRunCeiling)];
+        [self qlm_assertExchange:exchange is:QLMCommandVolume(-60, QLMRunCeiling)];
     }
 }
 
@@ -107,23 +74,23 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
 // -41.5 dB. GLM sends 2B 05 and 2B 07 to monitors outside its group, and
 // qlm sends each 2B 04 (docs/protocol.md: Mute and mute all).
 - (void)testTheKnobsBurstIsGLMs {
-    NSArray<QLMCaptureExchange *> *qlm = [self controls:11 of:@"qlm-control-first" from:373.115781];
-    NSArray<QLMCaptureExchange *> *glm = [self controls:20 of:@"knob-sweep" from:19.241470];
+    NSArray<QLMCaptureExchange *> *qlm = [self qlm_controls:11 of:@"qlm-control-first" from:373.115781];
+    NSArray<QLMCaptureExchange *> *glm = [self qlm_controls:20 of:@"knob-sweep" from:19.241470];
     if (qlm == nil || glm == nil) {
         return;
     }
     NSArray<QLMCaptureExchange *> *glmLevels = @[glm[0], glm[1], glm[2], glm[19]];
     NSArray<QLMCaptureExchange *> *qlmLevels = @[qlm[0], qlm[1], qlm[2], qlm[10]];
     for (NSUInteger i = 0; i < glmLevels.count; i++) {
-        [self assertExchange:qlmLevels[i] isExchange:glmLevels[0]];
-        [self assertExchange:glmLevels[i] isExchange:glmLevels[0]];
+        [self qlm_assertExchange:qlmLevels[i] isExchange:glmLevels[0]];
+        [self qlm_assertExchange:glmLevels[i] isExchange:glmLevels[0]];
     }
-    [self assertExchange:qlm[3] isExchange:glm[3]];
-    [self assertExchange:qlm[3] is:QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterUnmuted)];
+    [self qlm_assertExchange:qlm[3] isExchange:glm[3]];
+    [self qlm_assertExchange:qlm[3] is:QLMCommandMute(QLMAddressReply, QLMMuteValueAdapterUnmuted)];
     const uint8_t sessions[] = {0x02, 0x03, 0x04};
     for (NSUInteger round = 0; round < 2; round++) {
         for (size_t i = 0; i < sizeof sessions; i++) {
-            [self assertExchange:qlm[4 + round * 3 + i] is:QLMCommandMute(sessions[i], QLMMuteValueUnmuted)];
+            [self qlm_assertExchange:qlm[4 + round * 3 + i] is:QLMCommandMute(sessions[i], QLMMuteValueUnmuted)];
         }
     }
 }
@@ -133,29 +100,29 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
 // 51.24 s. qlmctl's dim sent only the level. GLM's also sends one round of
 // 2B, then 2D 00 and 3D 00 00 (notes.md).
 - (void)testDimIsGLMsDrop {
-    NSArray<QLMCaptureExchange *> *on = [self controls:18 of:@"qlm-control-first" from:538.342925];
-    NSArray<QLMCaptureExchange *> *off = [self controls:9 of:@"qlm-control-first" from:558.041752];
-    NSArray<QLMCaptureExchange *> *glm = [self controls:1 of:@"mute-dim" from:51.240592];
+    NSArray<QLMCaptureExchange *> *on = [self qlm_controls:18 of:@"qlm-control-first" from:538.342925];
+    NSArray<QLMCaptureExchange *> *off = [self qlm_controls:9 of:@"qlm-control-first" from:558.041752];
+    NSArray<QLMCaptureExchange *> *glm = [self qlm_controls:1 of:@"mute-dim" from:51.240592];
     if (on == nil || off == nil || glm == nil) {
         return;
     }
     for (QLMCaptureExchange *exchange in on) {
-        [self assertExchange:exchange is:QLMCommandDim(-43.5, QLMRunCeiling)];
-        [self assertExchange:exchange is:QLMCommandVolume(-63.5, QLMRunCeiling)];
+        [self qlm_assertExchange:exchange is:QLMCommandDim(-43.5, QLMRunCeiling)];
+        [self qlm_assertExchange:exchange is:QLMCommandVolume(-63.5, QLMRunCeiling)];
     }
     for (QLMCaptureExchange *exchange in off) {
-        [self assertExchange:exchange is:QLMCommandVolume(-43.5, QLMRunCeiling)];
+        [self qlm_assertExchange:exchange is:QLMCommandVolume(-43.5, QLMRunCeiling)];
     }
-    [self assertExchange:glm[0] is:QLMCommandDim(-56.5, 0)];
-    [self assertExchange:glm[0] is:QLMCommandVolume(-76.5, 0)];
+    [self qlm_assertExchange:glm[0] is:QLMCommandDim(-56.5, 0)];
+    [self qlm_assertExchange:glm[0] is:QLMCommandVolume(-76.5, 0)];
 }
 
 // Muting the Right 8351B at 04, 638.71 s, and unmuting it, 660.48 s: two
 // rounds of 2B to every monitor, 03 to it and 04 to the rest, as GLM mutes
 // one monitor in mute-dim. Each 2B payload qlm sent is one GLM sent there.
 - (void)testMuteIsGLMs {
-    NSArray<QLMCaptureExchange *> *mute = [self controls:6 of:@"qlm-control-first" from:638.707664];
-    NSArray<QLMCaptureExchange *> *unmute = [self controls:6 of:@"qlm-control-first" from:660.482687];
+    NSArray<QLMCaptureExchange *> *mute = [self qlm_controls:6 of:@"qlm-control-first" from:638.707664];
+    NSArray<QLMCaptureExchange *> *unmute = [self qlm_controls:6 of:@"qlm-control-first" from:660.482687];
     if (mute == nil || unmute == nil) {
         return;
     }
@@ -163,8 +130,8 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
     for (NSUInteger round = 0; round < 2; round++) {
         for (size_t i = 0; i < sizeof sessions; i++) {
             uint8_t value = sessions[i] == 0x04 ? QLMMuteValueMuted : QLMMuteValueUnmuted;
-            [self assertExchange:mute[round * 3 + i] is:QLMCommandMute(sessions[i], value)];
-            [self assertExchange:unmute[round * 3 + i] is:QLMCommandMute(sessions[i], QLMMuteValueUnmuted)];
+            [self qlm_assertExchange:mute[round * 3 + i] is:QLMCommandMute(sessions[i], value)];
+            [self qlm_assertExchange:unmute[round * 3 + i] is:QLMCommandMute(sessions[i], QLMMuteValueUnmuted)];
         }
     }
 
@@ -187,23 +154,23 @@ static NSArray<QLMCaptureExchange *> *QLMRunControls(void) {
 // Standby, 816.94 s, and wake, 827.79 s: the same broadcasts as GLM's in
 // standby-wake, at 34.86 and 46.57 s.
 - (void)testPowerIsGLMs {
-    NSArray<QLMCaptureExchange *> *standby = [self controls:4 of:@"qlm-control-first" from:816.942152];
-    NSArray<QLMCaptureExchange *> *glmStandby = [self controls:4 of:@"standby-wake" from:34.855835];
-    NSArray<QLMCaptureExchange *> *wake = [self controls:6 of:@"qlm-control-first" from:827.791994];
+    NSArray<QLMCaptureExchange *> *standby = [self qlm_controls:4 of:@"qlm-control-first" from:816.942152];
+    NSArray<QLMCaptureExchange *> *glmStandby = [self qlm_controls:4 of:@"standby-wake" from:34.855835];
+    NSArray<QLMCaptureExchange *> *wake = [self qlm_controls:6 of:@"qlm-control-first" from:827.791994];
     if (standby == nil || glmStandby == nil || wake == nil) {
         return;
     }
     for (NSUInteger i = 0; i < 4; i++) {
-        [self assertExchange:standby[i] isExchange:glmStandby[i]];
+        [self qlm_assertExchange:standby[i] isExchange:glmStandby[i]];
     }
     NSArray<NSNumber *> *pairs = @[@46.565318, @46.806259, @47.008166];
     for (NSUInteger pair = 0; pair < pairs.count; pair++) {
-        NSArray<QLMCaptureExchange *> *glm = [self controls:2 of:@"standby-wake" from:pairs[pair].doubleValue];
+        NSArray<QLMCaptureExchange *> *glm = [self qlm_controls:2 of:@"standby-wake" from:pairs[pair].doubleValue];
         if (glm == nil) {
             continue;
         }
-        [self assertExchange:wake[pair * 2] isExchange:glm[0]];
-        [self assertExchange:wake[pair * 2 + 1] isExchange:glm[1]];
+        [self qlm_assertExchange:wake[pair * 2] isExchange:glm[0]];
+        [self qlm_assertExchange:wake[pair * 2 + 1] isExchange:glm[1]];
     }
 }
 
