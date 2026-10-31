@@ -18,7 +18,7 @@ Every monitor answers its `08` poll with a telemetry frame. hlm's spec lists mos
 
 ## Sources
 
-- **The captures.** All 21 in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29, from 20:57 to 21:47. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30. Only `qlm-control-first` and `qlm-control-all` have music playing.
+- **The captures.** All 22 in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29, from 20:57 to 21:47. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, `qlm-control-all`, and, through the app, `qlm-app-first` on 2026-10-30. Only those last three have music playing.
 - **hlm's spec**, `docs/Genelec GLM Protocol.13.md` in [robcazzaro/hlm](https://github.com/robcazzaro/hlm), revision 13. It is GPL-3.0. This page states its facts in its own words, and takes no text or code from it.
   - Section 4: multi-byte values are big-endian.
   - Section 8: a busy byte, `06` or `07`, may follow the `09`. A reply of `09` and a busy byte alone carries no telemetry this round.
@@ -30,7 +30,7 @@ The numbers here come from a script over every `reports.txt`. It parsed each rep
 
 ## The frame
 
-The captures hold 20,598 replies to a monitor's `08`. 11,900 are whole frames, and 8,617 are a bare `09`. 31 are a bare busy marker. 50 are the two parts of 25 split frames.
+The captures hold 31,628 replies to a monitor's `08`. 18,174 are whole frames, and 13,330 are a bare `09`. 44 are a bare busy marker. 80 are the two parts of 40 split frames.
 
 Each model sends its fields in a fixed order:
 
@@ -58,7 +58,7 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 | 313.283 s | `09 41 2A` |
 | 313.878 s | `09 81 00 2A 82 00 2A 83 00 2A 42 9F 43 80 45 80 44 80 47 01 49 73 88 00 4B 89 00 41 84 02 F1` |
 
-- The captures have 25 split frames, from every model, in 12 scenarios. The split falls at any field: after `41` in 16, and after `83`, `46`, `42`, `47`, or `89` in the rest.
+- The captures have 40 split frames, from every model, in 13 scenarios. The split falls at any field: after `41` in 29, and after `83`, `46`, `42`, `47`, `49`, or `89` in the rest.
 - Every first part is followed by its second part at the monitor's next poll. No second part comes alone.
 - **Guess:** the poll reads the monitor's reply while the monitor is still writing that second's frame.
 

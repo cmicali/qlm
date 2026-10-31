@@ -62,7 +62,7 @@ hlm, genlc, and espgensam are GPL-3.0. This doc states their facts in our own wo
 A few conventions:
 
 - Bytes are hex. We write a frame as its address and its payload, without the CRC and the flag. So `FF 1F 00 31 07` is the volume broadcast at −56.5 dB.
-- "In the captures" means all 21 scenarios in `captures/`. A count comes from decoding every report in them, with each frame's CRC checked.
+- "In the captures" means all 22 scenarios in `captures/`. A count comes from decoding every report in them, with each frame's CRC checked.
 - **Guess:** marks a guess. [Open questions](#open-questions) lists what we don't know yet.
 
 ## USB and HID
@@ -157,7 +157,7 @@ The CRC is CRC-16/GSM: polynomial `1021`, initial value 0, no reflection, and a 
 
 Two bytes are special, `7E` and `7D`. In the payload and the CRC, `7E` goes out as `7D 5E`, and `7D` as `7D 5D`. You compute the CRC first, then escape.[^escape] The adapter escapes its own replies too. A knob reading of `FF FF FD 7D` comes as `FF FF FD 7D 5D`.[^adapter-escape]
 
-Every frame in the captures passes its CRC: 76,080 sent and 70,214 received.[^crc-all]
+Every frame in the captures passes its CRC: 113,022 sent and 104,520 received.[^crc-all]
 
 Multi-byte integers are big-endian. The exception is the PEQ coefficients, which are little-endian floats.[^endian]
 
@@ -258,6 +258,7 @@ GLM counts up from `02` at each launch, one per lease, in the order the monitors
 | qlm, at its first discovery | The six, at GLM's sessions | `qlm-first-discover`, 56.427 to 56.536 s |
 | qlm, at its wake within a run | Three monitors, at `06` to `08` | `qlm-control-first`, 828.326 to 828.371 s |
 | qlm, at each of two wakes within a run | All six, at `09` to `0E` | `qlm-control-all`, 575.835 to 575.934 s and 8482.674 to 8482.776 s |
+| qlm's app, at each of four launches, then at its wake | The six at `02` to `07`, then `08` to `0D` | `qlm-app-first`, from 185.726, 955.849, 1092.131, and 1158.096 s, then 1233.380 to 1233.497 s |
 
 ### When a monitor loses its lease
 
@@ -284,8 +285,11 @@ Monitors drop a host's leases once the host goes quiet. USB can't show why.
 | On | within 42 s | within 23 s | `qlm-first-discover` |
 | In standby | within 210 s | within 88 s and 68 s | `qlm-standby-discover` |
 | On, across an unplug of the adapter | within 9 s | | `unplug`, 60.4 to 69.2 s |
+| On, with qlm already polling the adapter | within 3.1 s | | `qlm-app-first`, 182.660 to 185.719 s |
 
-**Guess:** the adapter's take-over, about 2.6 s after the host goes quiet, ends them. Across the unplug, the adapter lost power, and its restart may have.
+Most of these bounds are only when the next host first probed. The last is tight. When GLM quit, qlm's app opened 0.85 s after GLM's last report, so the adapter never took over. Its probes got `01 7E` until 2.45 s after GLM last polled a monitor, and the one at 3.06 s found one.[^lease-lapse]
+
+**Guess:** each monitor drops its lease about 3 s after its last poll, not at the adapter's take-over. Across the unplug, the adapter lost power, and its restart may have ended them too.
 
 So wait between hosts, to avoid the TRAP above: 1 minute with every monitor on, and 4 minutes with any in standby ([measurement.md](measurement.md#wait-between-hosts)).
 
@@ -299,6 +303,7 @@ So wait between hosts, to avoid the TRAP above: 1 minute with every monitor on, 
 [^serial-length]: #9; `QLMReplies.h`.
 [^qlm-count]: #9; `QLMAddressIsLeasable`.
 [^lost-session]: `group-switch-main-2x1-main-4x2`, 35.84 to 36.38 s; `standby-wake`, from 46.631 s.
+[^lease-lapse]: `qlm-app-first`, GLM's last poll to a monitor at 182.660 s, its last report at 182.770 s, the app's sync at 183.622 s, and its probes at 185.109 and 185.719 s; `testGLMsLeasesLapsedWithinThreeSeconds`.
 [^four-misses]: `standby-wake`, 35.077 to 35.105 s, then 37.365 s; hlm §3. The second poll: `standby-wake`, 45.973 s.
 [^qlm-drop]: `QLMSystem.h`.
 
@@ -513,7 +518,7 @@ startup-idle, 7.294 s
 
 `30` or `31` says whether the knob is in, and `32` or `33` the mic. `DF` holds the knob's position, a signed count of tenths of a dB. `DE` and `DD` hold two mic readings.[^status-fields] `DF` reads about −1004 at the knob's bottom stop, and 0 at its top.[^df-range]
 
-No field speaks of the host, mute, standby, or a group. The shape holds from GLM's first poll in every Phase 0 capture.[^status-nothing] The adapter answers each poll within about 1.5 ms,[^status-time] and every one of the 35,983 polls in the captures got a reply.
+No field speaks of the host, mute, standby, or a group. The shape holds from GLM's first poll in every Phase 0 capture.[^status-nothing] The adapter answers each poll within about 1.5 ms,[^status-time] and every one of the 55,383 polls in the captures got a reply.
 
 ### Telemetry
 
@@ -534,7 +539,7 @@ No reply reports a monitor's mute. Not the telemetry, the `2B` ack, `19 01`, `39
 
 ### `01 7E`
 
-The adapter sends `01 7E` when no monitor answered.[^no-answer-sent] It's slower than any monitor. It comes 8.1 to 11.1 ms after the request, 8.6 ms at the median, across its 3,946 instances in the captures. The slowest is in `group-switch-main-2x1-main-4x2`, at 36.053 s. A monitor's reply comes within 7.1 ms, 1.6 ms at the median. **Guess:** the adapter waits about 8 ms for a monitor.
+The adapter sends `01 7E` when no monitor answered.[^no-answer-sent] It's slower than any monitor. It comes 8.1 to 11.1 ms after the request, 8.7 ms at the median, across its 5,798 instances in the captures. The slowest is in `group-switch-main-2x1-main-4x2`, at 36.053 s. A monitor's reply comes within 7.1 ms, 1.6 ms at the median. **Guess:** the adapter waits about 8 ms for a monitor.
 
 You'll see it in three places:
 
@@ -583,7 +588,7 @@ The protocol has no clock of its own. These times are what GLM does, how the har
 | GLM's longest silence, while it runs | 0.22 s between two of its reports. 1.70 s between two `01 08` polls, in a group switch. | [adapter-status.md](adapter-status.md#how-the-adapter-knows-a-host-is-present) |
 | The adapter's status reply | Within about 1.5 ms | [adapter-status.md](adapter-status.md#the-poll) |
 | A monitor's reply | Within 7.1 ms, 1.6 ms at the median. The slowest is a `39`, whose reply spans two reports. | `qlm-control-all`, 8481.361 s |
-| `01 7E` | 8.1 to 11.1 ms, 8.6 ms at the median. Its 11.1 ms, after a PEQ band to a monitor that had just lost its lease, is the slowest reply in the captures. | `group-switch-main-2x1-main-4x2`, 36.053 s |
+| `01 7E` | 8.1 to 11.1 ms, 8.7 ms at the median. Its 11.1 ms, after a PEQ band to a monitor that had just lost its lease, is the slowest reply in the captures. | `group-switch-main-2x1-main-4x2`, 36.053 s |
 | qlm's request timeout | 0.1 s | `QLMReportLink.h` |
 | GLM's retry after a missed poll | At once, about 9 ms apart | `standby-wake`, 35.077 to 35.105 s |
 | A knob-driven level | 1.7 to 42 ms after the poll that read the knob, 2.2 ms at the median | [adapter-status.md](adapter-status.md#how-knob-turns-reach-glm) |
@@ -591,14 +596,14 @@ The protocol has no clock of its own. These times are what GLM does, how the har
 | qlm's volume | At most one frame every 50 ms | `QLMSystem.h` |
 | The standby steps: `3A 03 02` twice, then `3A 03 00` twice | 21.6 to 22.0 ms apart | `standby-wake`, 34.856 s; `testSleepIsGLMs`; hlm §7 |
 | The wake: `3A 03 7F` and `3A 03 01` back to back, three pairs | 0.20 to 0.21 s between pairs | `startup-idle`, 7.332 s; `testWakeIsGLMs` |
-| The level after a wake | 0.235 s after the last pair. qlm's came 0.247 and 0.249 s after it. | `standby-wake`, 47.243 s; `testWakeIsGLMs`; `qlm-control-all`, 575.768 and 8482.601 s; `testTheWakeEndsAsGLMs` |
-| The first probe answer after a wake | 0.81 s after the first pair in `standby-wake`, 0.50 s in `qlm-control-first`, and 0.68 and 0.67 s in `qlm-control-all` | `standby-wake`, 47.373 s; `qlm-control-first`, 828.290 s; `qlm-control-all`, 575.776 and 8482.608 s |
-| The first telemetry that says on | 1.6 s after the first pair in `qlm-control-first`, and 1.5 and 1.7 s in `qlm-control-all`. 2.5 s in `standby-wake`, near the end of GLM's apply at wake. hlm saw 1.55 to 1.66 s on two 8320A. | `qlm-control-first`, 829.397 s; `standby-wake`, 49.05 s; hlm §7 |
+| The level after a wake | 0.235 s after the last pair. qlm's came 0.247 and 0.249 s after it, and its app's 0.241 s after it. | `standby-wake`, 47.243 s; `testWakeIsGLMs`; `qlm-control-all`, 575.768 and 8482.601 s; `testTheWakeEndsAsGLMs`; `qlm-app-first`, 1233.309 s |
+| The first probe answer after a wake | 0.81 s after the first pair in `standby-wake`, 0.50 s in `qlm-control-first`, 0.68 and 0.67 s in `qlm-control-all`, and 0.67 s in `qlm-app-first` | `standby-wake`, 47.373 s; `qlm-control-first`, 828.290 s; `qlm-control-all`, 575.776 and 8482.608 s; `qlm-app-first`, 1233.316 s |
+| The first telemetry that says on | 1.6 s after the first pair in `qlm-control-first`, 1.5 and 1.7 s in `qlm-control-all`, and 1.3 s in `qlm-app-first`. 2.5 s in `standby-wake`, near the end of GLM's apply at wake. hlm saw 1.55 to 1.66 s on two 8320A. | `qlm-control-first`, 829.397 s; `standby-wake`, 49.05 s; `qlm-app-first`, 1233.952 s; hlm §7 |
 | A new telemetry frame | About once a second | [telemetry.md](telemetry.md#one-frame-a-second) |
 | GLM's apply at launch | 1.4 s for six monitors | `startup-idle`, 8.534 to 9.901 s |
 | A group switch with no monitor waking | 1.1 s | `group-switch-main-4x2-main-2x1`, 12.359 to 13.476 s |
 | A monitor in standby dropping its lease | Every 3 s, for the Right 8351B in `standby-wake` | `standby-wake`, 37.365 to 45.959 s |
-| Leases, once the host goes quiet | On: within 42 s of GLM, and 23 s of qlm. In standby: within 210 s of GLM, and 88 s and 68 s of qlm. Across an unplug: within 9 s. | `qlm-first-discover`; `qlm-standby-discover`; `unplug`, 60.4 to 69.2 s |
+| Leases, once the host goes quiet | On: within 42 s of GLM, and 23 s of qlm. In standby: within 210 s of GLM, and 88 s and 68 s of qlm. Across an unplug: within 9 s. With the next host already polling: within 3.1 s. | `qlm-first-discover`; `qlm-standby-discover`; `unplug`, 60.4 to 69.2 s; `qlm-app-first`, 185.719 s |
 | The adapter's broadcast of `F0 1F 00 00 00`, while a host is connected | About every 610 ms | hlm §9 |
 | The hand-back | About 2.6 s after the host goes quiet | `qlm-control-first`, 289.7 s; hlm §9 |
 
@@ -614,6 +619,15 @@ About 2.6 s after the host goes quiet, the adapter takes over at the knob's posi
 
 The run on all six heard the same at every exit. The level went back to the knob's 2 to 3 s after the Mac's sound, which played about 0.5 s after qlm's last report. When qlm stopped at the knob's level, no one heard a change.[^hand-back-all]
 
+qlm's app chooses its stop by where the knob sits. With the knob above the app's level, quitting asks first, and on Quit Anyway the app sends nothing more. Its last report is an ordinary poll, and the level rises about 2.6 s later. With the knob at or below the app's level, the app's last report is the knob's level, so the take-over changes nothing. `qlm-app-first` heard both:[^hand-back-app]
+
+| Stop | The knob, and the app's level | The app's last report | Heard |
+| --- | --- | --- | --- |
+| Quit Anyway, 754.25 s | −39.9 dB, above −50 dB | `01 08`, a poll | The level rose to the knob's |
+| Quit, 1034.57 s | −40 dB, below −35 dB | `FF 1F 01 47 AE`, −40 dB | A drop at the quit, then nothing |
+| Quit, 1125.91 s | −40 dB, below −35 dB | `FF 1F 01 47 AE`, −40 dB | The same |
+| The adapter setting off, 1341.85 s | −40 dB, below −35 dB | `FF 1F 01 47 AE`, −40 dB | The same |
+
 [^no-keep-alive]: `startup-idle`, from 10 s; #12.
 [^hlm-keep-alive]: hlm §7.
 [^second-poll]: [adapter-status.md](adapter-status.md#the-poll).
@@ -622,6 +636,7 @@ The run on all six heard the same at every exit. The level went back to the knob
 [^hand-back-hlm]: hlm §9.
 [^hand-back-gaps]: [adapter-status.md](adapter-status.md#how-the-adapter-knows-a-host-is-present).
 [^hand-back-all]: `qlm-control-all`, at 81.4, 442.0, 456.8, 8410.5, 8425.4, 8494.1, and 8663.8 s, and its notes.
+[^hand-back-app]: `qlm-app-first`, and its notes; `testEachStopHandsBackAtTheKnob`; `QLMSnapshot.h`.
 
 ## Sequences
 
@@ -644,7 +659,7 @@ Three terms come up a lot:
 | Mute | Two rounds of `2B` to every monitor that is on. Mute all also sends `01 2B 01`. No reply reports mute. | [Mute and mute all](#mute-and-mute-all) |
 | Power | Standby: `3A 03 02` twice, then `3A 03 00` twice. Wake: three pairs of `3A 03 7F` and `3A 03 01`, then the level and the pair. | [Sleep and wake](#sleep-and-wake) |
 | Group | Two kinds: the apply at launch and wake, and a group switch | [The group apply](#the-group-apply) |
-| The host leaving | Nothing is sent. The adapter takes over at the knob's position about 2.6 s later. | [What the adapter and the monitors do on their own](#what-the-adapter-and-the-monitors-do-on-their-own) |
+| The host leaving | GLM sends nothing. qlm sends the knob's level when the knob is at or below its own. The adapter takes over at the knob's position about 2.6 s later. | [What the adapter and the monitors do on their own](#what-the-adapter-and-the-monitors-do-on-their-own) |
 
 ### GLM's startup
 
@@ -698,11 +713,13 @@ qlm leaves out `01 22`, `01 51 82`, the wake, the pair, and `01 2B 00` at connec
 | --- | --- | --- |
 | After each lease ack | Probes again at once | Sends the volume, once one is set, ahead of everything queued. Then asks the new monitor's `39`, `19 01`, and `08`, and probes again. |
 | Once the probe gets `01 7E` | Sends the volume, then `39` to each new monitor | Runs the cycle |
-| Source | `startup-idle`, 8.419 to 8.533 s | `qlm-first-discover`, 56.42 s; #27; `qlm-control-all`, 214.774 s |
+| Source | `startup-idle`, 8.419 to 8.533 s | `qlm-first-discover`, 56.42 s; #27; `qlm-control-all`, 214.774 s; `qlm-app-first`, 185.726 s |
 
 qlm sends the volume first because a monitor that is switched on plays at its stored level until a host sends one ([What the adapter and the monitors do on their own](#what-the-adapter-and-the-monitors-do-on-their-own)).
 
 It works on the monitors. In `qlm-control-all`, the Rear Right 8330A was switched on during a 90 s hold at −50 dB. It answered the probe and took session `07`. qlm's level went to it 1.1 ms after the ack, outside the cycle and before its `39`. No one heard a burst.[^new-monitor] Each monitor that wakes gets the level the same way ([Sleep and wake](#sleep-and-wake)).
+
+qlm's app sets its level at connect, so discovery sends it too. All 30 of its leases in `qlm-app-first`, at four launches and a wake, got the level 1 to 2 ms after the ack.[^app-leases]
 
 Monitors in standby answer discovery without a wake: the probe, the lease, `39`, `19 01`, and `08`. They stay in standby.[^standby-discovery] A monitor that drops out is found again by the probe, at the next session ([When a monitor loses its lease](#when-a-monitor-loses-its-lease)).
 
@@ -756,6 +773,8 @@ We replayed the knob readings of those seven captures through qlm, on the virtua
 
 In `qlm-control-first`, qlm jumped to the knob at its first real turn, then followed it. The highest level it sent was −41.5 dB, under a −35 dB ceiling.[^control-run-knob]
 
+In `qlm-app-first`, the knob reached its top stop, 0 dB, and its bottom. qlm never sent above its −35 dB ceiling, and at the bottom it sent the floor, `00 00 08`. But its volume followed the knob past the ceiling, and only the frame was capped. So each change still sent a burst: 102 bursts in 13.7 s, 75 of them with the level held at −35 dB.[^app-knob]
+
 ### Dim
 
 There's no dim opcode. Dim is a volume frame 20 dB down: in `mute-dim`, `00 31 07` became `00 04 E7`.[^dim-volume] GLM wraps it in a round and the pair.
@@ -783,6 +802,8 @@ On all six, each `qlmctl dim` sent GLM's sequence, with one frame ahead of it. A
 | One round of `2B 04` | To each monitor | To each monitor |
 | The pair | `FF 2D 00`, then `FF 3D 00 00` | The same |
 | Source | `mute-dim`, 51.24 s | `qlm-control-all`, 432.033 s |
+
+qlm's app knows its dim state, so its dim is GLM's ten frames, with nothing ahead.[^app-dim]
 
 ### Mute and mute all
 
@@ -813,9 +834,9 @@ For one monitor, the rounds go to every monitor that is on, in the setup's devic
 | The others in the group | `04` |
 | Outside the group | `05` then `07`, or `07` alone in the first of two rounds |
 
-Mute all sends the level once, `01 2B 01`, then two rounds of `2B 03`. Unmute all sends the level, `01 2B 00`, then two rounds of `2B 04`.[^mute-all] Every answered `2B`, to a monitor or the adapter, got a bare `09`: 5,937 in the captures.[^mute-acks]
+Mute all sends the level once, `01 2B 01`, then two rounds of `2B 03`. Unmute all sends the level, `01 2B 00`, then two rounds of `2B 04`.[^mute-all] Every answered `2B`, to a monitor or the adapter, got a bare `09`: 7,829 in the captures.[^mute-acks]
 
-Because every round restates every monitor that is on, a round from any host unmutes a monitor muted elsewhere. In `qlm-control-first`, the knob's burst unmuted the 7370A, which GLM had muted.[^unmuted-7370a] And since no reply reports mute, qlm keeps the user's mutes itself, by hardware ID, across a lapsed lease (#20). #29 keeps them across a stop too.
+Because every round restates every monitor that is on, a round from any host unmutes a monitor muted elsewhere. In `qlm-control-first`, the knob's burst unmuted the 7370A, which GLM had muted.[^unmuted-7370a] And since no reply reports mute, qlm keeps the user's mutes itself, by hardware ID, across a lapsed lease (#20). #29 keeps them across a stop too. In `qlm-app-first`, a mute outlasted a relaunch. At start, the app restated it with `2B 03` to the muted monitor alone, right after its lease and level. The others got no `2B`.[^app-mute]
 
 If you read `mute-dim`, session `05` is the 7370A and `0B` the 7350A. Its notes call `0B` the big sub, so their sub labels look swapped.[^mute-dim-sessions]
 
@@ -853,6 +874,8 @@ On all six, `wake --volume -50` ran twice, and ended as GLM's does each time. Th
 | After the last pair | The level 0.235 s later, then the pair 23 ms after it | The level 0.247 s later, then the pair at once |
 | Then | A lease for each monitor, and the apply at wake | A lease for each monitor, and the level after each ack |
 | Source | `standby-wake`, 46.565 to 47.378 s | `qlm-control-all`, 575.096 to 575.935 s |
+
+qlm sends no apply at wake, and it shows. After the app's wake in `qlm-app-first`, both 8330As' LF output meters read 7 to 8 steps higher than before the standby, at the same input, and the user heard the difference. GLM's next launch applied the group, and the sound came back.[^wake-no-apply] So a woken monitor runs without the group's settings until a host applies them.
 
 GLM sends `3A 03` to one monitor only in a group switch. Its own standby is a broadcast.[^unicast-power] A single `3A 03 02` puts a monitor outside the new group in standby.[^single-standby]
 
@@ -968,6 +991,7 @@ No apply by qlm has run on the monitors or been measured yet. [measurement.md](m
 [^knob-golden]: `QLMKnobGoldenTests`. The five are in `sleep-wake-darkwake`.
 [^knob-lock]: `volume-sweep`, 25.44 s; its notes.
 [^control-run-knob]: `qlm-control-first`, 373.12 s; `testEveryLevelIsGLMsAndUnderTheCeiling`.
+[^app-knob]: `qlm-app-first`, 282.6 to 296.5 s; `testTheAppSentOnlyControlsUnderTheCeiling`; `QLMKnob.h`.
 [^dim-volume]: hlm §9; `mute-dim`, 51.24 s.
 [^dim-sequence]: `mute-dim`, 51.24 s on and 54.77 s off; `testDimIsGLMs`.
 [^dim-2d]: [refused-frames.md](refused-frames.md#broadcast-2d-00-and-3d-00-00).
@@ -976,10 +1000,12 @@ No apply by qlm has run on the monitors or been measured yet. [measurement.md](m
 [^qlm-dim-nothing]: `QLMSystem.h`.
 [^qlmctl-dim]: `qlm-control-first`, 538.3 s.
 [^qlmctl-dim-run]: `qlm-control-all`, 432.033, 451.793, 8400.569, and 8420.349 s, and its notes; `testDimIsWhole`.
+[^app-dim]: `qlm-app-first`, 694.007 and 697.624 s; `testDimIsGLMs` in `QLMAppFirstTests`.
 [^mute-one]: `mute-dim`, 19.19 s; `knob-sweep`, 19.135 s; `testMutingOneMonitorIsGLMs`.
 [^mute-all]: Mute all: `mute-dim`, 46.19 s; `testMutingAllIsGLMs`. Unmute all: `mute-dim`, 48.60 s.
 [^mute-acks]: #27.
 [^unmuted-7370a]: `qlm-control-first`, 373.12 s; [telemetry.md](telemetry.md#what-the-meters-showed-about-the-control-run).
+[^app-mute]: `qlm-app-first`, 1121.786 and 1158.195 s; `testAMuteOutlastsARelaunch`.
 [^mute-dim-sessions]: The lease of `0B` in `group-switch-main-2x1-main-2x2`, 10.418 s, against the leases and `39` replies in `startup-idle`, 8.432 to 8.533 s.
 [^standby]: `standby-wake`, 34.856 s; `testStandbyIsGLMs`.
 [^standby-twice]: hlm §9.
@@ -988,6 +1014,8 @@ No apply by qlm has run on the monitors or been measured yet. [measurement.md](m
 [^wake-apply]: `standby-wake`, 47.70 to 49.09 s; `testWakeApply`.
 [^qlm-wake]: #27; `testWakeIsGLMs`.
 [^qlm-wake-run]: `qlm-control-all`, 575.096 to 575.935 s and 8481.937 to 8482.778 s, and its notes; `testTheWakeEndsAsGLMs`; `testWokenMonitorsGetTheLevelFirst`.
+[^wake-no-apply]: `qlm-app-first`, the meters from 1195 to 1219 s and from 1240 s on, and its notes; `testStandbyAndWakeAreGLMs`.
+[^app-leases]: `qlm-app-first`; `testEveryLeaseGetsTheLevelFirst`.
 [^new-monitor]: `qlm-control-all`, 214.751 to 214.777 s, and its notes; `testANewMonitorGetsTheLevelFirst`.
 [^unicast-power]: The six `group-switch-*` captures.
 [^single-standby]: `group-switch-main-4x2-main-2x2`, 14.249 s; `testSwitchFrom4x2To2x2`.
@@ -1020,7 +1048,7 @@ The adapter also talks on the bus, where USB can't see it. While a host is conne
 
 Besides the warning above, a woken monitor keeps the level it had until a host sends one.[^woken-level] We guessed it also stays muted until a host sends its state. After qlm's wake in `qlm-control-first`, every output meter read its floor for 10 s, and qlm sent no `2B`.[^woken-mute] The run on all six says otherwise. After its second wake, with music in, every monitor's output meters rose above their floor 3.4 to 4.0 s after the first pair. qlm sent no `2B`, and the user heard the music come back.[^woken-plays]
 
-A monitor that is switched on gets qlm's level, but not the group's settings. In `qlm-control-all`, the Rear Right 8330A played a little louder than the rest until GLM's launch applied the group, and then it matched.[^own-settings] **Guess:** it ran the settings it had stored, without the group's trims.
+A monitor that is switched on gets qlm's level, but not the group's settings. In `qlm-control-all`, the Rear Right 8330A played a little louder than the rest until GLM's launch applied the group, and then it matched.[^own-settings] A woken monitor runs without them too ([Sleep and wake](#sleep-and-wake)). **Guess:** each runs the settings it had stored, without the group's trims.
 
 A mute outlasts the host, and no reply reports it. The Right 8351B stayed muted after qlm's exit, until `mute off`.[^mute-outlasts] [Telemetry](#telemetry) has why no reply shows it.
 
@@ -1074,7 +1102,7 @@ On or in standby, monitors drop a quiet host's leases, within 23 s to 210 s ([Wh
 
 The footnotes name each fact's source. Together, they draw on:
 
-- The 21 captures in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30.
+- The 22 captures in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30, and qlm's app ran `qlm-app-first` the same day.
 - The tests in `Tests/`, which check these facts against the captures, and the headers in `qlm/GLMProtocol/`.
 - hlm's spec, revision 13, at robcazzaro/hlm commit `c08ced9`: §1 to §9, and Appendix B. Facts only. No text was copied.
 - genlc's `transport.py`, for the report-ID byte. Facts only. No code was ported.

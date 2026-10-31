@@ -169,10 +169,6 @@
     QLMAssertBytes(noCeiling.payload, noCeiling.length, 0x1F, 0x00, 0x00, 0x08);
 }
 
-static uint32_t QLMVolumeWordOf(QLMMessage message) {
-    return (uint32_t)message.payload[1] << 16 | (uint32_t)message.payload[2] << 8 | message.payload[3];
-}
-
 // The same rule across the whole scale, on and between the steps: no word
 // passes the ceiling or 7F FF FF, and dim is 20 dB below the volume sent.
 - (void)testNoVolumeFramePassesTheCeiling {
