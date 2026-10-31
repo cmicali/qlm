@@ -708,8 +708,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     next();
 }
 
+// A coalesced volume counts until its timer sends it. After a stop the
+// timer sends nothing, so it no longer counts.
 - (BOOL)isIdle {
-    return !_inFlight && _sends.count == 0;
+    return !_inFlight && _sends.count == 0 && !(_volumeSendPending && _running);
 }
 
 #pragma mark - The cycle
