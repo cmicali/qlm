@@ -242,7 +242,9 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             if (refusal != nil) {
                 return QLMDebugError(@"%@", refusal);
             }
-            app.debugPreferences.ceilingDecibels = decibels;
+            if (![app.debugPreferences saveCeilingDecibels:decibels]) {
+                return QLMDebugError(@"The preferences refused %g dB", decibels);
+            }
             [app debugVolumeRangeDidChange];
             return @{@"ok": @YES, @"ceilingDecibels": @(app.debugPreferences.ceilingDecibels)};
         }),
