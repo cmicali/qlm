@@ -30,9 +30,6 @@ static QLMReplyShape QLMReplyShapeFor(const QLMMessage *message) {
 static const NSUInteger QLMSyncTimeouts = 5;
 static const NSUInteger QLMSyncAttempts = 4;
 
-static NSError *QLMStalledError(void) {
-    return QLMAdapterErrorMake(QLMAdapterErrorUnresponsive, @"The GLM adapter stopped answering.");
-}
 
 @interface QLMReportLinkRequest : NSObject
 @property (nonatomic) NSData *report;
@@ -60,6 +57,8 @@ static NSError *QLMStalledError(void) {
     QLMReplyShape _late;
     // A sync is overdue. Every send fails until a sync's reply comes.
     BOOL _stalled;
+    // The adapter did not take a sync of this run.
+    BOOL _runNotTaken;
     // The syncs written in this run, all of one shape, whose replies may
     // still come, and how many the run has tried.
     NSUInteger _syncsOut;
@@ -124,7 +123,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         return;
     }
     if (_stalled) {
-        [self finish:handler reply:NULL error:QLMStalledError()];
+        [self finish:handler reply:NULL error:[self stalledError]];
         return;
     }
     if ((_waiting != nil && !_waiting.sync) || _held != nil) {
@@ -193,15 +192,35 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
 // comes. Meanwhile it sends more syncs of the same shape, in case a reply
 // was lost. That shape stays safe, since no late reply but a sync's own can
 // have it.
+- (NSError *)stalledError {
+    if (!_gaveUp) {
+        return QLMAdapterErrorMake(QLMAdapterErrorUnresponsive, @"The GLM adapter stopped answering.");
+    }
+    return _runNotTaken ? QLMAdapterErrorMake(QLMAdapterErrorStoppedTaking, @"The GLM adapter stopped taking qlm's syncs.")
+                        : QLMAdapterErrorMake(QLMAdapterErrorGaveUp, @"The GLM adapter answered none of qlm's syncs.");
+}
+
 - (void)syncOverdue {
     _timeouts += 1;
     if (!_stalled) {
         _stalled = YES;
-        [self failHeld:QLMStalledError()];
+        [self failHeld:[self stalledError]];
     }
     if (_syncAttempts < QLMSyncAttempts) {
         [self writeSync:_waiting.shape];
+    } else {
+        _gaveUp = YES;
     }
+}
+
+- (void)resync {
+    if (!_gaveUp) {
+        return;
+    }
+    _gaveUp = NO;
+    _syncAttempts = 0;
+    _runNotTaken = NO;
+    [self writeSync:_waiting.shape];
 }
 
 // One sync of the run's shape. A sync that did not go out fails the request
@@ -219,6 +238,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     NSTimeInterval wait = _replyTimeout * QLMSyncTimeouts * (double)(1u << (_syncAttempts - 1));
     NSError *error = _writer(sync.report.bytes);
     if (error != nil) {
+        _runNotTaken = _runNotTaken || error.code == QLMAdapterErrorNotTaken;
         [self failHeld:error];
         if (_syncsOut == 0) {
             _syncAttempts = 0;
@@ -261,6 +281,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     BOOL info = (_late & QLMReplyShapeSystemInfo) == 0 && (_late & (QLMReplyShapeAdapterStatus | QLMReplyShapeAny)) != 0;
     _syncsOut = 0;
     _syncAttempts = 0;
+    _runNotTaken = NO;
     [self writeSync:info ? QLMReplyShapeSystemInfo : QLMReplyShapeAdapterStatus];
 }
 
@@ -289,6 +310,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         _waiting = nil;
         _generation += 1;
         _stalled = NO;
+        _gaveUp = NO;
         _syncsOut = 0;
         _syncAttempts = 0;
         if (another) {
@@ -323,6 +345,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     _waiting = nil;
     _generation += 1;
     _stalled = NO;
+    _gaveUp = NO;
     _syncsOut = 0;
     _syncAttempts = 0;
     if (waiting != nil) {

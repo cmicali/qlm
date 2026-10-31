@@ -52,9 +52,11 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // was lost, it sends up to three more syncs of that shape. Each waits twice
 // as long as the one before, so the four wait 0.5, 1, 2, and 4 s at 0.1 s.
 // A reply may then be an earlier sync's, so one sync of the other shape
-// drops the rest. After the last, the link waits on for a reply, and sends
-// nothing. The retries add no shape that may be late, so a close and a
-// reopen keep track whenever they did before the stall.
+// drops the rest. After the last, the link gives up: it waits on for a
+// reply, sends nothing, and fails every send with QLMAdapterErrorGaveUp, or
+// QLMAdapterErrorStoppedTaking if the adapter did not take a sync of the
+// run. The retries add no shape that may be late, so a close and a reopen
+// keep track whenever they did before the stall.
 @property (nonatomic) NSTimeInterval replyTimeout;
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
@@ -75,6 +77,21 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // The device opened again, and the link is out of step, as at its first open.
 // A link that lost track stays closed.
 - (void)reopen;
+
+// The last sync's wait passed with no reply. It ends when a sync's reply
+// comes, or at a resync or a close.
+@property (nonatomic, readonly) BOOL gaveUp;
+
+// The device closed and opened again after the link gave up, with no close
+// of the link between. Starts a new run of syncs of the run's shape. The
+// link still knows which replies may come, and the run adds no shape.
+// TRAP: unlike reopen, it takes no other host's reply for one. The device
+// is closed from qlm's close to its open: one turn of the queue, or the
+// waits between tries when an open fails. Another host would have to open
+// the adapter, write, and close it in that time, unseen by the host checks,
+// which run before and after each open and every second. GLM keeps running
+// once it opens the adapter, so they find it.
+- (void)resync;
 
 // Why the link lost track, QLMAdapterErrorLostTrack, or nil. It never
 // reopens. Only a new arrival of the adapter, a new USB enumeration, gets a
