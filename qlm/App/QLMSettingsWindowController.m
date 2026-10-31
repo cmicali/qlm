@@ -261,14 +261,18 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 #pragma mark - The volume range
 
-// The fields and the steppers both send it.
+// The fields and the steppers both send it. The formatter refuses a level
+// above 0 dB first, so the preferences' refusal is a backstop.
 - (void)rangeChanged:(NSControl *)control {
-    if (control == self.ceilingField || control == self.ceilingStepper) {
-        self.preferences.ceilingDecibels = control.doubleValue;
-    } else {
-        self.preferences.lowestDecibels = control.doubleValue;
-    }
+    double decibels = control.doubleValue;
+    BOOL saved = control == self.ceilingField || control == self.ceilingStepper
+        ? [self.preferences saveCeilingDecibels:decibels]
+        : [self.preferences saveLowestDecibels:decibels];
     [self renderRange];
+    if (!saved) {
+        [self showRangeRefusal:QLMTypedLevelRefusal(decibels)];
+        return;
+    }
     [self.delegate settingsDidChangeVolumeRange:self];
 }
 

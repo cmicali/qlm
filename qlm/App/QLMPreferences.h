@@ -16,7 +16,9 @@ extern const double QLMVolumeRangeMinimumSpan;
 
 // The app's own level. At connect System keeps it until the knob turns.
 // Never above the ceiling.
-@property (nonatomic) double volumeDecibels;
+@property (nonatomic, readonly) double volumeDecibels;
+// NO for a level above 0 dB, which keeps the old one.
+- (BOOL)saveVolumeDecibels:(double)volumeDecibels __attribute__((warn_unused_result));
 // System's mute record: the muted hardware IDs, whether mute all is on, and
 // the monitors the user lifted it from. No reply reports a monitor's mute,
 // so the record is the truth.
@@ -36,8 +38,11 @@ extern const double QLMVolumeRangeMinimumSpan;
 
 @end
 
-// The user's choices, kept in NSUserDefaults. Each setter keeps its value in
-// range and on GLM's 0.5 dB steps. On the main queue.
+// The user's choices, kept in NSUserDefaults. Each level's save keeps it in
+// range and on GLM's 0.5 dB steps. It refuses a level above 0 dB, and keeps
+// the old one, though Settings and the debug channel refuse one first. A
+// level kept above 0 dB, or not a number, which only a hand edit could
+// store, reads as its default. On the main queue.
 @interface QLMPreferences : NSObject
 
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults;
@@ -45,10 +50,12 @@ extern const double QLMVolumeRangeMinimumSpan;
 // System caps every volume frame at it. At most 0 dB, and at least the
 // span above the bottom of the range. A value between steps falls to the
 // step below. System's default until the user sets one.
-@property (nonatomic) double ceilingDecibels;
+@property (nonatomic, readonly) double ceilingDecibels;
+- (BOOL)saveCeilingDecibels:(double)ceilingDecibels __attribute__((warn_unused_result));
 // The slider's bottom. At least QLMVolumeDecibelsMin, and at least the span
 // below the ceiling.
-@property (nonatomic) double lowestDecibels;
+@property (nonatomic, readonly) double lowestDecibels;
+- (BOOL)saveLowestDecibels:(double)lowestDecibels __attribute__((warn_unused_result));
 @property (nonatomic) BOOL wakesAtLaunch;
 // On, System drives the real monitors through the GLM adapter. Off, the
 // fake bus. Off by default.

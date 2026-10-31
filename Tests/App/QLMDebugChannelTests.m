@@ -102,8 +102,8 @@
     _suiteName = [@"QLMDebugChannelTests." stringByAppendingString:NSUUID.UUID.UUIDString];
     _defaults = [[NSUserDefaults alloc] initWithSuiteName:_suiteName];
     QLMPreferences *preferences = [[QLMPreferences alloc] initWithDefaults:_defaults];
-    preferences.ceilingDecibels = -30;
-    preferences.fakeBus.volumeDecibels = -45;
+    XCTAssertTrue([preferences saveCeilingDecibels:-30]);
+    XCTAssertTrue([preferences.fakeBus saveVolumeDecibels:-45]);
 
     _time = [[QLMVirtualClock alloc] init];
     _bus = [QLMFakeBus demoBusWithSubwoofer:NO];
