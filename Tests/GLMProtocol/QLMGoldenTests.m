@@ -454,12 +454,12 @@ static NSData *QLMDataFromHex(NSString *hex) {
     return lapses;
 }
 
-// A monitor drops its lease 2.4 to 2.9 s after the last frame it answered,
-// on or in standby, with the host still polling the adapter.
+// A monitor drops its lease under 3 s after the last frame it answered, on
+// or in standby, with the host still polling the adapter.
 // standby-wake: GLM leased the Right 8351B, in standby, at 0E, asked its 39,
-// and sent its session nothing more. Its lease lapsed within 2.26 to 2.83 s,
-// three times. So the leases in standby every 3 s are GLM's, not the
-// standby's.
+// and sent its session nothing more. Three times, it held its lease 2.25 s
+// or more, and lost it by 2.84 s. So the leases in standby every 3 s are
+// GLM's, not the standby's.
 // qlm-control-first: one qlmctl run found the three, and the next probed
 // from 499.79 s. The Left 8351B, in standby, the 7370A, and the Right
 // 8351B held their leases 2.37 s or more, and lapsed within 2.97 s.

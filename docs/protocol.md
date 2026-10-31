@@ -263,7 +263,7 @@ GLM counts up from `02` at each launch, one per lease, in the order the monitors
 
 ### When a monitor loses its lease
 
-A lease isn't permanent. A monitor loses it when it wakes, when a host broadcasts `03`, and when no host has sent it a frame for about 2.5 s. The host also gives up on a monitor that stops answering.
+A lease isn't permanent. A monitor loses it when it wakes, when a host broadcasts `03`, and about 2.5 s after the last frame it answered. The host also gives up on a monitor that stops answering.
 
 | When | What happens | Source |
 | --- | --- | --- |
@@ -271,7 +271,7 @@ A lease isn't permanent. A monitor loses it when it wakes, when a host broadcast
 | It joins a group from standby | It loses its lease. That's the 7350A in 2x1 to 2x2, both 8330A and the 7350A in 2x1 to 4x2, and both 8330A in 2x2 to 4x2. | The leases in `group-switch-main-2x1-main-2x2`, 10.418 s; `group-switch-main-2x1-main-4x2`, 36.254 to 36.457 s; and `group-switch-main-2x2-main-4x2`, 11.562 and 11.575 s |
 | It stays on through a switch | It keeps its session. The switches from 4x2 to 2x1, 4x2 to 2x2, and 2x2 to 2x1 lease nothing. | Each `group-switch-*` capture |
 | The host stops sending to its session | It drops its lease 2.45 to 2.84 s after the last frame it answered, on or in standby (below). In `standby-wake`, GLM leased the Right 8351B in standby, asked its `39`, and sent its session nothing more. So it answered the probe again 2.8 s later, three times, and took `0E`, `0F`, `10`, and `11`. Standby alone drops nothing: in `qlm-standby-discover`, no monitor did in GLM's 10 s of standby. | `standby-wake`, 37.365 to 45.959 s; `qlm-standby-discover`; `testALeaseLapsesUnderThreeSecondsAfterItsLastAnswer` |
-| The host broadcasts `03` | It drops its lease. All six answered GLM's next probe, 1.5 s after their last poll, though all were on. The wake pairs after the `03` drop no lease: in `setup-j-restore`, GLM sent them to six monitors that were on, and every lease held. | `setup-b-peq-8351b`, 22.461 to 23.807 s; `setup-j-restore`, 34.148 to 35.184 s; `testABroadcast03DropsEveryLease`; [refused-frames.md](refused-frames.md#broadcast-03) |
+| The host broadcasts `03` | It drops its lease. All six answered GLM's next probe, 1.5 s after their last poll, though all were on. The wake pairs after the `03` drop no lease: in `setup-j-restore`, GLM sent them to six monitors that were on, and every lease held. No capture has an `03` without the pairs after it, so this rests on one `03` and on ruling the pairs out. | `setup-b-peq-8351b`, 22.461 to 23.807 s; `setup-j-restore`, 34.148 to 35.184 s; `testABroadcast03DropsEveryLease`; [refused-frames.md](refused-frames.md#broadcast-03) |
 | The host goes quiet | The monitors drop its leases. See below. | |
 
 Frames sent to a lost session get `01 7E`. GLM's block to a monitor that has just woken gets it, from the old session.[^lost-session]
@@ -292,7 +292,7 @@ Monitors drop a host's leases once the host goes quiet. USB can't show why.
 
 Most of these bounds are only when the next host first probed. The last is tight. When GLM quit, qlm's app opened 0.85 s after GLM's last report, so the adapter never took over. Its probes got `01 7E` until 2.45 s after GLM last polled a monitor, and the one at 3.06 s found one.[^lease-lapse]
 
-Three windows are tight, and they agree. A monitor drops its lease between 2.45 and 2.84 s after the last frame it answered, on or in standby. The host was still polling the adapter in each, so it isn't the adapter's take-over. Broadcasts don't hold a lease: GLM sent its level every cycle in `standby-wake`.[^lapse] Every looser bound in the table above fits that, the unplug's 9 s among them.
+Three windows are tight, and they agree. A monitor drops its lease between 2.45 and 2.84 s after the last frame it answered. That range is where the windows overlap, and they come from different monitors and states. The 2.45 s floor is from `qlm-app-first`, with the monitors on. The 2.84 s ceiling is from `standby-wake`, with one 8351B in standby. So one time for a monitor on or in standby is an assumption. The host was still polling the adapter in each, so it isn't the adapter's take-over. Broadcasts don't hold a lease: GLM sent its level every cycle in `standby-wake`.[^lapse] Every looser bound in the table above fits that, the unplug's 9 s among them.
 
 | Monitors | Still held after | Gone by | Source |
 | --- | --- | --- | --- |
@@ -507,7 +507,7 @@ Here's why qlm needs syncs. A reply that comes after its timeout would answer th
 
 The adapter's reads `model-GLM Adapter`, `ver-1.4.0.6113`, and `hw-0.0.202`, built 2025-05-19.[^sysinfo-adapter]
 
-`c-` differs by model: `0` for the adapter, `1` for the subwoofers, `2` for the 8330A, and `3` for the 8351B. It is the number of `81` to `83` readings the model sends, in every whole frame from a monitor that is on.[^c-field] **Guess:** it counts the amplifier channels, one per way, and `81` to `83` read one each ([telemetry.md](telemetry.md#81-82-and-83)). It isn't `84`'s class, which reads `02` for the 8351B, as for the 8330A.[^c-84]
+`c-` differs by model: `0` for the adapter, `1` for the subwoofers, `2` for the 8330A, and `3` for the 8351B. It equals the number of `81` to `83` readings the model sends, in every whole frame from a monitor that is on. Both are fixed per model, so this is a match across three classes, not a proof.[^c-field] **Guess:** it counts the amplifier channels, one per way, and `81` to `83` read one each ([telemetry.md](telemetry.md#81-82-and-83)). It isn't `84`'s class, which reads `02` for the 8351B, as for the 8330A.[^c-84]
 
 ### The adapter's status
 
@@ -550,7 +550,7 @@ hlm saw `47` read `03` in standby, when its own firmware drove the monitors. No 
 
 A monitor makes a new frame about once a second, and a poll before it gets a bare `09`.[^once-a-second] A frame sometimes comes split across two polls.[^split]
 
-Two replies end with a bare `04` after `8A`'s value. In every other reply, `8A` comes last. Both came from the 8330As, busy, 1.4 s after GLM's apply at launch began. Both had been switched on at their power switches minutes before, 166 and 206 s by `49`, and had no apply since. Each `04` ends its monitor's first frame after GLM's apply. The other four, awake for 81 minutes, sent none in the same round. **Guess:** `04` marks the first apply since a power-on. qlm's parser stops at the `04`, and System keeps what came before it.[^bare-04]
+Two replies end with a bare `04` after `8A`'s value. In every other reply, `8A` comes last. Both came from the 8330As, busy, 1.4 s after GLM's apply at launch began. Both their counts had restarted minutes before, 166 and 206 s by `49`, and neither had had an apply since. The notes record only the Rear Right switched off and on at its power switch, at 214.8 s. They don't say why the other's count restarted, at about 175 s. Each `04` ends its monitor's first frame after GLM's apply. The other four, awake for 81 minutes, sent none in the same round. **Guess:** `04` marks the first apply since a power-on, from the one power-on the notes confirm. qlm's parser stops at the `04`, and System keeps what came before it.[^bare-04]
 
 No reply reports a monitor's mute. Not the telemetry, the `2B` ack, `19 01`, `39`, or the adapter's status. A muted monitor's output meters read their floor, `80`, but so does silence.[^no-mute]
 
@@ -586,7 +586,7 @@ You'll see it in three places:
 [^standby-drops]: `qlm-standby-discover`.
 [^once-a-second]: [telemetry.md](telemetry.md#one-frame-a-second).
 [^split]: [telemetry.md](telemetry.md#split-frames).
-[^bare-04]: `qlm-control-all`, 381.151 and 381.166 s; `testEveryReplyAnswersItsRequest`; `testTheBare04ComesFromTheMonitorsSwitchedOn`; `QLMSystem.m`.
+[^bare-04]: `qlm-control-all`, 381.151 and 381.166 s; `testEveryReplyAnswersItsRequest`; `testTheBare04ComesFromTheMonitorsJustStarted`; `QLMSystem.m`.
 [^no-mute]: #27; `mute-dim`.
 [^no-answer-sent]: #9; `testTheNoAnswerFrameIsNoReply`.
 [^standby-misses]: `qlm-standby-discover`; `standby-wake`.
@@ -1077,7 +1077,7 @@ A woken monitor doesn't wait for its mute state. It waits for the level, or the 
 | `qlm-app-first`, 1232.64 s | The level and the pair | Above their floor 3.6 s after the first pair |
 | `qlm-control-first`, 827.79 s | Nothing | At their floor for 12 s, to the end of the run. The Right 8351B played before its standby, and its input read the music. |
 
-So in `qlm-control-first`, the music came back only after the run.[^woken-mute] Its notes say it came back at the level the monitors had. That was the knob's level, so the adapter's take-over, 2.6 s after the run, explains it. No capture shows that a woken monitor keeps its level.[^woken-level]
+In `qlm-control-first`, the meters show the Right 8351B silent from 829.40 to 839.13 s, its last frame in the run.[^woken-mute] Its notes say otherwise: everything came back at the same level, with no change after the Tink. The Tink plays about 0.2 s after the last report, and a return at the adapter's take-over would have been a change about 2.4 s after it. The capture reads no meter after 839.13 s, so it can't settle this. Either way, no capture shows that a woken monitor keeps its level.[^woken-level]
 
 A monitor that is switched on gets qlm's level, but not the group's settings. In `qlm-control-all`, the Rear Right 8330A played a little louder than the rest until GLM's launch applied the group, and then it matched.[^own-settings] A woken monitor runs without them too ([Sleep and wake](#sleep-and-wake)). **Guess:** each runs the settings it had stored, without the group's trims.
 
@@ -1124,10 +1124,10 @@ On or in standby, monitors drop a quiet host's leases, within 2.84 s of the last
 | 12 | What is the 8351B's design rate? | Its bands match 96 kHz on the wire, as the setup file's `SR:96000` says, across the range `setup-b-peq-8351b` set. The other models' bands wait for captures of their own ([setup-captures.md](setup-captures.md)). [measurement.md](measurement.md) is an optional check. |
 | 13 | Why does GLM's burst sometimes carry the level of the reading it answered before? | It never carries anything else, and the knob just plugged in fits the rule ([Volume and the knob](#volume-and-the-knob)). The cause is inside GLM. |
 | 14 | Which ends a woken monitor's silence: the level, or the `2D 00` and `3D 00 00` pair? | Not its mute state ([Monitors keep their level and their mute](#monitors-keep-their-level-and-their-mute)). Every wake that sent one sent both. |
-| 15 | Does `c-` count the amplifier channels? | It is the number of `81` to `83` readings for every model ([System info](#system-info)). Nothing in the captures says what those read. |
+| 15 | Does `c-` count the amplifier channels? | It equals the number of `81` to `83` readings for every model ([System info](#system-info)). Nothing in the captures says what those read. |
 | 16 | What does the adapter do when the host's USB suspends? | The proxy does not forward suspend, and no capture caught a true sleep ([captures/README.md](../captures/README.md)). |
 | 17 | Which telemetry tags and meters are still open? | [telemetry.md](telemetry.md#open-questions) |
-| 18 | What does the bare `04` after `8A` mark? | It came once each from the two 8330As switched on at their power switches, in their first frame after GLM's apply ([Telemetry](#telemetry)). One case can't say more. |
+| 18 | What does the bare `04` after `8A` mark? | It came once each from the two 8330As whose counts had restarted minutes before, in their first frame after GLM's apply. The notes confirm a power-on for one ([Telemetry](#telemetry)). One case can't say more. |
 | 19 | What made GLM send a broadcast `03`? | It drops every lease ([When a monitor loses its lease](#when-a-monitor-loses-its-lease)). The capture doesn't show what set it off ([refused-frames.md](refused-frames.md#broadcast-03)). |
 | 20 | Does GLM compute a shelf's w0 in double and round it to float, or in float arithmetic? | Both match every captured shelf. High shelves at 5000, 10000, 11000, 13000, and 15000 Hz, −5 dB, at 96 kHz tell them apart ([setup-captures.md](setup-captures.md#part-b-peq-on-the-8351b)). |
 

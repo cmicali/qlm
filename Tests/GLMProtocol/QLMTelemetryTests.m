@@ -420,12 +420,14 @@ static uint8_t QLMSessionLeased(NSString *scenario, const uint8_t hardwareID[3],
     }
 }
 
-// qlm-control-all: the bare 04 comes only from the two monitors switched on at
-// their power switch: the Rear Right 8330A at 02, and the other 8330A at 04.
-// Each ends its first frame after GLM's apply at launch with 8A 00 00 and 04.
-// By 49, they were switched on 166 and 206 s before. By 8A, the other four
-// woke 81 minutes before, and their frames in the same round end 8A 00 13.
-- (void)testTheBare04ComesFromTheMonitorsSwitchedOn {
+// qlm-control-all: the bare 04 comes only from the two monitors whose counts
+// restarted minutes before: the Rear Right 8330A at 02, switched on at its
+// power switch at 214.8 s, and the other 8330A at 04, whose count restarted
+// at about 175 s for no reason the notes give. Each ends its first frame
+// after GLM's apply at launch with 8A 00 00 and 04. By 49, they restarted
+// 166 and 206 s before. By 8A, the other four woke 81 minutes before, and
+// their frames in the same round end 8A 00 13.
+- (void)testTheBare04ComesFromTheMonitorsJustStarted {
     NSArray<QLMCaptureExchange *> *round = [self qlm_frames:6 of:@"qlm-control-all" from:381.148658 keep:QLMIsMonitorPoll];
     if (round == nil) {
         return;
