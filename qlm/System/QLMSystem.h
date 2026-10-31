@@ -69,6 +69,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // its status. It runs discovery, the session leases, the poll cycle, and
 // volume. After a change it publishes an immutable snapshot once nothing is
 // queued for the bus or in flight. Every method may be called from any thread.
+// Each command returns its call's number. Once the call has run on System's
+// queue, a snapshot that carries it follows (QLMSnapshot's lastCall).
 // While the bus is refused or gone, no frame goes to a session. Once it comes
 // back, System drops every monitor, and takes each back only where its own
 // serial answers at the session it last held.
@@ -90,15 +92,15 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Never from System's queue.
 - (nullable QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds;
 
-- (void)start;
+- (QLMCallNumber)start;
 // Before it lets go, sends the knob's level when the knob is at or below the
 // level System sends, so the adapter's take-over changes nothing. The
 // snapshot's handBack says what it did. A start while that goes out runs
 // once the stop is done.
-- (void)stop;
+- (QLMCallNumber)stop;
 // The same. The completion runs on the main queue once System has let go of
 // the adapter, or at once when it is not running.
-- (void)stopWithCompletion:(nullable dispatch_block_t)completion;
+- (QLMCallNumber)stopWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every
 // cycle, and ahead of everything else when a monitor is leased. Held at the
@@ -106,16 +108,16 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // the adapter's knob sets it too, as GLM lets it (QLMKnob), under the
 // ceiling. A turn that leaves it where it was sends nothing. At start the
 // knob sets nothing.
-- (void)setVolumeDecibels:(double)decibels;
+- (QLMCallNumber)setVolumeDecibels:(double)decibels;
 
 // Caps every volume frame that goes out after this, those already in line
 // too. A volume above the new ceiling falls to it, and stays there if the
 // ceiling rises again. A volume already set goes out again.
-- (void)setCeilingDecibels:(double)ceilingDecibels;
+- (QLMCallNumber)setCeilingDecibels:(double)ceilingDecibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A
 // change sends GLM's dim sequence, or nothing while no volume is set.
-- (void)setDimmed:(BOOL)dimmed;
+- (QLMCallNumber)setDimmed:(BOOL)dimmed;
 
 // Each sends two rounds of 2B, restating the state of every monitor that is
 // on: its mute in the active group, and GLM's 05 and 07 outside it. Mute all
@@ -129,19 +131,19 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // state after its next poll that says on. So does one whose 2B did not go
 // out, or whose round a stop dropped, by the next start's poll. No 2B System
 // sends unmutes a muted monitor.
-- (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
-- (void)setAllMuted:(BOOL)muted;
+- (QLMCallNumber)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
+- (QLMCallNumber)setAllMuted:(BOOL)muted;
 // Adds to the record monitors already muted elsewhere, as in GLM, and sends
 // nothing. The next rounds restate them as muted.
-- (void)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs;
+- (QLMCallNumber)recordMutedHardwareIDs:(NSSet<NSData *> *)hardwareIDs;
 
 // Broadcasts the power sequences, with GLM's spacing between the steps.
 // Nothing else goes out between them. The wake ends with a level, as GLM's
 // does: the volume once one is set, else the knob's position under the
 // ceiling, else the bottom level. The monitors' power state comes back in
 // their telemetry.
-- (void)sleep;
-- (void)wake;
+- (QLMCallNumber)sleep;
+- (QLMCallNumber)wake;
 
 // The first apply sends what GLM sends at launch: each leased monitor's
 // block in turn, off nodes included. Each one after is GLM's group switch:
@@ -152,9 +154,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // for a node with a leased monitor whose block fails or whose design rate
 // is unverified, for a node that is on with no leased monitor, and while no
 // volume is set. The completion runs on the main queue.
-- (void)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
+- (QLMCallNumber)applyGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
 // GLM's group switch, even as the first apply. The rest is as applyGroup:.
-- (void)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
+- (QLMCallNumber)switchToGroup:(QLMSetupGroup *)group completion:(void (^)(NSError *_Nullable error))completion;
 
 @end
 

@@ -2802,4 +2802,59 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertTrue(snapshot.idle);
 }
 
+#pragma mark - Call numbers
+
+// The numbers run in their order on System's queue, whatever thread calls.
+// So the snapshot that carries the last number holds the level that call
+// set, and no snapshot carries a lower number than one before it.
+- (void)testCallsFromManyThreadsRunInTheOrderOfTheirNumbers {
+    [self startSystem];
+    [self waitForIdle];
+    QLMSystem *system = _system;
+    QLMCallNumber first = system.snapshot.lastCall + 1;
+    NSMutableDictionary<NSNumber *, NSNumber *> *levels = [NSMutableDictionary dictionary];
+    dispatch_apply(64, dispatch_get_global_queue(QOS_CLASS_DEFAULT, 0), ^(size_t i) {
+        double level = -30 - (double)i * 0.5;
+        QLMCallNumber call = [system setVolumeDecibels:level];
+        @synchronized(levels) {
+            levels[@(call)] = @(level);
+        }
+    });
+    XCTAssertEqual(levels.count, 64u);
+    QLMCallNumber last = first + 63;
+    for (QLMCallNumber call = first; call <= last; call++) {
+        XCTAssertNotNil(levels[@(call)], @"call %llu", call);
+    }
+    QLMSnapshot *shown = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.idle && snapshot.lastCall == last;
+    }];
+    XCTAssertEqualObjects(shown.volumeDecibels, levels[@(last)]);
+    dispatch_sync(_snapshots, ^{
+        for (NSUInteger i = 1; i < self->_received.count; i++) {
+            XCTAssertGreaterThanOrEqual(self->_received[i].lastCall, self->_received[i - 1].lastCall);
+        }
+    });
+}
+
+// So a wait for a call's number ends, even for a call that sends nothing.
+- (void)testACallThatChangesNothingStillPublishesItsNumber {
+    [self startSystem];
+    [self waitForIdle];
+    QLMCallNumber call = [_system setDimmed:NO];
+    QLMSnapshot *shown = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.lastCall >= call;
+    }];
+    XCTAssertEqual(shown.lastCall, call);
+    XCTAssertFalse(shown.dimmed);
+
+    [self stopSystem];
+    call = [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    shown = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.lastCall >= call;
+    }];
+    XCTAssertEqual(shown.lastCall, call);
+    XCTAssertFalse(shown.running);
+    XCTAssertEqual(shown.mutedHardwareIDs.count, 0u);
+}
+
 @end
