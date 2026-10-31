@@ -68,6 +68,9 @@ extern const double QLMVolumeRangeMinimumSpan;
 
 @end
 
+// At or under 0 dB, the monitors' full level. NaN is not.
+BOOL QLMIsSavableLevel(double decibels);
+
 // The nearest of GLM's 0.5 dB steps.
 double QLMNearestStepDecibels(double decibels);
 

@@ -33,8 +33,7 @@ double QLMNearestStepDecibels(double decibels) {
     return round(decibels / QLMVolumeDecibelsStep) * QLMVolumeDecibelsStep;
 }
 
-// Refuses NaN too.
-static BOOL QLMIsSavableLevel(double decibels) {
+BOOL QLMIsSavableLevel(double decibels) {
     return decibels <= QLMVolumeDecibelsMax;
 }
 
@@ -42,8 +41,9 @@ static BOOL QLMIsSavableLevel(double decibels) {
 // number at or under 0 dB is read, and anything else is the default.
 static double QLMKeptLevel(NSUserDefaults *defaults, NSString *key) {
     id kept = [defaults objectForKey:key];
-    if ([kept isKindOfClass:[NSNumber class]] && QLMIsSavableLevel([kept doubleValue])) {
-        return [kept doubleValue];
+    double decibels = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
+    if (QLMIsSavableLevel(decibels)) {
+        return decibels;
     }
     return [[defaults volatileDomainForName:NSRegistrationDomain][key] doubleValue];
 }

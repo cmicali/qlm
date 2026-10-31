@@ -1,9 +1,12 @@
 #import "QLMFormat.h"
 
-#include "QLMCommands.h"
+#include <math.h>
+
+#import "QLMPreferences.h"
 #import "QLMSetup.h"
 
 NSString *const QLMEmDash = @"—";
+static NSString *const QLMNoLevelRefusal = @"Type a level in dB.";
 
 // A no-break space keeps the unit on the number's line.
 NSString *QLMDecibelsText(double decibels) {
@@ -15,10 +18,13 @@ NSString *QLMDecibelsText(double decibels) {
 }
 
 NSString *QLMTypedLevelRefusal(double decibels) {
-    if (decibels > QLMVolumeDecibelsMax) {
-        return [NSString stringWithFormat:@"%g\u00A0dB is above 0\u00A0dB, the monitors' full level.", decibels];
+    if (QLMIsSavableLevel(decibels)) {
+        return nil;
     }
-    return nil;
+    if (isnan(decibels)) {
+        return QLMNoLevelRefusal;
+    }
+    return [NSString stringWithFormat:@"%g\u00A0dB is above 0\u00A0dB, the monitors' full level.", decibels];
 }
 
 @implementation QLMDecibelsFormatter
@@ -41,7 +47,7 @@ NSString *QLMTypedLevelRefusal(double decibels) {
     if (![super getObjectValue:&number forString:string errorDescription:error]) {
         return NO;
     }
-    NSString *refusal = number == nil ? @"Type a level in dB." : QLMTypedLevelRefusal([number doubleValue]);
+    NSString *refusal = number == nil ? QLMNoLevelRefusal : QLMTypedLevelRefusal([number doubleValue]);
     if (refusal != nil) {
         if (error != NULL) {
             *error = refusal;

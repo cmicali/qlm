@@ -144,6 +144,7 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
 - (void)testALevelAboveFullLevelIsRefused {
     XCTAssertEqualObjects(QLMTypedLevelRefusal(35), @"35 dB is above 0 dB, the monitors' full level.");
     XCTAssertEqualObjects(QLMTypedLevelRefusal(0.04), @"0.04 dB is above 0 dB, the monitors' full level.");
+    XCTAssertEqualObjects(QLMTypedLevelRefusal(NAN), @"Type a level in dB.");
     XCTAssertNil(QLMTypedLevelRefusal(0));
     XCTAssertNil(QLMTypedLevelRefusal(-35));
 }
