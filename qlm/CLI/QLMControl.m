@@ -98,6 +98,29 @@ NSDictionary<NSString *, NSString *> *QLMQueryArguments(NSString *command, NSArr
     return QLMReadArguments(arguments, [NSSet setWithObject:@"--fake"], [NSSet setWithArray:options[command]], NULL, problem);
 }
 
+NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *arguments, NSString **problem) {
+    if (arguments.count < 2 || [arguments[0] hasPrefix:@"--"] || [arguments[1] hasPrefix:@"--"]) {
+        *problem = @"compare-apply takes a setup file and a capture's reports.txt, then its options";
+        return nil;
+    }
+    NSArray<NSString *> *options = [arguments subarrayWithRange:NSMakeRange(2, arguments.count - 2)];
+    NSMutableDictionary<NSString *, NSString *> *given =
+        [QLMReadArguments(options, [NSSet set], [NSSet setWithArray:@[@"--group", @"--from", @"--to"]], NULL, problem) mutableCopy];
+    double from = 0;
+    double to = INFINITY;
+    if (given == nil || (given[@"--from"] != nil && !QLMReadNumber(given[@"--from"], @"a number of seconds", &from, problem)) ||
+        (given[@"--to"] != nil && !QLMReadNumber(given[@"--to"], @"a number of seconds", &to, problem))) {
+        return nil;
+    }
+    if (from < 0 || from >= to) {
+        *problem = @"the window must run forward from 0 s or later";
+        return nil;
+    }
+    given[@"setup"] = arguments[0];
+    given[@"reports"] = arguments[1];
+    return given;
+}
+
 @implementation QLMControlOptions
 
 + (instancetype)optionsForCommand:(QLMControlCommand)command arguments:(NSArray<NSString *> *)arguments problem:(NSString **)problem {

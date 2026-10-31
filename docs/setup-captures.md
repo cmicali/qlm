@@ -77,7 +77,7 @@ This takes about 15 minutes.
    PART=setup-b-peq-8351b COPY="$DIR/qlm-b.sam"
    ```
 
-4. Build `qlmctl` with `make cli`. `qlmctl setup "$COPY"` reads a copy without opening the bus, and lists its groups and nodes. Use it to check each copy before you capture it.
+4. Build `qlmctl` with `make cli`. `qlmctl setup "$COPY"` reads a copy without opening the bus, and lists its groups and nodes. Use it to check each copy before you capture it. Part A uses `qlmctl compare-apply`, which also only reads files.
 
 ## The run order
 
@@ -100,7 +100,13 @@ That's about two hours. If time is short, run A, B, G, and J. The 8351B's refusa
 
 Part A checks the method before anything changes. Make the copy, `qlm-a.sam`, and take its snapshot `0`. Diff it against a redacted Main.sam. It should differ in nothing that a monitor gets, so note anything that shows.
 
-Then switch to Main 2x1 and back, and wait 15 s. qlm's blocks from the copy should match this apply as they match Main.sam's in the captures we have. If they don't, stop the session and work out why first.
+Then switch to Main 2x1 and back, and wait 15 s. Stop the capture, then copy and convert it, as [captures/README.md](../captures/README.md) says. Check qlm's blocks from the copy against GLM's apply:
+
+```bash
+qlmctl compare-apply "captures/$PART/setups/0.sam" "captures/$PART/reports.txt"
+```
+
+`compare-apply` reads the two files and opens no bus.[^compare] It matches each of GLM's DSP passes to the node whose block is closest, and says `matches` for each one that's the same byte for byte. Every pass lists the generator stop as left out, and each 8351B's pass lists `43 00 02` and `4B 00 00 00 01` too. It should end with every pass matching, and exit 0, as it does for Main.sam's captures. If it doesn't, stop the session and work out why first. Its `GLM` and `qlm` lines show each frame that differs.
 
 ## Part B: PEQ on the 8351B
 
@@ -197,7 +203,21 @@ For each capture:
 2. Write its `notes.md`: each step, its time, and its diff.
 3. Check that `setups/` holds only redacted snapshots.
 
-Then one PR adds the captures. For each step, a golden test checks that qlm's block from that step's snapshot matches GLM's frames byte for byte. Where qlm refuses a setting today, the test pins GLM's frames instead, and protocol.md gets what they decode to. A last test checks every `05 04` frame across all the captures.
+Then check each step against its snapshot. First run `compare-apply` on the whole capture, with the step's snapshot:
+
+```bash
+qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt"
+```
+
+It prints each pass's time in the capture's seconds, as `reports.txt` gives them. With the notes, those times give each step's window: from its apply to the next step's. Then check the step alone:
+
+```bash
+qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --from $FROM --to $TO
+```
+
+A step's apply is two: the switch to Main 2x1, and the one back to Main 4x2. `compare-apply` looks in every group, so one run covers both. `--group` narrows it to one.
+
+Then one PR adds the captures, and it's mostly data. `QLMDSPBlockGoldenTests` checks its passes from a table of rows: a capture, the setup file GLM applied, the group, a window of the capture's seconds, and each pass's session and node. A step's two applies are two rows, one per group, each with its own window. `compare-apply` uses the same code, so a step it passes adds rows and no new code. The rows pin GLM's frames byte for byte, and protocol.md gets what they decode to. Where qlm refuses a setting today, the test pins GLM's frames instead. The golden tests already check that each pass follows one generator stop, with the same bytes every time, so each new row checks S7 too.
 
 | Result | It means |
 | --- | --- |
@@ -216,3 +236,4 @@ Then one PR adds the captures. For each step, a golden test checks that qlm's bl
 [^xo]: `startup-idle`, `3B 00 3C` at 8.723 s; `standby-wake`, `3B 00 55` at 46.775 s; [refused-frames.md](refused-frames.md).
 [^43-4b]: [refused-frames.md](refused-frames.md), on `43 00 02` and `4B 00 00 00 01`; `startup-idle`, from 8.650 s.
 [^lfe]: [refused-frames.md](refused-frames.md), on `3C`, `3E`, and `42`; `QLMDSPBlock`.
+[^compare]: The README's [compare-apply](../README.md#compare-apply) section, and `qlmctl help`, say how it matches a pass to a node, and what each exit code means.

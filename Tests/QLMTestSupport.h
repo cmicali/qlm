@@ -39,6 +39,9 @@ QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSN
 // The output report a message packs into, 64 bytes.
 NSData *QLMReportFor(QLMMessage message);
 
+// A path from the repository's root.
+NSString *QLMRepositoryPath(NSString *relative);
+
 // A file in Tests/Setups/Fixtures/.
 NSString *QLMFixturePath(NSString *name);
 

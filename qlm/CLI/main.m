@@ -7,6 +7,7 @@
 #import "QLMApplySequence.h"
 #import "QLMCapture.h"
 #include "QLMCommands.h"
+#import "QLMCompareApply.h"
 #import "QLMControl.h"
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
@@ -43,6 +44,9 @@ static void QLMPrintUsage(FILE *stream) {
             "                                 print, or send, every frame of a switch to the group, or with\n"
             "                                 --launch, of the apply at launch and wake. --volume is the level\n"
             "                                 the apply restores.\n"
+            "  compare-apply <file.sam> <reports.txt> [--group NAME] [--from S] [--to S]\n"
+            "                                 compare GLM's DSP passes in a capture with qlm's blocks from the\n"
+            "                                 setup file. It reads the two files and opens no bus.\n"
             "\n"
             "BUS picks what a command drives:\n"
             "  (none)                         the GLM adapter over USB, opened only seized. Refused, with exit 69,\n"
@@ -86,8 +90,21 @@ static void QLMPrintUsage(FILE *stream) {
             "\n"
             "apply-group over USB is a supervised test. Run it at a low level, with one monitor first, as\n"
             "docs/measurement.md does. On any bus, a group with a model whose filter design rate is unverified,\n"
-            "the 8351B, also needs --unverified-rate. Without it, qlmctl refuses before it opens the bus.\n",
-            QLMAdapterPollLimit, [[QLMSystemSettings alloc] init].adapterPollInterval, QLMDimDecibels, QLMCeilingLimit);
+            "the 8351B, also needs --unverified-rate. Without it, qlmctl refuses before it opens the bus.\n"
+            "\n"
+            "compare-apply takes each DSP pass in the capture, from 17 01 through the 40 frames after 3D, and\n"
+            "only those from --from to --to seconds into the capture when given. It matches each pass to the\n"
+            "node, in any group or the one --group names, whose block differs from it in the fewest settings,\n"
+            "then in order. Only nodes of the model the session's 39 reply names count. When the setup holds\n"
+            "the hardware ID the session's lease names, as a raw setup file does and a redacted one doesn't,\n"
+            "only that node counts. It prints each pass's node, then every setting whose frame differs, as\n"
+            "GLM's then qlm's, every frame only GLM sent, every frame only qlm would send, and what qlm leaves\n"
+            "out: the generator stop, 05 04, and the 8351B's 43 00 02 and 4B 00 00 00 01. A left-out frame\n"
+            "with other bytes is a frame only GLM sent. It exits 0 when every pass matches but for what qlm\n"
+            "leaves out, %d when one doesn't, %d for an argument it doesn't know, and %d for a file it can't\n"
+            "read, a group the setup lacks, or no pass to compare.\n",
+            QLMAdapterPollLimit, [[QLMSystemSettings alloc] init].adapterPollInterval, QLMDimDecibels, QLMCeilingLimit,
+            QLMCompareApplyDiffers, EX_USAGE, EX_DATAERR);
 }
 
 static BOOL QLMHasFlag(int argc, const char *argv[], const char *flag) {
@@ -783,12 +800,7 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
         fprintf(stderr, "qlmctl: %s\n", error.localizedDescription.UTF8String);
         return EX_DATAERR;
     }
-    QLMSetupGroup *group = nil;
-    for (QLMSetupGroup *candidate in setup.groups) {
-        if ([candidate.name isEqualToString:@(argv[3])]) {
-            group = candidate;
-        }
-    }
+    QLMSetupGroup *group = [setup groupNamed:@(argv[3])];
     if (group == nil) {
         fprintf(stderr, "qlmctl: no group named '%s'\n", argv[3]);
         return EX_DATAERR;
@@ -864,6 +876,18 @@ static int QLMApplyGroup(int argc, const char *argv[]) {
     return 0;
 }
 
+#pragma mark - The comparison
+
+static int QLMCompareApplyCommand(int argc, const char *argv[]) {
+    NSString *problem = nil;
+    NSArray<NSString *> *arguments = QLMArgumentsFrom(2, argc, argv, &problem);
+    if (arguments == nil) {
+        QLMPrintRefusal(problem);
+        return EX_USAGE;
+    }
+    return QLMCompareApply(arguments, stdout, stderr);
+}
+
 typedef int (*QLMCommandHandler)(int argc, const char *argv[]);
 
 static const struct {
@@ -880,6 +904,7 @@ static const struct {
     {"wake", QLMWake},
     {"setup", QLMPrintSetup},
     {"apply-group", QLMApplyGroup},
+    {"compare-apply", QLMCompareApplyCommand},
 };
 
 int main(int argc, const char *argv[]) {
