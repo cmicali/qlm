@@ -10,6 +10,12 @@ NSData *QLMBytes(const uint8_t *bytes, size_t length) {
     return [NSData dataWithBytes:bytes length:length];
 }
 
+NSData *QLMReportFor(QLMMessage message) {
+    uint8_t report[QLMReportLength];
+    QLMReportPackOutput(&message, report);
+    return QLMBytes(report, sizeof report);
+}
+
 NSString *QLMFixturePath(NSString *name) {
     NSString *tests = [@(__FILE__) stringByDeletingLastPathComponent];
     return [[tests stringByAppendingPathComponent:@"Setups/Fixtures"] stringByAppendingPathComponent:name];
@@ -191,6 +197,10 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     if (exchange.replyFrame == nil || self.silent) {
         return;
     }
+    if (self.dropReplies > 0) {
+        self.dropReplies -= 1;
+        return;
+    }
     NSTimeInterval delay = self.replyDelay;
     if (self.nextReplyDelay > 0) {
         delay = self.nextReplyDelay;
@@ -222,6 +232,10 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
     [_link sendMessage:message replyHandler:handler];
+}
+
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
+    [_link sendMessage:message rewrite:rewrite replyHandler:handler];
 }
 
 @end

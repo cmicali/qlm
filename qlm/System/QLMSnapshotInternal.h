@@ -56,6 +56,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) QLMAdapterState *adapter;
 @property (nonatomic, readwrite, nullable) NSError *adapterError;
 @property (nonatomic, readwrite) QLMBusProblem busProblem;
+@property (nonatomic, readwrite) QLMAdapterProblem adapterProblem;
 @property (nonatomic, readwrite) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
 @property (nonatomic, readwrite) double ceilingDecibels;
@@ -67,6 +68,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) BOOL allMuted;
 @property (nonatomic, readwrite) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readwrite) BOOL mutingAll;
+@property (nonatomic, readwrite) NSSet<NSData *> *liftedHardwareIDs;
+@property (nonatomic, readwrite) NSArray<QLMKnownLease *> *knownLeases;
 @property (nonatomic, readwrite) QLMHandBack *handBack;
 @property (nonatomic, readwrite) BOOL anyOn;
 

@@ -16,12 +16,19 @@ typedef NS_ERROR_ENUM(QLMAdapterErrorDomain, QLMAdapterError) {
     QLMAdapterErrorCapture,       // a capture does not read; the description names the line
     QLMAdapterErrorBusy,          // another host has the adapter, or qlm could not seize it; the description says which, and nothing was sent
     QLMAdapterErrorBadReply,      // the reply did not read
+    QLMAdapterErrorUnresponsive,  // the adapter stopped answering, so the link sends nothing but its syncs; nothing was sent
+    QLMAdapterErrorLostTrack,     // the link lost track of the adapter's replies, and stays closed until a replug; nothing was sent
+    QLMAdapterErrorNotTaken,      // the adapter did not take the report in time, so nothing went out
 };
 
 // One handler call per send, on the queue given to startOnQueue:clock:.
 // `reply` is NULL when no monitor answered, which is not an error. The
 // pointer is valid only during the call.
 typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSError *_Nullable error);
+
+// The message as it goes out, from the message as it was handed over. Run on
+// the queue just before its report is written.
+typedef QLMMessage (^QLMAdapterRewrite)(QLMMessage message);
 
 // What System drives: the GLM network adapter over HID, a replay of a capture,
 // or a fake bus. The bus is half-duplex, so a caller sends one message and
@@ -35,6 +42,15 @@ typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSErro
 
 // What this adapter drives, for display. Read on the queue.
 @property (nonatomic, readonly) NSString *deviceDescription;
+
+@optional
+// The same, but `rewrite`, when given, gives the message that goes out, as
+// its report is written. The rewrite may change only the values, and the
+// allowlist checks it again. TRAP: an adapter that may hold a message before
+// it writes it, as a report link does behind its syncs, must take this.
+- (void)sendMessage:(QLMMessage)message
+            rewrite:(nullable QLMAdapterRewrite)rewrite
+       replyHandler:(QLMAdapterReplyHandler)handler;
 
 @end
 

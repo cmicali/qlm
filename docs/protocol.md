@@ -241,6 +241,8 @@ A monitor that holds a lease doesn't answer the probe. Once every monitor holds 
 
 #32 handles it. Before its first probe, qlm asks each monitor it knew for its serial, at its old session. The same serial means the monitor still holds that lease, and qlm takes it back.
 
+The same TRAP waits when the bus comes back to a host. While qlm is refused, GLM may run, lease from `02` in its own probe order, and quit. A host that quits leaves its leases, so qlm's old sessions may now be other monitors'. So a host must not trust its own old sessions. When the bus comes back, qlm drops every monitor it tracked, and checks each old session's serial again. It takes a monitor back only where that monitor's own serial answers. A session that answers with another serial gets no lease and no frame from qlm.[^gap]
+
 The hardware ID is how qlm knows a monitor. It maps one to one to the serial in every capture, so qlm matches monitors by hardware ID.[^hwid] It also ties a monitor to the setup file: a setup node's `Serial` is its monitor's hardware ID, read big-endian, in decimal.[^setup-serial] The serial from `19 01` is something else. It's a model prefix and eight digits, and it never ends in the setup's `Serial`.[^serial-digits] Serials are 14 or 15 characters.[^serial-length]
 
 ### How sessions are counted
@@ -294,6 +296,7 @@ So wait between hosts, to avoid the TRAP above: 1 minute with every monitor on, 
 [^probe]: hlm §7, §9; `startup-idle`, 8.419 to 8.492 s. The lease: hlm §7, §8; `startup-idle`, 8.432 s; `testSessionAckAndHardwareID`.
 [^leased-silent]: `sleep-wake-darkwake`; `qlm-standby-discover`'s notes.
 [^trap-lease]: #17; [measurement.md](measurement.md#wait-between-hosts).
+[^gap]: GLM's leases held for up to 42 s after it quit: `qlm-first-discover`. GLM counts from `02` at each launch: [How sessions are counted](#how-sessions-are-counted). qlm's checks: `testABusThatComesBackChecksEveryLeaseBeforeUsingIt`, `testABusThatComesBackTakesBackTheLeasesStillHeld`.
 [^hwid]: #9; #8.
 [^setup-serial]: `startup-idle`, the leases at 8.432 to 8.481 s; #8.
 [^serial-digits]: #8.

@@ -24,16 +24,20 @@ static QLMReplyShape QLMReplyShapeFor(const QLMMessage *message) {
     return message->payload[0] == 0x39 ? QLMReplyShapeSystemInfo : QLMReplyShapeOther;
 }
 
-// A sync's reply queues behind the late one, so it has longer before the
-// link stalls.
+// A sync's reply queues behind the late one, so the first waits five
+// timeouts before the link stalls. Each sync after it in a run waits twice
+// as long as the one before, and a run writes at most four.
 static const NSUInteger QLMSyncTimeouts = 5;
+static const NSUInteger QLMSyncAttempts = 4;
 
 static NSError *QLMStalledError(void) {
-    return QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The GLM adapter stopped answering.");
+    return QLMAdapterErrorMake(QLMAdapterErrorUnresponsive, @"The GLM adapter stopped answering.");
 }
 
 @interface QLMReportLinkRequest : NSObject
 @property (nonatomic) NSData *report;
+@property (nonatomic) QLMMessage message;
+@property (nonatomic, copy, nullable) QLMAdapterRewrite rewrite;  // run as the report is written
 @property (nonatomic) BOOL expectsReply;
 @property (nonatomic) QLMReplyShape shape;
 @property (nonatomic) BOOL sync;
@@ -54,8 +58,12 @@ static NSError *QLMStalledError(void) {
     // The shapes of replies that may still come. While any may, the link is
     // out of step, and the next request waits for a sync.
     QLMReplyShape _late;
-    // The sync is overdue. Every send fails until its reply comes.
+    // A sync is overdue. Every send fails until a sync's reply comes.
     BOOL _stalled;
+    // The syncs written in this run, all of one shape, whose replies may
+    // still come, and how many the run has tried.
+    NSUInteger _syncsOut;
+    NSUInteger _syncAttempts;
     QLMReportLinkRequest *_held;
     NSError *_closed;  // while the device is closed
 }
@@ -82,19 +90,29 @@ static NSError *QLMStalledError(void) {
 }
 
 // Through the allowlist, or nil with why not.
-- (nullable QLMReportLinkRequest *)requestFor:(const QLMMessage *)message error:(NSError **)error {
+static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **error) {
     uint8_t report[QLMReportLength];
-    if (!QLMAdapterPackReport(message, report, error)) {
+    return QLMAdapterPackReport(message, report, error) ? [NSData dataWithBytes:report length:sizeof report] : nil;
+}
+
+- (nullable QLMReportLinkRequest *)requestFor:(const QLMMessage *)message error:(NSError **)error {
+    NSData *report = QLMReportData(message, error);
+    if (report == nil) {
         return nil;
     }
     QLMReportLinkRequest *request = [[QLMReportLinkRequest alloc] init];
-    request.report = [NSData dataWithBytes:report length:sizeof report];
+    request.report = report;
+    request.message = *message;
     request.expectsReply = QLMReportExpectsReply(message);
     request.shape = QLMReplyShapeFor(message);
     return request;
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    [self sendMessage:message rewrite:nil replyHandler:handler];
+}
+
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     if (_closed != nil) {
         [self finish:handler reply:NULL error:_closed];
         return;
@@ -115,6 +133,7 @@ static NSError *QLMStalledError(void) {
         return;
     }
     request.handler = handler;
+    request.rewrite = rewrite;
     if (_late != 0) {
         _held = request;
         if (_waiting == nil) {
@@ -125,18 +144,22 @@ static NSError *QLMStalledError(void) {
     [self write:request];
 }
 
+// A request, not a sync. A held one may wait a while, so its rewrite runs
+// only now, and the allowlist checks the result again.
 - (void)write:(QLMReportLinkRequest *)request {
-    NSError *error = _writer(request.report.bytes);
+    NSData *report = request.report;
+    if (request.rewrite != nil) {
+        QLMMessage message = request.rewrite(request.message);
+        NSError *refusal = nil;
+        report = QLMReportData(&message, &refusal);
+        if (report == nil) {
+            [self finish:request.handler reply:NULL error:refusal];
+            return;
+        }
+    }
+    NSError *error = _writer(report.bytes);
     if (error != nil) {
-        // A sync that did not go out fails the request it held. The next
-        // send syncs again.
-        QLMReportLinkRequest *failed = request.sync ? _held : request;
-        if (request.sync) {
-            _held = nil;
-        }
-        if (failed != nil) {
-            [self finish:failed.handler reply:NULL error:error];
-        }
+        [self finish:request.handler reply:NULL error:error];
         return;
     }
     if (!request.expectsReply) {
@@ -145,38 +168,77 @@ static NSError *QLMStalledError(void) {
     }
     QLMReportAssemblyReset(&_assembly);
     _waiting = request;
+    [self after:_replyTimeout run:^(QLMReportLink *link) {
+        link->_timeouts += 1;
+        [link loseReply:QLMAdapterErrorMake(QLMAdapterErrorTimeout, @"The adapter did not answer.")];
+    }];
+}
+
+// The block runs after `seconds`, unless a reply, a close, or another wait
+// ends this one first.
+- (void)after:(NSTimeInterval)seconds run:(void (^)(QLMReportLink *link))block {
     _generation += 1;
     uint64_t generation = _generation;
-    NSTimeInterval timeout = request.sync ? _replyTimeout * QLMSyncTimeouts : _replyTimeout;
     __weak QLMReportLink *weakSelf = self;
-    [_clock after:timeout queue:_queue run:^{
+    [_clock after:seconds queue:_queue run:^{
         QLMReportLink *strongSelf = weakSelf;
         if (strongSelf != nil && strongSelf->_generation == generation) {
-            [strongSelf timeOut];
+            block(strongSelf);
         }
     }];
 }
 
-- (void)timeOut {
-    if (_waiting == nil) {
-        return;
-    }
+// The sync's reply is overdue, and may still come. The link stalls: it
+// fails the held request, and every send, until a reply to one of its syncs
+// comes. Meanwhile it sends more syncs of the same shape, in case a reply
+// was lost. That shape stays safe, since no late reply but a sync's own can
+// have it.
+- (void)syncOverdue {
     _timeouts += 1;
-    if (_waiting.sync) {
-        [self stall];
-        return;
+    if (!_stalled) {
+        _stalled = YES;
+        [self failHeld:QLMStalledError()];
     }
-    [self loseReply:QLMAdapterErrorMake(QLMAdapterErrorTimeout, @"The adapter did not answer.")];
+    if (_syncAttempts < QLMSyncAttempts) {
+        [self writeSync:_waiting.shape];
+    }
 }
 
-// Only the sync's reply can put the link back in step, so the link keeps
-// waiting for it, however long, and fails every send meanwhile.
-- (void)stall {
-    _stalled = YES;
+// One sync of the run's shape. A sync that did not go out fails the request
+// it held. With none out, the next send syncs again. Otherwise the link
+// waits on for the others, and tries again in turn.
+- (void)writeSync:(QLMReplyShape)shape {
+    QLMMessage query = shape == QLMReplyShapeSystemInfo ? QLMCommandSystemInfo(QLMAddressAdapter) : QLMCommandPoll(QLMAddressAdapter);
+    QLMReportLinkRequest *sync = [self requestFor:&query error:NULL];
+    if (sync == nil) {
+        NSAssert(NO, @"the allowlist refused a sync");
+        return;
+    }
+    sync.sync = YES;
+    _syncAttempts += 1;
+    NSTimeInterval wait = _replyTimeout * QLMSyncTimeouts * (double)(1u << (_syncAttempts - 1));
+    NSError *error = _writer(sync.report.bytes);
+    if (error != nil) {
+        [self failHeld:error];
+        if (_syncsOut == 0) {
+            _syncAttempts = 0;
+            return;
+        }
+    } else {
+        QLMReportAssemblyReset(&_assembly);
+        _waiting = sync;
+        _syncsOut += 1;
+    }
+    [self after:wait run:^(QLMReportLink *link) {
+        [link syncOverdue];
+    }];
+}
+
+- (void)failHeld:(NSError *)error {
     QLMReportLinkRequest *held = _held;
     _held = nil;
     if (held != nil) {
-        [self finish:held.handler reply:NULL error:QLMStalledError()];
+        [self finish:held.handler reply:NULL error:error];
     }
 }
 
@@ -191,19 +253,15 @@ static NSError *QLMStalledError(void) {
     [self sync];
 }
 
-// The adapter's status poll, or else its system info. GLM sends both.
-// closeWithError: leaves at least one that no late reply could be taken for.
+// Starts a run of syncs: the adapter's status poll, or else its system info.
+// GLM sends both. closeWithError: leaves at least one that no late reply
+// could be taken for.
 - (void)sync {
     NSAssert((_late & QLMReplyShapeSyncs) != QLMReplyShapeSyncs, @"no sync is left");
     BOOL info = (_late & QLMReplyShapeSystemInfo) == 0 && (_late & (QLMReplyShapeAdapterStatus | QLMReplyShapeAny)) != 0;
-    QLMMessage query = info ? QLMCommandSystemInfo(QLMAddressAdapter) : QLMCommandPoll(QLMAddressAdapter);
-    QLMReportLinkRequest *sync = [self requestFor:&query error:NULL];
-    if (sync == nil) {
-        NSAssert(NO, @"the allowlist refused a sync");
-        return;
-    }
-    sync.sync = YES;
-    [self write:sync];
+    _syncsOut = 0;
+    _syncAttempts = 0;
+    [self writeSync:info ? QLMReplyShapeSystemInfo : QLMReplyShapeAdapterStatus];
 }
 
 - (void)receiveReport:(const uint8_t *)report length:(size_t)length {
@@ -227,12 +285,17 @@ static NSError *QLMStalledError(void) {
             _strayReplies += 1;
             return;
         }
+        BOOL another = _syncsOut > 1 || (_late & QLMReplyShapeAny) != 0;
         _waiting = nil;
         _generation += 1;
         _stalled = NO;
-        if ((_late & QLMReplyShapeAny) != 0) {
-            // This may have been the other host's reply, and then the sync's
-            // own is late. A sync of the other shape drops it.
+        _syncsOut = 0;
+        _syncAttempts = 0;
+        if (another) {
+            // This may have been an earlier sync's reply, or the other
+            // host's, and then a later one of this shape may still come.
+            // Every reply ahead of them has come or never will, so a sync of
+            // the other shape drops the rest.
             _late = request.shape;
             [self sync];
             return;
@@ -260,7 +323,10 @@ static NSError *QLMStalledError(void) {
     _waiting = nil;
     _generation += 1;
     _stalled = NO;
+    _syncsOut = 0;
+    _syncAttempts = 0;
     if (waiting != nil) {
+        // Every sync of a run has the waiting one's shape.
         _late |= waiting.shape;
         // The other host's reply comes first, and may have either shape.
         if ((_late & QLMReplyShapeAny) != 0) {
@@ -270,12 +336,9 @@ static NSError *QLMStalledError(void) {
             [self finish:waiting.handler reply:NULL error:error];
         }
     }
-    if (_held != nil) {
-        [self finish:_held.handler reply:NULL error:error];
-        _held = nil;
-    }
+    [self failHeld:error];
     if ((_late & QLMReplyShapeSyncs) == QLMReplyShapeSyncs) {
-        _failure = QLMAdapterErrorMake(QLMAdapterErrorDisconnected,
+        _failure = QLMAdapterErrorMake(QLMAdapterErrorLostTrack,
                                        @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");
     }
     _closed = _failure ?: error;

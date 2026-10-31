@@ -35,10 +35,18 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // alone, and sends the volume only once one is set.
 @property (nonatomic) BOOL discoversMonitors;
 // The mute record to start from, as a snapshot gave it: the muted hardware
-// IDs, and whether mute all is on. No reply reports a monitor's mute, so
-// System's record is the truth, and its rounds restate it.
-@property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;  // empty
-@property (nonatomic) BOOL mutingAll;                           // NO
+// IDs, whether mute all is on, and the monitors the user lifted it from. No
+// reply reports a monitor's mute, so System's record is the truth, and its
+// rounds restate it.
+@property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;   // empty
+@property (nonatomic) BOOL mutingAll;                            // NO
+@property (nonatomic, copy) NSSet<NSData *> *liftedHardwareIDs;  // empty
+// The leases to check at start, as a snapshot gave them. A monitor still
+// holds its lease for 23 s or more after a host goes quiet, and never
+// answers a probe meanwhile. So at start System asks each session for its
+// serial, takes back each monitor whose own serial answers, and leases
+// nothing to a session another monitor answers.
+@property (nonatomic, copy) NSArray<QLMKnownLease *> *knownLeases;  // empty
 // TRAP: AGENTS.md's Safety rule refuses a group apply for any model whose
 // filter design rate is unverified, such as the 8351B. Only qlmctl's
 // supervised test sets this, behind --unverified-rate. The app never does.
@@ -55,6 +63,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // its status. It runs discovery, the session leases, the poll cycle, and
 // volume. After a change it publishes an immutable snapshot once nothing is
 // queued for the bus or in flight. Every method may be called from any thread.
+// While the bus is refused or gone, no frame goes to a session. Once it comes
+// back, System drops every monitor, and takes each back only where its own
+// serial answers at the session it last held.
 @interface QLMSystem : NSObject
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter settings:(QLMSystemSettings *)settings;
@@ -81,8 +92,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // sets it too, as GLM lets it (QLMKnob). At start the knob sets nothing.
 - (void)setVolumeDecibels:(double)decibels;
 
-// Caps every volume frame after this. A volume already set goes out again at
-// once, under the new ceiling.
+// Caps every volume frame that goes out after this, those already in line
+// too. A volume already set goes out again, under the new ceiling.
 - (void)setCeilingDecibels:(double)ceilingDecibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A
@@ -92,10 +103,15 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Each sends two rounds of 2B, restating the state of every monitor that is
 // on: its mute in the active group, and GLM's 05 and 07 outside it. Mute all
 // also re-sends the volume and sets the adapter's own mute, as GLM does. A
+// lift of one mute under mute all lifts the adapter's own mute too, as
+// GLM's unmute all does, but mute all holds for every other monitor. A mute
+// of the last one lifted brings it back, as GLM's mute all. A
 // mute holds by hardware ID until the user lifts it, across a lease that
 // lapses, a stop and a start, and for a monitor that first appears while all
 // are muted. A muted monitor leased again, or one that was not on, hears its
-// state after its next poll that says on. No 2B System sends unmutes it.
+// state after its next poll that says on. So does one whose 2B did not go
+// out, or whose round a stop dropped, by the next start's poll. No 2B System
+// sends unmutes a muted monitor.
 - (void)setMuted:(BOOL)muted forMonitorWithHardwareID:(NSData *)hardwareID;
 - (void)setAllMuted:(BOOL)muted;
 // Adds to the record monitors already muted elsewhere, as in GLM, and sends

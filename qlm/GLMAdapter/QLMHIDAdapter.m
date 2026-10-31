@@ -30,6 +30,23 @@ static void QLMHIDRemoved(void *context, IOReturn result, void *sender) {
     [(__bridge QLMHIDAdapter *)context removed:sender];
 }
 
+NSError *QLMHIDWriteError(IOReturn result) {
+    if (result == kIOReturnSuccess) {
+        return nil;
+    }
+    if (result == kIOReturnExclusiveAccess) {
+        return QLMAdapterErrorMake(QLMAdapterErrorBusy, @"Another process has seized the GLM adapter.");
+    }
+    // TRAP: not QLMAdapterErrorTimeout, which says the frame went out and no
+    // reply came. Counted so, a hang would drop monitors that still hold
+    // their leases.
+    if (result == kIOReturnTimeout) {
+        return QLMAdapterErrorMake(QLMAdapterErrorNotTaken, @"The GLM adapter did not take the report.");
+    }
+    NSString *description = [NSString stringWithFormat:@"The GLM adapter did not take the report (0x%08x).", result];
+    return QLMAdapterErrorMake(QLMAdapterErrorDisconnected, description);
+}
+
 static NSString *_Nullable QLMHIDStringProperty(IOHIDDeviceRef device, CFStringRef key) {
     CFTypeRef value = IOHIDDeviceGetProperty(device, key);
     return value != NULL && CFGetTypeID(value) == CFStringGetTypeID() ? (__bridge NSString *)value : nil;
@@ -319,18 +336,9 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     if (_device == NULL) {
         return _problem ?: QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is open.");
     }
-    IOReturn result = IOHIDDeviceSetReport(_device, kIOHIDReportTypeOutput, 0, report, QLMReportLength);
-    if (result == kIOReturnSuccess) {
-        return nil;
-    }
-    NSError *error = nil;
-    if (result == kIOReturnExclusiveAccess) {
-        error = QLMAdapterErrorMake(QLMAdapterErrorBusy, @"Another process has seized the GLM adapter.");
-    } else if (result == kIOReturnTimeout) {
-        return QLMAdapterErrorMake(QLMAdapterErrorTimeout, @"The GLM adapter did not take the report.");
-    } else {
-        NSString *description = [NSString stringWithFormat:@"The GLM adapter did not take the report (0x%08x).", result];
-        error = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, description);
+    NSError *error = QLMHIDWriteError(IOHIDDeviceSetReport(_device, kIOHIDReportTypeOutput, 0, report, QLMReportLength));
+    if (error == nil || error.code == QLMAdapterErrorNotTaken) {
+        return error;
     }
     __weak QLMHIDAdapter *weakSelf = self;
     dispatch_async(_queue, ^{
@@ -347,10 +355,14 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    [self sendMessage:message rewrite:nil replyHandler:handler];
+}
+
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
     if (_device != NULL) {
-        [_link sendMessage:message replyHandler:handler];
+        [_link sendMessage:message rewrite:rewrite replyHandler:handler];
         return;
     }
     // Through the allowlist even so, so a refusal reads the same either way.
