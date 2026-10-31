@@ -25,14 +25,17 @@ NSData *QLMReportFor(QLMMessage message) {
     return QLMBytes(report, sizeof report);
 }
 
+NSString *QLMRepositoryPath(NSString *relative) {
+    NSString *root = [[@(__FILE__) stringByDeletingLastPathComponent] stringByDeletingLastPathComponent];
+    return [root stringByAppendingPathComponent:relative];
+}
+
 NSString *QLMFixturePath(NSString *name) {
-    NSString *tests = [@(__FILE__) stringByDeletingLastPathComponent];
-    return [[tests stringByAppendingPathComponent:@"Setups/Fixtures"] stringByAppendingPathComponent:name];
+    return QLMRepositoryPath([@"Tests/Setups/Fixtures" stringByAppendingPathComponent:name]);
 }
 
 static NSString *QLMCapturesDirectory(void) {
-    NSString *tests = [@(__FILE__) stringByDeletingLastPathComponent];
-    return [[tests stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"captures"];
+    return QLMRepositoryPath(@"captures");
 }
 
 NSArray<NSString *> *QLMCaptureScenarios(void) {
@@ -308,12 +311,7 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
 @end
 
 QLMSetupGroup *QLMFixtureGroup(NSString *name) {
-    for (QLMSetupGroup *group in QLMReadFixtureSetup().groups) {
-        if ([group.name isEqualToString:name]) {
-            return group;
-        }
-    }
-    return nil;
+    return [QLMReadFixtureSetup() groupNamed:name];
 }
 
 @implementation QLMApplyFilter {

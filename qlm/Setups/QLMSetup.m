@@ -87,6 +87,15 @@
     return nil;
 }
 
+- (QLMSetupGroup *)groupNamed:(NSString *)name {
+    for (QLMSetupGroup *group in _groups) {
+        if ([group.name isEqualToString:name]) {
+            return group;
+        }
+    }
+    return nil;
+}
+
 - (QLMSetupDevice *)deviceWithHardwareID:(NSData *)hardwareID {
     for (QLMSetupDevice *device in _devices) {
         if (device.hardwareID != nil && [device.hardwareID isEqualToData:hardwareID]) {

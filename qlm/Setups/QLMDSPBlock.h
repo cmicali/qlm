@@ -40,6 +40,10 @@ typedef NS_ERROR_ENUM(QLMDSPBlockErrorDomain, QLMDSPBlockError) {
 // subwoofer the second one, 40 01 02 00 00.
 @property (nonatomic, readonly) NSArray<NSData *> *routingPayloads;
 @property (nonatomic, readonly) NSData *crossoverPayload;
+// What GLM sends in this block that payloads leaves out. A three-way's are
+// 43 00 02 after the level pair and 4B 00 00 00 01 after the crossover,
+// which the allowlist refuses. Empty for the other classes.
+@property (nonatomic, readonly) NSArray<NSData *> *leftOutPayloads;
 @property (nonatomic, readonly) NSArray<NSString *> *warnings;
 
 @end

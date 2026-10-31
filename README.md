@@ -50,7 +50,7 @@ The app is new to the real adapter, so turn the setting on at a low level, one m
 
 ## qlmctl
 
-`qlmctl` drives the system from the command line, and `qlmctl help` lists its commands and options. A command that drives the bus takes one of three: the GLM adapter over USB, by default; a fake bus of two monitors, with `--fake`; or a capture's `reports.txt`, with `--replay FILE`.
+`qlmctl` drives the system from the command line, and `qlmctl help` lists its commands and options. A command that drives the bus takes one of three: the GLM adapter over USB, by default; a fake bus of two monitors, with `--fake`; or a capture's `reports.txt`, with `--replay FILE`. `setup` and `compare-apply` only read files.
 
 Over USB, `qlmctl` refuses the adapter while GLM runs, while another process holds it, or when it can't seize it. It then exits 69 and sends nothing.
 
@@ -94,6 +94,26 @@ Within a run, qlm takes leases back. At each start, it asks each monitor it knew
 Over USB, it's a supervised test, run at a low level with one monitor first. It needs `--volume`, the level the apply restores, and `--ceiling`. `--muted` and `--seconds` work as they do for the controls. A group with a model whose filter design rate is unverified also needs `--unverified-rate`, on any bus. Only 48 kHz for a two-way and 12 kHz for a subwoofer are confirmed, and the 8351B's design rate is 96 kHz. Without the flag, `qlmctl` refuses before it opens the bus.
 
 Captures decide whether the 8351B's refusal lifts. We record GLM applying setups made with varied settings, and qlm's apply must match GLM's byte for byte. [docs/measurement.md](docs/measurement.md) is an optional check after that: GLM applies a group and REW measures it, then `qlmctl` applies the same group and REW measures again.
+
+### compare-apply
+
+`compare-apply FILE.sam reports.txt` checks a capture of GLM's apply against qlm's blocks from a setup file. It reads the two files and opens no bus. It refuses any option of the bus, so a wrong flag can't drive the monitors.
+
+It takes each DSP pass in the capture, from `17 01` through the `40` frames after `3D`. `--from S` and `--to S` keep only the passes in that window of the capture's seconds. It matches each pass to the node whose block is closest to it, in any group, or in the one `--group NAME` names. Only nodes of the model in the session's `39` reply count. A raw setup file also names each node's hardware ID, so then only the node the session's lease names counts. A redacted one doesn't.
+
+| It prints | As |
+| --- | --- |
+| A setting whose frame differs | `GLM`, then `qlm` |
+| A frame only GLM sent | `GLM only` |
+| A frame only qlm would send | `qlm only` |
+| A frame qlm leaves out, as it always has: the generator stop, `05 04`, and the 8351B's `43 00 02` and `4B 00 00 00 01` | `left out` |
+| One of the 8351B's two that GLM didn't send | `not sent` |
+
+A left-out frame with other bytes counts as one only GLM sent. It exits 0 when every pass matches but for what qlm leaves out, and 1 when one doesn't. A wrong argument exits 64, and a file it can't read, a group the setup lacks, or no pass to compare exits 65.
+
+```bash
+qlmctl compare-apply Tests/Setups/Fixtures/Main.sam captures/startup-idle/reports.txt
+```
 
 ## Disclaimer
 
