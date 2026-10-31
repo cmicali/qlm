@@ -26,7 +26,7 @@ SIGNED_AS = $(if $(filter -,$(SIGN_IDENTITY)),ad hoc,as $(SIGN_IDENTITY))
 # Release, so the install leaves Xcode's base entitlements out.
 SIGNING = CODE_SIGN_IDENTITY="$(SIGN_IDENTITY)" CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
 
-.PHONY: help setup project build cli test install uninstall open clean
+.PHONY: help setup project build cli test check-release install uninstall open clean
 
 # Install the dev-tool dependencies (xcodegen) from the Brewfile.
 setup:
@@ -68,6 +68,13 @@ cli: project
 test: project
 	xcodebuild -project qlm.xcodeproj -scheme qlm -configuration Debug \
 	    -derivedDataPath $(DERIVED_DATA) $(ARGS) test
+
+# Fail if the Release app holds any of the debug channel. It builds the app
+# in Debug and in Release first. ARGS reaches xcodebuild.
+check-release: project
+	$(XCODEBUILD) -scheme qlm -configuration Debug $(ARGS) build
+	$(XCODEBUILD) -scheme qlm -configuration Release $(ARGS) build
+	tools/check-release.sh $(DERIVED_DATA)/Build/Products/Debug/qlm.app $(PRODUCTS)/qlm.app
 
 # Build qlm.app and qlmctl in Release, sign them, and install them. A qlm
 # running from $(APPDIR) is asked to quit first, and never killed.

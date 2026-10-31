@@ -48,6 +48,10 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // What the status item shows, so an unchanged snapshot does not redraw it.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
+#if DEBUG
+// A debug command's answer to the louder hand-back alert, while its quit runs.
+@property (nonatomic, nullable) NSNumber *debugQuitAnswer;
+#endif
 @end
 
 #if DEBUG
@@ -92,14 +96,22 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // On the real monitors, a take-over that would raise the level asks first.
 - (NSApplicationTerminateReply)applicationShouldTerminate:(NSApplication *)sender {
     QLMHandBack *handBack = self.monitorList.snapshot.handBack;
-    if ([self takeOverRaisesLevel:handBack]) {
-        [self activateApp];
-        if ([[self louderHandBackAlert:handBack] runModal] != NSAlertSecondButtonReturn) {
-            return NSTerminateCancel;
-        }
+    if ([self takeOverRaisesLevel:handBack] && [self answerLouderHandBack:handBack] != NSAlertSecondButtonReturn) {
+        return NSTerminateCancel;
     }
     [self stopSystemAndWait];
     return NSTerminateNow;
+}
+
+// A debug command's quit answers in place of the user.
+- (NSModalResponse)answerLouderHandBack:(QLMHandBack *)handBack {
+#if DEBUG
+    if (self.debugQuitAnswer != nil) {
+        return self.debugQuitAnswer.integerValue;
+    }
+#endif
+    [self activateApp];
+    return [[self louderHandBackAlert:handBack] runModal];
 }
 
 // Only on the real monitors: on the fake bus a take-over moves no level.
@@ -444,6 +456,42 @@ static const NSTimeInterval QLMStopAllowance = 3;
 
 - (void)debugReadSetup {
     [self popoverControllerReadSetupAgain:self.popoverController];
+}
+
+- (QLMSystem *)debugSystem {
+    return self.system;
+}
+
+- (QLMPreferences *)debugPreferences {
+    return self.preferences;
+}
+
+// Settings draws the preferences as its window opens, so an open one keeps
+// the old value.
+- (void)debugVolumeRangeDidChange {
+    [self settingsDidChangeVolumeRange:self.settingsController];
+}
+
+- (void)debugAdapterDidChange {
+    [self settingsDidChangeAdapter:self.settingsController];
+}
+
+- (NSString *)debugQuitGLMTitle {
+    return self.popoverController.quitGLMTitle;
+}
+
+- (BOOL)debugQuitGLM {
+    return [self.popoverController quitGLM];
+}
+
+- (BOOL)debugQuitAsksFirst {
+    return [self takeOverRaisesLevel:self.monitorList.snapshot.handBack];
+}
+
+- (void)debugQuitAnswering:(BOOL)quitAnyway {
+    self.debugQuitAnswer = @(quitAnyway ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn);
+    [NSApp terminate:self];
+    self.debugQuitAnswer = nil;
 }
 
 @end
