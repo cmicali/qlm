@@ -73,9 +73,21 @@ extern const NSInteger QLMMonitorValueAbsent;
 // Why nothing reaches the bus.
 typedef NS_ENUM(NSInteger, QLMBusProblem) {
     QLMBusProblemNone = 0,
-    QLMBusProblemNoAdapter,  // no GLM adapter is connected
+    QLMBusProblemNoAdapter,  // no GLM adapter is connected, or adapterProblem says why it is no use
     QLMBusProblemGLM,        // GLM holds the adapter: quit it first
     QLMBusProblemOtherHost,  // another process holds the adapter, or qlm could not seize it
+};
+
+// Why qlm holds the adapter, but nothing reaches the bus. The adapter takes
+// over at the knob's level about 2.6 s after the last report it took, so
+// warn with the snapshot's handBack, which keeps the last knob reading.
+typedef NS_ENUM(NSInteger, QLMAdapterProblem) {
+    QLMAdapterProblemNone = 0,
+    // It stopped answering. qlm syncs a few times over about 7 s, then waits
+    // for a reply, and resumes once one comes.
+    QLMAdapterProblemUnresponsive,
+    // qlm lost track of its replies, and sends nothing until a replug.
+    QLMAdapterProblemLostTrack,
 };
 
 // What the adapter's take-over does to the level. About 2.6 s after the
@@ -92,6 +104,14 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
     QLMHandBackLouder,
 };
 
+// The session an identified monitor last held, as System knew it. Immutable.
+@interface QLMKnownLease : NSObject
+- (instancetype)initWithHardwareID:(NSData *)hardwareID serialNumber:(NSString *)serialNumber session:(uint8_t)session;
+@property (nonatomic, readonly) NSData *hardwareID;
+@property (nonatomic, readonly) NSString *serialNumber;  // from 19 01
+@property (nonatomic, readonly) uint8_t session;
+@end
+
 // Immutable.
 @interface QLMHandBack : NSObject
 @property (nonatomic, readonly) QLMHandBackKind kind;
@@ -106,10 +126,13 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly) BOOL running;
 @property (nonatomic, readonly) QLMAdapterState *adapter;
 // Why nothing reaches the bus: QLMAdapterErrorBusy while another host has
-// the adapter, or QLMAdapterErrorDisconnected. Nil once a send goes out.
+// the adapter, QLMAdapterErrorDisconnected, QLMAdapterErrorUnresponsive, or
+// QLMAdapterErrorLostTrack. Nil once a send goes out.
 @property (nonatomic, readonly, nullable) NSError *adapterError;
 // The same, typed, so the app need not read GLMAdapter's error codes.
 @property (nonatomic, readonly) QLMBusProblem busProblem;
+// Set only while busProblem is NoAdapter. Read it first.
+@property (nonatomic, readonly) QLMAdapterProblem adapterProblem;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed
 @property (nonatomic, readonly) double ceilingDecibels;            // every volume frame is capped at it
@@ -121,10 +144,17 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // While System runs, what a stop would do to the level now. Once it has
 // stopped, what it did.
 @property (nonatomic, readonly) QLMHandBack *handBack;
-// System's mute record: every muted hardware ID, leased or not, and whether
-// mute all is on. Give both back through QLMSystemSettings to start from it.
+// System's mute record: every muted hardware ID, leased or not, whether
+// mute all is on, and the monitors the user lifted it from. Mute all holds
+// for every other monitor, one that appears later included. Give all three
+// back through QLMSystemSettings to start from it.
 @property (nonatomic, readonly) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readonly) BOOL mutingAll;
+@property (nonatomic, readonly) NSSet<NSData *> *liftedHardwareIDs;
+// The session each monitor System identified last held, in session order,
+// kept across a stop. Give them back through QLMSystemSettings, so a new
+// System checks them before it leases anything.
+@property (nonatomic, readonly) NSArray<QLMKnownLease *> *knownLeases;
 // Each is NO when there are no monitors.
 @property (nonatomic, readonly) BOOL allIdentified;
 @property (nonatomic, readonly) BOOL allMuted;

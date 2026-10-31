@@ -22,7 +22,9 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // step, and the second then drops the first's own reply.
 // TRAP: two late replies, a system info and then a status, fool both steps.
 // GLM keeps one request in flight (captures/startup-idle). An earlier qlm
-// leaves two only when it quit during a sync after a system info timed out.
+// leaves more than one only when it quit while it synced: the reply that
+// timed out, and its syncs' (replyTimeout). Those may be a system info and
+// then a status.
 //
 // Every method runs on the queue, and so does the writer. Each handler is
 // called once, asynchronously, on the queue.
@@ -45,11 +47,19 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // until one has that shape. The adapter bridges one request at a time, so
 // it answers in order, and the late reply is then past. The held request
 // goes out. The sync's reply queues behind the late one, so after five
-// timeouts the link stalls: it fails the held request, and every send, until
-// the sync's reply comes.
+// timeouts the link stalls: it fails the held request, and every send, with
+// QLMAdapterErrorUnresponsive, until a sync's reply comes. In case the reply
+// was lost, it sends up to three more syncs of that shape. Each waits twice
+// as long as the one before, so the four wait 0.5, 1, 2, and 4 s at 0.1 s.
+// A reply may then be an earlier sync's, so one sync of the other shape
+// drops the rest. After the last, the link waits on for a reply, and sends
+// nothing. The retries add no shape that may be late, so a close and a
+// reopen keep track whenever they did before the stall.
 @property (nonatomic) NSTimeInterval replyTimeout;
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler;
+// The rewrite runs as the report is written, after any sync that held it.
+- (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler;
 
 // One input report, as the device delivered it.
 - (void)receiveReport:(const uint8_t *)report length:(size_t)length;
@@ -66,8 +76,9 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // A link that lost track stays closed.
 - (void)reopen;
 
-// Why the link lost track, or nil. It never reopens. Only a new arrival of
-// the adapter, a new USB enumeration, gets a new link.
+// Why the link lost track, QLMAdapterErrorLostTrack, or nil. It never
+// reopens. Only a new arrival of the adapter, a new USB enumeration, gets a
+// new link.
 @property (nonatomic, readonly, nullable) NSError *failure;
 
 // Input that completed a frame no request was waiting for, or that a sync

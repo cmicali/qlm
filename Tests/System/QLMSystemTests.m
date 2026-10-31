@@ -3,8 +3,10 @@
 #import "QLMApplySequence.h"
 #import "QLMDSPBlock.h"
 #import "QLMFakeBus.h"
+#import "QLMHIDAdapterInternal.h"
 #import "QLMHostCheck.h"
 #import "QLMReplayAdapter.h"
+#import "QLMReportLink.h"
 #import "QLMSetupInternal.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
@@ -26,6 +28,9 @@
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
 // Hands the oldest reply held over, on the adapter's queue. NO when none is.
 - (BOOL)releaseReply;
+// The most requests sent since the last start, at once, whose replies
+// System had not been handed yet.
+@property (atomic, readonly) NSUInteger mostInFlight;
 @end
 
 @implementation QLMHeldAdapter {
@@ -33,6 +38,8 @@
     dispatch_queue_t _queue;
     id<QLMClock> _clock;
     NSMutableArray<dispatch_block_t> *_held;
+    NSUInteger _starts;
+    NSUInteger _inFlight;  // of this start's
 }
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
@@ -40,6 +47,92 @@
     if (self) {
         _adapter = adapter;
         _held = [NSMutableArray array];
+    }
+    return self;
+}
+
+- (NSString *)deviceDescription {
+    return _adapter.deviceDescription;
+}
+
+- (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {
+    _queue = queue;
+    _clock = clock;
+    @synchronized(self) {
+        _starts += 1;
+        _inFlight = 0;
+    }
+    [_adapter startOnQueue:queue clock:clock];
+}
+
+- (void)stop {
+    [_adapter stop];
+}
+
+- (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
+    NSUInteger start;
+    @synchronized(self) {
+        start = _starts;
+        _inFlight += 1;
+        _mostInFlight = MAX(_mostInFlight, _inFlight);
+    }
+    __weak QLMHeldAdapter *weakSelf = self;
+    [_adapter sendMessage:message replyHandler:^(const QLMMessage *reply, NSError *error) {
+        BOOL answered = reply != NULL;
+        QLMMessage copy = answered ? *reply : QLMMessageMake(0, NULL, 0);
+        @synchronized(self) {
+            [self->_held addObject:^{
+                [weakSelf replied:start];
+                handler(answered ? &copy : NULL, error);
+            }];
+        }
+    }];
+}
+
+- (void)replied:(NSUInteger)start {
+    @synchronized(self) {
+        if (_starts == start) {
+            _inFlight -= 1;
+        }
+    }
+}
+
+- (BOOL)releaseReply {
+    dispatch_block_t reply = nil;
+    @synchronized(self) {
+        reply = _held.firstObject;
+        if (reply != nil) {
+            [_held removeObjectAtIndex:0];
+        }
+    }
+    if (reply == nil) {
+        return NO;
+    }
+    [_clock async:_queue run:reply];
+    return YES;
+}
+
+@end
+
+// Passes each message on, but while `failure` is set, fails each one it
+// matches with that error, and sends nothing. With no `matches`, it matches
+// every message.
+@interface QLMFailingAdapter : NSObject <QLMAdapter>
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter;
+@property (atomic, nullable) NSError *failure;
+@property (atomic, copy, nullable) BOOL (^matches)(const QLMMessage *message);
+@end
+
+@implementation QLMFailingAdapter {
+    id<QLMAdapter> _adapter;
+    dispatch_queue_t _queue;
+    id<QLMClock> _clock;
+}
+
+- (instancetype)initWithAdapter:(id<QLMAdapter>)adapter {
+    self = [super init];
+    if (self) {
+        _adapter = adapter;
     }
     return self;
 }
@@ -59,30 +152,15 @@
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
-    [_adapter sendMessage:message replyHandler:^(const QLMMessage *reply, NSError *error) {
-        BOOL answered = reply != NULL;
-        QLMMessage copy = answered ? *reply : QLMMessageMake(0, NULL, 0);
-        @synchronized(self) {
-            [self->_held addObject:^{
-                handler(answered ? &copy : NULL, error);
-            }];
-        }
-    }];
-}
-
-- (BOOL)releaseReply {
-    dispatch_block_t reply = nil;
-    @synchronized(self) {
-        reply = _held.firstObject;
-        if (reply != nil) {
-            [_held removeObjectAtIndex:0];
-        }
+    NSError *failure = self.failure;
+    BOOL (^matches)(const QLMMessage *) = self.matches;
+    if (failure != nil && (matches == nil || matches(&message))) {
+        [_clock async:_queue run:^{
+            handler(NULL, failure);
+        }];
+        return;
     }
-    if (reply == nil) {
-        return NO;
-    }
-    [_clock async:_queue run:reply];
-    return YES;
+    [_adapter sendMessage:message replyHandler:handler];
 }
 
 @end
@@ -844,6 +922,25 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(QLMFindMonitor(snapshot, _right.hardwareID).session, 0x03);
 }
 
+// A stop with no hand-back lets go at once, with a request in flight, and
+// a start right after it sends its own first request. The stopped run's
+// reply must end nothing of the new run. If it did, System would send its
+// next request while the first is still in flight.
+- (void)testAReplyFromBeforeAStopEndsNothingAfterTheStart {
+    QLMHeldAdapter *held = [[QLMHeldAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:held];
+    [_time settle];
+    [_system stop];
+    [_system start];
+    [_time settle];
+    XCTAssertEqual(held.mostInFlight, 1u);
+    [self releaseRepliesOf:held until:^BOOL {
+        return NO;
+    }];
+    XCTAssertEqual(held.mostInFlight, 1u);
+    XCTAssertEqual(_system.snapshot.monitors.count, 2u);
+}
+
 // A gap the monitors ride out keeps every lease.
 - (void)testAShortGapKeepsTheLeases {
     [self startSystem];
@@ -1071,6 +1168,137 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         const uint8_t mute[] = {monitor.session, 0x2B, QLMMuteValueMuted};
         XCTAssertEqual([self countSent:QLMBytes(mute, 3) from:before], 2u);
     }
+}
+
+// Waits until the left's and the right's last 2B are these.
+- (void)waitForLeftMute:(uint8_t)left rightMute:(uint8_t)right {
+    [self waitUntil:^BOOL {
+        __block BOOL stated = NO;
+        [self->_bus perform:^{
+            stated = self->_left.muteValue == left && self->_right.muteValue == right;
+        }];
+        return stated;
+    }];
+}
+
+// A lift of one mute under mute all lifts the adapter's own mute too, as
+// GLM's unmute all does: the level, 01 2B 00, then two rounds
+// (captures/mute-dim, 48.60 s). No capture shows GLM lift one mute under
+// mute all. Mute all still holds for the rest, here for the right, which
+// appears after it. The lift holds when the left is leased again, and
+// after a relaunch from the snapshot's record.
+- (void)testLiftingOneMuteUnderMuteAllHolds {
+    _settings.cycleInterval = 0.3;
+    [_bus perform:^{
+        self->_right.present = NO;
+    }];
+    [self startSystem];
+    QLMSnapshot *discovered = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 1 && snapshot.allIdentified && snapshot.idle;
+    }];
+    uint8_t left = QLMFindMonitor(discovered, _left.hardwareID).session;
+    [_system setVolumeDecibels:-30];
+    [_system setAllMuted:YES];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.allMuted && snapshot.idle;
+    }];
+
+    NSUInteger before = _bus.sentMessages.count;
+    NSData *leftID = _left.hardwareID;
+    NSData *rightID = _right.hardwareID;
+    QLMSystem *system = _system;
+    QLMSnapshot *lifted = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !QLMFindMonitor(snapshot, leftID).muted && snapshot.idle;
+    } after:^{
+        [system setMuted:NO forMonitorWithHardwareID:leftID];
+    }];
+    XCTAssertTrue(lifted.mutingAll);
+    XCTAssertEqualObjects(lifted.liftedHardwareIDs, [NSSet setWithObject:leftID]);
+    QLMMessage volume = QLMCommandVolume(-30, _settings.ceilingDecibels);
+    NSData *leftUnmuted = QLMBytes((const uint8_t[]){left, 0x2B, QLMMuteValueUnmuted}, 3);
+    NSArray<NSData *> *expected = @[
+        QLMAdapterRecord(&volume), QLMBytes((const uint8_t[]){QLMAddressAdapter, 0x2B, QLMMuteValueAdapterUnmuted}, 3), leftUnmuted, leftUnmuted
+    ];
+    XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
+        return ((const uint8_t *)message.bytes)[1] == 0x1F || ((const uint8_t *)message.bytes)[1] == 0x2B;
+    }], expected);
+
+    [_bus perform:^{
+        self->_right.present = YES;
+        self->_left.session = 0;
+    }];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        QLMMonitorState *state = QLMFindMonitor(snapshot, leftID);
+        return state.session != left && state.identified && QLMFindMonitor(snapshot, rightID).identified && snapshot.idle;
+    }];
+    XCTAssertFalse(QLMFindMonitor(again, leftID).muted);
+    XCTAssertTrue(QLMFindMonitor(again, rightID).muted);
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
+
+    QLMSnapshot *stopped = [self stopAndWait];
+    _settings.mutedHardwareIDs = stopped.mutedHardwareIDs;
+    _settings.mutingAll = stopped.mutingAll;
+    _settings.liftedHardwareIDs = stopped.liftedHardwareIDs;
+    [self lapseLeases];
+    [self startSystem];
+    QLMSnapshot *relaunched = [self waitForDiscovery];
+    XCTAssertFalse(QLMFindMonitor(relaunched, leftID).muted);
+    XCTAssertTrue(QLMFindMonitor(relaunched, rightID).muted);
+    XCTAssertEqualObjects(relaunched.liftedHardwareIDs, [NSSet setWithObject:leftID]);
+    before = _bus.sentMessages.count;
+    [_system setVolumeDecibels:-30];
+    [_system setDimmed:YES];
+    [_system setDimmed:NO];
+    [self waitForIdle];
+    XCTAssertGreaterThan([self sentWithOpcode:0x2B from:before].count, 0u);
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
+}
+
+// A mute of the last monitor lifted brings mute all back whole: GLM's mute
+// all, with 01 2B 01 (captures/mute-dim, 46.19 s), as a relaunch from the
+// record would have it.
+- (void)testMutingTheLastLiftedMonitorBringsMuteAllBack {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [_system setAllMuted:YES];
+    [_system setMuted:NO forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForIdle];
+    NSUInteger before = _bus.sentMessages.count;
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+    XCTAssertTrue(again.mutingAll);
+    XCTAssertEqualObjects(again.liftedHardwareIDs, [NSSet set]);
+    const uint8_t adapterMuted[] = {QLMAddressAdapter, 0x2B, QLMMuteValueAdapterMuted};
+    XCTAssertEqual([self countSent:QLMBytes(adapterMuted, 3) from:before], 1u);
+    QLMMessage volume = QLMCommandVolume(-30, _settings.ceilingDecibels);
+    XCTAssertEqualObjects(_bus.sentMessages[before], QLMAdapterRecord(&volume));
+}
+
+// A round waits in line, and the mutes may change meanwhile. Here the user
+// mutes the left, lifts mute all, and mutes the left again, quicker than
+// the rounds go out (QLMSafetyFuzzTests, seed 0x2095). Each 2B says the
+// mute as it is when it goes out, so none lifts the left's.
+- (void)testARoundSaysTheMutesAsTheyAreWhenItGoesOut {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    QLMSnapshot *discovered = [self waitForDiscovery];
+    uint8_t left = QLMFindMonitor(discovered, _left.hardwareID).session;
+    NSUInteger before = _bus.sentMessages.count;
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [_system setAllMuted:NO];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForIdle];
+    NSArray<NSData *> *mutes = [self mutesFrom:before to:[NSIndexSet indexSetWithIndex:left]];
+    XCTAssertEqual(mutes.count, 6u);
+    for (NSData *mute in mutes) {
+        XCTAssertEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
+    const uint8_t adapterUnmuted[] = {QLMAddressAdapter, 0x2B, QLMMuteValueAdapterUnmuted};
+    XCTAssertEqual([self countSent:QLMBytes(adapterUnmuted, 3) from:before], 1u);
 }
 
 #pragma mark - Dim
@@ -1758,6 +1986,63 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// The Safety rule holds for frames already in line: a ceiling lowered after
+// the wake queues its level caps that level too, when it goes out.
+- (void)testALoweredCeilingCapsTheVolumeFramesAlreadyQueued {
+    _settings.cycleInterval = 10;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-20];  // at the -20 dB ceiling
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [_system wake];
+    [_system setCeilingDecibels:-40];
+    [self waitUntil:^BOOL {
+        return [self sentWithOpcode:0x1F from:before].count >= 2;
+    }];
+    [_time advanceBy:0.1];
+    QLMMessage capped = QLMCommandVolume(-20, -40);
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertEqual(levels.count, 2u);  // the wake's, then the ceiling's own
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, QLMAdapterRecord(&capped));
+    }
+}
+
+// The same when the report link holds the frame. After a reopen, the link
+// holds the first request behind its sync, and the ceiling falls meanwhile
+// (QLMSafetyFuzzTests, seed 0xE6635237C78ED983). The frame goes out under
+// the ceiling in force when the link writes it.
+- (void)testALoweredCeilingCapsAVolumeFrameTheLinkHolds {
+    _settings.cycleInterval = 10;
+    QLMCaptureDevice *device = [[QLMCaptureDevice alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
+    [self startSystemWithAdapter:device];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
+    }];
+    // The clock stands still, so nothing else touches the link meanwhile.
+    [device.link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
+    [device.link reopen];
+    NSUInteger before = device.writtenReports.count;
+    [_system setVolumeDecibels:0];
+    [_system setCeilingDecibels:-44.5];
+    [self waitForIdle];
+    [_time advanceBy:0.1];
+    NSData *capped = QLMReportFor(QLMCommandVolume(0, -44.5));
+    NSArray<NSData *> *written = device.writtenReports;
+    NSUInteger volumes = 0;
+    for (NSUInteger i = before; i < written.count; i++) {
+        const uint8_t *bytes = written[i].bytes;
+        if (bytes[1] == QLMAddressBroadcast && bytes[2] == 0x1F) {
+            volumes += 1;
+            XCTAssertEqualObjects(written[i], capped);
+        }
+    }
+    XCTAssertEqual(volumes, 2u);  // the volume's, then the ceiling's own
+}
+
 // A stop's completion runs on the main queue once System has let go of the
 // adapter: after the hand-back level, with the snapshot stopped. A stop
 // while not running completes at once.
@@ -1816,6 +2101,279 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertNotEqual(QLMFindMonitor(moved, _left.hardwareID).session, leftSession);
     XCTAssertNil(QLMFindMonitor(moved, _right.hardwareID));
+}
+
+// Every frame sent from `start` on to any of `sessions`.
+- (NSArray<NSData *> *)sentFrom:(NSUInteger)start to:(NSIndexSet *)sessions {
+    return [self sentFrom:start matching:^BOOL(NSData *message) {
+        return [sessions containsIndex:((const uint8_t *)message.bytes)[0]];
+    }];
+}
+
+// GLM leases from 02 in its own probe order, and a host that quits leaves
+// its leases: in captures/qlm-first-discover they held for up to 42 s after
+// GLM quit. Here GLM takes the bus, leases each monitor the other's
+// session, and quits. When the bus comes back, System drops its records and
+// asks each old session for its serial. Each answers with the other
+// monitor's, so System sends nothing more to either session, and leases
+// neither. Once GLM's leases lapse, the probe finds both monitors, and each
+// hears its own mute.
+- (void)testABusThatComesBackChecksEveryLeaseBeforeUsingIt {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    uint8_t leftSession = QLMFindMonitor(first, _left.hardwareID).session;
+    uint8_t rightSession = QLMFindMonitor(first, _right.hardwareID).session;
+    NSMutableIndexSet *oldSessions = [NSMutableIndexSet indexSetWithIndex:leftSession];
+    [oldSessions addIndex:rightSession];
+    [_system setVolumeDecibels:-30];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.busProblem == QLMBusProblemGLM;
+    }];
+    [_bus perform:^{
+        self->_left.session = rightSession;
+        self->_right.session = leftSession;
+        self->_left.muteValue = QLMMuteValueUnmuted;
+        self->_right.muteValue = QLMMuteValueUnmuted;
+        self->_bus.busyReason = nil;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [_time advanceBy:0.3];
+    QLMSnapshot *back = _system.snapshot;
+    XCTAssertEqual(back.busProblem, QLMBusProblemNone);
+    XCTAssertEqual(back.monitors.count, 0u);
+    QLMMessage leftCheck = QLMCommandSerialNumber(leftSession);
+    QLMMessage rightCheck = QLMCommandSerialNumber(rightSession);
+    NSSet<NSData *> *checks = [NSSet setWithObjects:QLMAdapterRecord(&leftCheck), QLMAdapterRecord(&rightCheck), nil];
+    XCTAssertEqualObjects([NSSet setWithArray:[self sentFrom:before to:oldSessions]], checks);
+    XCTAssertEqual([self sentFrom:before to:oldSessions].count, 2u);
+
+    [self lapseLeases];
+    QLMSnapshot *found = [self waitForDiscovery];
+    for (QLMMonitorState *monitor in found.monitors) {
+        XCTAssertFalse([oldSessions containsIndex:monitor.session], @"%02X", monitor.session);
+    }
+    [self sendEveryMuteRound];
+    XCTAssertEqual([self sentFrom:before to:oldSessions].count, 2u);
+    [_bus perform:^{
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+        XCTAssertEqual(self->_right.muteValue, QLMMuteValueUnmuted);
+    }];
+}
+
+// The same, with the leases where System left them. Each monitor is taken
+// back at once, with no lease, and hears its own state after its first
+// poll, since the other host changed both mutes.
+- (void)testABusThatComesBackTakesBackTheLeasesStillHeld {
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
+    }];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    [_bus perform:^{
+        self->_left.muteValue = QLMMuteValueUnmuted;
+        self->_right.muteValue = QLMMuteValueMuted;
+        self->_bus.busyReason = nil;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+    }];
+    for (QLMMonitorState *monitor in first.monitors) {
+        XCTAssertEqual(QLMFindMonitor(back, monitor.hardwareID).session, monitor.session);
+    }
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 0u);
+}
+
+// The app makes a new System at each launch, which knows no leases of its
+// own, so it gives the new one the last snapshot's. Across a quick relaunch
+// here, the right's lease lapses, and the muted left still holds its own.
+// The new System takes the left back at its session, and leases the right
+// another, so no 2B reaches both.
+- (void)testANewSystemChecksTheLeasesItIsGivenBeforeLeasing {
+    [self startSystem];
+    QLMSnapshot *first = [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && snapshot.idle;
+    }];
+    QLMSnapshot *stopped = [self stopAndWait];
+    XCTAssertEqual(stopped.knownLeases.count, 2u);
+    uint8_t lastSession = 0;
+    for (QLMKnownLease *lease in stopped.knownLeases) {
+        QLMMonitorState *monitor = QLMFindMonitor(first, lease.hardwareID);
+        XCTAssertEqual(lease.session, monitor.session);
+        XCTAssertEqualObjects(lease.serialNumber, monitor.serialNumber);
+        XCTAssertGreaterThan(lease.session, lastSession);
+        lastSession = lease.session;
+    }
+    uint8_t leftSession = QLMFindMonitor(first, _left.hardwareID).session;
+    [_bus perform:^{
+        self->_right.session = 0;
+    }];
+
+    _settings.knownLeases = stopped.knownLeases;
+    _settings.mutedHardwareIDs = stopped.mutedHardwareIDs;
+    NSUInteger before = _bus.sentMessages.count;
+    [self startSystem];
+    QLMSnapshot *again = [self waitForDiscovery];
+    XCTAssertEqual(QLMFindMonitor(again, _left.hardwareID).session, leftSession);
+    XCTAssertNotEqual(QLMFindMonitor(again, _right.hardwareID).session, leftSession);
+    XCTAssertEqual([self countSentTo:QLMAddressMulticast opcode:0x02 from:before], 1u);
+    [_bus perform:^{
+        XCTAssertNotEqual(self->_right.session, self->_left.session);
+        XCTAssertEqual(self->_left.muteValue, QLMMuteValueMuted);
+    }];
+}
+
+// The adapter goes silent, through the report link the HID adapter uses.
+// About 2.6 s after the host goes quiet, the adapter takes over at the
+// knob's level (captures/qlm-control-first/notes.md), so the snapshot says
+// it stopped answering, apart from no adapter, and keeps the last knob
+// reading for the warning. Once it answers again, the link resyncs, and
+// System takes every lease back.
+- (void)testASilentAdapterShowsAsItsOwnProblemWithTheKnobKept {
+    _settings.cycleInterval = 0.05;
+    _settings.adapterPollInterval = 0.02;
+    QLMCaptureDevice *device = [[QLMCaptureDevice alloc] initWithCapture:QLMReadCapture(@"startup-idle", NULL)];
+    [self startSystemWithAdapter:device];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.adapter.identified && snapshot.idle;
+    }];
+    device.silent = YES;
+    QLMSnapshot *silent = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    XCTAssertEqual(silent.adapterProblem, QLMAdapterProblemUnresponsive);
+    XCTAssertEqual(silent.busProblem, QLMBusProblemNoAdapter);
+    XCTAssertEqual(silent.adapterError.code, QLMAdapterErrorUnresponsive);
+    XCTAssertEqualObjects(silent.handBack.knobDecibels, @(-100.4));
+    XCTAssertTrue(silent.adapter.identified);
+
+    device.silent = NO;
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError == nil && snapshot.monitors.count == 6 && snapshot.allIdentified && snapshot.idle;
+    }];
+    XCTAssertEqual(back.adapterProblem, QLMAdapterProblemNone);
+    [self stopSystem];
+    // Every report is GLM's, but the state each monitor taken back hears:
+    // GLM sent 2B 04 only to Main 2x1's members, and no group is active here.
+    NSMutableSet<NSData *> *captured = [NSMutableSet set];
+    for (QLMCaptureExchange *exchange in QLMReadCapture(@"startup-idle", NULL).exchanges) {
+        [captured addObject:exchange.outputReport];
+    }
+    for (NSData *report in device.writtenReports) {
+        const uint8_t *bytes = report.bytes;
+        BOOL state = bytes[2] == 0x2B && bytes[3] == QLMMuteValueUnmuted;
+        XCTAssertTrue([captured containsObject:report] || state, @"%@", report);
+    }
+}
+
+// A link that lost track is a problem of its own too, and keeps the knob.
+- (void)testALinkThatLostTrackShowsAsItsOwnProblem {
+    QLMFailingAdapter *failing = [[QLMFailingAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:failing];
+    [self waitForDiscovery];
+    failing.failure = QLMAdapterErrorMake(QLMAdapterErrorLostTrack, @"qlm lost track of the GLM adapter's replies.");
+    QLMSnapshot *lost = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.adapterError != nil;
+    }];
+    XCTAssertEqual(lost.adapterProblem, QLMAdapterProblemLostTrack);
+    XCTAssertEqual(lost.busProblem, QLMBusProblemNoAdapter);
+    XCTAssertEqualObjects(lost.handBack.knobDecibels, @(-100.4));
+}
+
+// IOHIDDeviceSetReport blocks up to the device's 5 s timeout when the
+// adapter stops taking reports (QLMHIDAdapter.m), and then nothing went out.
+// So a poll IOKit never took is no missed poll, and drops no monitor that
+// still holds its lease.
+- (void)testAPollIOKitDidNotTakeIsNoMissedPoll {
+    QLMFailingAdapter *failing = [[QLMFailingAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:failing];
+    [self waitForDiscovery];
+    failing.matches = ^BOOL(const QLMMessage *message) {
+        return QLMAddressIsLeasable(message->address) && message->payload[0] == 0x08;
+    };
+    failing.failure = QLMHIDWriteError(kIOReturnTimeout);
+    __block NSUInteger fewest = 2;
+    __block NSUInteger mostMissed = 0;
+    QLMSystem *system = _system;
+    [_time runUntil:^BOOL {
+        QLMSnapshot *snapshot = system.snapshot;
+        fewest = MIN(fewest, snapshot.monitors.count);
+        for (QLMMonitorState *monitor in snapshot.monitors) {
+            mostMissed = MAX(mostMissed, monitor.missedPolls);
+        }
+        return NO;
+    } within:1];
+    XCTAssertEqual(fewest, 2u);
+    XCTAssertEqual(mostMissed, 0u);
+}
+
+// A mute whose 2B never went out still reaches the monitor. As GLM states a
+// new monitor's mute right after its first poll (captures/startup-idle,
+// 9.861 s), each monitor whose 2B IOKit did not take hears its state after
+// its next poll: the left its mute, and the right the lift of its own.
+- (void)testAMuteWhose2BDidNotGoOutIsStatedAfterTheNextPoll {
+    QLMFailingAdapter *failing = [[QLMFailingAdapter alloc] initWithAdapter:_bus];
+    [self startSystemWithAdapter:failing];
+    [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_right.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.idle;
+    }];
+    failing.matches = ^BOOL(const QLMMessage *message) {
+        return QLMAddressIsLeasable(message->address) && message->payload[0] == 0x2B;
+    };
+    failing.failure = QLMHIDWriteError(kIOReturnTimeout);
+    [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+    [_system setMuted:NO forMonitorWithHardwareID:_right.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_left.hardwareID).muted && !QLMFindMonitor(snapshot, self->_right.hardwareID).muted &&
+               snapshot.idle;
+    }];
+    [_bus perform:^{
+        XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted);
+    }];
+    failing.failure = nil;
+    [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
+}
+
+// A stop drops the rounds still queued. A mute lifted just before a stop
+// reaches the monitor at the next start, after its first poll. The round
+// goes to the left first, so only the right's 2B is dropped here.
+- (void)testAMuteLiftedJustBeforeAStopReachesTheMonitorAtTheNextStart {
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setMuted:YES forMonitorWithHardwareID:_right.hardwareID];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return QLMFindMonitor(snapshot, self->_right.hardwareID).muted && snapshot.idle;
+    }];
+    [_system setMuted:NO forMonitorWithHardwareID:_right.hardwareID];
+    [self stopSystem];
+    [_bus perform:^{
+        XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted);
+    }];
+    [_system start];
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueUnmuted];
+    XCTAssertFalse(QLMFindMonitor(_system.snapshot, _right.hardwareID).muted);
 }
 
 // The snapshot says why nothing reaches the bus, typed: no adapter, GLM, or

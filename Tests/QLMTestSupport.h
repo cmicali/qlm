@@ -32,6 +32,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 NSData *QLMBytes(const uint8_t *bytes, size_t length);
 
+// The output report a message packs into, 64 bytes.
+NSData *QLMReportFor(QLMMessage message);
+
 // A file in Tests/Setups/Fixtures/.
 NSString *QLMFixturePath(NSString *name);
 
@@ -80,6 +83,7 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
 @property (atomic) NSTimeInterval replyDelay;                   // 1 ms
 @property (atomic) NSTimeInterval nextReplyDelay;               // above 0: the next reply's delay, once
 @property (atomic) BOOL silent;
+@property (atomic) NSUInteger dropReplies;  // the next N replies never come
 // Every output report written, as 64 bytes. Read on the queue.
 @property (nonatomic, readonly) NSArray<NSData *> *writtenReports;
 @property (nonatomic, readonly) NSUInteger unmatchedReports;  // reports the capture never sent
