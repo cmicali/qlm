@@ -18,7 +18,7 @@ Most of qlm has run only on the fake bus. Only `qlmctl` has driven the real adap
 | `qlmctl volume`, `mute`, `dim`, `sleep`, and `wake` | One monitor, before #27's fixes (`qlm-control-first`). A run on all six is under way (#39, open). |
 | The hand-back at a stop | The fake bus |
 | `qlmctl apply-group` | Its dry run, and the fake bus. It can go over USB now, behind `--unverified-rate`, but it hasn't. |
-| The app | The fake bus. It has never run on the real adapter. |
+| The app | All six monitors, once, driven by hand under a −35 dB ceiling (`qlm-app-first`, #43). Its fixes since (#52) have run only on the fake bus. |
 
 ### The layers
 
@@ -33,9 +33,14 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - applies a group with an 8351B only for `qlmctl`'s supervised test (#32);
   - gives the app what it lacked: a ceiling that changes while System runs, a stop with a completion, leases taken back by serial after a short gap, a typed reason the bus is unavailable, and one rule for presence (#32);
   - runs every timer on an injectable clock, so the tests run on a virtual one. That work found a monitor leased twice, and a wait in `qlmctl` that could miss an action already done. #38, which carries #37, fixes both.
+  - holds its volume at or under the ceiling, so a turn of the knob above it sends nothing, and gives a snapshot of itself now, for a stop's warning (#52).
 - Setups reads GLM 5 setup files strictly, designs the filters, and builds each monitor's DSP block, checked against every captured pass. It also watches the setup file, and calls back once a save settles (#28).
 - `qlmctl` has `info`, `discover`, `poll`, and `setup`, and all of Phase 2's controls. The controls run behind gates: a ceiling the user states, at most −30 dB without `--allow-high-ceiling`, and a `--dry-run` that sends only discovery. Each also runs on the fake bus with `--fake`, or a capture with `--replay`. `dim` now sends GLM's whole sequence, `--muted` names the monitors already muted in GLM, and at exit `qlmctl` prints what the hand-back did (#27, #29, #32). `apply-group` prints GLM's whole apply. Over USB it's a supervised test, and it needs `--volume`, `--ceiling`, and, for a group with an 8351B, `--unverified-rate` (#32).
-- The app has the menu bar popover, a monitors window, Settings, a banner for adapter errors, and a panel that plays the fake bus. A setting, off by default, drives the real adapter instead. The banner offers to quit GLM when GLM holds the adapter. The app stops System at sleep and starts it at wake, posts a notification when a monitor drops off or runs hot, and offers to read the setup again when GLM saves it (#28). It doesn't use System's new calls from #32 yet.
+- The app has the menu bar popover, a monitors window, Settings, a banner for adapter errors, and a panel that plays the fake bus. A setting, off by default, drives the real adapter instead. The banner offers to quit GLM when GLM holds the adapter. The app stops System at sleep and starts it at wake, posts a notification when a monitor drops off or runs hot, and offers to read the setup again when GLM saves it (#28). Since its first run (#43):
+  - It asks before any stop that may make the monitors louder: a quit, or turning the setting off. That's the knob above qlm's level, or no knob read. It decides from System's snapshot now (#52).
+  - Each bus keeps its own level, mute record, and known leases across launches, so nothing set on the fake bus reaches the real monitors (#52).
+  - The banner says when the adapter stops answering, or qlm loses track of it, and what the take-over does then (#52).
+  - The default ceiling is −30 dB, qlmctl's highest without `--allow-high-ceiling`, and the field saves as it ends editing (#52).
 
 ### The captures, the kits, and the docs
 
@@ -71,7 +76,7 @@ What's left, in the order we'll do it. Most of it needs the monitors and the use
 1. The all-monitor check of #27's fixes, recorded as `qlm-control-all`. It's under way (#39, open). It checks that the volume reaches each new and woken monitor at once, that the wake ends with the level, and that `qlmctl dim` sends GLM's whole sequence.
 2. The hand-back on hardware. A stop with the knob at or below qlm's level should change nothing we can hear. With the knob above it, `qlmctl` should warn before the level rises.
 3. Phase 3's supervised apply and measurement, following [measurement.md](measurement.md). The result decides whether the 8351B's refusal lifts.
-4. The app adopts System's calls from #32, which is under way: the live ceiling in place of a new System, the stop's completion before a sleep, the typed bus reason, and System's rule for presence. Then the app's first run on the real adapter, at a low level, one monitor first.
+4. The app's fixes from its first run on the real adapter (`qlm-app-first`, #43): its safety fixes (#52), and its daily-use fixes. Then the week of daily use.
 5. The knob's slow drift, in System, also under way. In `sleep-wake-darkwake`, GLM follows a 7 dB drift that qlm ignores until the knob's first turn.
 6. The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
 7. The [open questions in protocol.md](protocol.md#open-questions), such as whether the adapter escapes an address byte, and what level it applies with no knob in. [experiments.md](experiments.md) is the script for a session that settles the ones a person at the desk can.
@@ -346,16 +351,16 @@ The measurement also decides whether the 8351B's refusal lifts. qlm leaves out t
 
 **Done when** a week of daily use without GLM brings no crash, and every dropped monitor recovers on its own. Volume must reach the bus within 50 ms of the slider. A group switch must finish within 2 s.
 
-Each item is built, but the app has run only on the fake bus:
+Each item is built, and the app has run once on the real adapter, on all six monitors (`qlm-app-first`, #43):
 
 | Item | Where it stands |
 | --- | --- |
 | The menu bar item and the window | Built: the popover, the monitors window, and a panel that plays the fake bus |
-| Settings, and detection of a running GLM | Built. A setting, off by default, drives the real adapter, and Settings explains the hand-back. When GLM holds the adapter, the banner offers to quit it (#28). |
+| Settings, and detection of a running GLM | Built. A setting, off by default, drives the real adapter, and Settings explains the hand-back. When GLM holds the adapter, the banner offers to quit it (#28). Turning the setting off asks first when the take-over may be louder (#52). |
 | Sleep, wake, and hot plug | Built. System stops at sleep and starts again at wake, and the HID adapter follows hot plug (#28). |
 | Notifications | Built: when a monitor drops off, or reaches 70 °C, at most one of each kind every 10 minutes per monitor (#28) |
 
-The app also watches the setup file, and offers to read it again when GLM saves it. Before the week of daily use, it adopts System's calls from #32, which is under way. Then it runs on the real adapter for the first time, at a low level, one monitor first. Nothing in the Done when has been tried yet.
+The app also watches the setup file, and offers to read it again when GLM saves it. Its first run on the real adapter found the bugs #52 fixes. Nothing in the Done when has been tried yet.
 
 ### Later
 
