@@ -1,8 +1,32 @@
 # qlm build helpers. qlm.xcodeproj is generated from project.yml by XcodeGen.
 
 CONFIG ?= Release
+# The build number is the commit count, so a later commit builds a higher one.
+# project.yml holds the marketing version.
+BUILD_NUMBER ?= $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
+DERIVED_DATA = build/DerivedData
+PRODUCTS = $(DERIVED_DATA)/Build/Products/Release
+# Every build but the tests' carries the build number.
+XCODEBUILD = xcodebuild -project qlm.xcodeproj -derivedDataPath $(DERIVED_DATA) \
+    CURRENT_PROJECT_VERSION=$(BUILD_NUMBER)
 
-.PHONY: help setup project build cli test open clean
+# make install puts qlm.app in $(DESTDIR)/Applications, and qlmctl in
+# $(DESTDIR)$(BINDIR), which needs no sudo. DESTDIR stages a copy elsewhere.
+BINDIR ?= $(HOME)/.local/bin
+APPDIR = $(DESTDIR)/Applications
+INSTALLED_APP = $(APPDIR)/qlm.app
+INSTALLED_CLI = $(DESTDIR)$(BINDIR)/qlmctl
+# A valid Apple Development identity if the keychain has one, else ad hoc.
+# A stable identity keeps macOS's grants, such as Documents access, across
+# installs. SIGN_IDENTITY=- signs ad hoc.
+SIGN_IDENTITY ?= $(if $(shell security find-identity -v -p codesigning 2>/dev/null \
+    | grep '"Apple Development: ' | grep -v CSSMERR_),Apple Development,-)
+SIGNED_AS = $(if $(filter -,$(SIGN_IDENTITY)),ad hoc,as $(SIGN_IDENTITY))
+# Xcode adds get-task-allow to a build signed for development, even in
+# Release, so the install leaves Xcode's base entitlements out.
+SIGNING = CODE_SIGN_IDENTITY="$(SIGN_IDENTITY)" CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
+
+.PHONY: help setup project build cli test install uninstall open clean
 
 # Install the dev-tool dependencies (xcodegen) from the Brewfile.
 setup:
@@ -34,18 +58,38 @@ project:
 
 # The menu bar app. ARGS reaches xcodebuild.
 build: project
-	xcodebuild -project qlm.xcodeproj -scheme qlm -configuration $(CONFIG) \
-	    -derivedDataPath build/DerivedData $(ARGS) build
+	$(XCODEBUILD) -scheme qlm -configuration $(CONFIG) $(ARGS) build
 
 # The command-line tool, qlmctl.
 cli: project
-	xcodebuild -project qlm.xcodeproj -scheme qlmctl -configuration $(CONFIG) \
-	    -derivedDataPath build/DerivedData $(ARGS) build
+	$(XCODEBUILD) -scheme qlmctl -configuration $(CONFIG) $(ARGS) build
 
 # The unit tests, in Debug.
 test: project
 	xcodebuild -project qlm.xcodeproj -scheme qlm -configuration Debug \
-	    -derivedDataPath build/DerivedData $(ARGS) test
+	    -derivedDataPath $(DERIVED_DATA) $(ARGS) test
+
+# Build qlm.app and qlmctl in Release, sign them, and install them. A qlm
+# running from $(APPDIR) is asked to quit first, and never killed.
+install: project
+	$(XCODEBUILD) -scheme qlm -configuration Release $(SIGNING) $(ARGS) build
+	$(XCODEBUILD) -scheme qlmctl -configuration Release $(SIGNING) $(ARGS) build
+	codesign --verify --strict $(PRODUCTS)/qlm.app $(PRODUCTS)/qlmctl
+	tools/quit-app.sh "$(INSTALLED_APP)"
+	mkdir -p "$(APPDIR)" "$(DESTDIR)$(BINDIR)"
+	rm -rf "$(INSTALLED_APP)"
+	ditto $(PRODUCTS)/qlm.app "$(INSTALLED_APP)"
+	install -m 755 $(PRODUCTS)/qlmctl "$(INSTALLED_CLI)"
+	@plist="$(INSTALLED_APP)/Contents/Info.plist"; \
+	    echo "Installed qlm $$(plutil -extract CFBundleShortVersionString raw -o - "$$plist")" \
+	    "($$(plutil -extract CFBundleVersion raw -o - "$$plist")), signed $(SIGNED_AS), in $(APPDIR)," \
+	    "and qlmctl in $(DESTDIR)$(BINDIR)."
+
+# Ask qlm to quit, then remove qlm.app and qlmctl. The settings stay.
+uninstall:
+	tools/quit-app.sh "$(INSTALLED_APP)"
+	rm -rf "$(INSTALLED_APP)"
+	rm -f "$(INSTALLED_CLI)"
 
 # Open the generated project in Xcode.
 open: project

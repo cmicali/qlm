@@ -17,9 +17,34 @@ make test      # the unit tests
 
 `vibe-libs/` is [vibe-libs](https://github.com/cmicali/vibe-libs), a git submodule. `make project` fetches it.
 
+## Installing
+
+`make install` builds the app and `qlmctl` in Release, signs them, and installs them.
+
+```
+make install     # qlm.app in /Applications, and qlmctl in ~/.local/bin
+make uninstall   # quit qlm, then remove both
+```
+
+- **Signing.** It signs with your Apple Development certificate if the keychain has a valid one, and ad hoc if not. `SIGN_IDENTITY=-` forces ad hoc. With a certificate, macOS keeps what you allowed qlm across installs. Ad hoc, it can ask again after each install.
+- **A running qlm.** If qlm runs from `/Applications`, `make install` asks it to quit and waits. It never kills it. If qlm asks before it quits, answer it.
+- **qlmctl** goes in `~/.local/bin`, so it needs no sudo. Put that folder on your `PATH`, or set `BINDIR`. `DESTDIR` stages the whole install in another folder.
+- **Before you uninstall**, turn off "Open qlm at login" in Settings, since macOS keeps a login item after its app is gone. `make uninstall` leaves qlm's settings.
+
+qlm is a menu bar item, with no Dock icon. At its first launch, macOS asks whether qlm may read your Documents folder, where GLM keeps its setup files. It asks about notifications the first time qlm has one, such as a monitor dropping off. Nothing else asks: the adapter needs no Input Monitoring, and Gatekeeper doesn't stop a build made on this Mac. "Open qlm at login" may need your approval under Login Items in System Settings, and Settings then shows a button that opens it.
+
 ## The app
 
-The menu bar app runs on a fake bus until you turn on "Drive the real monitors through the GLM adapter" in Settings. It caps every volume at the ceiling set there. When GLM holds the adapter, it offers to quit GLM. On the real monitors, it asks before a quit that would make them louder. It refuses any group with a model whose filter design rate is unverified, and has no way around that.
+The menu bar app runs on a fake bus until you turn on "Drive the real monitors through the GLM adapter" in Settings. It caps every volume at the ceiling set there. When GLM holds the adapter, it offers to quit GLM. On the real monitors, it asks before a quit that would make them louder. It refuses any group with a model whose filter design rate is unverified, and has no way around that. Today that's any group with an 8351B. The app says so, and sends nothing, so while every group in your setup has an 8351B, the app switches no group.
+
+### Driving the real monitors
+
+The app is new to the real adapter, so turn the setting on at a low level, one monitor first:
+
+1. In Settings, set the ceiling to −40 dB or lower, and press Return. The field saves only then. The default is −20 dB. No volume goes out above the ceiling.
+2. Turn the knob all the way down. The ceiling doesn't reach the knob, and when qlm quits or the Mac sleeps, the adapter takes over at the knob's level.
+3. In GLM, put every monitor but one in standby. Then quit GLM, since qlm drives nothing while GLM runs. Leave "Wake the monitors" off.
+4. Turn the setting on.
 
 ## qlmctl
 
