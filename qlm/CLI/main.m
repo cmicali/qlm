@@ -225,16 +225,6 @@ static unsigned long QLMHardwareIDNumber(NSData *hardwareID) {
     return hardwareID.length == 3 ? (unsigned long)bytes[0] << 16 | (unsigned long)bytes[1] << 8 | bytes[2] : 0;
 }
 
-static void QLMPrintKnob(QLMAdapterState *adapter) {
-    if (!adapter.hasStatus) {
-        printf("knob      ?\n");
-    } else if (adapter.knobTenths == nil) {
-        printf("knob      none%s\n", QLMStaleText(adapter).UTF8String);
-    } else {
-        printf("knob      in, at %.1f dB%s\n", adapter.knobTenths.doubleValue / 10.0, QLMStaleText(adapter).UTF8String);
-    }
-}
-
 static int QLMInfo(int argc, const char *argv[]) {
     NSDictionary<NSString *, NSString *> *given = QLMReadQuery(argc, argv);
     if (given == nil) {
@@ -262,7 +252,7 @@ static int QLMInfo(int argc, const char *argv[]) {
     printf("serial    %s\n", adapter.serialNumber.UTF8String ?: "?");
     NSString *systemInfo = [adapter.systemInfo stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
     printf("system    %s\n", systemInfo.UTF8String ?: "?");
-    QLMPrintKnob(adapter);
+    printf("knob      %s\n", QLMKnobText(adapter).UTF8String);
     printf("mic       %s\n", QLMMicText(adapter).UTF8String);
     if (!adapter.identified) {
         fputs("qlmctl: the adapter did not answer every query\n", stderr);
@@ -359,11 +349,9 @@ static int QLMPoll(int argc, const char *argv[]) {
             return;
         }
         double elapsed = [[NSDate date] timeIntervalSinceDate:start];
-        NSNumber *tenths = snapshot.adapter.knobTenths;
-        NSString *knob = tenths != nil ? [NSString stringWithFormat:@"knob at %.1f dB", tenths.doubleValue / 10.0] : @"no knob";
-        knob = [knob stringByAppendingString:QLMStaleText(snapshot.adapter)];
+        NSString *knob = QLMKnobText(snapshot.adapter);
         if (snapshot.adapter.hasStatus && ![knob isEqualToString:lastKnob]) {
-            printf("%7.2f s  %s\n", elapsed, knob.UTF8String);
+            printf("%7.2f s  knob %s\n", elapsed, knob.UTF8String);
             lastKnob = knob;
         }
         NSString *mic = QLMMicText(snapshot.adapter);

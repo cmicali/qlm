@@ -803,12 +803,13 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertNil(snapshot.adapter.micDD);
 }
 
-// The mic in with neither reading, 32 34 alone, a shape no capture has. The
-// readings are nil, not 0.
-- (void)testCarriesNoReadingsWhenTheReplyLacksThem {
+// The mic in with neither reading, 32 34 alone, then with DE alone: shapes no
+// capture has. A missing reading is nil, not 0.
+- (void)testCarriesNoReadingWhenTheReplyLacksIt {
     _settings.discoversMonitors = NO;
+    _settings.adapterPollInterval = 0.02;
     [_bus perform:^{
-        self->_bus.micWithoutReadings = YES;
+        self->_bus.micIn = YES;
     }];
     [self startSystem];
     QLMSnapshot *snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
@@ -816,6 +817,15 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertTrue(snapshot.adapter.micPresent);
     XCTAssertNil(snapshot.adapter.micDE);
+    XCTAssertNil(snapshot.adapter.micDD);
+    snapshot = [self waitForSnapshot:^BOOL(QLMSnapshot *received) {
+        return received.adapter.micDE != nil;
+    } after:^{
+        [self->_bus perform:^{
+            self->_bus.micDE = @5;
+        }];
+    }];
+    XCTAssertEqualObjects(snapshot.adapter.micDE, @5);
     XCTAssertNil(snapshot.adapter.micDD);
 }
 

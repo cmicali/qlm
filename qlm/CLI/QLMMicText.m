@@ -1,22 +1,30 @@
 #import "QLMMicText.h"
 
+static NSString *QLMStale(NSString *text, QLMAdapterState *adapter) {
+    NSUInteger missed = adapter.missedPolls;
+    if (missed == 0) {
+        return text;
+    }
+    return [text stringByAppendingFormat:@" (stale, %lu poll%s missed)", (unsigned long)missed, missed == 1 ? "" : "s"];
+}
+
+NSString *QLMKnobText(QLMAdapterState *adapter) {
+    if (!adapter.hasStatus) {
+        return @"?";
+    }
+    NSNumber *tenths = adapter.knobTenths;
+    return QLMStale(tenths != nil ? [NSString stringWithFormat:@"in, at %.1f dB", tenths.doubleValue / 10.0] : @"none", adapter);
+}
+
 NSString *QLMMicText(QLMAdapterState *adapter) {
     if (!adapter.hasStatus) {
         return @"?";
     }
     NSString *text = @"none";
-    if (adapter.micPresent && adapter.micDE == nil && adapter.micDD == nil) {
-        text = @"in, no readings";
-    } else if (adapter.micPresent) {
-        text = [NSString stringWithFormat:@"in, DE %@, DD %@", adapter.micDE ?: @"?", adapter.micDD ?: @"?"];
+    if (adapter.micPresent) {
+        text = adapter.micDE == nil && adapter.micDD == nil
+                   ? @"in, no readings"
+                   : [NSString stringWithFormat:@"in, DE %@, DD %@", adapter.micDE ?: @"?", adapter.micDD ?: @"?"];
     }
-    return [text stringByAppendingString:QLMStaleText(adapter)];
-}
-
-NSString *QLMStaleText(QLMAdapterState *adapter) {
-    NSUInteger missed = adapter.missedPolls;
-    if (missed == 0) {
-        return @"";
-    }
-    return [NSString stringWithFormat:@" (stale, %lu poll%s missed)", (unsigned long)missed, missed == 1 ? "" : "s"];
+    return QLMStale(text, adapter);
 }

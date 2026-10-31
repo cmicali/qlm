@@ -162,14 +162,15 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
     case 0x08: {
         uint8_t bytes[QLMPayloadMax] = {0x09};
         size_t length = 1;
-        if (_micWithoutReadings) {
+        if (_micIn || _micDE != nil || _micDD != nil) {
             bytes[length++] = 0x32;
             bytes[length++] = 0x34;
-        } else if (_micDE != nil && _micDD != nil) {
-            bytes[length++] = 0x32;
-            bytes[length++] = 0x34;
-            length = QLMFakePutField(bytes, length, 0xDE, _micDE.unsignedIntValue);
-            length = QLMFakePutField(bytes, length, 0xDD, _micDD.unsignedIntValue);
+            if (_micDE != nil) {
+                length = QLMFakePutField(bytes, length, 0xDE, _micDE.unsignedIntValue);
+            }
+            if (_micDD != nil) {
+                length = QLMFakePutField(bytes, length, 0xDD, _micDD.unsignedIntValue);
+            }
         } else {
             bytes[length++] = 0x33;
         }

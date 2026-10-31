@@ -6,7 +6,8 @@
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
 
-// The mic as qlmctl's info and poll print it, from System on a replay. The
+// The mic, and the knob's staleness, as qlmctl's info and poll print them,
+// from System on a replay. The
 // readings' meaning is unconfirmed (docs/adapter-status.md), so they print as
 // raw counts.
 @interface QLMMicTextTests : XCTestCase
@@ -63,14 +64,15 @@
     XCTAssertEqualObjects(QLMMicText(adapter), @"in, DE 5, DD ?");
 }
 
-// After a missed 01 08, the line shows the last status read, and says so.
-- (void)testMarksTheReadingsStaleAfterAMissedPoll {
+// After a missed 01 08, the knob and mic lines show the last status read,
+// and say so. startup-idle-mic's knob reads -775 at 7.31 s.
+- (void)testMarksBothLinesStaleAfterAMissedPoll {
     QLMAdapterState *adapter = [self adapterAfterFirstPollOf:@"startup-idle-mic"];
-    XCTAssertEqualObjects(QLMStaleText(adapter), @"");
+    XCTAssertEqualObjects(QLMKnobText(adapter), @"in, at -77.5 dB");
     adapter.missedPolls = 1;
     XCTAssertEqualObjects(QLMMicText(adapter), @"in, DE 464255904, DD 2248271 (stale, 1 poll missed)");
     adapter.missedPolls = 3;
-    XCTAssertEqualObjects(QLMStaleText(adapter), @" (stale, 3 polls missed)");
+    XCTAssertEqualObjects(QLMKnobText(adapter), @"in, at -77.5 dB (stale, 3 polls missed)");
 }
 
 @end
