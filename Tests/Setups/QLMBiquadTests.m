@@ -5,8 +5,8 @@
 // Sources: the hlm protocol spec, revision 13. Section 5 gives the bypass
 // bytes and the slot rates, Appendix A.2 the sign flip, A.3 the RBJ forms
 // with Q 0.3 and 0.5 for the shelves, and A.4 the zero-gain bypass. The
-// captured slots come from captures/group-switch-main-2x1-main-4x2 and
-// group-switch-main-2x2-main-2x1.
+// captured slots come from captures/group-switch-main-2x1-main-4x2,
+// group-switch-main-2x2-main-2x1, and setup-b-peq-8351b.
 @interface QLMBiquadTests : XCTestCase
 @end
 
@@ -121,6 +121,19 @@
     [self assertBiquad:shelf packsTo:@"38 AB 6E 3F 22 65 DE BF F3 89 4E 3F 08 22 EF 3F F6 AE 5E BF"];
     QLMBiquad twoWayQ = QLMBiquadHighShelf(649.91, -0.63, QLMBiquadHighShelfQ, 96000);
     XCTAssertGreaterThan(fabs(twoWayQ.a1 - shelf.a1), 0.04);
+}
+
+// The Left 8351B's four shelves in setup-b-peq-8351b's setups/2.sam went to
+// 00 to 03 in the pass from 300.007 s, and live as they were edited: low
+// shelves at 60 Hz +3 dB and 150 Hz -4 dB, and high shelves at 3000 Hz
+// +2 dB and 8000 Hz -5 dB. The 8 kHz shelf went to 03 at 265.754 s and
+// 300.029 s. It alone decides that w0 is a float: designed from a w0 in
+// double, it misses GLM's by a bit or more in b1, b2, a1, and a2.
+- (void)testShelvesTakeAFloatW0 {
+    [self assertBiquad:QLMBiquadLowShelf(60, 3, QLMBiquadLowShelfQ, 96000) packsTo:@"E8 24 80 3F 63 78 FE BF 29 A8 7C 3F 7B 78 FE 3F CD F1 7C BF"];
+    [self assertBiquad:QLMBiquadLowShelf(150, -4, QLMBiquadLowShelfQ, 96000) packsTo:@"49 0C 7F 3F 5B 5F FB BF 5B B7 77 3F A3 5E FB 3F 15 C5 76 BF"];
+    [self assertBiquad:QLMBiquadHighShelf(3000, 2, QLMBiquadThreeWayHighShelfQ, 96000) packsTo:@"39 64 9C 3F 03 29 EB BF A4 BD 25 3F 62 5F BA 3F A3 E5 F9 BE"];
+    [self assertBiquad:QLMBiquadHighShelf(8000, -5, QLMBiquadThreeWayHighShelfQ, 96000) packsTo:@"66 95 27 3F F9 7A 0E BF D5 2F A2 3C 30 8E 84 3F 34 21 1D BE"];
 }
 
 @end

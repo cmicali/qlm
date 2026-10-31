@@ -27,11 +27,20 @@ QLMBiquad QLMBiquadPeak(double frequency, double gainDecibels, double q, double 
     return QLMBiquadNormalize(1 + alpha * A, -2 * c, 1 - alpha * A, 1 + alpha / A, -2 * c, 1 - alpha / A);
 }
 
+// TRAP: GLM's shelf takes a float w0. One captured shelf decides it: from a
+// w0 in double, the 8 kHz -5 dB high shelf misses GLM's by a bit or more in
+// four of its five coefficients. This w0 matches it and every other
+// captured shelf. So does a w0 computed in float arithmetic, which
+// differs elsewhere, so that form isn't ruled out.
+static double QLMShelfW0(double frequency, double sampleRate) {
+    return (float)(2 * M_PI * frequency / sampleRate);
+}
+
 QLMBiquad QLMBiquadLowShelf(double frequency, double gainDecibels, double q, double sampleRate) {
     if (gainDecibels == 0) {
         return QLMBiquadBypass();
     }
-    double w0 = 2 * M_PI * frequency / sampleRate;
+    double w0 = QLMShelfW0(frequency, sampleRate);
     double A = pow(10, gainDecibels / 40);
     double alpha = sin(w0) / (2 * q);
     double c = cos(w0);
@@ -44,7 +53,7 @@ QLMBiquad QLMBiquadHighShelf(double frequency, double gainDecibels, double q, do
     if (gainDecibels == 0) {
         return QLMBiquadBypass();
     }
-    double w0 = 2 * M_PI * frequency / sampleRate;
+    double w0 = QLMShelfW0(frequency, sampleRate);
     double A = pow(10, gainDecibels / 40);
     double alpha = sin(w0) / (2 * q);
     double c = cos(w0);

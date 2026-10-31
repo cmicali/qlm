@@ -61,9 +61,10 @@ static NSData *QLMHex(NSString *hex) {
 // the repository's root, the group, and a window of the capture's seconds.
 // Its passes are every DSP pass in the window, in order, as session and node
 // serial. A monitor that wakes into the group is leased again and gets a
-// second pass at its new session. At startup GLM sends every node its
-// block, off ones included. A capture of setups/N.sam snapshots takes one
-// row per snapshot, its window from that step's apply to the next's.
+// second pass at its new session, and GLM may cut the first one short. At
+// startup GLM sends every node its block, off ones included. A capture of
+// setups/N.sam snapshots takes one row per apply, against the snapshot
+// GLM applied, its window from that apply to the next's.
 static const struct {
     const char *capture;
     const char *setup;
@@ -84,6 +85,26 @@ static const struct {
      "03:1000002 06:1000003 05:1000006"},
     {"group-switch-main-4x2-main-2x2", "Tests/Setups/Fixtures/Main.sam", "Main 2x2", 0, INFINITY,
      "03:1000002 06:1000003 05:1000006 07:1000007"},
+    {"setup-a-baseline", "captures/setup-a-baseline/setups/0.sam", "Main 2x1", 0, 45,
+     "03:1000002 06:1000003 05:1000006"},
+    {"setup-a-baseline", "captures/setup-a-baseline/setups/0.sam", "Main 4x2", 45, INFINITY,
+     "03:1000002 06:1000003 05:1000006 07:1000007 08:1000005 09:1000004 0A:1000007"},
+    {"setup-b-peq-8351b", "captures/setup-b-peq-8351b/setups/0.sam", "Main 4x2", 0, 170,
+     "0B:1000005 0C:1000002 0D:1000004 0E:1000006 0F:1000003 10:1000007"},
+    {"setup-b-peq-8351b", "captures/setup-b-peq-8351b/setups/1.sam", "Main 2x1", 170, 181,
+     "0C:1000002 0F:1000003 0E:1000006"},
+    {"setup-b-peq-8351b", "captures/setup-b-peq-8351b/setups/1.sam", "Main 4x2", 181, 290,
+     "0C:1000002 0F:1000003 0D:1000004 0B:1000005 0E:1000006 10:1000007 11:1000005 12:1000004 13:1000007"},
+    {"setup-b-peq-8351b", "captures/setup-b-peq-8351b/setups/2.sam", "Main 2x1", 290, 299,
+     "0C:1000002 0F:1000003 0E:1000006"},
+    {"setup-b-peq-8351b", "captures/setup-b-peq-8351b/setups/2.sam", "Main 4x2", 299, INFINITY,
+     "0C:1000002 0F:1000003 12:1000004 11:1000005 0E:1000006 13:1000007 14:1000005 15:1000004 16:1000007"},
+    {"setup-j-restore", "Tests/Setups/Fixtures/Main.sam", "Main 4x2", 0, 34.2,
+     "0C:1000002 0E:1000006 0F:1000003 14:1000005 15:1000004 16:1000007"},
+    {"setup-j-restore", "Tests/Setups/Fixtures/Main.sam", "Main 4x2", 34.2, 40,
+     "0C:1000002 0F:1000003 15:1000004 14:1000005 0E:1000006 16:1000007"},
+    {"setup-j-restore", "Tests/Setups/Fixtures/Main.sam", "Main 2x1", 40, INFINITY,
+     "0C:1000002 0F:1000003 0E:1000006"},
     {"knob-sweep", "Tests/Setups/Fixtures/Main.sam", "Main 2x1", 0, INFINITY,
      "02:1000005 03:1000002 04:1000004 05:1000006 06:1000003 07:1000007"},
     {"standby-wake", "Tests/Setups/Fixtures/Main.sam", "Main 4x2", 0, INFINITY,
@@ -145,16 +166,22 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
 }
 
 // Every captured pass matches its node's block, setting for setting, and
-// no other node's. What qlm leaves out is exactly its class's extras. Where
-// the capture holds the session's reply to 39, its model is the node's.
+// no other node's. A pass GLM cut short matches the block's start, and
+// only the 7350A's two in setup-b-peq-8351b are. What qlm leaves out is
+// exactly its class's extras. Where the capture holds the session's reply
+// to 39, its model is the node's.
 - (void)testEveryCapturedPassMatchesItsBlock {
     NSUInteger payloads = 0;
     NSUInteger identified = 0;
+    NSMutableArray<NSString *> *cut = [NSMutableArray array];
     NSArray<QLMGoldenPass *> *passes = [self passes];
     for (QLMGoldenPass *pass in passes) {
         if (pass.captured.model != nil) {
             XCTAssertEqualObjects(pass.captured.model, [pass.setup deviceWithSerial:pass.node.serial].model, @"%@", pass);
             identified += 1;
+        }
+        if (pass.captured.cutShort) {
+            [cut addObject:pass.description];
         }
         for (QLMSetupNode *node in pass.group.nodes) {
             NSError *error = nil;
@@ -170,9 +197,10 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
         }
         payloads += pass.captured.payloads.count;
     }
-    XCTAssertEqual(passes.count, 73u);
-    XCTAssertEqual(payloads, 2467u);
-    XCTAssertEqual(identified, 44u);
+    XCTAssertEqual(passes.count, 128u);
+    XCTAssertEqual(payloads, 4277u);
+    XCTAssertEqual(identified, 92u);
+    XCTAssertEqualObjects(cut, (@[@"setup-b-peq-8351b at 183.450 s", @"setup-b-peq-8351b at 300.973 s"]));
 }
 
 // compare-apply's match. Given the row's group, it finds for each pass the
@@ -198,12 +226,11 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
 }
 
 // S7's rule. Every generator stop GLM sent in a row's window is the same 14
-// bytes, 85 of them, as docs/refused-frames.md counts. Each pass has one or
-// more since its
-// session's last pass: at launch and wake right before 17 01, and in a
-// switch in the routing pass. A switch also stops the monitors off in the
-// new group, which then get no pass, and a monitor may get two before one
-// pass, so the rule counts no exact number per pass.
+// bytes, 154 of them, as docs/refused-frames.md counts. Each pass has one or
+// more since its session's last pass: at launch and wake right before
+// 17 01, and in a switch in the routing pass. A switch also stops the
+// monitors off in the new group, which then get no pass, and a monitor may
+// get two before one pass, so the rule counts no exact number per pass.
 - (void)testEveryGeneratorStopIsTheKnownOne {
     for (QLMGoldenPass *pass in [self passes]) {
         XCTAssertGreaterThan(pass.captured.generatorStops.count, 0u, @"%@", pass);
@@ -218,7 +245,7 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
             stops += 1;
         }
     }
-    XCTAssertEqual(stops, 85u);
+    XCTAssertEqual(stops, 154u);
 }
 
 // A two-way's pass is its block in order, the 8351B's two extras aside: 43
@@ -249,10 +276,11 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
         }
         checked += 1;
     }
-    XCTAssertEqual(checked, 47u);
+    XCTAssertEqual(checked, 83u);
 }
 
-// A subwoofer's pass is its block in order, frame for frame.
+// A subwoofer's pass is its block in order, frame for frame. One cut short
+// is the block's start.
 - (void)testSubwooferPassesAreTheBlockInOrder {
     NSUInteger checked = 0;
     for (QLMGoldenPass *pass in [self passes]) {
@@ -260,10 +288,14 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
             continue;
         }
         NSArray<NSData *> *mine = [QLMDSPBlock blockForNode:pass.node inGroup:pass.group error:NULL].payloads;
+        if (pass.captured.cutShort) {
+            XCTAssertLessThan(pass.captured.payloads.count, mine.count, @"%@", pass);
+            mine = [mine subarrayWithRange:NSMakeRange(0, MIN(pass.captured.payloads.count, mine.count))];
+        }
         XCTAssertEqualObjects(pass.captured.payloads, mine, @"%@", pass);
         checked += 1;
     }
-    XCTAssertEqual(checked, 26u);
+    XCTAssertEqual(checked, 45u);
 }
 
 // GLM floors the level word. Four captured levels tell floor from round,
@@ -340,7 +372,7 @@ static QLMSetupNode *QLMNodeAtRate(QLMSetupNode *node, double sampleRate) {
             }
         }
     }
-    XCTAssertEqual(filters.count, 41u);
+    XCTAssertEqual(filters.count, 49u);
 }
 
 @end

@@ -18,6 +18,7 @@ const int QLMCompareApplyDiffers = 1;
 @property (nonatomic, readwrite) NSArray<NSData *> *generatorStops;
 @property (nonatomic, readwrite, nullable) NSString *model;
 @property (nonatomic, readwrite, nullable) NSData *hardwareID;
+@property (nonatomic, readwrite) BOOL cutShort;
 @end
 
 @implementation QLMCapturedPass
@@ -48,7 +49,6 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
     NSMutableDictionary<NSNumber *, NSString *> *models = [NSMutableDictionary dictionary];
     QLMCapturedPass *open = nil;
     NSMutableArray<NSData *> *openPayloads = nil;
-    BOOL synced = NO;
     for (QLMCaptureExchange *exchange in capture.exchanges) {
         QLMMessage message = exchange.message;
         const uint8_t *payload = message.payload;
@@ -75,22 +75,22 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
             openPayloads = [NSMutableArray array];
             open.payloads = openPayloads;
             open.generatorStops = stops[@(message.address)] ?: @[];
+            open.cutShort = YES;
             [stops removeObjectForKey:@(message.address)];
             if (exchange.time >= from && exchange.time < to) {
                 [passes addObject:open];
             }
-            synced = NO;
         }
         if (open == nil || message.address != open.session) {
             continue;
         }
-        if (synced && payload[0] != 0x40) {
+        if (!open.cutShort && payload[0] != 0x40) {
             open = nil;
             continue;
         }
         if (QLMIsDSPOpcode(payload[0])) {
             [openPayloads addObject:QLMPayloadOf(message)];
-            synced = synced || payload[0] == 0x3D;
+            open.cutShort = open.cutShort && payload[0] != 0x3D;
         }
     }
     for (QLMCapturedPass *pass in passes) {
@@ -153,23 +153,29 @@ static NSData *QLMSettingKey(NSData *payload) {
 @implementation QLMBlockComparison
 
 + (instancetype)comparisonOfBlock:(QLMDSPBlock *)block withPass:(QLMCapturedPass *)pass {
-    NSMutableDictionary<NSData *, NSData *> *expected = [NSMutableDictionary dictionary];
-    for (NSData *payload in block.payloads) {
-        expected[QLMSettingKey(payload)] = payload;
-    }
     NSArray<NSData *> *extras = block.leftOutPayloads;
-    NSMutableArray<NSArray<NSData *> *> *changed = [NSMutableArray array];
-    NSMutableSet<NSData *> *changedSeen = [NSMutableSet set];
-    NSMutableOrderedSet<NSData *> *glmOnly = [NSMutableOrderedSet orderedSet];
     NSMutableOrderedSet<NSData *> *leftOut = [NSMutableOrderedSet orderedSet];
-    NSMutableSet<NSData *> *seen = [NSMutableSet set];
     NSMutableArray<NSData *> *kept = [NSMutableArray array];
     for (NSData *payload in pass.payloads) {
         if ([extras containsObject:payload]) {
             [leftOut addObject:payload];
-            continue;
+        } else {
+            [kept addObject:payload];
         }
-        [kept addObject:payload];
+    }
+    NSArray<NSData *> *payloads = block.payloads;
+    if (pass.cutShort && kept.count < payloads.count) {
+        payloads = [payloads subarrayWithRange:NSMakeRange(0, kept.count)];
+    }
+    NSMutableDictionary<NSData *, NSData *> *expected = [NSMutableDictionary dictionary];
+    for (NSData *payload in payloads) {
+        expected[QLMSettingKey(payload)] = payload;
+    }
+    NSMutableArray<NSArray<NSData *> *> *changed = [NSMutableArray array];
+    NSMutableSet<NSData *> *changedSeen = [NSMutableSet set];
+    NSMutableOrderedSet<NSData *> *glmOnly = [NSMutableOrderedSet orderedSet];
+    NSMutableSet<NSData *> *seen = [NSMutableSet set];
+    for (NSData *payload in kept) {
         NSData *key = QLMSettingKey(payload);
         NSData *mine = expected[key];
         if (mine == nil) {
@@ -183,14 +189,14 @@ static NSData *QLMSettingKey(NSData *payload) {
         }
     }
     NSMutableOrderedSet<NSData *> *qlmOnly = [NSMutableOrderedSet orderedSet];
-    for (NSData *payload in block.payloads) {
+    for (NSData *payload in payloads) {
         if (![seen containsObject:QLMSettingKey(payload)]) {
             [qlmOnly addObject:payload];
         }
     }
     NSMutableArray<NSData *> *missing = [NSMutableArray array];
     for (NSData *extra in extras) {
-        if (![leftOut containsObject:extra]) {
+        if (!pass.cutShort && ![leftOut containsObject:extra]) {
             [missing addObject:extra];
         }
     }
@@ -201,7 +207,7 @@ static NSData *QLMSettingKey(NSData *payload) {
     comparison.leftOut = leftOut.array;
     comparison.missingLeftOut = missing;
     comparison.qlmOnly = qlmOnly.array;
-    comparison.inOrder = [kept isEqualToArray:block.payloads];
+    comparison.inOrder = [kept isEqualToArray:payloads];
     return comparison;
 }
 
@@ -364,7 +370,7 @@ static void QLMPrintMatch(FILE *out, QLMPassMatch *match, QLMSetup *setup) {
         fprintf(out, "%s, but session %02X's pass at %.3f s took this node first\n",
                 comparison.matches ? "the same block" : "closest", match.earlierPass.session, match.earlierPass.time);
     } else if (comparison.matches) {
-        fprintf(out, "matches\n");
+        fprintf(out, pass.cutShort ? "cut short by GLM, and matches the block's start\n" : "matches\n");
     } else if (comparison.differenceCount == 0) {
         fprintf(out, "the same settings, not in GLM's order\n");
     } else {

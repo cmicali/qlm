@@ -22,6 +22,24 @@ GLM drives the bus the whole time, and qlm sends nothing, so AGENTS.md's bus rul
 
 S7 decides what qlm does with opcode `05`. GLM sends the same 14 bytes at the top of every monitor's block, in every capture so far.[^stop] If no setting moves them, the frame is a fixed reset, and allowing exactly those bytes in an apply is the owner's call. If a setting does move them, the frame carries something, and we decode that first.
 
+## What the first session settled
+
+The owner ran the short form on 2026-10-31: Parts A, B, and J. Part G didn't run, as [its section](#part-g-the-8351bs-own-fields) says. Each capture's `notes.md` has its steps.[^first-session]
+
+| # | After A, B, and J |
+| --- | --- |
+| S1 | Settled for the 8351B's peaking bands at 96 kHz. They match to the bit across frequency, from 25 Hz to 18 kHz, gain, from −20 dB to +6 dB, and Q, from 0.1 to 20.[^s1-bands] Its four shelves match too, now. One, 8000 Hz at −5 dB, missed by a bit in four of its five floats, until qlm took the shelf's w0 as a float.[^s1-shelf] That one shelf decides it. It matches a w0 rounded from double and one computed in float arithmetic, so the next capture needs the shelves under Part B. 48 kHz and 12 kHz wait for Parts C and D. |
+| S2 to S6 | Open. Parts C to I haven't run. |
+| S7 | Holds for 69 more stops, 154 in all, every one the known 14 bytes.[^s7] |
+
+The captures also showed how GLM behaves while you edit:
+
+- **It sends a band as you edit it.** Each change goes out at once, as one `10 0E` to the monitor's session, outside any block. Confirming the editor sends the monitor its level, its delay, and `10 01 09`, and no block. The block follows at the next group switch.[^live]
+- **It moves fields of its own when the editor saves.** It rounds `Level_Sensitivity` to the value the editor shows, −0.17 to −0.2. It bumps `CalibrationStatusFlag`, 3 to 4. And each band you touch keeps one decimal of frequency and Q.[^own-fields]
+- **Its editor has limits.** A plain notch, with no "+", is cut only. Q runs from 0.1 to 20, and the deepest cut is −20 dB. Above +6 dB of total boost, GLM warns, but takes the values.[^limits]
+- **It cuts a pass short to lease a monitor again.** A monitor that wakes into the group mid-apply takes a new session. GLM stops that monitor's pass, and sends the whole block at the new one.[^cut]
+- **Once, it broadcast a bare `03`, woke the system, and leased every monitor again.** The owner made no change then. [refused-frames.md](refused-frames.md#broadcast-03) has it.
+
 ## How a part runs
 
 Each part is one capture of GLM, on a fresh copy of Main.sam. A step changes one thing, or one group of bands on one monitor, and has GLM apply it.
@@ -132,6 +150,7 @@ Part B changes only the Left 8351B. The Right stays as it was, so the same captu
    - one boosted, if GLM allows a boost;
    - one set to 0 dB, which should go out as `1, 0, 0, 0, 0`.
 2. B2, the shelves. Move both low shelves and both high shelves to new frequencies and gains, one of each pair cut and one boosted.
+3. In the next capture, B3, the high shelves at 5000, 10000, 11000, 13000, and 15000 Hz, each at −5 dB, one per step, at 96 kHz. A w0 rounded from double and one computed in float arithmetic give different coefficients at each. So these tell which GLM uses (protocol.md's open question 20).
 
 Each band is checked on its own, so one step can change several. The one rule is that each band's settings are known from the snapshot.
 
@@ -164,6 +183,8 @@ Main 4x2 crosses over at 85 Hz, and GLM sends `3B 00 55`. Main 2x1 crosses over 
 The diff after F1 to F3 shows whether GLM moves the two rates along with the crossover.
 
 ## Part G: the 8351B's own fields
+
+> **Not run on 2026-10-31.** GLM 5.2.1 shows no control for `GroupDelayCompensation` or `BassExtensionXO(Hz)` outside the group definition. The group definition's "Extended Phase Linearity" switch is the likely owner of `GroupDelayCompensation`, and changing it needs a recalibration. So Part G needs [the file-edit route](#when-glm-doesnt-show-a-setting), or a session with a recalibration.
 
 This part matters most. GLM sends two frames to the 8351Bs that qlm leaves out, always with the same bytes. `43 00 02` follows the level pair, before the PEQ slots. `4B 00 00 00 01` follows `3B`.[^43-4b] The 8351B's node has two fields the 8330A's lacks, and both hold the same value in every group: `GroupDelayCompensation:2` and `BassExtensionXO(Hz):1`. Our guess is that `43` carries the first and `4B` the second. Against that, the 7350A has `GroupDelayCompensation:2` too, and gets no `43`.
 
@@ -242,10 +263,18 @@ Then one PR adds the captures, and it's mostly data. `QLMDSPBlockGoldenTests` ch
 
 [^sr]: `Tests/Setups/Fixtures/Main.sam`. Every band of a `ThreewayGen2` node, the 8351B, has `SR:96000`. A `TwowayGen2`, the 8330A, has `SR:48000`, and a `SubwooferGen2` has `SR:12000`.
 [^bit-match]: `QLMDSPBlockGoldenTests`, over every DSP pass in the captures; [protocol.md](protocol.md).
-[^stop]: [refused-frames.md](refused-frames.md#05-04--the-generator-stop). It's `05 04 00 00 00 FF FF EA 00 01 90 00 02 DA`, 85 times in 12 captures.
+[^stop]: [refused-frames.md](refused-frames.md#05-04--the-generator-stop). It's `05 04 00 00 00 FF FF EA 00 01 90 00 02 DA`, 154 times in 15 captures.
 [^level]: [plan.md](plan.md#the-setup-file).
 [^delay]: [plan.md](plan.md#the-setup-file); #8.
 [^xo]: `startup-idle`, `3B 00 3C` at 8.723 s; `standby-wake`, `3B 00 55` at 46.775 s; [refused-frames.md](refused-frames.md).
 [^43-4b]: [refused-frames.md](refused-frames.md), on `43 00 02` and `4B 00 00 00 01`; `startup-idle`, from 8.650 s.
 [^lfe]: [refused-frames.md](refused-frames.md), on `3C`, `3E`, and `42`; `QLMDSPBlock`.
+[^first-session]: `captures/setup-a-baseline`, `setup-b-peq-8351b`, and `setup-j-restore`, and their notes.
+[^s1-bands]: `setup-b-peq-8351b`, snapshot `1`, the Main 4x2 apply at 182.460 s; `QLMDSPBlockGoldenTests`.
+[^s1-shelf]: `setup-b-peq-8351b`, slot `03` at 265.754 s, live from the editor, and at 300.029 s, in the pass; `testShelvesTakeAFloatW0`.
+[^s7]: `testEveryGeneratorStopIsTheKnownOne`: 15 in `setup-a-baseline`, 36 in `setup-b-peq-8351b`, and 18 in `setup-j-restore`.
+[^live]: `setup-b-peq-8351b`, 49.989 to 117.849 s and 230.501 to 265.754 s, and the confirms at 167.774 and 287.885 s.
+[^own-fields]: `setup-b-peq-8351b`, `setups/0.sam` against `setups/1.sam`.
+[^limits]: `setup-b-peq-8351b`'s notes.
+[^cut]: `setup-b-peq-8351b`, the 7350A at 183.450 and 300.973 s.
 [^compare]: The README's [compare-apply](../README.md#compare-apply) section, and `qlmctl help`, say how it matches a pass to a node, and what each exit code means.

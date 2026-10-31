@@ -101,6 +101,9 @@ Record each one on its own. Start every capture with the monitors on and GLM clo
 | `unplug` | With GLM open, unplug the adapter. Wait ten seconds. Plug it back in. |
 | `sleep-wake` | With GLM open, sleep the computer, wait a minute, wake it. Then check `pmset -g log` for an `Entering Sleep` line. A sleep that reaches only DarkWake leaves GLM running. |
 | `setup-<part>-<topic>` | GLM applying a copy of the setup with known changes. [docs/setup-captures.md](../docs/setup-captures.md) is the script. |
+| `setup-a-baseline` | Part A. On a fresh copy of Main.sam, switch to Main 2x1 and back. |
+| `setup-b-peq-8351b` | Part B. Change the Left 8351B's bands, then its shelves, and switch to Main 2x1 and back after each. |
+| `setup-j-restore` | Part J. Open Main.sam again, and switch to the group you use. |
 
 ## What Phase 0 must answer
 

@@ -13,8 +13,9 @@
 // qlmctl compare-apply. Its passes and comparison are the DSP block golden
 // tests', so these check the verb around them: its match on a capture and
 // the fixture, the one frame a changed band moves, a node two monitors
-// match, every generator stop, its window, and its exit codes. A setup or a
-// capture a test changes is a temporary file, never committed.
+// match, every generator stop, a pass GLM cut short, its window, and its
+// exit codes. A setup or a capture a test changes is a temporary file,
+// never committed.
 @interface QLMCompareApplyTests : XCTestCase
 @end
 
@@ -218,6 +219,44 @@ static QLMCapturedPass *QLMLeftPass(void) {
                   @"%@", output);
     XCTAssertTrue([output containsString:@"\n1 of 2 generator stops are the known"], @"%@", output);
     XCTAssertTrue([output containsString:@"\n1 of 1 pass match. 0 differ, and 1 generator stop differs.\n"], @"%@", output);
+}
+
+// GLM cut the 7350A's pass at session 10 short when it leased the monitor
+// again as 13. The short pass is the block's start, so it matches.
+- (void)testAPassGLMCutShortMatchesTheBlocksStart {
+    NSString *output = nil;
+    NSString *errors = nil;
+    int status = [self run:@[QLMRepositoryPath(@"captures/setup-b-peq-8351b/setups/1.sam"),
+                             QLMRepositoryPath(@"captures/setup-b-peq-8351b/reports.txt"), @"--group", @"Main 4x2", @"--from", @"181",
+                             @"--to", @"290"]
+                    output:&output
+                    errors:&errors];
+    XCTAssertEqual(status, 0, @"%@%@", output, errors);
+    XCTAssertTrue([output containsString:@" 183.450 s  session 10  7350A 1000007 \"Center 7350A\": cut short by GLM, and matches the block's start\n"],
+                  @"%@", output);
+    XCTAssertTrue([output containsString:@"\n9 of 9 passes match, apart from"], @"%@", output);
+}
+
+// A pass cut short still shows a frame it sent that differs, and no frame
+// past the cut.
+- (void)testACutPassStillShowsAChangedFrame {
+    NSArray<NSData *> *payloads = QLMLeftPass().payloads;
+    NSMutableArray<NSData *> *records = [NSMutableArray array];
+    for (NSUInteger i = 0; i < 10; i++) {
+        NSMutableData *payload = [payloads[i] mutableCopy];
+        if (i == 9) {
+            ((uint8_t *)payload.mutableBytes)[payload.length - 2] ^= 0x01;
+        }
+        [records addObject:QLMRecord(0x03, payload)];
+    }
+    NSString *output = nil;
+    NSString *errors = nil;
+    int status = [self run:@[QLMFixturePath(@"Main.sam"), [self captureOf:records], @"--group", @"Main 2x1"] output:&output errors:&errors];
+    XCTAssertEqual(status, QLMCompareApplyDiffers, @"%@%@", output, errors);
+    XCTAssertTrue([output containsString:@"session 03  8351B 1000002 \"Left\": 1 difference\n"], @"%@", output);
+    XCTAssertEqual([self lines:output starting:@"  GLM        10 0E 04"].count, 1u, @"%@", output);
+    XCTAssertEqual([self lines:output starting:@"  qlm only"].count, 0u, @"%@", output);
+    XCTAssertEqual([self lines:output starting:@"  not sent"].count, 0u, @"%@", output);
 }
 
 - (void)testTheWindowPicksThePasses {

@@ -209,7 +209,7 @@ Every frame starts with an address. A few are fixed: the broadcast, the adapter'
 
 | Address | What it is | Source |
 | --- | --- | --- |
-| `FF` | A host's broadcast. GLM sends the probe, the keep-alive, the volume, `2D 00`, `3D 00 00`, and the power steps to it. | hlm §3; the captures |
+| `FF` | A host's broadcast. GLM sends the probe, the keep-alive, the volume, `2D 00`, `3D 00 00`, and the power steps to it, and once a bare `03`. | hlm §3; the captures |
 | `F0` | The adapter's multicast. A host sends every lease to it. Standalone, the adapter sends its own volume and power steps on it. | hlm §3, §9; every lease in the captures |
 | `01` | The adapter. Every reply comes from `01`, and a host reaches the adapter itself at `01`. | hlm §3, §8; `startup-idle`, 7.293 s; `testEveryReplyReencodesByteForByte` |
 | `02` to `FE` | Session IDs, leased to monitors. qlm leases none of `7D`, `7E`, and `F0`. | hlm §3; `QLMAddressIsLeasable` |
@@ -255,6 +255,7 @@ GLM counts up from `02` at each launch, one per lease, in the order the monitors
 | GLM, after a replug | `08` to `0D` | `unplug-proxy-hang`, 107.137 s |
 | GLM, after a replug | `14` to `19` | `unplug`, 69.241 s |
 | GLM, after a wake | `12` to `17` | `standby-wake`, 47.378 s |
+| GLM, after a broadcast `03` and a wake | `0B` to `10`, counting on | `setup-b-peq-8351b`, 23.764 to 23.807 s |
 | qlm, at its first discovery | The six, at GLM's sessions | `qlm-first-discover`, 56.427 to 56.536 s |
 | qlm, at its wake within a run | Three monitors, at `06` to `08` | `qlm-control-first`, 828.326 to 828.371 s |
 | qlm, at each of two wakes within a run | All six, at `09` to `0E` | `qlm-control-all`, 575.835 to 575.934 s and 8482.674 to 8482.776 s |
@@ -270,6 +271,7 @@ A lease isn't permanent. A monitor loses it when it wakes, sometimes while it si
 | It joins a group from standby | It loses its lease. That's the 7350A in 2x1 to 2x2, both 8330A and the 7350A in 2x1 to 4x2, and both 8330A in 2x2 to 4x2. | The leases in `group-switch-main-2x1-main-2x2`, 10.418 s; `group-switch-main-2x1-main-4x2`, 36.254 to 36.457 s; and `group-switch-main-2x2-main-4x2`, 11.562 and 11.575 s |
 | It stays on through a switch | It keeps its session. The switches from 4x2 to 2x1, 4x2 to 2x2, and 2x2 to 2x1 lease nothing. | Each `group-switch-*` capture |
 | It sits in standby | It may drop its lease over and over. In `standby-wake`, the Right 8351B answered the probe every 3 s in standby, and GLM leased it `0E`, `0F`, `10`, and `11`. In `qlm-standby-discover`, no monitor did in GLM's 10 s of standby. | `standby-wake`, 37.365 to 45.959 s; `qlm-standby-discover` |
+| The host broadcasts `03`, then wakes the system | All six answered GLM's next probe, 1.5 s after their last poll, though all were on. The capture can't tell which frame dropped the leases. | `setup-b-peq-8351b`, 22.461 to 23.807 s; [refused-frames.md](refused-frames.md#broadcast-03) |
 | The host goes quiet | The monitors drop its leases. See below. | |
 
 Frames sent to a lost session get `01 7E`. GLM's block to a monitor that has just woken gets it, from the old session.[^lost-session]
@@ -311,7 +313,7 @@ So wait between hosts, to avoid the TRAP above: 1 minute with every monitor on, 
 
 ## Opcodes
 
-The opcode is the payload's first byte. This table has every opcode in the captures, and the ones qlm never sends. The qlm column says what qlm does with each: it sends it, or refuses it. "Sends" means GLMProtocol's allowlist accepts it and System sends it. The allowlist goes by opcode, with finer checks on `02`, `10`, `2D`, `3A`, `3C`, `3E`, and `42`.[^allowlist] A golden test pins the refused set: `05`, `43`, `4B`, and `22` and `51` to the adapter.[^refused-set] [refused-frames.md](refused-frames.md) has the story of each refused frame.
+The opcode is the payload's first byte. This table has every opcode in the captures, and the ones qlm never sends. The qlm column says what qlm does with each: it sends it, or refuses it. "Sends" means GLMProtocol's allowlist accepts it and System sends it. The allowlist goes by opcode, with finer checks on `02`, `10`, `2D`, `3A`, `3C`, `3E`, and `42`.[^allowlist] A golden test pins the refused set: `05`, `43`, `4B`, `22` and `51` to the adapter, and a broadcast `03`.[^refused-set] [refused-frames.md](refused-frames.md) has the story of each refused frame.
 
 Every frame qlm sent in its three runs on the adapter is one GLM sends.[^qlm-runs]
 
@@ -319,6 +321,7 @@ Every frame qlm sent in its three runs on the adapter is one GLM sends.[^qlm-run
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `FE` | The probe | `FF` | None | A hardware ID, or `01 7E` | GLM, each cycle, and back to back at discovery | Sends | hlm §7; `startup-idle`, 8.419 s |
 | `02` | The lease | `F0` | The 3-byte hardware ID, then the session | `09` and the session | GLM, after each probe answer | Sends, only a leasable session | hlm §7; `testLeasesNoAddressThatNeedsEscapingOrIsTheMulticast` |
+| `03` | Unknown | `FF` | None | None | GLM, once, twice in a row, before it woke the system and leased every monitor again | Refuses | `setup-b-peq-8351b`, 22.461 s; [refused-frames.md](refused-frames.md#broadcast-03) |
 | `04` | The keep-alive | `FF` | None | None | GLM, only in a DSP pass | Sends, in an apply | `startup-idle`, 8.534 s; #12 |
 | `05 04` | The generator stop | A session | `00 00 00 FF FF EA 00 01 90 00 02 DA` | `09` | GLM, in every block at launch, and in a switch's routing pass | Refuses. Never send. | hlm §7; [refused-frames.md](refused-frames.md#05-04--the-generator-stop) |
 | `08` | The poll | A session | None | Telemetry, a bare `09`, a busy marker, or `01 7E` | GLM, each cycle | Sends | hlm §7; [telemetry.md](telemetry.md) |
@@ -399,7 +402,7 @@ A linear gain at 2²³ − 1, floored. It carries `Level_Sensitivity` plus `Grou
 
 #### `10 01 09 00 00 00`
 
-Always these zeros, in all 79 blocks in the captures. We don't know what it sets.[^level-09]
+Always these zeros, all 136 times in the captures. Two came outside a block, when the setup's editor was confirmed. We don't know what it sets.[^level-09]
 
 #### `10 0E`, a PEQ band
 
@@ -414,11 +417,13 @@ The payload of 10 0E, with each field's size in bytes
 └───────┴──────┴──────┴──────┴──────┴──────┴──────┴────┘
 ```
 
-GLM designs in double precision, rounds the six raw coefficients to float, and normalizes in float.[^peq-design]
+GLM designs in double precision, rounds the six raw coefficients to float, and normalizes in float.[^peq-design] A shelf's w0 is a float. One captured shelf decides it: designed from a w0 in double, an 8 kHz high shelf at −5 dB misses GLM's by a bit or more in four of its five floats.[^shelf-w0] qlm rounds a w0 computed in double, and that matches it and every other captured shelf. A w0 computed in float arithmetic matches them all too. The two forms differ on other shelves, so the captures don't rule out the second (open question 20). The peaking bands match GLM's with w0 in either precision, so the captures can't say which GLM uses there. qlm keeps it in double.
 
-The design rate is 48 kHz for the 8330A, and 12 kHz for the subwoofers.[^peq-rate] The 8351B's bands match a 96 kHz design to the bit, and no 48 kHz design. No measurement confirms that rate yet.[^peq-rate-8351b]
+The design rate is 48 kHz for the 8330A, and 12 kHz for the subwoofers.[^peq-rate] The 8351B's bands match a 96 kHz design to the bit, and no 48 kHz design. They match across frequency, from 25 Hz to 18 kHz, gain, from −20 dB to +6 dB, and Q, from 0.1 to 20, and so do its four shelves.[^peq-range-8351b] No measurement confirms that rate yet.[^peq-rate-8351b]
 
 GLM sends all twenty slots in every block, not only the changed ones. A subwoofer's block sends 23 PEQ frames, with slot 0 four times.[^peq-twenty]
+
+GLM also sends a band on its own, as it's edited in GLM's Acoustic editor. Each change goes out at once, as one `10 0E` to the monitor's session, outside any block. Confirming the editor sends the monitor `10 01 00`, `10 02`, and `10 01 09`, and no block. The block follows at the next group switch.[^peq-live]
 
 #### `3B`, the crossover
 
@@ -446,6 +451,9 @@ The input index, the source, a pair selector, and the AES3 channel.[^routing] In
 [^peq-rate]: hlm §4.
 [^peq-rate-8351b]: #10; `QLMDSPBlockGoldenTests`.
 [^peq-twenty]: #9; `QLMDSPBlockGoldenTests`.
+[^shelf-w0]: `setup-b-peq-8351b`, slot `03` at 265.754 s, live from the editor, and at 300.029 s, in the pass; `testShelvesTakeAFloatW0`.
+[^peq-range-8351b]: `setup-b-peq-8351b`, the Main 4x2 applies at 182.460 and 300.007 s, and its notes; `QLMDSPBlockGoldenTests`.
+[^peq-live]: `setup-b-peq-8351b`, 49.989 to 117.849 s and 230.501 to 265.754 s; the confirms at 167.774 and 287.885 s.
 [^crossover]: [refused-frames.md](refused-frames.md#43-00-02-and-4b-00-00-00-01-to-the-8351b).
 [^crossover-full]: hlm §7.
 [^routing]: hlm §7.
@@ -926,7 +934,7 @@ sequenceDiagram
 
 That's the switch from 4x2 to 2x1, where no monitor wakes: `group-switch-main-4x2-main-2x1`, at 12.359 to 13.476 s.[^switch] Two things in the other switches are worth knowing.
 
-A monitor woken into the group loses its lease mid-switch. GLM's frames to its old session get `01 7E`, and GLM applies its block at the new lease beside the switch's tail.[^switch-wake] And GLM's cycle runs beside its apply, so its rounds drop monitors its polls find in standby mid-switch.[^switch-race]
+A monitor woken into the group loses its lease mid-switch. GLM's frames to its old session get `01 7E`, and GLM applies its block at the new lease beside the switch's tail.[^switch-wake] When the new lease comes mid-pass, GLM stops the pass at the old session, and sends the whole block at the new one.[^switch-cut] And GLM's cycle runs beside its apply, so its rounds drop monitors its polls find in standby mid-switch.[^switch-race]
 
 The switches decode to the group switch espgensam documents, with this system's differences: the per-monitor wake, all twenty slots, the 8351B's two extra frames, the subwoofers' repeats, and the tail.[^espgensam]
 
@@ -1025,8 +1033,9 @@ No apply by qlm has run on the monitors or been measured yet. [measurement.md](m
 [^switch]: `testSwitchFrom4x2To2x1`.
 [^switch-wake]: `group-switch-main-2x1-main-4x2`, 35.84 to 36.46 s; `testSwitchFrom2x1To4x2`.
 [^switch-race]: `testSwitchFrom4x2To2x2`.
+[^switch-cut]: `setup-b-peq-8351b`, the 7350A at 183.450 and 300.973 s; `testSubwooferPassesAreTheBlockInOrder`; `testAPassGLMCutShortMatchesTheBlocksStart`.
 [^espgensam]: #9; espgensam's `docs/glm-group-apply.md`.
-[^block]: `QLMDSPBlockGoldenTests`, all 73 captured passes.
+[^block]: `QLMDSPBlockGoldenTests`, all 128 captured passes.
 [^extra-keep-alive]: `startup-idle`, 8.540 s; `group-switch-main-2x2-main-4x2`, 10.947 s; `QLMApplySequence.m`.
 [^sub-block]: [refused-frames.md](refused-frames.md#3c-3e-and-42-to-the-subwoofers).
 
@@ -1092,19 +1101,21 @@ On or in standby, monitors drop a quiet host's leases, within 23 s to 210 s ([Wh
 | 9 | What is the analog routing frame, for input 4? | No group in the setup uses it (#8). |
 | 10 | What does the adapter do with `01 2B 01`, and does it keep a mute of its own through the hand-back? | [refused-frames.md](refused-frames.md#open) |
 | 11 | What does `82` select in `01 51 82`, and what is `219000`? | [refused-frames.md](refused-frames.md#open) |
-| 12 | What is the 8351B's design rate? | Its bands match 96 kHz on the wire, as the setup file's `SR:96000` says. Captures of setups with varied settings must confirm it across their range. [measurement.md](measurement.md) is an optional check. |
+| 12 | What is the 8351B's design rate? | Its bands match 96 kHz on the wire, as the setup file's `SR:96000` says, across the range `setup-b-peq-8351b` set. The other models' bands wait for captures of their own ([setup-captures.md](setup-captures.md)). [measurement.md](measurement.md) is an optional check. |
 | 13 | Why does GLM's level sometimes lag a change it followed? Why does a knob just plugged in bring a burst for a single tenth? | The rule itself is in [Volume and the knob](#volume-and-the-knob). `sleep-wake-darkwake`, 138.96 s; `standby-wake`, 0.98 s; [adapter-status.md](adapter-status.md#open) |
 | 14 | Does a woken monitor stay muted until a host sends its state? | [telemetry.md](telemetry.md#open-questions) |
 | 15 | What does `c-` mean in the system info, given that `84` reads `02` for the 8351B? | [System info](#system-info) |
 | 16 | What does the adapter do when the host's USB suspends? | The proxy does not forward suspend, and no capture caught a true sleep ([captures/README.md](../captures/README.md)). |
 | 17 | Which telemetry tags and meters are still open? | [telemetry.md](telemetry.md#open-questions) |
 | 18 | What is the bare `04` that ends two telemetry replies, after `8A`? | [Telemetry](#telemetry) |
+| 19 | What does a broadcast `03` do, and what made GLM send it? | [refused-frames.md](refused-frames.md#broadcast-03) |
+| 20 | Does GLM compute a shelf's w0 in double and round it to float, or in float arithmetic? | Both match every captured shelf. High shelves at 5000, 10000, 11000, 13000, and 15000 Hz, −5 dB, at 96 kHz tell them apart ([setup-captures.md](setup-captures.md#part-b-peq-on-the-8351b)). |
 
 ## Sources
 
 The footnotes name each fact's source. Together, they draw on:
 
-- The 22 captures in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30, and qlm's app ran `qlm-app-first` the same day.
+- The 25 captures in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30, and qlm's app ran `qlm-app-first` the same day. GLM ran the three setup captures on 2026-10-31: `setup-a-baseline`, `setup-b-peq-8351b`, and `setup-j-restore`.
 - The tests in `Tests/`, which check these facts against the captures, and the headers in `qlm/GLMProtocol/`.
 - hlm's spec, revision 13, at robcazzaro/hlm commit `c08ced9`: §1 to §9, and Appendix B. Facts only. No text was copied.
 - genlc's `transport.py`, for the report-ID byte. Facts only. No code was ported.
