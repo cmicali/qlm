@@ -63,7 +63,7 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
   - `adapter`: the device, model, and serial, and the knob: `knobPresent` and `knobTenths`.
   - `volumeDecibels` as set, before dim. `ceilingDecibels`, the one System caps at. `dimmed`, `allMuted`, `mutingAll`, `anyOn`, `applying`, `activeGroupName`, and `wokeWithoutGroup`: a wake went out with no group active, so the woken monitors play without their group's settings.
   - `handBack`: `kind` (`knobLevel`, `louder`, or `unknown`), `knobDecibels`, `volumeDecibels` (the level sent, dimmed and under the ceiling), and the app's `line` about it.
-  - `monitors`: each one's serial, model, class, hardware ID, session, status, mute, and offline state, with its missed polls and temperature.
+  - `monitors`: each one's `serialNumber`, model, class, hardware ID, session, status, `muted`, `lifted`, and `offline`, with its missed polls and temperature.
 
 After `ceiling` or `adapter`, an open Settings window shows the old value until it opens again. `dump_state` reads the new one.
 
@@ -84,7 +84,13 @@ After `ceiling` or `adapter`, an open Settings window shows the old value until 
 5. Ask the user to start the capture, if there is one, and to tell you the time `capture.sh` printed. That is the run's zero.
 6. Launch the app: `open build/DerivedData/Build/Products/Debug/qlm.app`. Then run `dump_state` until it replies.
 
-   **TRAP: a new build's first launch waits on macOS.** It asks whether qlm may open the Documents folder, where GLM keeps its setup files. Until the user answers, the app's main thread waits, and the channel never installs. Every verb gets no reply. Ask the user to answer the prompt. Granting it is theirs to do.
+   **TRAP: a new build's first launch waits on macOS.** It asks whether qlm may open the Documents folder, where GLM keeps its setup files. Until the user answers, the app's main thread waits, and the channel never installs. Every verb gets no reply. Ask the user to answer the prompt. Granting it is theirs to do, and the display has to be awake for them to see it. If they'd rather skip it, quit the hung app with `pkill -x qlm` and launch with an empty home, which has no Documents folder to ask about:
+
+   ```bash
+   open --env CFFIXED_USER_HOME=/tmp/qlm-empty-home build/DerivedData/Build/Products/Debug/qlm.app
+   ```
+
+   after `mkdir -p /tmp/qlm-empty-home`. The app then finds no setup file, so it names no monitor. Its defaults still live in the real domain, since cfprefsd ignores that variable, so every `defaults read` below still applies.
 
 ## Each step
 
@@ -153,11 +159,21 @@ The app's second run on all six monitors. It checks the fixes made since `qlm-ap
 
 The calibration mic stays out of the adapter for the whole run. `qlm-mic-discovery`, below, comes after it.
 
-Keep the whole `defaults read` from step 3 in the log. It is the per-bus check's "before". If `QLMVolumeDecibels` isn't −50, ask whether to write −50, so the monitors come on at the run's level.
+Keep the whole `defaults read` from step 3 in the log. It is the per-bus check's "before". Then check `QLMVolumeDecibels`. It is the level the monitors come on at in step 5. After the first run it read −35, the ceiling itself, which is louder than the knob sits. If it isn't −50, ask the user, and on their word run:
+
+```bash
+defaults write com.commonwealthrecordings.qlm QLMVolumeDecibels -float -50
+```
+
+Do this before the launch. The app reads the key as it starts.
 
 ### The steps
 
 The knob decides each stop's hand-back. It goes above the ceiling once, for steps 7 to 10, and those steps stop nothing. It sits below the level for both stops, steps 16 and 20, so neither makes the monitors louder and no step needs `anyway`. Mute all spans the one restart, so a single gap checks both the leases and the lifted mute.
+
+**Steps 8 to 10 run only if step 7 ends with `quitAsksFirst` true.** They test the alert. With `quitAsksFirst` false, `adapter_off_answering cancel` turns the adapter off and `quit_answering cancel` quits the app, as a rehearsal on the fake bus showed. If step 7 leaves it false, skip the three, log why, and go on to step 11.
+
+Two of the steps read the popover by eye, 6 and 19. No verb reads a row's name or the banner's text: `dump_view_tree` carries no label text or tooltips, and `dump_screenshot` can't render the popover, since it is neither the key window nor the main one. So the user reads the popover and says what it shows. Log their words. Don't open the Monitors window before step 6: it shows serials and no names.
 
 | Step | Verb, or what the user does | Fix | Heard | What proves it |
 | --- | --- | --- | --- | --- |
@@ -166,8 +182,8 @@ The knob decides each stop's hand-back. It goes above the ceiling once, for step
 | 3 | `volume -55`. Then `defaults read com.commonwealthrecordings.qlm`. | #52, each bus keeps its own level[^per-bus] | Nothing | `snapshot.volumeDecibels` −55. In the defaults, `QLMFakeVolumeDecibels` is −55, and `QLMVolumeDecibels` is as it was before launch. |
 | 4 | The user quits GLM. | | The adapter takes over at the knob. | |
 | 5 | `adapter on`. Then `dump_state` until `busProblem` is `none` and six monitors read `on`. | #52, each bus keeps its own level[^per-bus]. #53, the old bus's monitors go.[^list] | The level drops to −50 dB. | `snapshot.volumeDecibels` −50, not the fake bus's −55. `monitors` holds six, and none is `offline`. |
-| 6 | `popover show`, `dump_view_tree`, and `dump_screenshot - > captures/qlm-app-second/names.png`. Then `popover close`. | #53, monitors named as the setup names them[^names] | Nothing | The popover's rows, not `dump_state`. Each row shows its setup name. `114bab` is Left, and `114bea` is Right.[^ids] The serial is the row's tip. |
-| 7 | The user turns the knob slowly up to about −30 dB, a few dB above the ceiling. Not to its top stop. | #52, the volume held at the ceiling[^hold] | The level rises to −35 dB, and no further. | `volumeDecibels` −35 while `handBack.knobDecibels` reads about −30. `handBack.kind` is `louder`, and `quitAsksFirst` is true. |
+| 6 | `popover show`. The user reads each row's name, and hovers two rows for their serials. Then `popover close`. | #53, monitors named as the setup names them[^names] | Nothing | The user's reading, not `dump_state`. Each row shows its setup name. `114bab` is Left, and `114bea` is Right.[^ids] The serial is the row's tip. |
+| 7 | The user turns the knob slowly up to about −30 dB, a few dB above the ceiling. Not to its top stop. | #52, the volume held at the ceiling[^hold] | The level rises to −35 dB, and no further. | `volumeDecibels` −35 while `handBack.knobDecibels` reads about −30. `handBack.kind` is `louder`, and `quitAsksFirst` is true. If it is false, skip steps 8 to 10. |
 | 8 | `adapter off` | #52, a stop that may be louder asks first[^asks] | Nothing | An error reply: it refuses. `usesAdapter` stays true. |
 | 9 | `adapter_off_answering cancel` | #52, as step 8[^asks] | Nothing | The reply's `asksFirst` is true and `restarted` false. `usesAdapter` stays true. |
 | 10 | `quit_answering cancel` | #52, as step 8[^asks] | Nothing | The reply's `asksFirst` is true and `quitting` false. `pgrep -x qlm` still finds it. |
@@ -175,13 +191,15 @@ The knob decides each stop's hand-back. It goes above the ceiling once, for step
 | 12 | `volume -50` | | A little louder | `volumeDecibels` −50. `handBack.kind` is `knobLevel`, and `quitAsksFirst` is false. |
 | 13 | `mute_all on` | | Silence | `mutingAll` and `allMuted` true |
 | 14 | `mute 8351BP21002711 off`, the Left 8351B | #49, a lift of one mute under mute all holds[^lift] | Only the Left plays. | The Left's `muted` is false and `lifted` true. The other five read `muted`. `mutingAll` stays true. |
-| 15 | `defaults read com.commonwealthrecordings.qlm` | #52, the record and the leases kept[^per-bus] | | The defaults, not `dump_state`. `QLMMutingAll` is 1, and `QLMLiftedHardwareIDs` holds `114bab`. `QLMKnownLeases` lists six sessions. Note each one. |
+| 15 | `defaults read com.commonwealthrecordings.qlm` | #52, the record and the leases kept[^per-bus] | | The defaults, not `dump_state`. `QLMMutingAll` is 1, and `QLMLiftedHardwareIDs` holds `114bab`, printed as data: `{length = 3, bytes = 0x114bab}`. `QLMKnownLeases` lists six sessions. Note each one. |
 | 16 | `adapter off` and `adapter on`, back to back, as one step. See below. Then `dump_state` until `busProblem` is `none` and six read `on`. | #49, after a gap qlm trusts no old session until its serial answers[^gap]. #49, the lift holds.[^lift] | The Left may dip to the knob's −55 dB for a moment. The other five stay silent. | Each monitor's `session`, against step 15's. The same one means its serial answered and qlm took it back. A new one means its lease lapsed and the probe found it. The Left is still `lifted` and unmuted, and the other five muted. |
 | 17 | `mute_all off` | | All six play at −50 dB. | `mutingAll` false, and no monitor `muted` or `lifted` |
 | 18 | `standby`. Then `dump_state` until all six read `standby`. | | The music stops. | Each `status` is `standby`, and `anyOn` is false. |
-| 19 | `wake`. Then `dump_state` until all six read `on`. Then `popover show` and `dump_view_tree`. | #53, a wake with no group active says so[^wake] | All six come back. They may sound a little different, as in the first run. | `wokeWithoutGroup` true, and `activeGroupName` null. The popover's banner reads "The monitors play without their group's settings". |
+| 19 | `wake`. Then `dump_state` until all six read `on`. Then `popover show`, and the user reads the banner. | #53, a wake with no group active says so[^wake] | All six come back. They may sound a little different, as in the first run. | `wokeWithoutGroup` true, and `activeGroupName` null. The user reads the popover's banner: "The monitors play without their group's settings". |
 | 20 | `quit_answering cancel` | #52, the stop's rule[^asks] | The level drops to the knob's −55 dB at once. Nothing changes 2.6 s later. | The reply's `asksFirst` is false and `quitting` true. `pgrep -x qlm` finds nothing. |
-| 21 | `defaults read com.commonwealthrecordings.qlm` | #52, each bus keeps its own settings[^per-bus] | | `QLMVolumeDecibels` −50 and `QLMFakeVolumeDecibels` −55. `QLMKnownLeases` holds the sessions from the wake. `QLMMutingAll` is 0, and `QLMLiftedHardwareIDs` is empty. |
+| 21 | `defaults read com.commonwealthrecordings.qlm` | #52, each bus keeps its own settings[^per-bus] | | `QLMVolumeDecibels` −50 and `QLMFakeVolumeDecibels` −55. `QLMKnownLeases` holds the sessions from the wake. `QLMMutingAll` is 0, and `QLMLiftedHardwareIDs` is `()`. |
+
+A rehearsal of steps 1 to 3, 6, 10, and 12 to 21 ran on the fake bus before the real run, through the channel. Every verb and field above answered as written there, apart from the two the user reads by eye. One thing it saw once, with the display asleep: `popover close` replied ok, and `popoverShown` stayed true. If that shows up, note it and go on.
 
 **Step 16 is the one step that runs two verbs.** Agree on it as one step before the run. Run it as one command line:
 
