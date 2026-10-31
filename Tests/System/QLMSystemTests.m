@@ -533,12 +533,12 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self waitForAdapterPolls:10];
     XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
 
-    // The top stop: 0 dB, capped at the -20 dB ceiling.
+    // The top stop, 0 dB, holds the volume at the -20 dB ceiling.
     [_bus perform:^{
         self->_bus.knobTenths = @(0);
     }];
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return [snapshot.volumeDecibels isEqual:@(0)];
+        return [snapshot.volumeDecibels isEqual:@(-20)];
     }];
     const uint8_t ceiling[] = {QLMAddressBroadcast, 0x1F, 0x0C, 0xCC, 0xCC};
     levels = [self sentWithOpcode:0x1F from:before];
@@ -562,6 +562,48 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(_system.snapshot.adapter.knobTenths, @(-300));
     for (NSData *record in _bus.sentMessages) {
         XCTAssertTrue(QLMIsDiscoveryOrPoll(record), @"%@", record);
+    }
+}
+
+// Waits until the snapshot shows the knob at `tenths`, with nothing queued.
+- (QLMSnapshot *)turnKnobTo:(NSInteger)tenths {
+    [_bus perform:^{
+        self->_bus.knobTenths = @(tenths);
+    }];
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.adapter.knobTenths isEqual:@(tenths)] && snapshot.idle;
+    }];
+}
+
+// In qlm-app-first, System's volume followed the knob above the ceiling, and
+// only the frame was capped. So each turn above it sent a burst, 75 in 13.7 s
+// with the level held at -35 dB (captures/qlm-app-first/notes.md,
+// Surprises). Now the volume stops at the ceiling, and a turn that leaves it
+// there sends nothing. Below it, the knob moves the volume again.
+- (void)testTheKnobAboveTheCeilingHoldsTheVolumeAtIt {
+    _settings.cycleInterval = 10;
+    _settings.adapterPollInterval = 0.01;
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-30)] && snapshot.idle;
+    }];
+
+    XCTAssertEqualObjects([self turnKnobTo:-100].volumeDecibels, @(-20));
+    NSUInteger before = _bus.sentMessages.count;
+    for (NSNumber *tenths in @[@(-50), @(0), @(-150)]) {
+        XCTAssertEqualObjects([self turnKnobTo:tenths.integerValue].volumeDecibels, @(-20));
+    }
+    XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
+    XCTAssertEqual([self sentWithOpcode:0x2B from:before].count, 0u);
+
+    XCTAssertEqualObjects([self turnKnobTo:-253].volumeDecibels, @(-25.5));
+    QLMMessage level = QLMCommandVolume(-25.5, _settings.ceilingDecibels);
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertEqual(levels.count, 4u);  // GLM's burst: three, the mute state, then one
+    for (NSData *sent in levels) {
+        XCTAssertEqualObjects(sent, QLMAdapterRecord(&level));
     }
 }
 
@@ -1051,9 +1093,9 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         return snapshot.running;
     }];
 
-    [_system setVolumeDecibels:-10];
+    [_system setVolumeDecibels:-10];  // held at the -20 dB ceiling
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return [snapshot.volumeDecibels isEqual:@(-10)];
+        return [snapshot.volumeDecibels isEqual:@(-20)];
     }];
     [_time advanceBy:0.1];
     NSArray<NSData *> *sent = _bus.sentMessages;
@@ -1963,13 +2005,14 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual(back.adapter.missedPolls, 0u);
 }
 
-// The ceiling changes while System runs. The volume goes out again at once
-// under it, lower or higher.
+// The ceiling changes while System runs. A lowered one takes the volume
+// down with it, and a raised one leaves it there. Either way, the volume
+// goes out again at once.
 - (void)testTheCeilingChangesWhileSystemRuns {
     _settings.cycleInterval = 10;
     [self startSystem];
     [self waitForDiscovery];
-    [_system setVolumeDecibels:-10];  // above the -20 dB ceiling
+    [_system setVolumeDecibels:-30];
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.volumeDecibels != nil && snapshot.idle;
     }];
@@ -1981,7 +2024,8 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         }];
         XCTAssertEqual(snapshot.ceilingDecibels, ceiling.doubleValue);
         XCTAssertEqual(_system.settings.ceilingDecibels, ceiling.doubleValue);
-        QLMMessage volume = QLMCommandVolume(-10, ceiling.doubleValue);
+        XCTAssertEqualObjects(snapshot.volumeDecibels, @(-40));
+        QLMMessage volume = QLMCommandVolume(-40, ceiling.doubleValue);
         XCTAssertEqualObjects([self sentWithOpcode:0x1F from:before], @[QLMAdapterRecord(&volume)]);
     }
 }

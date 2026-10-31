@@ -218,10 +218,10 @@ static NSData *QLMRecord(QLMMessage message) {
     settings.ceilingDecibels = -40;
     int status = -1;
     NSArray<NSData *> *records = QLMDryRunRecords(QLMDiscovered(), settings, ^int(QLMSystem *system, QLMSnapshot *found) {
-        [system setVolumeDecibels:-20];
+        [system setVolumeDecibels:-20];  // held at the -40 dB ceiling
         return 0;
     }, ^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.idle && [snapshot.volumeDecibels isEqual:@(-20)];
+        return snapshot.idle && [snapshot.volumeDecibels isEqual:@(-40)];
     }, &status);
 
     XCTAssertEqual(status, 0);

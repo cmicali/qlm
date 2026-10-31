@@ -1,8 +1,5 @@
 #import "QLMAppDelegate.h"
 
-#include <math.h>
-
-#include "QLMCommands.h"
 #import "QLMAlerts.h"
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
@@ -258,8 +255,7 @@ static const NSTimeInterval QLMStopAllowance = 3;
         symbol = @"speaker.slash";
         tip = @"qlm: muted";
     } else if (snapshot.volumeDecibels != nil) {
-        double volume = fmin(snapshot.volumeDecibels.doubleValue, snapshot.ceilingDecibels);
-        tip = [NSString stringWithFormat:@"qlm: %@%@", QLMDecibelsText(volume), snapshot.dimmed ? @", dimmed" : @""];
+        tip = [NSString stringWithFormat:@"qlm: %@%@", QLMDecibelsText(snapshot.volumeDecibels.doubleValue), snapshot.dimmed ? @", dimmed" : @""];
     }
     if ([symbol isEqualToString:self.statusSymbol] && [tip isEqualToString:self.statusTip]) {
         return;

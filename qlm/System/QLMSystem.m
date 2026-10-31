@@ -1037,6 +1037,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (volume == nil) {
         return;
     }
+    // A turn above the ceiling, with the volume at it, changes nothing, so
+    // it sends nothing (captures/qlm-app-first/notes.md, Surprises).
+    volume = [self underCeiling:volume.doubleValue];
+    if ([volume isEqual:_volumeDecibels]) {
+        return;
+    }
     _volumeDecibels = volume;
     _dirty = YES;
     for (int i = 0; i < 3; i++) {
@@ -1120,7 +1126,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)setVolumeDecibels:(double)decibels {
     [self onQueue:^{
-        self->_volumeDecibels = @(decibels);
+        self->_volumeDecibels = [self underCeiling:decibels];
         self->_dirty = YES;
         [self scheduleVolumeSend];
     }];
@@ -1131,11 +1137,20 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMSystemSettings *settings = [self.settings copy];
         settings.ceilingDecibels = ceilingDecibels;
         self.settings = settings;
+        if (self->_volumeDecibels != nil) {
+            self->_volumeDecibels = [self underCeiling:self->_volumeDecibels.doubleValue];
+        }
         self->_dirty = YES;
         if (self->_running && !self->_stopping && self->_volumeDecibels != nil) {
             [self sendVolume];
         }
     }];
+}
+
+// The volume System keeps is never above the ceiling, so what the snapshot
+// says is what goes out.
+- (NSNumber *)underCeiling:(double)decibels {
+    return @(fmin(decibels, self.settings.ceilingDecibels));
 }
 
 - (void)scheduleVolumeSend {

@@ -134,7 +134,7 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 // Set only while busProblem is NoAdapter. Read it first.
 @property (nonatomic, readonly) QLMAdapterProblem adapterProblem;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
-@property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed
+@property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed, at most the ceiling
 @property (nonatomic, readonly) double ceilingDecibels;            // every volume frame is capped at it
 @property (nonatomic, readonly) BOOL dimmed;
 @property (nonatomic, readonly) BOOL applying;

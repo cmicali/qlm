@@ -87,13 +87,16 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 - (void)stopWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every
-// cycle, and ahead of everything else when a monitor is leased. Clamped to
-// the ceiling in the builder. Once one is set, a turn of the adapter's knob
-// sets it too, as GLM lets it (QLMKnob). At start the knob sets nothing.
+// cycle, and ahead of everything else when a monitor is leased. Held at the
+// ceiling, and clamped to it in the builder too. Once one is set, a turn of
+// the adapter's knob sets it too, as GLM lets it (QLMKnob), under the
+// ceiling. A turn that leaves it where it was sends nothing. At start the
+// knob sets nothing.
 - (void)setVolumeDecibels:(double)decibels;
 
 // Caps every volume frame that goes out after this, those already in line
-// too. A volume already set goes out again, under the new ceiling.
+// too. A volume above the new ceiling falls to it, and stays there if the
+// ceiling rises again. A volume already set goes out again.
 - (void)setCeilingDecibels:(double)ceilingDecibels;
 
 // While dimmed, every volume frame is the volume less QLMDimDecibels. A

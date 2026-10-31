@@ -461,15 +461,17 @@ static NSView *QLMSpacer(void) {
         self.ceilingLabel.stringValue = ceilingText;
         return;
     }
+    // System holds the volume at or under the ceiling.
     double decibels = volume.doubleValue;
-    double sent = fmin(decibels, ceiling);
-    self.volumeLabel.stringValue = QLMDecibelsText(sent);
+    self.volumeLabel.stringValue = QLMDecibelsText(decibels);
     BOOL held = NSProcessInfo.processInfo.systemUptime - self.sliderMovedAt < QLMSliderHoldInterval;
     if (!held) {
-        self.volumeSlider.doubleValue = fmax(self.volumeSlider.minValue, sent);
+        self.volumeSlider.doubleValue = fmax(self.volumeSlider.minValue, decibels);
     }
+    NSNumber *knob = snapshot.handBack.knobDecibels;
+    BOOL capped = decibels >= ceiling && knob != nil && knob.doubleValue > ceiling;
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
-    if (decibels > ceiling) {
+    if (capped) {
         [parts addObject:[NSString stringWithFormat:@"Capped at the %@ ceiling", QLMDecibelsText(ceiling)]];
     } else {
         [parts addObject:ceilingText];
@@ -481,7 +483,7 @@ static NSView *QLMSpacer(void) {
         [parts addObject:@"muted"];
     }
     self.ceilingLabel.stringValue = [parts componentsJoinedByString:@"\u00A0· "];
-    self.ceilingLabel.textColor = decibels > ceiling ? NSColor.systemOrangeColor : NSColor.secondaryLabelColor;
+    self.ceilingLabel.textColor = capped ? NSColor.systemOrangeColor : NSColor.secondaryLabelColor;
 }
 
 - (void)renderMonitors:(NSArray<QLMMonitorEntry *> *)monitors snapshot:(nullable QLMSnapshot *)snapshot {
