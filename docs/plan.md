@@ -1,31 +1,35 @@
 # qlm: the plan
 
-**Status, 2026-10-30.** Phases 0 and 1 are done, and Phase 2's controls have run on one monitor, with every frame matching GLM's. Since then we've built the control run's safety fixes, the hand-back, the supervised 8351B apply, and the app's mode for the real adapter, but so far they've run only on the fake bus. Next we check them on the monitors: the fixes on all six, then the hand-back, then Phase 3's measurement.
+**Status, 2026-10-31.** Phases 0 and 1 are done. Phase 2's controls have run on all six monitors, with every frame matching GLM's, and the app has run on all six too. The group apply has run only on the fake bus. Next we capture GLM applying setups with varied settings, until qlm's apply matches GLM's byte for byte. Then comes the week of daily use.
 
 ## Where things stand
 
 This section is a snapshot of main: what has run on the real adapter, what each layer holds, what we decided and learned on the way, and what comes next. [protocol.md](protocol.md) holds the protocol itself, with a source for every fact, so this section links to it rather than restate it.
 
-Main passes 282 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
+Main passes 372 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
 
 ### What has run where
 
-Most of qlm has run only on the fake bus. Only `qlmctl` has driven the real adapter, and its controls have reached one monitor.
+`qlmctl` and the app have both driven all six monitors now, each in a supervised run. What hasn't reached the monitors is the group apply, and every fix made since the app's run.
 
-| What | Where it has run |
-| --- | --- |
-| `qlmctl info`, `discover`, and `poll` | The adapter, with all six monitors, on and in standby (`qlm-first-discover`, `qlm-standby-discover`) |
-| `qlmctl volume`, `mute`, `dim`, `sleep`, and `wake` | One monitor, before #27's fixes (`qlm-control-first`). A run on all six is under way (#39, open). |
-| The hand-back at a stop | The fake bus |
-| `qlmctl apply-group` | Its dry run, and the fake bus. It can go over USB now, behind `--unverified-rate`, but it hasn't. |
-| The app | All six monitors, once, driven by hand under a −35 dB ceiling (`qlm-app-first`, #43). Its fixes since (#52) have run only on the fake bus. |
+| What | Where it has run | Source |
+| --- | --- | --- |
+| `qlmctl info`, `discover`, and `poll` | The adapter, with all six monitors, on and in standby | `qlm-first-discover`, `qlm-standby-discover` |
+| `qlmctl volume`, `dim`, `sleep`, and `wake` | All six monitors, with #27's fixes, under a −35 dB ceiling | `qlm-control-all`, #39 |
+| `qlmctl mute` | One monitor, before #27's fixes | `qlm-control-first` |
+| The app | All six monitors, once, driven by hand under a −35 dB ceiling. It ran volume, the knob, mute, mute all, dim, standby, and wake, across four launches. | `qlm-app-first`, #43 |
+| The hand-back at a stop | All six, through the app, both ways. Both of `qlmctl`'s control runs were built before #32, so `qlmctl` hasn't run it. | `qlm-app-first` |
+| The fixes since the app's run: System's, GLMAdapter's, and the app's | The fake bus | #49, #52, #53 |
+| The debug channel | The fake bus | #50, #51 |
+| The group apply | Its dry run, and the fake bus. `qlmctl apply-group` can send it over USB behind `--unverified-rate`, but it hasn't. | #32 |
+| Phase 3's measurement | Not yet. It's an optional final check now. | [measurement.md](measurement.md) |
 
 ### The layers
 
 Each layer has grown since the first control run. Here's what each holds now, with the PR behind each newer part.
 
 - GLMProtocol frames, escapes, and checks every message, and refuses any opcode off its allowlist. Its builders clamp every volume frame to the ceiling and use GLM's own 200 volume words, and its control builders match GLM's frames byte for byte. It parses every reply qlm reads, the adapter's status among them, and packs and reassembles the USB reports. Telemetry now decodes the tags hlm's spec lacks, and the first half of a frame split across two polls no longer reads as a whole one (#35).
-- GLMAdapter holds the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. The report link now syncs at every open, not only after a timeout, so a reply GLM left late can't answer qlm's first request (#33). The clock that every timer runs on lives here too (#38).
+- GLMAdapter holds the adapter over IOKit HID, the report link under it, a fake bus, a capture reader, and a replay adapter. The HID adapter refuses the adapter while GLM runs or another process holds it, and opens it only seized. The report link now syncs at every open, not only after a timeout, so a reply GLM left late can't answer qlm's first request (#33). The clock that every timer runs on lives here too (#38). Since the safety review, the link caps a volume frame at the ceiling as it writes it, so a frame held behind its syncs can't pass a ceiling lowered meanwhile. A lost sync reply no longer stalls the link for good. It syncs up to three more times, and its errors say whether the adapter stopped answering or the link lost track. A report IOKit didn't take counts as not sent (#49).
 - System owns the bus on one serial queue. It runs discovery, the leases, the poll cycle, volume, mute, dim, power, and the group apply, and it follows the knob from its first turn, under the ceiling. The golden tests compare its group apply with all eight captured applies. Apart from the frames qlm skips, three match exactly, and the rest differ only where GLM raced itself. Since the control run, System:
   - sends the volume to each monitor the moment its lease is acked, and ends every wake with a level (#27, #29);
   - keeps the mute record across a stop, and starts from a record it's given (#29);
@@ -33,11 +37,13 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - applies a group with an 8351B only for `qlmctl`'s supervised test (#32);
   - gives the app what it lacked: a ceiling that changes while System runs, a stop with a completion, leases taken back by serial after a short gap, a typed reason the bus is unavailable, and one rule for presence (#32);
   - runs every timer on an injectable clock, so the tests run on a virtual one. That work found a monitor leased twice, and a wait in `qlmctl` that could miss an action already done. #38, which carries #37, fixes both.
+  - follows the knob by GLM's own rule, slow drift and all. A move of more than a whole dB moves the level, and then every change does for about 2.5 s. A replay of seven captures matches GLM's level at every rest point but GLM's five lags (#42).
+  - has the fixes from a safety review and a fuzz (#49). It caps every volume frame at the ceiling as it goes out. After a gap, it trusts none of its old sessions until each one's own serial answers. It also starts from the leases it's given, states a mute whose `2B` never went out, holds a lift of one mute under mute all, and drops a reply from before a stop.
   - holds its volume at or under the ceiling, so a turn of the knob above it sends nothing, and gives a snapshot of itself now, for a stop's warning (#52);
   - says when a wake went out with no group active, so the woken monitors play without their group's settings (#53).
 - Setups reads GLM 5 setup files strictly, designs the filters, and builds each monitor's DSP block, checked against every captured pass. It also watches the setup file, and calls back once a save settles (#28).
 - `qlmctl` has `info`, `discover`, `poll`, and `setup`, and all of Phase 2's controls. The controls run behind gates: a ceiling the user states, at most −30 dB without `--allow-high-ceiling`, and a `--dry-run` that sends only discovery. Each also runs on the fake bus with `--fake`, or a capture with `--replay`. `dim` now sends GLM's whole sequence, `--muted` names the monitors already muted in GLM, and at exit `qlmctl` prints what the hand-back did (#27, #29, #32). `apply-group` prints GLM's whole apply. Over USB it's a supervised test, and it needs `--volume`, `--ceiling`, and, for a group with an 8351B, `--unverified-rate` (#32).
-- The app has the menu bar popover, a monitors window, Settings, a banner for adapter errors, and a panel that plays the fake bus. A setting, off by default, drives the real adapter instead. The banner offers to quit GLM when GLM holds the adapter. The app stops System at sleep and starts it at wake, posts a notification when a monitor drops off or runs hot, and offers to read the setup again when GLM saves it (#28). A Debug build answers a debug channel, whose verbs are the app's own controls, so a script can run a supervised test on the monitors one step at a time (#50). Since its first run (#43):
+- The app has the menu bar popover, a monitors window, Settings, a banner for adapter errors, and a panel that plays the fake bus. A setting, off by default, drives the real adapter instead. The banner offers to quit GLM when GLM holds the adapter. The app stops System at sleep and starts it at wake, posts a notification when a monitor drops off or runs hot, and offers to read the setup again when GLM saves it (#28). A Debug build answers a debug channel, whose verbs are the app's own controls, so a script can run a supervised test on the monitors one step at a time (#50, #51). `make check-release` fails if a Release build holds any of it (#51). `make install` puts the app in `/Applications`, and `qlmctl` in `~/.local/bin`, for daily use (#46). Since its first run (#43):
   - It asks before any stop that may make the monitors louder: a quit, or turning the setting off. That's the knob above qlm's level, or no knob read. It decides from System's snapshot now (#52).
   - Each bus keeps its own level, mute record, and known leases across launches, so nothing set on the fake bus reaches the real monitors (#52).
   - The banner says when the adapter stops answering, or qlm loses track of it, and what the take-over does then (#52).
@@ -49,9 +55,9 @@ Each layer has grown since the first control run. Here's what each holds now, wi
 
 Besides the code, the repo holds the captures we learned from, the scripts that record and measure, and the docs that explain them.
 
-`captures/` holds 20 captures: the 17 Phase 0 scenarios in [captures/README.md](../captures/README.md), and qlm's own three runs, `qlm-first-discover`, `qlm-standby-discover`, and `qlm-control-first`. Each has its `reports.txt` and `notes.md`, with the raw capture xz-compressed, and the golden tests read every report. `sleep-wake` never caught a true sleep. A fourth run of qlm's, `qlm-control-all`, is under way (#39, open).
+`captures/` holds 22 captures: the 17 Phase 0 scenarios in [captures/README.md](../captures/README.md), and qlm's own five runs. Four ran `qlmctl`: `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all`. The fifth, `qlm-app-first`, ran the app. Each has its `reports.txt` and `notes.md`, with the raw capture xz-compressed, and the golden tests read every report. `sleep-wake` never caught a true sleep.
 
-The capture kit is `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`. The measurement kit is [measurement.md](measurement.md) and `tools/compare-measurements.py`, with a synthetic pair of exports in `tools/measurement-example/` (#34).
+The capture kit is `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-reports.py`, and the Pi proxy in `tools/pi/`. The measurement kit is [measurement.md](measurement.md) and `tools/compare-measurements.py`, with a synthetic pair of exports in `tools/measurement-example/` (#34). For a run of the app on the monitors, `.claude/skills/app-hardware-run` drives the debug channel one step at a time (#51). The rest of `tools/` is small. `tools/redact-setup.py` makes the redacted setup fixture, and two scripts serve the Makefile: `tools/check-release.sh` for `make check-release` (#51), and `tools/quit-app.sh`, which asks a running qlm to quit before `make install` or `make uninstall` replaces it (#46).
 
 | Doc | What it covers |
 | --- | --- |
@@ -60,44 +66,46 @@ The capture kit is `captures/README.md`, `tools/inventory.sh`, `tools/pcapng-to-
 | [refused-frames.md](refused-frames.md) | Each frame GLM sends that qlm doesn't, and GLM's group apply frame by frame |
 | [telemetry.md](telemetry.md) | Each telemetry tag, and what the meters can show (#35) |
 | [measurement.md](measurement.md) | Phase 3's measurement, step by step (#34) |
+| [experiments.md](experiments.md) | The script for a session that settles the open questions a person at the desk can (#47) |
 
 ### Decided since Phase 1
 
-We made these calls after the captures and the first control run. Each is built now.
+We made these calls after the captures and the runs on the monitors. Each is built now.
 
 - qlm matches GLM byte for byte. So the allowlist takes exactly `2D 00`, as a broadcast right before `FF 3D 00 00`, and dim sends it.
 - qlm refuses the adapter only for GLM, or for a process that holds it the way GLM does. A process that only enumerates it does not count. Spotify puts a USB device client on every USB device, the adapter among them, and that made qlm refuse in `qlm-standby-discover`. GLM's client is an HID library client that has opened the HID device.
 - The hand-back. When qlm stops, it compares the knob's position with its own volume. If the knob is at or below it, qlm sends the knob's level just before it lets go, so the adapter's take-over changes nothing. If the knob is above it, the take-over would make the level louder, so qlm warns instead.
-- The 8351B in a supervised test. `qlmctl apply-group` may apply a group with an 8351B over USB only behind an explicit flag, at a low level, one monitor first. The app still refuses. A measurement after that apply decides whether the refusal lifts.
+- The 8351B in a supervised test. `qlmctl apply-group` may apply a group with an 8351B over USB only behind an explicit flag, at a low level, one monitor first. The app still refuses. Lifting that is the owner's call, once qlm's apply matches GLM's byte for byte across captures of setups with varied settings. A measurement after the apply is an optional final check, not the gate.
 - qlm keeps the mute record. No reply reports a monitor's mute, so qlm's record is the truth, and its rounds stay GLM's. The record survives a stop, and System can start from one, so the app can keep it across launches.
 - Every wake ends with a level. A woken monitor keeps its own level until a host sends one. So the wake sends the volume, else the knob's position under the ceiling, else the bottom level, `00 00 08`.
+- After a gap, qlm trusts none of its old sessions. Another host may have leased them in its own order, so qlm checks each one's serial before it sends anything there (#49).
+- System holds its volume at the ceiling, not only its frames. So at the ceiling, a turn of the knob that changes nothing sends nothing (#52).
+- The 8351B's refusal stands at a wake. The app applies no group with an unverified rate, so after a wake it says the monitors play without their group's settings (#53).
 
 ### Next
 
 What's left, in the order we'll do it. Most of it needs the monitors and the user at the desk, at a low level, one monitor first.
 
-1. The all-monitor check of #27's fixes, recorded as `qlm-control-all`. It's under way (#39, open). It checks that the volume reaches each new and woken monitor at once, that the wake ends with the level, and that `qlmctl dim` sends GLM's whole sequence.
-2. The hand-back on hardware. A stop with the knob at or below qlm's level should change nothing we can hear. With the knob above it, `qlmctl` should warn before the level rises.
-3. Phase 3's supervised apply and measurement, following [measurement.md](measurement.md). The result decides whether the 8351B's refusal lifts.
-4. The app's fixes from its first run on the real adapter (`qlm-app-first`, #43): its safety fixes (#52), and its daily-use fixes (#53). Then the week of daily use.
-5. The knob's slow drift, in System, also under way. In `sleep-wake-darkwake`, GLM follows a 7 dB drift that qlm ignores until the knob's first turn.
-6. The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it.
-7. The [open questions in protocol.md](protocol.md#open-questions), such as whether the adapter escapes an address byte, and what level it applies with no knob in. [experiments.md](experiments.md) is the script for a session that settles the ones a person at the desk can.
-8. A bump of usb-proxy's pin in `tools/pi/setup.sh`, dropping `tools/pi/usb-proxy.patch`, once upstream [AristoChen/usb-proxy#37](https://github.com/AristoChen/usb-proxy/pull/37) merges. That PR carries the patch's three fixes, and it's still open.
+1. The rest of the group apply, decoded from GLM's captures. The owner makes setups in GLM with known, varied settings: PEQ bands of each type, frequency, gain, and Q on each model; crossover points; levels and delays; and the 8351B's own fields, `GroupDelayCompensation` and the bass extension crossover, `BassExtensionXO(Hz)`. We capture GLM applying each setup through the Pi proxy. qlm's design from each setup must then match GLM's frames byte for byte, which decodes `43 00 02` and `4B 00 00 00 01`.
+2. Lifting the 8351B's refusal. Once qlm's apply matches GLM's byte for byte across those captures, that's the owner's call. Then the app can apply the active group at a wake, as GLM does, and switch groups. Today a wake leaves the monitors on their stored settings, until GLM applies the group (#53). The REW measurement in [measurement.md](measurement.md) becomes an optional final check, not the gate.
+3. The week of daily use without GLM, Phase 4's Done when. `make install` installs the app (#46). The fixes from its first run (#52, #53), and System's (#49), have run only on the fake bus, so the week is their first test on the monitors. The debug channel can check them one step at a time first, following `.claude/skills/app-hardware-run`.
+4. The experiments session. [experiments.md](experiments.md) is the script, and it settles the [open questions in protocol.md](protocol.md#open-questions) that a person at the desk can, such as what level the adapter applies with no knob in. Its Part A also hears `qlmctl`'s own hand-back, which neither control run had. Part B needs `qlmctl volume --adapter-poll`, which isn't built yet.
+5. The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it. Part G of the experiments captures GLM switching to a copy of the setup with an analog group.
+6. A bump of usb-proxy's pin in `tools/pi/setup.sh`, dropping `tools/pi/usb-proxy.patch`, once upstream [AristoChen/usb-proxy#37](https://github.com/AristoChen/usb-proxy/pull/37) merges. That PR carries the patch's three fixes, and it's still open.
 
 ### What the captures and runs showed
 
-The captures and qlm's three runs taught us how the protocol behaves, and [protocol.md](protocol.md) has each fact with its source. Each run's `notes.md` has its timeline. These are the findings that shaped the plan:
+The captures and qlm's five runs taught us how the protocol behaves, and [protocol.md](protocol.md) has each fact with its source. Each run's `notes.md` has its timeline. These are the findings that shaped the plan:
 
 - The adapter is a thin bridge. It passes each request to the bus and returns one reply, and while a host is connected, the host runs the bus ([The big picture](protocol.md#the-big-picture)).
-- A monitor that holds a lease ignores the probe, and monitors drop a quiet host's leases within 23 to 210 s. So a new host waits, or takes the leases back ([When a monitor loses its lease](protocol.md#when-a-monitor-loses-its-lease)).
-- About 2.6 s after the host goes quiet, the adapter takes over at the knob's position, and qlm's ceiling doesn't reach it ([The hand-back](protocol.md#the-hand-back)).
-- A monitor just switched on plays at its own stored level until a host sends one. A mute outlasts the host, and no reply reports it ([What the adapter and the monitors do on their own](protocol.md#what-the-adapter-and-the-monitors-do-on-their-own)).
-- Every frame qlm has sent on the adapter is one GLM sends (`QLMControlRunTests`). [refused-frames.md](refused-frames.md) covers the frames GLM sends that qlm doesn't.
+- A monitor that holds a lease ignores the probe, and monitors drop a quiet host's leases on their own. The bounds we've timed run from 3.1 s, with the next host already polling the adapter, to 210 s in standby. Between two of `qlmctl`'s runs, every monitor answered the probe within 9.7 s. So a new host waits, or takes the leases back ([When a monitor loses its lease](protocol.md#when-a-monitor-loses-its-lease)).
+- About 2.6 s after the host goes quiet, the adapter takes over at the knob's position. qlm's ceiling doesn't reach it, and once we heard the take-over pass the ceiling ([The hand-back](protocol.md#the-hand-back)).
+- A monitor just switched on plays at its own stored level until a host sends one. So qlm sends its level within 2 ms of each lease's ack. On all six, it reached every monitor switched on or woken. The monitor still plays without its group's settings until a group applies. A mute outlasts the host, and no reply reports it ([What the adapter and the monitors do on their own](protocol.md#what-the-adapter-and-the-monitors-do-on-their-own)).
+- Every frame qlm has sent on the adapter is one GLM sends. `QLMControlRunTests`, `QLMControlAllTests`, and `QLMAppFirstTests` check each run's. [refused-frames.md](refused-frames.md) covers the frames GLM sends that qlm doesn't.
 - Phase 0's three questions are answered. GLM sends nothing when it quits, so the adapter senses a host by its traffic. Knob turns reach the host in the adapter's reply to `01 08`. When the host leaves, the adapter applies the knob's position.
 - A 5 dB step is too small to hear in a quick test, so the control run tested the hand-back and the knob at −60 dB (`qlm-control-first`).
 
-The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. On the wire, every 8351B band GLM sends matches qlm's 96 kHz design to the bit (`QLMDSPBlockGoldenTests`). No measurement confirms the rate yet. So the app refuses every group with an 8351B, which is every group in the setup, and only `qlmctl`'s supervised test may apply one.
+The user's system, from their setup file: two 8351B, two 8330A, a 7370A, and a 7350A. The file designs the 8351B bands at 96 kHz, the 8330A at 48 kHz, and the subwoofers at 12 kHz. On the wire, every 8351B band GLM sends matches qlm's 96 kHz design to the bit (`QLMDSPBlockGoldenTests`). But every captured apply comes from this one setup, and qlm leaves out two of the 8351B's frames, `43 00 02` and `4B 00 00 00 01`. So the app refuses every group with an 8351B, which is every group in the setup, and only `qlmctl`'s supervised test may apply one.
 
 qlm is a native Mac controller for Genelec SAM monitors. It replaces GLM for daily use on the Mac. It shows the system's status. It sets volume, mute, dim, and power. It switches groups. GLM stays installed for calibration and setup. The app never measures, calibrates, or edits a setup.
 
@@ -175,8 +183,8 @@ qlm/
 │   ├── App/          the menu bar app: AppKit, Objective-C
 │   └── CLI/          qlmctl
 ├── Tests/          one XCTest bundle, hostless; mirrors qlm/
-├── captures/       the captures, one directory per scenario
-├── tools/          the capture, redaction, and measurement scripts, and the Pi proxy
+├── captures/       the captures, one directory per scenario or run
+├── tools/          the capture, redaction, measurement, and build scripts, and the Pi proxy
 ├── vibe-libs/      the shared toolbox, a git submodule
 └── .github/        CI: tests and both builds on macOS
 ```
@@ -285,15 +293,15 @@ One group switch must also decode to the sequence espgensam documents, for your 
 
 **Done when** each action's frames match GLM's captured frames byte for byte, apart from session IDs. The knob must move the volume through System in the CLI. Quitting the CLI must hand the bus back to the adapter without an unplanned level jump.
 
-Two of the three are met, and the third is built but not yet heard:
+Two of the three are met in `qlmctl`, and the third has been heard through the app:
 
 | Done when | Where it stands |
 | --- | --- |
-| Each action's frames match GLM's | Met. `QLMControlRunTests` checks each control frame qlm sent in `qlm-control-first` against GLM's. The run's dim sent only the dimmed level, so #27 made `qlmctl dim` send GLM's whole sequence, and a fake-bus test checks it frame by frame. |
+| Each action's frames match GLM's | Met. `QLMControlRunTests` checks each control frame qlm sent in `qlm-control-first` against GLM's. That run's dim sent only the dimmed level, so #27 made `qlmctl dim` send GLM's whole sequence. `QLMControlAllTests` checks it on all six, in `qlm-control-all`. |
 | The knob moves the volume through System | Met in `qlm-control-first`. qlm jumped to the knob at its first turn, then followed it, and never sent more than −41.5 dB under a −35 dB ceiling. |
-| Quitting hands the bus back without a jump | Built, on the fake bus. At a stop, System sends the knob's level when that is no louder than its own, and `qlmctl` says what the stop did. With the knob above qlm's level, it warns instead (#32). |
+| Quitting hands the bus back without a jump | Heard through the app, in `qlm-app-first`. With the knob below the app's level, the app's last report was the knob's level, and nothing changed after. With the knob above it, the app warned first. `qlmctl` stops through the same System, but both its control runs were built before #32 added the hand-back. |
 
-What's left is to hear the hand-back on the monitors. The all-monitor run, under way as `qlm-control-all` (#39, open), checks #27's fixes on hardware first.
+What's left is to hear `qlmctl`'s own hand-back. Part A of [experiments.md](experiments.md) runs it.
 
 #### The first control run
 
@@ -343,7 +351,7 @@ Everything Phase 3 needs is built, and none of it has reached the monitors:
 | The app applies each group, at a low level, one monitor first | Not yet. Every group in the user's setup has an 8351B, so the app refuses them all. `qlmctl apply-group --unverified-rate` can apply one over USB as a supervised test (#32). |
 | A measurement after qlm's apply matches one after GLM's within 0.2 dB | Not yet. [measurement.md](measurement.md) is the procedure, and `tools/compare-measurements.py` compares REW's exports (#34). |
 
-The measurement also decides whether the 8351B's refusal lifts. qlm leaves out the 8351B's `43 00 02` and `4B 00 00 00 01`, and only monitors just switched on can show whether that matters. So measurement.md's last step is [an apply from a cold start](measurement.md#step-5-qlm-from-a-cold-start).
+The 8351B's refusal no longer waits on the measurement. qlm leaves out the 8351B's `43 00 02` and `4B 00 00 00 01`, and captures of GLM applying setups with varied settings should decode them ([Next](#next)). Once qlm's apply matches GLM's byte for byte across those captures, lifting the refusal is the owner's call. The measurement becomes an optional final check. Only monitors just switched on can show whether the frames qlm leaves out matter, so its last step is [an apply from a cold start](measurement.md#step-5-qlm-from-a-cold-start).
 
 ### Phase 4: the Mac app
 

@@ -285,6 +285,7 @@ Monitors drop a host's leases once the host goes quiet. USB can't show why.
 | On | within 42 s | within 23 s | `qlm-first-discover` |
 | In standby | within 210 s | within 88 s and 68 s | `qlm-standby-discover` |
 | On, across an unplug of the adapter | within 9 s | | `unplug`, 60.4 to 69.2 s |
+| On, and one in standby, between two of `qlmctl`'s runs | | within 9.7 s | `qlm-control-first`; `qlm-control-all`[^runs-lapse] |
 | On, with qlm already polling the adapter | within 3.1 s | | `qlm-app-first`, 182.660 to 185.719 s |
 
 Most of these bounds are only when the next host first probed. The last is tight. When GLM quit, qlm's app opened 0.85 s after GLM's last report, so the adapter never took over. Its probes got `01 7E` until 2.45 s after GLM last polled a monitor, and the one at 3.06 s found one.[^lease-lapse]
@@ -304,6 +305,7 @@ So wait between hosts, to avoid the TRAP above: 1 minute with every monitor on, 
 [^qlm-count]: #9; `QLMAddressIsLeasable`.
 [^lost-session]: `group-switch-main-2x1-main-4x2`, 35.84 to 36.38 s; `standby-wake`, from 46.631 s.
 [^lease-lapse]: `qlm-app-first`, GLM's last poll to a monitor at 182.660 s, its last report at 182.770 s, the app's sync at 183.622 s, and its probes at 185.109 and 185.719 s; `testGLMsLeasesLapsedWithinThreeSeconds`.
+[^runs-lapse]: Each gap runs from qlm's last report, after `dim on`, to the next run's first probe. Every monitor answered the probes that followed. `qlm-control-first`, 548.329 to 557.974 s, with the Left 8351B in standby; `qlm-control-all`, 441.956 to 451.664 s and 8410.490 to 8420.218 s. After each `sleep`, with every monitor in standby, all answered too, 9.1 to 9.8 s later: `qlm-control-first`, 818.068 to 827.672 s; `qlm-control-all`, 565.136 to 574.915 s and 8472.153 to 8481.287 s.
 [^four-misses]: `standby-wake`, 35.077 to 35.105 s, then 37.365 s; hlm §3. The second poll: `standby-wake`, 45.973 s.
 [^qlm-drop]: `QLMSystem.h`.
 
@@ -603,7 +605,7 @@ The protocol has no clock of its own. These times are what GLM does, how the har
 | GLM's apply at launch | 1.4 s for six monitors | `startup-idle`, 8.534 to 9.901 s |
 | A group switch with no monitor waking | 1.1 s | `group-switch-main-4x2-main-2x1`, 12.359 to 13.476 s |
 | A monitor in standby dropping its lease | Every 3 s, for the Right 8351B in `standby-wake` | `standby-wake`, 37.365 to 45.959 s |
-| Leases, once the host goes quiet | On: within 42 s of GLM, and 23 s of qlm. In standby: within 210 s of GLM, and 88 s and 68 s of qlm. Across an unplug: within 9 s. With the next host already polling: within 3.1 s. | `qlm-first-discover`; `qlm-standby-discover`; `unplug`, 60.4 to 69.2 s; `qlm-app-first`, 185.719 s |
+| Leases, once the host goes quiet | On: within 42 s of GLM, and 23 s of qlm. In standby: within 210 s of GLM, and 88 s and 68 s of qlm. Across an unplug: within 9 s. Between two of `qlmctl`'s runs, on and one in standby: within 9.7 s. With the next host already polling: within 3.1 s. | `qlm-first-discover`; `qlm-standby-discover`; `unplug`, 60.4 to 69.2 s; `qlm-control-first`, 557.974 s; `qlm-control-all`, 451.664 s; `qlm-app-first`, 185.719 s |
 | The adapter's broadcast of `F0 1F 00 00 00`, while a host is connected | About every 610 ms | hlm §9 |
 | The hand-back | About 2.6 s after the host goes quiet | `qlm-control-first`, 289.7 s; hlm §9 |
 
