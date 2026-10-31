@@ -222,7 +222,7 @@ These fixes need a fault or a race that no verb or hand can make safely. Each ha
 
 ## The mic's discovery: `qlm-mic-discovery`
 
-A capture of its own, run after `qlm-app-second`, to decode what the adapter reports with the calibration mic in. qlm parses the mic's fields already, but nobody knows their scale.[^mic-known] This capture is the first one made to find out. It drives no app. `qlmctl poll` is the host, and the user makes every change by hand: the mic, the room's sound, and the knob. The mic stays out for every other run, so this one comes last, with the app quit.
+A capture of its own, run after `qlm-app-second`, to decode what the adapter reports with the calibration mic in. qlm reads the mic's two readings and shows them as raw counts, but nobody knows their scale.[^mic-known] This capture is the first one made to find out. It drives no app. `qlmctl poll` is the host, and the user makes every change by hand: the mic, the room's sound, and the knob. The mic stays out for every other run, so this one comes last, with the app quit.
 
 The rules above still hold, with `qlmctl` in place of the verbs:
 
@@ -259,11 +259,11 @@ Steps 1 to 5 run under one `poll`. Start it in the background, with its output i
 "$C" poll --seconds 600 > captures/qlm-mic-discovery/poll-1.txt
 ```
 
-`poll` prints the knob and each monitor's telemetry, not the mic. So log each hand action's time when the user says it's done, with `date +%T`. `reports.txt` gives the exact poll later. If `poll` exits early, the adapter takes over at the knob, which changes nothing. Ask before starting it again.
+`poll` prints a `mic` line at its first status, then each time the text changes: `mic none`, or `mic in, DE …, DD …`, in raw counts. With the mic in, that's about once a cycle, every 0.57 s. So the user can watch `DE` and `DD` move live, and a step that moves nothing shows at once. But `poll` sees only about one `DE` in ten. `reports.txt` has every reading, and stays the record. Log each hand action's time when the user says it's done, with `date +%T`, and the `mic` lines around it from `poll`'s output. `reports.txt` gives the exact poll later. If `poll` exits early, the adapter takes over at the knob, which changes nothing. Ask before starting it again.
 
 | Step | What the user does | Seconds | What it settles |
 | --- | --- | --- | --- |
-| 1 | The mic out. Then plug it in. Then pull it out again. | 10 out, 20 in, 10 out | How the adapter reports a hot-plug: the shape goes from `33 30 36 DF` to `32 34 DE DD 30 36 DF` and back. How many polls the change takes, and whether `34` ever appears alone. |
+| 1 | The mic out. Then plug it in. Then pull it out again. | 10 out, 20 in, 10 out | How the adapter reports a hot-plug: the shape goes from `33 30 36 DF` to `32 34 DE DD 30 36 DF` and back. `poll`'s `mic` line shows it live, from `none` to `in, DE …, DD …` and back. `reports.txt` shows how many polls the change takes, and whether `34` ever appears alone. |
 | 2 | Plug the mic in at the 0.5 m spot. The room silent, and the noise off. | 30 | The floor of `DE` and `DD` |
 | 3 | The noise on, at −40, −30, and −20 dBFS in turn | 30 each | Whether `DD` steps by a fixed ratio per 10 dB, and which: linear in pressure or in power, or already in dB. Whether `DE` takes the same steps. |
 | 4 | The noise off. Three sharp claps or finger snaps near the mic, 10 s apart. | 40 | Whether `DE` spikes and `DD` barely moves, which would confirm peak against average |
@@ -279,7 +279,7 @@ Step 6 runs under its own `poll`, with the noise off throughout:
 | --- | --- | --- | --- |
 | 6 | The mic in, the noise off. Pull the knob out, wait, and plug it back in before `poll` ends. Leave the knob where it was. | 20 out | The one shape no capture has: mic in, knob out. `poll` prints `no knob` while it's out. |
 
-If REW's top step leaves `DD` at its floor, stop. Don't raise the monitors' level. A louder test is the user's call, at −50 dB or lower.
+If `poll`'s `DD` stays at its step 2 floor at REW's top step, stop. Don't raise the monitors' level. A louder test is the user's call, at −50 dB or lower.
 
 After step 6, ask the user to stop the capture, then to unplug the mic.
 
@@ -343,7 +343,7 @@ What each result would mean, against the guesses in adapter-status.md:
 
 A decoded fact lands in `docs/adapter-status.md` and `docs/protocol.md`, with this capture and its seconds as its source, in the capture's PR. Add the scenario to `captures/README.md`'s list there too. The mic serial query stays off limits, whatever this capture shows.
 
-[^mic-known]: `docs/adapter-status.md`, "The mic: `DE` and `DD`". `qlm/GLMProtocol/QLMReplies.c` parses `mic`, `micDE`, and `micDD`. `QLMSnapshot` has `micPresent`. `qlmctl info` prints `mic in` or `mic none`, and no command prints the readings yet. The captures with the mic in are `startup-idle-mic` and `knob-sweep`.
+[^mic-known]: `docs/adapter-status.md`, "The mic: `DE` and `DD`". `qlm/GLMProtocol/QLMReplies.c` parses `mic`, `micDE`, and `micDD`. #62 carries the readings, `micDE` and `micDD`, beside `micPresent` in the snapshot's adapter state. `qlmctl info` prints `mic       in, DE 464255904, DD 2248271`, `poll` prints a `mic` line as above, and `dump_state` gives all three under `snapshot.adapter`. adapter-status.md notes that `poll` sees only about one `DE` in ten. The captures with the mic in are `startup-idle-mic` and `knob-sweep`.
 [^poll-level]: `qlmctl`'s usage, for what `poll` sends. `docs/experiments.md`, Part C: `poll` sends no level, and while it runs, the adapter keeps what it applied.
 [^no-knob]: `docs/experiments.md`, Part C, Q4. Its steps keep the signal off at every take-over with no knob, for the same reason.
 
