@@ -155,6 +155,7 @@ NSString *QLMBusProblemTitle(QLMSnapshot *snapshot) {
     switch (snapshot.adapterProblem) {
     case QLMAdapterProblemUnresponsive: return @"The adapter stopped answering";
     case QLMAdapterProblemLostTrack: return @"qlm lost track of the adapter";
+    case QLMAdapterProblemNotTaking: return @"The adapter stopped taking reports";
     case QLMAdapterProblemNone: break;
     }
     switch (snapshot.busProblem) {
@@ -180,6 +181,10 @@ NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
     case QLMAdapterProblemLostTrack:
         action = @"qlm gave up on the adapter, and sends nothing more. Only a replug or a relaunch helps: unplug the adapter and "
                  @"plug it back in, or quit qlm and open it again.";
+        break;
+    case QLMAdapterProblemNotTaking:
+        action = @"qlm stopped reconnecting, since each try would hold it up for seconds. Unplug the adapter, and plug it "
+                 @"back in.";
         break;
     case QLMAdapterProblemNone:
         break;

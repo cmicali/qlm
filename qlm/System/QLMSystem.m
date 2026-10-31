@@ -160,7 +160,7 @@ static QLMBusProblem QLMBusProblemFor(NSError *_Nullable error) {
         return QLMBusProblemNone;
     }
     if (error.code == QLMAdapterErrorDisconnected || error.code == QLMAdapterErrorUnresponsive || error.code == QLMAdapterErrorGaveUp ||
-        error.code == QLMAdapterErrorLostTrack) {
+        error.code == QLMAdapterErrorStoppedTaking || error.code == QLMAdapterErrorLostTrack) {
         return QLMBusProblemNoAdapter;
     }
     if (error.code != QLMAdapterErrorBusy) {
@@ -177,6 +177,7 @@ static QLMAdapterProblem QLMAdapterProblemFor(NSError *_Nullable error) {
     case QLMAdapterErrorUnresponsive:
     case QLMAdapterErrorGaveUp: return QLMAdapterProblemUnresponsive;
     case QLMAdapterErrorLostTrack: return QLMAdapterProblemLostTrack;
+    case QLMAdapterErrorStoppedTaking: return QLMAdapterProblemNotTaking;
     default: return QLMAdapterProblemNone;
     }
 }
@@ -238,6 +239,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSUInteger _reconnects;
     BOOL _reconnectDue;
     NSUInteger _reconnectToken;
+    // Counts every try to reopen. A send's result, or _adapterError, from
+    // before the last try says nothing of the link now.
+    NSUInteger _reopens;
+    NSUInteger _adapterErrorReopens;
     id<QLMTimer> _adapterTimer;
     NSUInteger _adapterPollsQueued;
     QLMKnob *_knob;
@@ -534,7 +539,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         uint8_t session = sent.address;
         uint8_t value = state ? sent.payload[1] : 0;
         NSUInteger run = strongSelf->_run;
-        __block BOOL refused = NO;
+        __block NSUInteger reopens = strongSelf->_reopens;
         QLMAdapterReplyHandler handler = ^(const QLMMessage *reply, NSError *error) {
             QLMSystem *system = weakSelf;
             // TRAP: a stop ends the item in flight, and a start may follow at
@@ -543,9 +548,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             if (system == nil || system->_run != run) {
                 return;
             }
-            if (!refused) {
-                [system noteSendError:error];
-            }
+            [system noteSendError:error reopens:reopens];
             if (state) {
                 [system noteStateOf:session value:value wentOut:QLMSendWentOut(error)];
             }
@@ -557,11 +560,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         // it now. While the bus is refused or gone, another host may lease
         // that session to another monitor. So such a frame does not go out
         // then, nor after, if it was queued before System checked the
-        // leases again. It fails as a refusal would. The error is System's
-        // own, not the adapter's news, so noteSendError: never sees it: an
-        // old QLMAdapterErrorGaveUp would reopen the adapter again.
+        // leases again. It fails as a refusal would, with _adapterError as
+        // old as when System noted it.
         if (QLMNamesSession(&sent) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
-            refused = YES;
+            reopens = strongSelf->_adapterErrorReopens;
             NSError *error = strongSelf->_adapterError
                                  ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, @"The frame was queued before System checked the leases again.", nil);
             [strongSelf->_clock async:strongSelf->_queue run:^{
@@ -649,8 +651,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // A busy or missing adapter shows in the snapshot until a send goes out.
 // Then every lease is checked again. Call it only from an item's completion.
-- (void)noteSendError:(nullable NSError *)error {
-    if (!_running) {
+// TRAP: a reply hops to the queue, so a reopen may run between a send's
+// result and this. A QLMAdapterErrorGaveUp from before it would schedule
+// another reopen while the link syncs.
+- (void)noteSendError:(nullable NSError *)error reopens:(NSUInteger)reopens {
+    if (!_running || reopens != _reopens) {
         return;
     }
     BOOL noBus = QLMBusProblemFor(error) != QLMBusProblemNone;
@@ -667,6 +672,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     }
     if (noBus && ![_adapterError isEqual:error]) {
         _adapterError = error;
+        _adapterErrorReopens = _reopens;
         _dirty = YES;
     } else if (error == nil && _adapterError != nil) {
         _adapterError = nil;
@@ -684,8 +690,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // The link gave up on the adapter. System reopens it after a wait, and the
 // link syncs again, until a send goes out, the adapter is gone or refused,
-// or a stop. After the gap, takeBackAfterGap trusts no old session until its
-// serial answers.
+// or a stop. A reopen that fails is tried again after the next wait. After
+// the gap, takeBackAfterGap trusts no old session until its serial answers.
+// A link whose syncs the adapter did not take fails with
+// QLMAdapterErrorStoppedTaking instead, and is never reopened: each write
+// may block the queue for 5 s.
 - (void)reconnectLater {
     if (_reconnectDue || _stopping || ![_adapter respondsToSelector:@selector(reconnect)]) {
         return;
@@ -704,8 +713,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 - (void)reconnect {
     _reconnectDue = NO;
-    _reconnects = [_adapter reconnect] ? _reconnects + 1 : 0;
+    _reopens += 1;
+    QLMReconnectResult result = [_adapter reconnect];
+    if (result == QLMReconnectNotNeeded) {
+        return;
+    }
+    _reconnects += 1;
     _dirty = YES;
+    if (result == QLMReconnectFailed) {
+        [self reconnectLater];
+    }
     [self publishIfSettled];
 }
 

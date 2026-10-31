@@ -79,7 +79,8 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // When the adapter's link gives up, System reopens the adapter, and the link
 // syncs again. It waits 1 s before the first reopen, then twice as long
 // before each next one, up to 30 s, until a send goes out, the adapter is
-// gone or refused, or a stop.
+// gone or refused, or a stop. A reopen that fails is tried again after the
+// next wait. A link whose syncs the adapter did not take is never reopened.
 @interface QLMSystem : NSObject
 
 - (instancetype)initWithAdapter:(id<QLMAdapter>)adapter settings:(QLMSystemSettings *)settings;

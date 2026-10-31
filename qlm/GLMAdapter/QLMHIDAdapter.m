@@ -11,12 +11,17 @@ static const NSTimeInterval QLMHIDWatchInterval = 1.0;
 
 @interface QLMHIDAdapter ()
 - (void)takeArrivals;
+- (void)takeTerminations;
 - (void)receiveReport:(const uint8_t *)report length:(CFIndex)length result:(IOReturn)result sender:(void *)sender;
 - (void)removed:(void *)sender;
 @end
 
 static void QLMHIDArrived(void *context, io_iterator_t iterator) {
     [(__bridge QLMHIDAdapter *)context takeArrivals];
+}
+
+static void QLMHIDTerminated(void *context, io_iterator_t iterator) {
+    [(__bridge QLMHIDAdapter *)context takeTerminations];
 }
 
 static void QLMHIDInput(void *context, IOReturn result, void *sender, IOHIDReportType type, uint32_t reportID, uint8_t *report,
@@ -66,6 +71,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     const void *_runningSelf;
     IONotificationPortRef _port;
     io_iterator_t _arrivals;
+    io_iterator_t _terminations;
     io_service_t _service;
     IOHIDDeviceRef _device;
     // One link for each arrival of the adapter, kept across closes, so that
@@ -129,6 +135,12 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         NSString *description = [NSString stringWithFormat:@"IOKit did not watch for the GLM adapter (0x%08x).", result];
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, description);
     }
+    // The removal callback needs an open device. After a reopen that failed,
+    // none is open.
+    if (IOServiceAddMatchingNotification(_port, kIOTerminatedNotification, QLMHostCheckCreateHIDMatching(), QLMHIDTerminated,
+                                         (__bridge void *)self, &_terminations) == KERN_SUCCESS) {
+        [self takeTerminations];
+    }
 
     __weak QLMHIDAdapter *weakSelf = self;
     _watch = [_clock every:QLMHIDWatchInterval queue:queue run:^{
@@ -147,6 +159,10 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     if (_arrivals != IO_OBJECT_NULL) {
         IOObjectRelease(_arrivals);
         _arrivals = IO_OBJECT_NULL;
+    }
+    if (_terminations != IO_OBJECT_NULL) {
+        IOObjectRelease(_terminations);
+        _terminations = IO_OBJECT_NULL;
     }
     IONotificationPortDestroy(_port);
     _port = NULL;
@@ -174,6 +190,20 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     [self openIfFree];
 }
 
+- (void)takeTerminations {
+    io_service_t service;
+    while ((service = IOIteratorNext(_terminations)) != IO_OBJECT_NULL) {
+        uint64_t entry = 0;
+        uint64_t ours = 0;
+        IORegistryEntryGetRegistryEntryID(service, &entry);
+        IOObjectRelease(service);
+        if (_service != IO_OBJECT_NULL && IORegistryEntryGetRegistryEntryID(_service, &ours) == KERN_SUCCESS && entry == ours) {
+            [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The GLM adapter was unplugged.") removed:YES];
+            [self forgetService];
+        }
+    }
+}
+
 - (void)forgetService {
     if (_service != IO_OBJECT_NULL) {
         IOObjectRelease(_service);
@@ -182,12 +212,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 }
 
 - (void)refuse:(NSString *)host {
-    NSError *error = QLMAdapterErrorMake(QLMAdapterErrorBusy, host);
-    if (_device != NULL) {
-        [self closeWithError:error removed:NO];
-    } else {
-        _problem = error;
-    }
+    [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, host) removed:NO];
 }
 
 - (void)openIfFree {
@@ -207,6 +232,10 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     }
     if (_link.failure != nil) {
         _problem = _link.failure;
+        return;
+    }
+    // System's reconnect opens it.
+    if (_link.gaveUp) {
         return;
     }
     NSError *refusal = [self openService];
@@ -236,19 +265,32 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     return [self openDevice:device];
 }
 
-- (BOOL)reconnect {
-    if (_device == NULL || !_link.gaveUp) {
-        return NO;
+// Another host closes the link, as at any time. Any other failure leaves it
+// given up, for System's next try, and sends still fail as it gave up.
+// TRAP: a failed seize alone is no other host. qlm's own close may not have
+// let go yet.
+- (QLMReconnectResult)reconnect {
+    if (!_link.gaveUp || _service == IO_OBJECT_NULL) {
+        return QLMReconnectNotNeeded;
     }
-    [self releaseDevice:NO];
-    NSError *refusal = [self openService];
-    if (refusal != nil) {
+    NSString *host = QLMHostCheckOtherHost();
+    if (host == nil) {
+        if (_device != NULL) {
+            [self releaseDevice:NO];
+        }
+        NSError *refusal = [self openService];
+        if (refusal == nil) {
+            [_link resync];
+            return QLMReconnectReopened;
+        }
         _problem = refusal;
-        [_link closeWithError:refusal];
-        return NO;
+        host = QLMHostCheckOtherHost();
     }
-    [_link resync];
-    return YES;
+    if (host != nil) {
+        [self refuse:host];
+        return QLMReconnectNotNeeded;
+    }
+    return QLMReconnectFailed;
 }
 
 // TRAP: never fall back to a shared open. GLM could then open the adapter
@@ -292,13 +334,17 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     return nil;
 }
 
+// A link that gave up stays open across a failed reopen, so it closes here
+// too.
 - (void)closeWithError:(NSError *)error removed:(BOOL)removed {
     _problem = error;
-    if (_device == NULL) {
+    if (_device == NULL && !_link.gaveUp) {
         return;
     }
     [_link closeWithError:error];
-    [self releaseDevice:removed];
+    if (_device != NULL) {
+        [self releaseDevice:removed];
+    }
 }
 
 // Closes the device, and leaves the link to the caller.
@@ -385,7 +431,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 - (void)sendMessage:(QLMMessage)message rewrite:(nullable QLMAdapterRewrite)rewrite replyHandler:(QLMAdapterReplyHandler)handler {
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
-    if (_device != NULL) {
+    if (_device != NULL || _link.gaveUp) {
         [_link sendMessage:message rewrite:rewrite replyHandler:handler];
         return;
     }

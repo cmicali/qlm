@@ -135,9 +135,15 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
 @property (nonatomic, readonly) NSUInteger unmatchedReports;  // reports the capture never sent
 @property (nonatomic, readonly) NSUInteger deliveredReplies;  // read on the queue
 // As the HID adapter's: once the link gave up, the device closes and opens
-// again under the link, which syncs anew. When unplugged, the device would
-// not open, and every send fails as with no adapter.
-@property (atomic) BOOL unplugged;
+// again under the link, which syncs anew. While refusesOpen is set, the
+// open fails, and the link stays given up for the next try.
+@property (atomic) BOOL refusesOpen;
+// Set: the adapter takes no report, as when IOKit times out on its OUT
+// endpoint. Nothing is written.
+@property (atomic) BOOL refusesReports;
+// As IOKit's termination of the device: the link closes, and every send
+// fails as with no adapter.
+- (void)unplug;
 // The clock's time at each call to reconnect.
 @property (atomic, readonly) NSArray<NSNumber *> *reconnectTimes;
 

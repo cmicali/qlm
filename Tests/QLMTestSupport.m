@@ -200,7 +200,7 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     NSUInteger _repliesDue;
     NSTimeInterval _lastDue;  // on the clock
     NSArray<NSNumber *> *_reconnectTimes;
-    NSError *_gone;  // after a reconnect found it unplugged
+    NSError *_gone;  // once unplugged
 }
 
 - (instancetype)initWithCapture:(QLMCapture *)capture {
@@ -249,7 +249,11 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     _clock = clock;
     __weak QLMCaptureDevice *weakSelf = self;
     _link = [[QLMReportLink alloc] initWithQueue:queue clock:clock writer:^NSError *(const uint8_t *report) {
-        [weakSelf answer:[NSData dataWithBytes:report length:QLMReportLength]];
+        QLMCaptureDevice *strongSelf = weakSelf;
+        if (strongSelf.refusesReports) {
+            return QLMAdapterErrorMake(QLMAdapterErrorNotTaken, @"The GLM adapter did not take the report.");
+        }
+        [strongSelf answer:[NSData dataWithBytes:report length:QLMReportLength]];
         return nil;
     }];
 }
@@ -311,20 +315,25 @@ NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode) {
     }
 }
 
-- (BOOL)reconnect {
+- (QLMReconnectResult)reconnect {
     @synchronized(self) {
         _reconnectTimes = [_reconnectTimes arrayByAddingObject:@(_clock.now)];
     }
-    if (!_link.gaveUp) {
-        return NO;
+    if (!_link.gaveUp || _gone != nil) {
+        return QLMReconnectNotNeeded;
     }
-    if (self.unplugged) {
-        _gone = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"IOKit did not make a HID device of the GLM adapter.");
-        [_link closeWithError:_gone];
-        return NO;
+    if (self.refusesOpen) {
+        return QLMReconnectFailed;
     }
     [_link resync];
-    return YES;
+    return QLMReconnectReopened;
+}
+
+- (void)unplug {
+    [_clock async:_queue run:^{
+        self->_gone = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The GLM adapter was unplugged.");
+        [self->_link closeWithError:self->_gone];
+    }];
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {

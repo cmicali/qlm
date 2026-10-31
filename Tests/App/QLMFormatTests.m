@@ -160,6 +160,18 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
                           @"The level at the take-over is unknown, since no knob is in.");
 }
 
+// An adapter that stopped taking reports is not reopened, and the banner
+// says why.
+- (void)testTheBannerSaysWhenTheAdapterStoppedTakingReports {
+    QLMSnapshot *notTaking = QLMSnapshotWithProblem(QLMAdapterProblemNotTaking, QLMHandBackUnknown, nil, @(-50));
+    XCTAssertEqualObjects(QLMBusProblemTitle(notTaking), @"The adapter stopped taking reports");
+    XCTAssertEqualObjects(QLMBusProblemDetail(notTaking),
+                          @"qlm stopped reconnecting, since each try would hold it up for seconds. Unplug the adapter, and plug "
+                          @"it back in. About 2.6 s after qlm's last report, the adapter takes over at the knob's position. "
+                          @"The level at the take-over is unknown, since no knob is in.");
+    XCTAssertTrue(QLMStopMayRaiseLevel(notTaking));
+}
+
 - (void)testTheBannerShowsTheBusProblemOtherwise {
     QLMSnapshot *snapshot = QLMSnapshotWith(QLMHandBackUnknown, nil, nil);
     XCTAssertNil(QLMBusProblemTitle(snapshot));
