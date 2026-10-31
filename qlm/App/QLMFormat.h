@@ -12,6 +12,17 @@ extern NSString *const QLMEmDash;
 // "−30.0 dB", with a true minus sign.
 NSString *QLMDecibelsText(double decibels);
 
+// Why a level typed for the ceiling, or the range's bottom, is refused, or
+// nil. 0 dB is the monitors' full level, so a level above it is refused, not
+// clamped: a clamp would make 35, typed for −35, the loudest ceiling.
+NSString *_Nullable QLMTypedLevelRefusal(double decibels);
+
+// Settings' level fields: one decimal, with a true minus sign. It refuses an
+// empty field, which would read as 0 dB, and what QLMTypedLevelRefusal
+// refuses, with the reason as its error.
+@interface QLMDecibelsFormatter : NSNumberFormatter
+@end
+
 // What a person calls the monitor: its name in the setup file, else its
 // serial. Nil with neither.
 NSString *_Nullable QLMMonitorLabel(QLMMonitorState *monitor, QLMSetup *_Nullable setup);

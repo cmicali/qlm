@@ -8,7 +8,7 @@
 
 static const CGFloat QLMSettingsTextWidth = 360;
 
-@interface QLMSettingsWindowController () <NSWindowDelegate>
+@interface QLMSettingsWindowController () <NSWindowDelegate, NSTextFieldDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) NSButton *adapterCheckbox;
@@ -20,6 +20,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic) NSStepper *lowestStepper;
 @property (nonatomic) NSTextField *ceilingField;
 @property (nonatomic) NSStepper *ceilingStepper;
+@property (nonatomic) NSTextField *rangeNote;
 @property (nonatomic) NSButton *wakeCheckbox;
 @property (nonatomic) NSButton *loginCheckbox;
 @property (nonatomic) NSTextField *loginNote;
@@ -83,6 +84,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.ceilingStepper = [self stepper];
     NSStackView *ceilingRow = [NSStackView stackViewWithViews:@[self.ceilingField, self.ceilingStepper, [NSTextField labelWithString:@"dB"]]];
     ceilingRow.spacing = 4;
+    self.rangeNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
     NSTextField *ceilingNote = QLMNoteLabel(
         @"No volume goes out above the ceiling. qlm's protocol layer caps every volume frame at it, "
         @"whether the level comes from the slider, the knob, dim, or a group. 0 dB is the monitors' full level.",
@@ -106,6 +108,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @[[NSGridCell emptyContentView], self.setupNote],
         @[rangeTitle, lowestRow],
         @[[NSTextField labelWithString:@"Ceiling:"], ceilingRow],
+        @[[NSGridCell emptyContentView], self.rangeNote],
         @[[NSGridCell emptyContentView], ceilingNote],
         @[launchTitle, self.wakeCheckbox],
         @[[NSGridCell emptyContentView], self.loginCheckbox],
@@ -117,7 +120,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     grid.rowAlignment = NSGridRowAlignmentFirstBaseline;
     [grid columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
     // A note sits close under its control, and a new section stands apart.
-    for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, ceilingNote, self.loginNote]) {
+    for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, self.rangeNote, ceilingNote, self.loginNote]) {
         [grid cellForView:note].row.topPadding = -4;
     }
     for (NSView *title in @[setupTitle, rangeTitle, launchTitle]) {
@@ -126,6 +129,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     grid.translatesAutoresizingMaskIntoConstraints = NO;
     self.grid = grid;
     self.handBackRow = [grid cellForView:self.handBackLevel].row;
+    [grid cellForView:self.rangeNote].row.hidden = YES;
     [content addSubview:grid];
     [NSLayoutConstraint activateConstraints:@[
         [grid.leadingAnchor constraintEqualToAnchor:content.leadingAnchor constant:20],
@@ -142,17 +146,12 @@ static const CGFloat QLMSettingsTextWidth = 360;
 }
 
 - (NSTextField *)decibelsField {
-    NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
-    formatter.numberStyle = NSNumberFormatterDecimalStyle;
-    formatter.minimumFractionDigits = 1;
-    formatter.maximumFractionDigits = 1;
-    formatter.minusSign = @"−";
-    formatter.lenient = YES;
     NSTextField *field = [NSTextField textFieldWithString:@""];
-    field.formatter = formatter;
+    field.formatter = [[QLMDecibelsFormatter alloc] init];
     field.alignment = NSTextAlignmentRight;
     field.target = self;
     field.action = @selector(rangeChanged:);
+    field.delegate = self;
     // TRAP: by default only Return sends the action. In qlm-app-first, a
     // ceiling typed and left was lost.
     field.cell.sendsActionOnEndEditing = YES;
@@ -273,6 +272,28 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [self.delegate settingsDidChangeVolumeRange:self];
 }
 
+// The formatter refused the text. The field takes back its saved value and
+// keeps focus, and the note says why.
+- (BOOL)control:(NSControl *)control didFailToFormatString:(NSString *)string errorDescription:(NSString *)error {
+    double saved = control == self.ceilingField ? self.preferences.ceilingDecibels : self.preferences.lowestDecibels;
+    NSText *editor = control.currentEditor;
+    editor.string = [control.formatter stringForObjectValue:@(saved)] ?: @"";
+    [editor selectAll:nil];
+    [self showRangeRefusal:error];
+    return NO;
+}
+
+// The note's row shows only with a refusal.
+- (void)showRangeRefusal:(nullable NSString *)refusal {
+    NSString *text = refusal ?: @"";
+    if ([self.rangeNote.stringValue isEqualToString:text]) {
+        return;
+    }
+    self.rangeNote.stringValue = text;
+    [self.grid cellForView:self.rangeNote].row.hidden = refusal == nil;
+    [self fitWindow];
+}
+
 #pragma mark - Launch
 
 - (void)wakeClicked:(NSButton *)checkbox {
@@ -333,6 +354,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.ceilingStepper.minValue = lowest + QLMVolumeRangeMinimumSpan;
     self.ceilingStepper.maxValue = 0;
     self.ceilingStepper.doubleValue = ceiling;
+    [self showRangeRefusal:nil];
 }
 
 // Asks macOS for the login item's status, so only when the window shows.

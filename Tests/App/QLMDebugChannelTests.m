@@ -7,6 +7,7 @@
 #import "QLMApplySequence.h"
 #import "QLMDebugChannel.h"
 #import "QLMFakeBus.h"
+#import "QLMFormat.h"
 #import "QLMPreferences.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
@@ -431,9 +432,21 @@
     [self assertEveryFrameSafeUnder:-30];
     // The slider's range follows it.
     XCTAssertEqualObjects(([self errorOf:@[@"volume", @"-45"]]), @"-45.0 dB is outside the slider's range, -60.0 to -48.5 dB");
-    // The preferences bound it: at most 0 dB, and 10 dB above the bottom.
+    // The preferences bound it 10 dB above the bottom.
     XCTAssertEqualObjects(([self runOK:@[@"ceiling", @"-100"]][@"ceilingDecibels"]), @(-50));
-    XCTAssertEqualObjects(([self runOK:@[@"ceiling", @"6"]][@"ceilingDecibels"]), @0);
+}
+
+// The verb refuses what Settings' field refuses, before the preferences
+// bound it. 0 dB itself goes through.
+- (void)testACeilingAboveFullLevelIsRefused {
+    NSUInteger mark = _bus.sentMessages.count;
+    for (NSString *decibels in @[@"6", @"0.04", @"+3"]) {
+        XCTAssertEqualObjects(([self errorOf:@[@"ceiling", decibels]]), QLMTypedLevelRefusal(decibels.doubleValue), @"%@", decibels);
+    }
+    XCTAssertEqual(_app.debugPreferences.ceilingDecibels, -30);
+    XCTAssertEqualObjects(_app.actions, @[]);
+    [self assertNothingSentSince:mark];
+    XCTAssertEqualObjects(([self runOK:@[@"ceiling", @"0"]][@"ceilingDecibels"]), @0);
 }
 
 // The stand-in never makes a HID adapter: on the app, a change starts a

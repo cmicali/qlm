@@ -64,7 +64,7 @@ These rules protect the monitors and the listener. They outrank any feature.
 - **qlm's own verbs call what the popover and Settings call.** They reach System and Setups, never the adapter, so the ceiling, the allowlist, and the GLM check hold.
   - `dump_state` reads the latest snapshot and the app's settings.
   - `popover <show|close>`, `show_monitors`, `show_settings`, and `read_setup` open what their buttons open.
-  - `volume <dB>`, `ceiling <dB>`, `adapter <on|off>`, `adapter_off_answering <cancel|anyway>`, `mute <serial> <on|off>`, `mute_all <on|off>`, `dim <on|off>`, `standby`, `wake`, `quit_glm`, and `quit_answering <cancel|anyway>` change the monitors. Each refuses while its control would be disabled. `volume` refuses a level outside the slider's range.
+  - `volume <dB>`, `ceiling <dB>`, `adapter <on|off>`, `adapter_off_answering <cancel|anyway>`, `mute <serial> <on|off>`, `mute_all <on|off>`, `dim <on|off>`, `standby`, `wake`, `quit_glm`, and `quit_answering <cancel|anyway>` change the monitors. Each refuses while its control would be disabled. `volume` refuses a level outside the slider's range, and `ceiling` refuses one above 0 dB, as Settings' field does.
   - **A stop that may make the monitors louder needs an explicit `anyway`.** Where the app's alert would show, `adapter off` refuses, and only `adapter_off_answering anyway` or `quit_answering anyway` stops.
 - **Every reply of qlm's own verbs carries `at`**, the Mac's local time to the millisecond, for a run's `notes.md`. vibe-libs' standard verbs carry none.
 - **`.claude/skills/app-hardware-run` runs a supervised test on the real monitors** through these verbs, one step at a time. Follow it for any run on the hardware.
