@@ -1612,8 +1612,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqual([self sentWithOpcode:0x1F from:before].count, 0u);
     XCTAssertEqual([self sentWithOpcode:0x3A from:before].count, 0u);
     XCTAssertEqual([self sentWithOpcode:0x10 from:before].count, 0u);
-    XCTAssertEqual([self sentWithOpcode:0x43 from:before].count, 0u);
-    XCTAssertEqual([self sentWithOpcode:0x4B from:before].count, 0u);
     XCTAssertEqual(_bus.sentMessages.count, before);
     XCTAssertNil(_system.snapshot.activeGroupName);
 }

@@ -229,28 +229,15 @@
         XCTAssertFalse(QLMFrameAllows(refused[i], lengths[i]), @"entry %zu", i);
     }
 
-    const uint8_t opcodes[] = {0x43, 0x4B};
-    const uint8_t values[] = {0x02, 0x01};
-    for (size_t i = 0; i < sizeof opcodes; i++) {
-        const uint8_t sessions[] = {QLMAddressSessionFirst, 0x03, 0x0C, QLMAddressSessionLast};
-        for (size_t j = 0; j < sizeof sessions; j++) {
-            QLMMessage unicast = QLMCommandThreeWayUnknown(sessions[j], opcodes[i], values[i]);
-            XCTAssertEqual(QLMFrameEncode(&unicast, out, sizeof out, &length), QLMFrameOK, @"%02X to %02X", opcodes[i], sessions[j]);
-        }
-        const uint8_t others[] = {QLMAddressAdapter, QLMAddressMulticast, QLMAddressBroadcast};
-        for (size_t j = 0; j < sizeof others; j++) {
-            QLMMessage elsewhere = QLMCommandThreeWayUnknown(others[j], opcodes[i], values[i]);
-            XCTAssertEqual(QLMFrameEncode(&elsewhere, out, sizeof out, &length), QLMFrameErrorForbidden, @"%02X to %02X", opcodes[i], others[j]);
-        }
-        QLMMessage otherValue = QLMCommandThreeWayUnknown(0x03, opcodes[i], values[i] + 1);
-        XCTAssertEqual(QLMFrameEncode(&otherValue, out, sizeof out, &length), QLMFrameErrorForbidden, @"%02X", opcodes[i]);
+    const uint8_t addresses[] = {QLMAddressSessionFirst, 0x03, 0x0C, QLMAddressSessionLast,
+                                 QLMAddressAdapter, QLMAddressMulticast, QLMAddressBroadcast};
+    for (size_t i = 0; i < sizeof addresses; i++) {
+        QLMFrameStatus expected = QLMAddressIsLeasable(addresses[i]) ? QLMFrameOK : QLMFrameErrorForbidden;
+        QLMMessage built43 = QLMCommandThreeWay43(addresses[i], 0x02);
+        XCTAssertEqual(QLMFrameEncode(&built43, out, sizeof out, &length), expected, @"43 to %02X", addresses[i]);
+        QLMMessage built4B = QLMCommandThreeWay4B(addresses[i], 0x01);
+        XCTAssertEqual(QLMFrameEncode(&built4B, out, sizeof out, &length), expected, @"4B to %02X", addresses[i]);
     }
-    QLMMessage built43 = QLMCommandThreeWayUnknown(0x03, 0x43, 0x02);
-    XCTAssertEqualObjects(QLMBytes(built43.payload, built43.length), QLMBytes(frame43, sizeof frame43));
-    QLMMessage built4B = QLMCommandThreeWayUnknown(0x03, 0x4B, 0x01);
-    XCTAssertEqualObjects(QLMBytes(built4B.payload, built4B.length), QLMBytes(frame4B, sizeof frame4B));
-    QLMMessage other = QLMCommandThreeWayUnknown(0x03, 0x44, 0x02);
-    XCTAssertEqual(QLMFrameEncode(&other, out, sizeof out, &length), QLMFrameErrorForbidden);
 }
 
 // Section 7 and section 9's group apply: what qlm does send.

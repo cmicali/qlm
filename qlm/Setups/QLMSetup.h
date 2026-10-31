@@ -53,7 +53,7 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly, nullable) NSNumber *lfeCrossoverFrequency;  // subwoofers
 @property (nonatomic, readonly, nullable) NSNumber *lfeLevel;               // subwoofers
 @property (nonatomic, readonly, nullable) NSNumber *subwooferGroupID;       // subwoofers
-@property (nonatomic, readonly, nullable) NSNumber *groupDelayCompensation; // 8351B and 7350A
+@property (nonatomic, readonly, nullable) NSNumber *groupDelayCompensation; // 8351B
 @property (nonatomic, readonly, nullable) NSNumber *bassExtensionCrossover; // 8351B: BassExtensionXO(Hz)
 @property (nonatomic, readonly) NSArray<QLMSetupBand *> *bands;
 

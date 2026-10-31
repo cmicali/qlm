@@ -234,23 +234,20 @@ static NSData *QLMDelayOf(QLMDSPBlock *block) {
     NSError *error = nil;
     QLMDSPBlock *threeWay = [QLMDSPBlock blockForNode:group.nodes[1] inGroup:group error:&error];
     XCTAssertNotNil(threeWay, @"%@", error);
-    for (NSData *payload in threeWay.payloads) {
+    NSArray<NSData *> *payloads = threeWay.payloads;
+    for (NSData *payload in payloads) {
         XCTAssertTrue(QLMFrameAllows(payload.bytes, payload.length), @"%@", payload);
     }
     // 17 01, 10 02, 10 01 00, 10 01 09, 43, PEQ x20, 3B, 4B, 3D, 40.
-    const uint8_t frame43[] = {0x43, 0x00, 0x02};
-    const uint8_t frame4B[] = {0x4B, 0x00, 0x00, 0x00, 0x01};
-    XCTAssertEqual(threeWay.payloads.count, 29u);
-    const uint8_t unknownLevel[] = {0x10, 0x01, 0x09, 0x00, 0x00, 0x00};
-    XCTAssertEqualObjects(threeWay.payloads[3], QLMBytes(unknownLevel, sizeof unknownLevel));
-    XCTAssertEqualObjects(threeWay.payloads[4], QLMBytes(frame43, sizeof frame43));
-    XCTAssertEqual(((const uint8_t *)threeWay.payloads[5].bytes)[0], 0x10);
-    XCTAssertEqual(((const uint8_t *)threeWay.payloads[24].bytes)[2], 19);
-    XCTAssertEqualObjects(threeWay.payloads[25], threeWay.crossoverPayload);
-    XCTAssertEqualObjects(threeWay.payloads[26], QLMBytes(frame4B, sizeof frame4B));
-    const uint8_t sync[] = {0x3D, 0x00, 0x00};
-    XCTAssertEqualObjects(threeWay.payloads[27], QLMBytes(sync, sizeof sync));
-    XCTAssertEqualObjects(threeWay.payloads[28], threeWay.routingPayloads[0]);
+    XCTAssertEqual(payloads.count, 29u);
+    QLMAssertBytes(payloads[3].bytes, payloads[3].length, 0x10, 0x01, 0x09, 0x00, 0x00, 0x00);
+    QLMAssertBytes(payloads[4].bytes, payloads[4].length, 0x43, 0x00, 0x02);
+    XCTAssertEqual(((const uint8_t *)payloads[5].bytes)[0], 0x10);
+    XCTAssertEqual(((const uint8_t *)payloads[24].bytes)[2], 19);
+    XCTAssertEqualObjects(payloads[25], threeWay.crossoverPayload);
+    QLMAssertBytes(payloads[26].bytes, payloads[26].length, 0x4B, 0x00, 0x00, 0x00, 0x01);
+    QLMAssertBytes(payloads[27].bytes, payloads[27].length, 0x3D, 0x00, 0x00);
+    XCTAssertEqualObjects(payloads[28], threeWay.routingPayloads[0]);
 
     // A two-way gets neither.
     for (NSData *payload in [QLMDSPBlock blockForNode:group.nodes[0] inGroup:group error:NULL].payloads) {

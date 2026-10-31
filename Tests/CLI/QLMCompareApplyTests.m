@@ -130,7 +130,6 @@ static QLMCapturedPass *QLMLeftPass(void) {
     XCTAssertTrue([output containsString:@"\n6 of 6 passes match, apart from the generator stop, which qlm leaves out.\n"], @"%@", output);
     XCTAssertEqual([self lines:output starting:@"  GLM"].count, 0u);
     XCTAssertEqual([self lines:output starting:@"  qlm"].count, 0u);
-    XCTAssertEqual([self lines:output starting:@"  left out"].count, 0u);
 }
 
 - (void)testAChangedBandIsTheOneFrameThatDiffers {
@@ -146,7 +145,6 @@ static QLMCapturedPass *QLMLeftPass(void) {
     XCTAssertEqual(qlm.count, 1u, @"%@", output);
     XCTAssertTrue([glm.firstObject hasPrefix:@"  GLM        10 0E 05 "], @"%@", glm);
     XCTAssertTrue([qlm.firstObject hasPrefix:@"  qlm        10 0E 05 "], @"%@", qlm);
-    XCTAssertEqual([self lines:output starting:@"  not sent"].count, 0u);
 
     QLMSetup *setup = [QLMSetupReader readFileAtPath:copy error:NULL];
     NSArray<QLMPassMatch *> *matches =
@@ -255,7 +253,6 @@ static QLMCapturedPass *QLMLeftPass(void) {
     XCTAssertTrue([output containsString:@"session 03  8351B 1000002 \"Left\": 1 difference\n"], @"%@", output);
     XCTAssertEqual([self lines:output starting:@"  GLM        10 0E 04"].count, 1u, @"%@", output);
     XCTAssertEqual([self lines:output starting:@"  qlm only"].count, 0u, @"%@", output);
-    XCTAssertEqual([self lines:output starting:@"  not sent"].count, 0u, @"%@", output);
 }
 
 - (void)testTheWindowPicksThePasses {

@@ -34,11 +34,9 @@ static BOOL QLMLFEAsCaptured(QLMSetupNode *node) {
 }
 
 // Guess: 43 00 vv carries GroupDelayCompensation, and 4B 00 00 00 vv
-// BassExtensionXO(Hz). At node level only the 8351B has these fields, and in
-// every capture they hold 2 and 1, and GLM sends 43 00 02 and 4B 00 00 00 01.
-// So the mapping is matched at those values only. Every group also has
-// GroupDelayCompensation:2, and no other model gets a 43. Any other value
-// is refused.
+// BassExtensionXO(Hz). Every capture has them at 2 and 1, so the mapping is
+// matched only there, and any other value is refused. Against it: every
+// group has a GroupDelayCompensation:2 too, and no other model gets a 43.
 static BOOL QLMThreeWayAsCaptured(QLMSetupNode *node) {
     return [node.groupDelayCompensation isEqual:@2] && [node.bassExtensionCrossover isEqual:@1];
 }
@@ -186,12 +184,12 @@ static QLMBiquad QLMDesign(QLMSetupBand *band, QLMSetupNodeClass nodeClass) {
         BOOL threeWay = node.nodeClass == QLMSetupNodeClassThreeWay;
         [payloads addObjectsFromArray:@[prepare, delayed, leveled, levelUnknown]];
         if (threeWay) {
-            [payloads addObject:QLMPayload(QLMCommandThreeWayUnknown(0, 0x43, node.groupDelayCompensation.unsignedCharValue))];
+            [payloads addObject:QLMPayload(QLMCommandThreeWay43(0, node.groupDelayCompensation.unsignedCharValue))];
         }
         [payloads addObjectsFromArray:slots];
         [payloads addObject:crossed];
         if (threeWay) {
-            [payloads addObject:QLMPayload(QLMCommandThreeWayUnknown(0, 0x4B, node.bassExtensionCrossover.unsignedCharValue))];
+            [payloads addObject:QLMPayload(QLMCommandThreeWay4B(0, node.bassExtensionCrossover.unsignedCharValue))];
         }
         [payloads addObject:sync];
         [payloads addObjectsFromArray:routing];

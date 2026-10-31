@@ -208,11 +208,12 @@ QLMMessage QLMCommandSubwooferUnknown(uint8_t session, uint8_t opcode) {
     return QLMMessageMake(session, payload, sizeof payload);
 }
 
-QLMMessage QLMCommandThreeWayUnknown(uint8_t session, uint8_t opcode, uint8_t value) {
-    if (opcode == 0x4B) {
-        const uint8_t payload[] = {opcode, 0x00, 0x00, 0x00, value};
-        return QLMMessageMake(session, payload, sizeof payload);
-    }
-    const uint8_t payload[] = {opcode, 0x00, value};
+QLMMessage QLMCommandThreeWay43(uint8_t session, uint8_t value) {
+    const uint8_t payload[] = {0x43, 0x00, value};
+    return QLMMessageMake(session, payload, sizeof payload);
+}
+
+QLMMessage QLMCommandThreeWay4B(uint8_t session, uint8_t value) {
+    const uint8_t payload[] = {0x4B, 0x00, 0x00, 0x00, value};
     return QLMMessageMake(session, payload, sizeof payload);
 }
