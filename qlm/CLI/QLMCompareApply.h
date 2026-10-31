@@ -28,6 +28,21 @@ extern const int QLMCompareApplyDiffers;
 @property (nonatomic, readonly, nullable) NSData *hardwareID;
 @end
 
+// A generator stop GLM sent a session.
+@interface QLMCapturedStop : NSObject
+@property (nonatomic) uint8_t session;
+@property (nonatomic) NSTimeInterval time;
+@property (nonatomic) NSData *payload;
+@end
+
+// Every generator stop, a 05 frame to a session, from `from` to before `to`,
+// pass or no pass. A switch sends one to each monitor of the setup, the ones
+// off in the new group included.
+NSArray<QLMCapturedStop *> *QLMGeneratorStopsInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
+
+// The generator stop's 14 bytes in every capture so far.
+BOOL QLMIsKnownGeneratorStop(NSData *payload);
+
 // Each pass whose 17 01 is from `from` to before `to`, in seconds into the
 // capture.
 NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
@@ -43,8 +58,7 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
 @property (nonatomic, readonly) NSArray<NSArray<NSData *> *> *changed;
 // What GLM sent and qlm's block lacks, past what qlm knowingly leaves out.
 @property (nonatomic, readonly) NSArray<NSData *> *glmOnly;
-// What qlm knowingly leaves out, as GLM sent it: the generator stop, and
-// the block's leftOutPayloads.
+// The block's leftOutPayloads, as GLM sent them.
 @property (nonatomic, readonly) NSArray<NSData *> *leftOut;
 // The block's leftOutPayloads this pass lacks.
 @property (nonatomic, readonly) NSArray<NSData *> *missingLeftOut;
@@ -61,29 +75,36 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
 // A pass, the node whose block is closest to it, and how they compare.
 @interface QLMPassMatch : NSObject
 @property (nonatomic, readonly) QLMCapturedPass *pass;
+@property (nonatomic, readonly) QLMSetupGroup *group;
 // Nil when no node could be a match.
-@property (nonatomic, readonly, nullable) QLMSetupGroup *group;
 @property (nonatomic, readonly, nullable) QLMSetupNode *node;
 @property (nonatomic, readonly, nullable) QLMDSPBlock *block;
 @property (nonatomic, readonly, nullable) QLMBlockComparison *comparison;
 // Other nodes as close, whose blocks differ from this one's.
 @property (nonatomic, readonly) NSUInteger ties;
+// An earlier pass, to another monitor, that matched the same node. A node
+// is one monitor, so this pass can't match. Two leases in the capture with
+// other hardware IDs are two monitors. So are two sessions neither leased
+// in the capture, since a monitor leased again gets a lease there.
+@property (nonatomic, readonly, nullable) QLMCapturedPass *earlierPass;
+// The comparison matches, and no earlier pass took the node.
+@property (nonatomic, readonly) BOOL matches;
 @end
 
-// Matches each pass to a node of `groups`, all of `setup`'s when nil. The
-// node is the one whose block differs from the pass in the fewest settings,
-// then in order. Only nodes of the model the pass's 39 reply names count.
+// Matches each pass to a node of `group`, the one whose block differs from
+// the pass in the fewest settings, then in order. One group only: another
+// group may hold a near copy of a node, which would hide a difference. Only nodes of the model the pass's 39 reply names count.
 // When the setup holds the hardware ID the pass's lease names, as a raw
 // copy does and a redacted one doesn't, only that node counts. A node qlm
 // builds no block for is skipped, and `refusals` gets why, once per node.
-NSArray<QLMPassMatch *> *QLMMatchPasses(NSArray<QLMCapturedPass *> *passes, QLMSetup *setup,
-                                        NSArray<QLMSetupGroup *> *_Nullable groups,
+NSArray<QLMPassMatch *> *QLMMatchPasses(NSArray<QLMCapturedPass *> *passes, QLMSetup *setup, QLMSetupGroup *group,
                                         NSArray<NSString *> *_Nullable *_Nullable refusals);
 
 // compare-apply, given what follows the command's name. It reads a setup
 // file and a capture's reports.txt, and opens no bus. It prints to `out`,
-// and why it can't compare to `err`. It returns 0 when every pass matches,
-// QLMCompareApplyDiffers when one doesn't, EX_USAGE for an argument it
+// and why it can't compare to `err`. It returns 0 when every pass matches
+// and every generator stop in the window is the known one,
+// QLMCompareApplyDiffers when not, EX_USAGE for an argument it
 // doesn't know, and EX_DATAERR for a file it can't read, a group the setup
 // lacks, or no pass to compare.
 int QLMCompareApply(NSArray<NSString *> *arguments, FILE *out, FILE *err);

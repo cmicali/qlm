@@ -39,6 +39,11 @@ QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSN
 // The output report a message packs into, 64 bytes.
 NSData *QLMReportFor(QLMMessage message);
 
+// A frame as the bus carries it, with no allowlist: the CRC over the address
+// and payload, then 7E and 7D escaped, then the flag (docs/protocol.md,
+// Framing). For frames qlm never encodes: replies, and GLM's refused frames.
+NSData *QLMUncheckedFrame(QLMMessage message);
+
 // A path from the repository's root.
 NSString *QLMRepositoryPath(NSString *relative);
 

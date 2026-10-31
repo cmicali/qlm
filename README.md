@@ -97,22 +97,27 @@ Captures decide whether the 8351B's refusal lifts. We record GLM applying setups
 
 ### compare-apply
 
-`compare-apply FILE.sam reports.txt` checks a capture of GLM's apply against qlm's blocks from a setup file. It reads the two files and opens no bus. It refuses any option of the bus, so a wrong flag can't drive the monitors.
+`compare-apply FILE.sam reports.txt --group NAME` checks a capture of GLM's apply of one group against qlm's blocks from a setup file. It reads the two files and opens no bus. It refuses any option of the bus, so a wrong flag can't drive the monitors.
 
-It takes each DSP pass in the capture, from `17 01` through the `40` frames after `3D`. `--from S` and `--to S` keep only the passes in that window of the capture's seconds. It matches each pass to the node whose block is closest to it, in any group, or in the one `--group NAME` names. Only nodes of the model in the session's `39` reply count. A raw setup file also names each node's hardware ID, so then only the node the session's lease names counts. A redacted one doesn't.
+It takes each DSP pass in the capture, from `17 01` through the `40` frames after `3D`. `--from S` and `--to S` keep only the passes in that window of the capture's seconds. Each apply gets its own run, with its group and its window.
+
+It matches each pass to the node of the group whose block is closest to it. Only that group's nodes count, since another group may hold a near copy of a node. In Main.sam, Group_4 is nearly Main 4x2, so a search across groups could match a changed node's pass to the old copy, and hide the change. Two more rules narrow the match:
+
+- Only nodes of the model in the session's `39` reply count. A raw setup file also names each node's hardware ID, so then only the node the session's lease names counts. A redacted one doesn't.
+- A node is one monitor. So a second session that matches a node already matched fails, unless the capture leases that session, as when a monitor wakes into the group.
 
 | It prints | As |
 | --- | --- |
 | A setting whose frame differs | `GLM`, then `qlm` |
 | A frame only GLM sent | `GLM only` |
 | A frame only qlm would send | `qlm only` |
-| A frame qlm leaves out, as it always has: the generator stop, `05 04`, and the 8351B's `43 00 02` and `4B 00 00 00 01` | `left out` |
-| One of the 8351B's two that GLM didn't send | `not sent` |
+| The 8351B's `43 00 02` and `4B 00 00 00 01`, which qlm leaves out | `left out` |
+| One of those two that GLM didn't send | `not sent` |
 
-A left-out frame with other bytes counts as one only GLM sent. It exits 0 when every pass matches but for what qlm leaves out, and 1 when one doesn't. A wrong argument exits 64, and a file it can't read, a group the setup lacks, or no pass to compare exits 65.
+It also checks every generator stop, `05 04`, in the window, to a monitor with a pass or not. A left-out frame or a stop with other bytes counts as one only GLM sent. It exits 0 when every pass matches and every stop is the known one, and 1 when not. A wrong argument, or no `--group`, exits 64. A file it can't read, a group the setup lacks, or no pass to compare exits 65.
 
 ```bash
-qlmctl compare-apply Tests/Setups/Fixtures/Main.sam captures/startup-idle/reports.txt
+qlmctl compare-apply Tests/Setups/Fixtures/Main.sam captures/startup-idle/reports.txt --group "Main 2x1"
 ```
 
 ## Disclaimer

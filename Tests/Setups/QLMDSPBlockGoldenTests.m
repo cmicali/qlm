@@ -27,6 +27,7 @@
 @property (nonatomic) QLMSetup *setup;
 @property (nonatomic) QLMSetupGroup *group;
 @property (nonatomic) QLMSetupNode *node;
+@property (nonatomic) size_t row;
 @end
 
 @implementation QLMGoldenPass
@@ -135,6 +136,7 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
             pass.setup = setup;
             pass.group = group;
             pass.node = [group nodeWithSerial:parts[1]];
+            pass.row = r;
             XCTAssertNotNil(pass.node, @"%@ pass %lu", scenario, (unsigned long)i);
             [passes addObject:pass];
         }
@@ -173,42 +175,50 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
     XCTAssertEqual(identified, 44u);
 }
 
-// compare-apply's match. Given every group of the row's setup, it finds for
-// each pass a node whose block is the table's node's, and the two match.
+// compare-apply's match. Given the row's group, it finds for each pass the
+// table's node, and the two match. Where two sessions match one node, the
+// later was leased in the capture: the monitor, leased again.
 - (void)testTheMatchFindsEachPassesNode {
     NSArray<QLMGoldenPass *> *passes = [self passes];
-    NSMutableDictionary<NSValue *, NSMutableArray<QLMGoldenPass *> *> *bySetup = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSNumber *, NSMutableArray<QLMGoldenPass *> *> *byRow = [NSMutableDictionary dictionary];
     for (QLMGoldenPass *pass in passes) {
-        NSValue *key = [NSValue valueWithNonretainedObject:pass.setup];
-        bySetup[key] = bySetup[key] ?: [NSMutableArray array];
-        [bySetup[key] addObject:pass];
+        byRow[@(pass.row)] = byRow[@(pass.row)] ?: [NSMutableArray array];
+        [byRow[@(pass.row)] addObject:pass];
     }
     NSUInteger checked = 0;
-    for (NSArray<QLMGoldenPass *> *group in bySetup.allValues) {
-        NSArray<QLMPassMatch *> *matches = QLMMatchPasses([group valueForKey:@"captured"], group.firstObject.setup, nil, NULL);
-        for (NSUInteger i = 0; i < group.count; i++) {
-            QLMGoldenPass *pass = group[i];
-            QLMDSPBlock *mine = [QLMDSPBlock blockForNode:pass.node inGroup:pass.group error:NULL];
-            XCTAssertTrue(matches[i].comparison.matches, @"%@", pass);
-            XCTAssertEqualObjects(matches[i].node.serial, pass.node.serial, @"%@", pass);
-            XCTAssertEqualObjects(matches[i].block.payloads, mine.payloads, @"%@", pass);
+    for (NSArray<QLMGoldenPass *> *row in byRow.allValues) {
+        NSArray<QLMPassMatch *> *matches = QLMMatchPasses([row valueForKey:@"captured"], row[0].setup, row[0].group, NULL);
+        for (NSUInteger i = 0; i < row.count; i++) {
+            XCTAssertTrue(matches[i].matches, @"%@: %@", row[i], matches[i].earlierPass);
+            XCTAssertEqual(matches[i].node, row[i].node, @"%@", row[i]);
             checked += 1;
         }
     }
     XCTAssertEqual(checked, passes.count);
 }
 
-// GLM sends each session one generator stop before its pass, at launch and
-// wake right before 17 01, and in a switch in the routing pass. It is the
-// same 14 bytes every time (docs/refused-frames.md), so compare-apply counts
-// it as left out.
-- (void)testEachPassFollowsOneGeneratorStop {
-    NSUInteger checked = 0;
+// S7's rule. Every generator stop GLM sent in a row's window is the same 14
+// bytes, 85 of them, as docs/refused-frames.md counts. Each pass has one or
+// more since its
+// session's last pass: at launch and wake right before 17 01, and in a
+// switch in the routing pass. A switch also stops the monitors off in the
+// new group, which then get no pass, and a monitor may get two before one
+// pass, so the rule counts no exact number per pass.
+- (void)testEveryGeneratorStopIsTheKnownOne {
     for (QLMGoldenPass *pass in [self passes]) {
-        XCTAssertEqualObjects(pass.captured.generatorStops, @[QLMHex(@"05 04 00 00 00 FF FF EA 00 01 90 00 02 DA")], @"%@", pass);
-        checked += 1;
+        XCTAssertGreaterThan(pass.captured.generatorStops.count, 0u, @"%@", pass);
     }
-    XCTAssertEqual(checked, 73u);
+    NSUInteger stops = 0;
+    for (size_t r = 0; r < sizeof QLMGoldenApplies / sizeof QLMGoldenApplies[0]; r++) {
+        QLMCapture *capture = QLMReadCapture(@(QLMGoldenApplies[r].capture), NULL);
+        for (QLMCapturedStop *stop in QLMGeneratorStopsInCapture(capture, QLMGoldenApplies[r].from, QLMGoldenApplies[r].to)) {
+            XCTAssertEqualObjects(stop.payload, QLMHex(@"05 04 00 00 00 FF FF EA 00 01 90 00 02 DA"), @"%s at %.3f s",
+                                  QLMGoldenApplies[r].capture, stop.time);
+            XCTAssertTrue(QLMIsKnownGeneratorStop(stop.payload));
+            stops += 1;
+        }
+    }
+    XCTAssertEqual(stops, 85u);
 }
 
 // A two-way's pass is its block in order, the 8351B's two extras aside: 43

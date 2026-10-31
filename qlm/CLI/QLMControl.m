@@ -112,6 +112,10 @@ NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *a
         (given[@"--to"] != nil && !QLMReadNumber(given[@"--to"], @"a number of seconds", &to, problem))) {
         return nil;
     }
+    if (given[@"--group"] == nil) {
+        *problem = @"compare-apply needs --group, the group the capture's apply switched to";
+        return nil;
+    }
     if (from < 0 || from >= to) {
         *problem = @"the window must run forward from 0 s or later";
         return nil;

@@ -100,13 +100,25 @@ That's about two hours. If time is short, run A, B, G, and J. The 8351B's refusa
 
 Part A checks the method before anything changes. Make the copy, `qlm-a.sam`, and take its snapshot `0`. Diff it against a redacted Main.sam. It should differ in nothing that a monitor gets, so note anything that shows.
 
-Then switch to Main 2x1 and back, and wait 15 s. Stop the capture, then copy and convert it, as [captures/README.md](../captures/README.md) says. Check qlm's blocks from the copy against GLM's apply:
+Then switch to Main 2x1 and back, and wait 15 s. Stop the capture, then copy and convert it, as [captures/README.md](../captures/README.md) says. That's two applies, so check each against snapshot `0` with its own group. First run on the whole capture, with Main 2x1:
 
 ```bash
-qlmctl compare-apply "captures/$PART/setups/0.sam" "captures/$PART/reports.txt"
+qlmctl compare-apply "captures/$PART/setups/0.sam" "captures/$PART/reports.txt" --group "Main 2x1"
 ```
 
-`compare-apply` reads the two files and opens no bus.[^compare] It matches each of GLM's DSP passes to the node whose block is closest, and says `matches` for each one that's the same byte for byte. Every pass lists the generator stop as left out, and each 8351B's pass lists `43 00 02` and `4B 00 00 00 01` too. It should end with every pass matching, and exit 0, as it does for Main.sam's captures. If it doesn't, stop the session and work out why first. Its `GLM` and `qlm` lines show each frame that differs.
+`compare-apply` reads the two files and opens no bus.[^compare] It lists each of GLM's DSP passes with its time, in the capture's seconds, matched to the closest node of the group. It says `matches` for each one that's the same byte for byte. Main 2x1's passes come first, and should match. The passes after them are the switch back to Main 4x2, so they differ.
+
+Set `T` between the two applies: after the last Main 2x1 pass, and a second or more before the first Main 4x2 pass. A switch's routing pass, with its generator stops, comes about a second before its DSP pass. Then check each apply in its own window:
+
+```bash
+qlmctl compare-apply "captures/$PART/setups/0.sam" "captures/$PART/reports.txt" --group "Main 2x1" --to $T
+```
+
+```bash
+qlmctl compare-apply "captures/$PART/setups/0.sam" "captures/$PART/reports.txt" --group "Main 4x2" --from $T
+```
+
+Each 8351B's pass lists `43 00 02` and `4B 00 00 00 01` as left out. Each run also checks every generator stop in its window, the ones to monitors with no pass included. Both runs should end with every pass matching and every stop the known one, and exit 0, as Main.sam's captures do. If they don't, stop the session and work out why first. The `GLM` and `qlm` lines show each frame that differs.
 
 ## Part B: PEQ on the 8351B
 
@@ -203,21 +215,21 @@ For each capture:
 2. Write its `notes.md`: each step, its time, and its diff.
 3. Check that `setups/` holds only redacted snapshots.
 
-Then check each step against its snapshot. First run `compare-apply` on the whole capture, with the step's snapshot:
+Then check each step against its snapshot. Each step makes two applies, the switch to Main 2x1 and the one back to Main 4x2, and each gets its own run, with its group and its window. First run on the whole capture, once with each group. Each run lists every pass with its time, in the capture's seconds:
 
 ```bash
-qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt"
+qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --group "Main 2x1"
 ```
 
-It prints each pass's time in the capture's seconds, as `reports.txt` gives them. With the notes, those times give each step's window: from its apply to the next step's. Then check the step alone:
+With the notes, those times give each apply's window, from a second or more before its first pass to the same before the next apply's. Windows that meet end to end check every generator stop once. Then check each apply alone:
 
 ```bash
-qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --from $FROM --to $TO
+qlmctl compare-apply "captures/$PART/setups/$STEP.sam" "captures/$PART/reports.txt" --group "$GROUP" --from $FROM --to $TO
 ```
 
-A step's apply is two: the switch to Main 2x1, and the one back to Main 4x2. `compare-apply` looks in every group, so one run covers both. `--group` narrows it to one.
+`compare-apply` matches passes only within the group it's given. Main.sam's Group_4 is nearly a copy of Main 4x2, and these steps change only Main 4x2. So a match across groups could put a changed node's pass on Group_4's old copy, and hide the change.
 
-Then one PR adds the captures, and it's mostly data. `QLMDSPBlockGoldenTests` checks its passes from a table of rows: a capture, the setup file GLM applied, the group, a window of the capture's seconds, and each pass's session and node. A step's two applies are two rows, one per group, each with its own window. `compare-apply` uses the same code, so a step it passes adds rows and no new code. The rows pin GLM's frames byte for byte, and protocol.md gets what they decode to. Where qlm refuses a setting today, the test pins GLM's frames instead. The golden tests already check that each pass follows one generator stop, with the same bytes every time, so each new row checks S7 too.
+Then one PR adds the captures, and it's mostly data. `QLMDSPBlockGoldenTests` checks its passes from a table of rows: a capture, the setup file GLM applied, the group, a window of the capture's seconds, and each pass's session and node. Each apply is a row, so a step is two. `compare-apply` uses the same code, so a step it passes adds rows and no new code. The rows pin GLM's frames byte for byte, and protocol.md gets what they decode to. Where qlm refuses a setting today, the test pins GLM's frames instead. The golden tests check S7 on every row: every generator stop GLM sent in the row's window is the known 14 bytes, pass or no pass, and each pass has at least one.
 
 | Result | It means |
 | --- | --- |

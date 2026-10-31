@@ -2,6 +2,7 @@
 
 #include <math.h>
 
+#include "QLMCRC.h"
 #include "QLMReplies.h"
 #import "QLMReportLink.h"
 #import "QLMSetupReader.h"
@@ -23,6 +24,28 @@ NSData *QLMReportFor(QLMMessage message) {
     uint8_t report[QLMReportLength];
     QLMReportPackOutput(&message, report);
     return QLMBytes(report, sizeof report);
+}
+
+NSData *QLMUncheckedFrame(QLMMessage message) {
+    uint8_t raw[1 + QLMPayloadMax + 2];
+    raw[0] = message.address;
+    memcpy(raw + 1, message.payload, message.length);
+    uint16_t crc = QLMCRC16GSM(raw, 1 + message.length);
+    raw[1 + message.length] = (uint8_t)(crc >> 8);
+    raw[2 + message.length] = (uint8_t)crc;
+    uint8_t frame[QLMFrameMax];
+    size_t count = 0;
+    frame[count++] = raw[0];
+    for (size_t i = 1; i < 3 + message.length; i++) {
+        if (raw[i] == QLMFrameFlag || raw[i] == QLMFrameEscape) {
+            frame[count++] = QLMFrameEscape;
+            frame[count++] = raw[i] ^ QLMFrameEscapeXor;
+        } else {
+            frame[count++] = raw[i];
+        }
+    }
+    frame[count++] = QLMFrameFlag;
+    return QLMBytes(frame, count);
 }
 
 NSString *QLMRepositoryPath(NSString *relative) {
