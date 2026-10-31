@@ -13,6 +13,48 @@ NSString *QLMDecibelsText(double decibels) {
     return [[number stringByReplacingOccurrencesOfString:@"-" withString:@"−"] stringByAppendingString:@"\u00A0dB"];
 }
 
+NSString *QLMTypedLevelRefusal(double decibels) {
+    if (decibels > 0) {
+        return [NSString stringWithFormat:@"%g\u00A0dB is above 0\u00A0dB, the monitors' full level.", decibels];
+    }
+    return nil;
+}
+
+@implementation QLMDecibelsFormatter
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        self.numberStyle = NSNumberFormatterDecimalStyle;
+        self.minimumFractionDigits = 1;
+        self.maximumFractionDigits = 1;
+        self.minusSign = @"−";
+        self.lenient = YES;
+    }
+    return self;
+}
+
+- (BOOL)getObjectValue:(out id _Nullable __autoreleasing *)value forString:(NSString *)string
+      errorDescription:(out NSString *_Nullable __autoreleasing *)error {
+    id number = nil;
+    if (![super getObjectValue:&number forString:string errorDescription:error]) {
+        return NO;
+    }
+    NSString *refusal = number == nil ? @"Type a level in dB." : QLMTypedLevelRefusal([number doubleValue]);
+    if (refusal != nil) {
+        if (error != NULL) {
+            *error = refusal;
+        }
+        return NO;
+    }
+    if (value != NULL) {
+        *value = number;
+    }
+    return YES;
+}
+
+@end
+
 NSString *QLMMonitorLabel(QLMMonitorState *monitor, QLMSetup *setup) {
     return [setup deviceWithHardwareID:monitor.hardwareID].name ?: monitor.serialNumber;
 }

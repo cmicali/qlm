@@ -44,7 +44,7 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
 | --- | --- | --- |
 | `dump_state` | Reads the snapshot the popover shows, and the app's settings: below | never |
 | `volume <dB>` | The slider, on GLM's 0.5 dB steps | System is stopped, or the level is outside the slider's range (`sliderRange`) |
-| `ceiling <dB>` | Settings' ceiling. The preferences bound it: at most 0 dB, on a step at or below the value | never |
+| `ceiling <dB>` | Settings' ceiling, on a step at or below the value | the level is above 0 dB, as Settings' field refuses it |
 | `adapter <on\|off>` | Settings' "Drive the real monitors through the GLM adapter". A change starts a new System | `off` while the louder alert would show (`quitAsksFirst`) |
 | `adapter_off_answering <cancel\|anyway>` | Turning the setting off. The argument answers the louder alert, if it would show | never |
 | `mute <serial> <on\|off>` | One monitor's mute button | System tracks no monitor with that serial |

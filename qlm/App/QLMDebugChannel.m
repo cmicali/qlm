@@ -228,11 +228,16 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             [app.debugSystem setVolumeDecibels:stepped];
             return @{@"ok": @YES, @"volumeDecibels": @(stepped)};
         }),
-        // Settings' ceiling. The preferences bound it, as they do a typed one.
+        // Settings' ceiling. It refuses what the field refuses, and the
+        // preferences bound the rest, as they do a typed one.
         QLMDebugVerb(@"ceiling <dB>", QLM_HANDLER {
             double decibels = 0;
             if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
                 return nil;
+            }
+            NSString *refusal = QLMTypedLevelRefusal(decibels);
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
             }
             app.debugPreferences.ceilingDecibels = decibels;
             [app debugVolumeRangeDidChange];

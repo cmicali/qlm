@@ -138,4 +138,43 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertEqualObjects(QLMBusProblemTitle(snapshot), @"GLM has the adapter");
 }
 
+#pragma mark - A typed level
+
+// 0 dB is the monitors' full level. Settings once clamped a level above it,
+// so 35, typed for −35, made the loudest ceiling.
+- (void)testALevelAboveFullLevelIsRefused {
+    XCTAssertEqualObjects(QLMTypedLevelRefusal(35), @"35 dB is above 0 dB, the monitors' full level.");
+    XCTAssertEqualObjects(QLMTypedLevelRefusal(0.04), @"0.04 dB is above 0 dB, the monitors' full level.");
+    XCTAssertNil(QLMTypedLevelRefusal(0));
+    XCTAssertNil(QLMTypedLevelRefusal(-35));
+}
+
+// Settings' fields refuse what the rule refuses, and an empty field, which
+// read as 0 dB. The preferences bound every level they take.
+- (void)testTheLevelFieldsRefuseALevelAboveFullLevelAndAnEmptyField {
+    QLMDecibelsFormatter *formatter = [[QLMDecibelsFormatter alloc] init];
+    NSDictionary<NSString *, NSString *> *refused = @{
+        @"35": QLMTypedLevelRefusal(35),
+        @"+3": QLMTypedLevelRefusal(3),
+        @"0.04": QLMTypedLevelRefusal(0.04),
+        @"1e3": QLMTypedLevelRefusal(1000),
+        @"": @"Type a level in dB.",
+    };
+    for (NSString *text in refused) {
+        id value = nil;
+        NSString *error = nil;
+        XCTAssertFalse([formatter getObjectValue:&value forString:text errorDescription:&error], @"%@", text);
+        XCTAssertNil(value, @"%@", text);
+        XCTAssertEqualObjects(error, refused[text], @"%@", text);
+    }
+    XCTAssertFalse([formatter getObjectValue:NULL forString:@"abc" errorDescription:NULL]);
+
+    NSDictionary<NSString *, NSNumber *> *taken = @{@"−35": @(-35), @"-35": @(-35), @"−35.5": @(-35.5), @"0": @0};
+    for (NSString *text in taken) {
+        id value = nil;
+        XCTAssertTrue([formatter getObjectValue:&value forString:text errorDescription:NULL], @"%@", text);
+        XCTAssertEqualObjects(value, taken[text], @"%@", text);
+    }
+}
+
 @end
