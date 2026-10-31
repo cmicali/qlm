@@ -37,6 +37,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: make build
 
+      - name: Check the Release app has no debug channel
+        if: ${{ !cancelled() }}
+        run: make check-release
+
       - name: Build qlmctl (Release)
         if: ${{ !cancelled() }}
         run: make cli

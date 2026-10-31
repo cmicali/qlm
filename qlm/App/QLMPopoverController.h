@@ -41,6 +41,11 @@ NS_ASSUME_NONNULL_BEGIN
 // Reads the volume range and the ceiling from the preferences again.
 - (void)reloadVolumeRange;
 
+// The banner's Quit GLM button: its title, or nil while it is hidden.
+@property (nonatomic, readonly, copy, nullable) NSString *quitGLMTitle;
+// Its click. NO while it is hidden or disabled.
+- (BOOL)quitGLM;
+
 @end
 
 NS_ASSUME_NONNULL_END

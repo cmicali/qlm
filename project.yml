@@ -150,13 +150,19 @@ targets:
   QLMTests:
     type: bundle.unit-test
     platform: macOS
-    templates: [QLMShared]
+    templates: [QLMShared, VibeLibsDebugChannel, VibeLibsDebugVerbs]
+    templateAttributes:
+      excludedPlatform: iOS
     sources:
       - path: Tests
         excludes: ["**/.DS_Store", "**/*.md"]
       # qlmctl's gates and dry run. Its main.m is the tool's own.
       - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md", "main.m"]
+      # The app's debug verbs, and the files they read that need no app.
+      - qlm/App/QLMDebugChannel.m
+      - qlm/App/QLMFormat.m
+      - qlm/App/QLMPreferences.m
     settings:
       base:
         PRODUCT_NAME: "$(TARGET_NAME)"

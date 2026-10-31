@@ -35,7 +35,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - runs every timer on an injectable clock, so the tests run on a virtual one. That work found a monitor leased twice, and a wait in `qlmctl` that could miss an action already done. #38, which carries #37, fixes both.
 - Setups reads GLM 5 setup files strictly, designs the filters, and builds each monitor's DSP block, checked against every captured pass. It also watches the setup file, and calls back once a save settles (#28).
 - `qlmctl` has `info`, `discover`, `poll`, and `setup`, and all of Phase 2's controls. The controls run behind gates: a ceiling the user states, at most −30 dB without `--allow-high-ceiling`, and a `--dry-run` that sends only discovery. Each also runs on the fake bus with `--fake`, or a capture with `--replay`. `dim` now sends GLM's whole sequence, `--muted` names the monitors already muted in GLM, and at exit `qlmctl` prints what the hand-back did (#27, #29, #32). `apply-group` prints GLM's whole apply. Over USB it's a supervised test, and it needs `--volume`, `--ceiling`, and, for a group with an 8351B, `--unverified-rate` (#32).
-- The app has the menu bar popover, a monitors window, Settings, a banner for adapter errors, and a panel that plays the fake bus. A setting, off by default, drives the real adapter instead. The banner offers to quit GLM when GLM holds the adapter. The app stops System at sleep and starts it at wake, posts a notification when a monitor drops off or runs hot, and offers to read the setup again when GLM saves it (#28). It doesn't use System's new calls from #32 yet.
+- The app has the menu bar popover, a monitors window, Settings, a banner for adapter errors, and a panel that plays the fake bus. A setting, off by default, drives the real adapter instead. The banner offers to quit GLM when GLM holds the adapter. The app stops System at sleep and starts it at wake, posts a notification when a monitor drops off or runs hot, and offers to read the setup again when GLM saves it (#28). It doesn't use System's new calls from #32 yet. A Debug build answers a debug channel, whose verbs are the app's own controls, so a script can run a supervised test on the monitors one step at a time (#50).
 
 ### The captures, the kits, and the docs
 
@@ -208,7 +208,7 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 
 Nothing else applies: no decoding, playback, tags, or waveforms.
 
-**The app takes two pieces: dev/DebugChannel and dev/DebugVerbs.** They bring core/Common and core/Graphics with them. `project.yml` includes `vibe-libs/vibe-libs.yml`, sets `VIBE_LIBS_ROOT`, and lists them under the app's `templates:`. Each compiles to nothing in Release. The CLI and the tests take none. The rest of the table waits for its own work.
+**The app takes two pieces: dev/DebugChannel and dev/DebugVerbs.** They bring core/Common and core/Graphics with them. `project.yml` includes `vibe-libs/vibe-libs.yml`, sets `VIBE_LIBS_ROOT`, and lists them under the app's `templates:`. Each compiles to nothing in Release, and `make check-release` checks that. The tests take them too, to run the app's debug verbs on the fake bus. The CLI takes none. The rest of the table waits for its own work.
 
 **The protocol stays in this app.** No other app needs it, so by vibe-libs's own rule it is not a candidate.
 

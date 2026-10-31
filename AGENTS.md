@@ -7,7 +7,7 @@ qlm is a native Mac controller for Genelec SAM monitors. It talks to them throug
 ## Building
 
 - `make setup` installs XcodeGen. `make project` fetches `vibe-libs/` and generates `qlm.xcodeproj`.
-- `make build` builds the app, `make cli` builds `qlmctl`, and `make test` runs the unit tests.
+- `make build` builds the app, `make cli` builds `qlmctl`, and `make test` runs the unit tests. `make check-release` fails if the Release app holds any of the debug channel.
 - **The Xcode project is generated.** Change `project.yml`, never the project. The app's `Info.plist` is generated too.
 - **Warnings are errors.** Fix the warning. Do not turn the setting off.
 - **TRAP: `make project` checks out `vibe-libs/` at its pinned commit.** Commit or stash any work inside `vibe-libs/` first.
@@ -53,16 +53,23 @@ These rules protect the monitors and the listener. They outrank any feature.
 
 - `vibe-libs/` is the [vibe-libs](https://github.com/cmicali/vibe-libs) submodule. Read `vibe-libs/AGENTS.md`, and the `AGENTS.md` of every piece you touch, before changing one.
 - **A change to a piece lands in vibe-libs first.** Then qlm bumps the submodule.
-- **The app takes two pieces**: `dev/DebugChannel` and `dev/DebugVerbs`, which bring `core/Common` and `core/Graphics`. `project.yml` includes `vibe-libs/vibe-libs.yml` and lists them under the app's `templates:`. A new piece goes there too.
+- **The app and the tests take two pieces**: `dev/DebugChannel` and `dev/DebugVerbs`, which bring `core/Common` and `core/Graphics`. `project.yml` includes `vibe-libs/vibe-libs.yml` and lists them under each target's `templates:`. A new piece goes there too.
 - **The protocol stays in qlm.** No other app needs it.
 - vibe-libs serves another app, which is closed source. **Never name it here.**
 
 ## The debug channel
 
 - **A Debug build of the app answers commands.** `build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm --debug-cmd <verb> [args...]` sends one and prints the JSON reply. An unknown verb's reply lists every verb. The channel compiles to nothing in Release.
-- **qlm's own verbs call what the popover calls**: `dump_state` (the latest snapshot), `popover <show|close>`, `show_monitors`, `show_settings`, and `read_setup`. They reach System and Setups, never the adapter. **A verb that changes a level waits for its own plan.**
+- **qlm's own verbs call what the popover and Settings call.** They reach System and Setups, never the adapter, so the ceiling, the allowlist, and the GLM check hold.
+  - `dump_state` reads the latest snapshot and the app's settings.
+  - `popover <show|close>`, `show_monitors`, `show_settings`, and `read_setup` open what their buttons open.
+  - `volume <dB>`, `ceiling <dB>`, `adapter <on|off>`, `mute <serial> <on|off>`, `mute_all <on|off>`, `dim <on|off>`, `standby`, `wake`, `quit_glm`, and `quit_answering <cancel|anyway>` change the monitors. Each refuses while its control would be disabled. `volume` refuses a level outside the slider's range.
+- **Every reply of qlm's own verbs carries `at`**, the Mac's local time to the millisecond, for a run's `notes.md`. vibe-libs' standard verbs carry none.
+- **`.claude/skills/app-hardware-run` runs a supervised test on the real monitors** through these verbs, one step at a time. Follow it for any run on the hardware.
 - **The standard verbs are vibe-libs'**: `dump_build`, `dump_view_tree`, `dump_screenshot -`, `dump_health`, `quit`, and the input verbs, such as `click <x> <y>` and `key <key>`. The mouse verbs aim at the popover's window while it shows, else the key window. Coordinates are content-view points with a top-left origin. `dump_screenshot -` writes the PNG to stdout.
 - **Drive the app through the channel, never through System Events or AppleScript UI scripting.**
+- **TRAP: vibe-libs' `quit` terminates inside the channel's drain, a main-queue block.** There the app's wait for System's stop can only time out, so the hand-back may not finish. Quit with `quit_answering`.
+- **The channel ships in no Release build.** `make check-release` builds the app in both configurations. It fails if a symbol or string of the channel, qlm's or the pieces', is in the Release app. It first finds each one in the Debug app, so it can't go stale.
 - **TRAP: a Debug build reads the same settings as the installed app.** With the adapter switched on there, a launch drives the real bus. To test the channel, build with another bundle identifier, as `ARGS="PRODUCT_BUNDLE_IDENTIFIER=com.commonwealthrecordings.qlm.debug"` does, so the app starts on the fake bus.
 
 ## Names
