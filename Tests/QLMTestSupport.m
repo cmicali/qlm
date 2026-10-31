@@ -7,6 +7,12 @@ NSData *QLMBytes(const uint8_t *bytes, size_t length) {
     return [NSData dataWithBytes:bytes length:length];
 }
 
+NSData *QLMReportFor(QLMMessage message) {
+    uint8_t report[QLMReportLength];
+    QLMReportPackOutput(&message, report);
+    return QLMBytes(report, sizeof report);
+}
+
 NSString *QLMFixturePath(NSString *name) {
     NSString *tests = [@(__FILE__) stringByDeletingLastPathComponent];
     return [[tests stringByAppendingPathComponent:@"Setups/Fixtures"] stringByAppendingPathComponent:name];

@@ -32,6 +32,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 NSData *QLMBytes(const uint8_t *bytes, size_t length);
 
+// The output report a message packs into, 64 bytes.
+NSData *QLMReportFor(QLMMessage message);
+
 // A file in Tests/Setups/Fixtures/.
 NSString *QLMFixturePath(NSString *name);
 

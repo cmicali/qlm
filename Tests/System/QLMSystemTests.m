@@ -2030,16 +2030,14 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [_system setCeilingDecibels:-44.5];
     [self waitForIdle];
     [_time advanceBy:0.1];
-    uint8_t capped[QLMReportLength];
-    QLMMessage volume = QLMCommandVolume(0, -44.5);
-    QLMReportPackOutput(&volume, capped);
+    NSData *capped = QLMReportFor(QLMCommandVolume(0, -44.5));
     NSArray<NSData *> *written = device.writtenReports;
     NSUInteger volumes = 0;
     for (NSUInteger i = before; i < written.count; i++) {
         const uint8_t *bytes = written[i].bytes;
         if (bytes[1] == QLMAddressBroadcast && bytes[2] == 0x1F) {
             volumes += 1;
-            XCTAssertEqualObjects(written[i], QLMBytes(capped, sizeof capped));
+            XCTAssertEqualObjects(written[i], capped);
         }
     }
     XCTAssertEqual(volumes, 2u);  // the volume's, then the ceiling's own
@@ -2194,13 +2192,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         self->_bus.busyReason = nil;
     }];
     NSUInteger before = _bus.sentMessages.count;
-    [self waitUntil:^BOOL {
-        __block BOOL restated = NO;
-        [self->_bus perform:^{
-            restated = self->_left.muteValue == QLMMuteValueMuted && self->_right.muteValue == QLMMuteValueUnmuted;
-        }];
-        return restated;
-    }];
+    [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
     QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
     }];
@@ -2361,13 +2353,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted);
     }];
     failing.failure = nil;
-    [self waitUntil:^BOOL {
-        __block BOOL stated = NO;
-        [self->_bus perform:^{
-            stated = self->_left.muteValue == QLMMuteValueMuted && self->_right.muteValue == QLMMuteValueUnmuted;
-        }];
-        return stated;
-    }];
+    [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
 }
 
 // A stop drops the rounds still queued. A mute lifted just before a stop
@@ -2386,13 +2372,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         XCTAssertEqual(self->_right.muteValue, QLMMuteValueMuted);
     }];
     [_system start];
-    [self waitUntil:^BOOL {
-        __block BOOL stated = NO;
-        [self->_bus perform:^{
-            stated = self->_right.muteValue == QLMMuteValueUnmuted;
-        }];
-        return stated;
-    }];
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueUnmuted];
     XCTAssertFalse(QLMFindMonitor(_system.snapshot, _right.hardwareID).muted);
 }
 

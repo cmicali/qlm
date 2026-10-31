@@ -74,10 +74,24 @@
     return delivered;
 }
 
-static NSData *QLMReportFor(QLMMessage message) {
-    uint8_t report[QLMReportLength];
-    QLMReportPackOutput(&message, report);
-    return QLMBytes(report, sizeof report);
+// Closes the device as when GLM appears, opens it again, and returns why the
+// link lost track, or nil.
+- (nullable NSError *)closeAndReopen {
+    QLMReportLink *link = _device.link;
+    __block NSError *failure = nil;
+    dispatch_sync(_queue, ^{
+        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
+        [link reopen];
+        failure = link.failure;
+    });
+    return failure;
+}
+
+// The adapter's serial in startup-idle.
+- (void)assertAdapterSerial:(const QLMMessage *)reply {
+    char text[QLMPayloadMax];
+    XCTAssertTrue(QLMReplyText(reply, text, sizeof text));
+    XCTAssertEqualObjects(@(text), @"H99999F000");
 }
 
 // A reply GLM got in its opening: 0 a status, 1 the adapter's name, which
@@ -259,9 +273,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 
     XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
+    [self assertAdapterSerial:&reply];
     NSArray<NSData *> *sent = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter)),
                                 QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
     XCTAssertEqualObjects([self written], sent);
@@ -341,9 +353,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
 
     XCTAssertTrue([self sendOnceInStep:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
+    [self assertAdapterSerial:&reply];
     NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
     NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
     NSArray<NSData *> *sent = @[info, poll, poll, info, QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
@@ -364,9 +374,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
     XCTAssertTrue([self sendOnceInStep:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
+    [self assertAdapterSerial:&reply];
     NSData *poll = QLMReportFor(QLMCommandPoll(QLMAddressAdapter));
     NSData *info = QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter));
     NSArray<NSData *> *sent = @[poll, info, info, poll, QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
@@ -400,13 +408,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
     XCTAssertEqual([self written].count, 5u);
 
-    QLMReportLink *link = _device.link;
-    __block NSError *failure = nil;
-    dispatch_sync(_queue, ^{
-        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
-        [link reopen];
-        failure = link.failure;
-    });
+    NSError *failure = [self closeAndReopen];
     XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
 }
 
@@ -423,21 +425,13 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertFalse([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:NULL error:&error]);
     XCTAssertEqual(error.code, QLMAdapterErrorUnresponsive);
 
-    QLMReportLink *link = _device.link;
-    __block NSError *failure = nil;
-    dispatch_sync(_queue, ^{
-        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
-        [link reopen];
-        failure = link.failure;
-    });
+    NSError *failure = [self closeAndReopen];
     XCTAssertNil(failure);
     _device.silent = NO;
     QLMMessage reply;
     XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
+    [self assertAdapterSerial:&reply];
 }
 
 // The device closes with a request in flight, as when GLM appears, and
@@ -453,9 +447,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     NSError *error = nil;
     XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:&error]);
     XCTAssertNil(error);
-    char text[QLMPayloadMax];
-    XCTAssertTrue(QLMReplyText(&reply, text, sizeof text));
-    XCTAssertEqualObjects(@(text), @"H99999F000");
+    [self assertAdapterSerial:&reply];
     NSArray<NSData *> *sent = @[QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)), QLMReportFor(QLMCommandPoll(QLMAddressAdapter)),
                                 QLMReportFor(QLMCommandSystemInfo(QLMAddressAdapter)),
                                 QLMReportFor(QLMCommandSerialNumber(QLMAddressAdapter))];
@@ -474,13 +466,7 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     NSUInteger before = [self deliveredReplies];
     XCTAssertFalse([self send:QLMCommandSystemInfo(QLMAddressAdapter) reply:NULL error:&error]);
     XCTAssertEqual(error.code, QLMAdapterErrorTimeout);
-    QLMReportLink *link = _device.link;
-    __block NSError *failure = nil;
-    dispatch_sync(_queue, ^{
-        [link closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, @"GLM is running.")];
-        [link reopen];
-        failure = link.failure;
-    });
+    NSError *failure = [self closeAndReopen];
     XCTAssertEqual(failure.code, QLMAdapterErrorLostTrack);
     XCTAssertEqualObjects(failure.localizedDescription,
                           @"qlm lost track of the GLM adapter's replies. Unplug the adapter and plug it back in.");
