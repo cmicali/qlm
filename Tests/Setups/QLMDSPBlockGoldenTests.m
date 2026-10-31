@@ -146,7 +146,7 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
         XCTAssertNotNil(group, @"%@: %s", scenario, QLMGoldenApplies[r].group);
         NSArray<NSString *> *expected = [@(QLMGoldenApplies[r].passes) componentsSeparatedByString:@" "];
         NSArray<QLMCapturedPass *> *captured =
-            QLMPassesInCapture(QLMReadCapture(scenario, NULL), QLMGoldenApplies[r].from, QLMGoldenApplies[r].to);
+            QLMPassesInCapture(QLMReadCapture(scenario, NULL), QLMGoldenApplies[r].from, QLMGoldenApplies[r].to, NULL, NULL);
         XCTAssertEqual(captured.count, expected.count, @"%@", scenario);
         for (NSUInteger i = 0; i < MIN(captured.count, expected.count); i++) {
             NSArray<NSString *> *parts = [expected[i] componentsSeparatedByString:@":"];
@@ -238,7 +238,7 @@ static QLMSetup *QLMReadGoldenSetup(NSString *path) {
     NSUInteger stops = 0;
     for (size_t r = 0; r < sizeof QLMGoldenApplies / sizeof QLMGoldenApplies[0]; r++) {
         QLMCapture *capture = QLMReadCapture(@(QLMGoldenApplies[r].capture), NULL);
-        for (QLMCapturedStop *stop in QLMGeneratorStopsInCapture(capture, QLMGoldenApplies[r].from, QLMGoldenApplies[r].to)) {
+        for (QLMSessionFrame *stop in QLMGeneratorStopsInCapture(capture, QLMGoldenApplies[r].from, QLMGoldenApplies[r].to)) {
             XCTAssertEqualObjects(stop.payload, QLMHex(@"05 04 00 00 00 FF FF EA 00 01 90 00 02 DA"), @"%s at %.3f s",
                                   QLMGoldenApplies[r].capture, stop.time);
             XCTAssertTrue(QLMIsKnownGeneratorStop(stop.payload));
@@ -373,6 +373,58 @@ static QLMSetupNode *QLMNodeAtRate(QLMSetupNode *node, double sampleRate) {
         }
     }
     XCTAssertEqual(filters.count, 49u);
+}
+
+// GLM sends a band as it's edited, as one 10 0E to the monitor's session,
+// outside any pass. In setup-b-peq-8351b, B1 sent the Left 8351B's session
+// 0C 13 of them, to slots 04 to 09, from 49.989 to 117.849 s, and B2 sent
+// it 8, to slots 00 to 03, from 230.501 to 265.754 s. Each follows 0C's pass
+// in its row's window. Each slot's last is the slot as the next snapshot's
+// block sends it: 1.sam after B1, and 2.sam after B2. The ones before it
+// are values the editor passed through.
+- (void)testLiveBandEditsAreTheNextSnapshots {
+    const struct {
+        double from;
+        double to;
+        const char *next;
+        NSUInteger count;
+        double first;
+        double last;
+        uint8_t slots[2];
+    } edits[] = {
+        {0, 170, "captures/setup-b-peq-8351b/setups/1.sam", 13, 49.989, 117.849, {0x04, 0x09}},
+        {181, 290, "captures/setup-b-peq-8351b/setups/2.sam", 8, 230.501, 265.754, {0x00, 0x03}},
+    };
+    QLMCapture *capture = QLMReadCapture(@"setup-b-peq-8351b", NULL);
+    for (size_t e = 0; e < sizeof edits / sizeof edits[0]; e++) {
+        NSArray<QLMSessionFrame *> *outside = nil;
+        XCTAssertNotNil(QLMPassesInCapture(capture, edits[e].from, edits[e].to, &outside, NULL));
+        NSMutableArray<QLMSessionFrame *> *bands = [NSMutableArray array];
+        NSMutableDictionary<NSNumber *, QLMSessionFrame *> *lastBySlot = [NSMutableDictionary dictionary];
+        for (QLMSessionFrame *frame in outside) {
+            const uint8_t *bytes = frame.payload.bytes;
+            if (bytes[0] == 0x10 && bytes[1] == 0x0E) {
+                [bands addObject:frame];
+                lastBySlot[@(bytes[2])] = frame;
+                XCTAssertEqual(frame.session, 0x0C, @"%.3f s", frame.time);
+                XCTAssertEqual(frame.follows.session, 0x0C, @"%.3f s", frame.time);
+            }
+        }
+        XCTAssertEqual(bands.count, edits[e].count, @"%s", edits[e].next);
+        XCTAssertEqualWithAccuracy(bands.firstObject.time, edits[e].first, 0.0005);
+        XCTAssertEqualWithAccuracy(bands.lastObject.time, edits[e].last, 0.0005);
+
+        QLMSetup *next = QLMReadGoldenSetup(@(edits[e].next));
+        QLMSetupGroup *group = [next groupNamed:@"Main 4x2"];
+        QLMDSPBlock *block = [QLMDSPBlock blockForNode:[group nodeWithSerial:@"1000002"] inGroup:group error:NULL];
+        XCTAssertEqual(lastBySlot.count, (NSUInteger)(edits[e].slots[1] - edits[e].slots[0] + 1), @"%s", edits[e].next);
+        for (NSNumber *slot in lastBySlot) {
+            XCTAssertGreaterThanOrEqual(slot.unsignedCharValue, edits[e].slots[0]);
+            XCTAssertLessThanOrEqual(slot.unsignedCharValue, edits[e].slots[1]);
+            QLMSessionFrame *frame = lastBySlot[slot];
+            XCTAssertEqualObjects(frame.payload, QLMBlockBand(block, frame.payload), @"%s, %.3f s", edits[e].next, frame.time);
+        }
+    }
 }
 
 @end

@@ -46,7 +46,7 @@ static void QLMPrintUsage(FILE *stream) {
             "                                 print, or send, every frame of a switch to the group, or with\n"
             "                                 --launch, of the apply at launch and wake. --volume is the level\n"
             "                                 the apply restores.\n"
-            "  compare-apply <file.sam> <reports.txt> --group NAME [--from S] [--to S]\n"
+            "  compare-apply <file.sam> <reports.txt> --group NAME [--from S] [--to S] [--strict-outside]\n"
             "                                 compare GLM's DSP passes in a capture of one group's apply with\n"
             "                                 qlm's blocks from the setup file. It reads the two files and opens\n"
             "                                 no bus.\n"
@@ -105,9 +105,16 @@ static void QLMPrintUsage(FILE *stream) {
             "again. It prints each pass's node, then every setting whose frame differs, as GLM's then qlm's,\n"
             "every frame only GLM sent, every frame only qlm would send, and the 8351B's 43 00 02 and\n"
             "4B 00 00 00 01, which qlm leaves out. It checks every generator stop, 05 04, in the window, pass\n"
-            "or no pass. A left-out frame or a stop with other bytes is a frame only GLM sent. It exits 0\n"
-            "when every pass matches and every stop is the known one, %d when not, %d for an argument it\n"
-            "doesn't know or no --group, and %d for a file it can't read, a group the setup lacks, or no pass.\n",
+            "or no pass. A left-out frame or a stop with other bytes is a frame only GLM sent.\n"
+            "It also lists, as GLM, outside a pass, every DSP frame in the window that no pass holds: one\n"
+            "GLM sent a session before its first pass in the window, at the top, or after a pass closed, under\n"
+            "that pass. A subwoofer's 3B before its pass is one, and so is a band GLM sends as it's edited.\n"
+            "For a band, 10 0E, it names the slot, and says whether it is the slot as the block sends it.\n"
+            "By default these frames change no verdict. With --strict-outside, any but such a band differs.\n"
+            "A session's model comes from its 39 reply in the window, else the nearest in the capture. A\n"
+            "window whose replies give one session two models is refused. It exits 0 when every pass matches\n"
+            "and every stop is the known one, %d when not, %d for an argument it doesn't know or no --group,\n"
+            "and %d for a file it can't read, a group the setup lacks, no pass, or a session with two models.\n",
             QLMAdapterPollLimit, [[QLMSystemSettings alloc] init].adapterPollInterval, QLMDimDecibels, QLMCeilingLimit,
             QLMCompareApplyDiffers, EX_USAGE, EX_DATAERR);
 }

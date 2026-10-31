@@ -114,9 +114,17 @@ static NSData *QLMRecord(uint8_t session, NSData *payload) {
     return record;
 }
 
+static NSString *QLMHexOf(NSData *payload) {
+    NSMutableArray<NSString *> *pairs = [NSMutableArray array];
+    for (NSUInteger i = 0; i < payload.length; i++) {
+        [pairs addObject:[NSString stringWithFormat:@"%02X", ((const uint8_t *)payload.bytes)[i]]];
+    }
+    return [pairs componentsJoinedByString:@" "];
+}
+
 // startup-idle's pass to the Left 8351B, at session 03.
 static QLMCapturedPass *QLMLeftPass(void) {
-    QLMCapturedPass *pass = QLMPassesInCapture(QLMReadCapture(@"startup-idle", NULL), 0, INFINITY)[1];
+    QLMCapturedPass *pass = QLMPassesInCapture(QLMReadCapture(@"startup-idle", NULL), 0, INFINITY, NULL, NULL)[1];
     return pass;
 }
 
@@ -151,7 +159,7 @@ static QLMCapturedPass *QLMLeftPass(void) {
 
     QLMSetup *setup = [QLMSetupReader readFileAtPath:copy error:NULL];
     NSArray<QLMPassMatch *> *matches =
-        QLMMatchPasses(QLMPassesInCapture(QLMReadCapture(@"startup-idle", NULL), 0, INFINITY), setup, [setup groupNamed:@"Main 2x1"], NULL);
+        QLMMatchPasses(QLMPassesInCapture(QLMReadCapture(@"startup-idle", NULL), 0, INFINITY, NULL, NULL), setup, [setup groupNamed:@"Main 2x1"], NULL);
     NSUInteger differing = 0;
     for (QLMPassMatch *match in matches) {
         if (match.matches) {
@@ -260,7 +268,7 @@ static QLMCapturedPass *QLMLeftPass(void) {
 }
 
 - (void)testTheWindowPicksThePasses {
-    NSArray<QLMCapturedPass *> *passes = QLMPassesInCapture(QLMReadCapture(@"startup-idle", NULL), 0, INFINITY);
+    NSArray<QLMCapturedPass *> *passes = QLMPassesInCapture(QLMReadCapture(@"startup-idle", NULL), 0, INFINITY, NULL, NULL);
     XCTAssertEqual(passes.count, 6u);
     NSString *from = [NSString stringWithFormat:@"%f", passes[1].time];
     NSString *to = [NSString stringWithFormat:@"%f", passes[2].time];
@@ -271,6 +279,110 @@ static QLMCapturedPass *QLMLeftPass(void) {
                     errors:&errors];
     XCTAssertEqual(status, 0, @"%@%@", output, errors);
     XCTAssertTrue([output containsString:@"\n1 of 1 pass match, apart from"], @"%@", output);
+}
+
+// GLM sends each subwoofer its 3B before its pass, with the generator stop
+// (startup-idle, 8.841 and 9.133 s). No pass holds it, so it's listed at
+// the top, and counts only with --strict-outside.
+- (void)testAFrameBeforeAnyPassIsListedAtTheTop {
+    NSString *output = nil;
+    NSString *errors = nil;
+    int status = [self run:@[QLMFixturePath(@"Main.sam"), QLMStartupIdle(), @"--group", @"Main 2x1"] output:&output errors:&errors];
+    XCTAssertEqual(status, 0, @"%@%@", output, errors);
+    XCTAssertTrue([output containsString:@"\nGLM, outside a pass, before its session's first pass in the window\n"
+                                         @"       8.841 s  session 05  3B 00 3C\n"
+                                         @"       9.133 s  session 07  3B 00 3C\n\n"],
+                  @"%@", output);
+    XCTAssertTrue([output containsString:@"\n2 DSP frames outside a pass, 0 of them a band as its block sends it. "
+                                         @"They don't count without --strict-outside.\n"],
+                  @"%@", output);
+
+    status = [self run:@[QLMFixturePath(@"Main.sam"), QLMStartupIdle(), @"--group", @"Main 2x1", @"--strict-outside"] output:&output
+                errors:&errors];
+    XCTAssertEqual(status, QLMCompareApplyDiffers, @"%@%@", output, errors);
+    XCTAssertTrue([output containsString:@"\n6 of 6 passes match. 0 differ, 0 generator stops differ, and 2 outside a pass differ.\n"],
+                  @"%@", output);
+}
+
+// A band GLM sends after a pass closes, as it does while its editor is
+// open, is listed under the pass with its slot. With --strict-outside, one
+// that is its slot as the block sends it passes, and one that isn't fails.
+- (void)testABandAfterAPassIsListedUnderIt {
+    QLMSetupGroup *group = QLMFixtureGroup(@"Main 2x1");
+    QLMDSPBlock *block = [QLMDSPBlock blockForNode:[group nodeWithSerial:@"1000002"] inGroup:group error:NULL];
+    NSData *band = QLMBlockBand(block, QLMBytes((const uint8_t[]){0x10, 0x0E, 0x05}, 3));
+    XCTAssertEqual(band.length, 24u);
+    NSMutableData *edited = [band mutableCopy];
+    ((uint8_t *)edited.mutableBytes)[edited.length - 2] ^= 0x01;
+
+    for (NSData *sent in @[band, edited]) {
+        NSMutableArray<NSData *> *records = [NSMutableArray array];
+        for (NSData *payload in QLMLeftPass().payloads) {
+            [records addObject:QLMRecord(0x03, payload)];
+        }
+        [records addObject:QLMRecord(0x03, sent)];
+        BOOL same = [sent isEqualToData:band];
+        NSString *output = nil;
+        NSString *errors = nil;
+        int status = [self run:@[QLMFixturePath(@"Main.sam"), [self captureOf:records], @"--group", @"Main 2x1", @"--strict-outside"]
+                        output:&output
+                        errors:&errors];
+        XCTAssertEqual(status, same ? 0 : QLMCompareApplyDiffers, @"%@%@", output, errors);
+        NSString *listed = [NSString stringWithFormat:@"  GLM, outside a pass\n  %10.3f s  slot 05, %@\n                %@\n",
+                                                      1 + QLMLeftPass().payloads.count * 0.001,
+                                                      same ? @"as the block sends it" : @"not as the block sends it", QLMHexOf(sent)];
+        NSRange at = [output rangeOfString:listed];
+        XCTAssertNotEqual(at.location, (NSUInteger)NSNotFound, @"%@\n%@", listed, output);
+        XCTAssertLessThan([output rangeOfString:@"session 03  8351B 1000002 \"Left\": matches\n"].location, at.location, @"%@", output);
+        status = [self run:@[QLMFixturePath(@"Main.sam"), [self captureOf:records], @"--group", @"Main 2x1"] output:&output errors:&errors];
+        XCTAssertEqual(status, 0, @"%@%@", output, errors);
+    }
+}
+
+// Phase 0's captures lease monitors again at new sessions, so a session's
+// model holds only for a while. A window whose 39 replies give one session
+// two models is refused. This copy of startup-idle adds, at 200 s, the
+// 8330A's reply to 39 at 8.497 s, as session 03's, the Left 8351B's. A
+// window that ends before it shows one model, and is compared.
+- (void)testASessionWithTwoModelsIsRefused {
+    NSString *text = [NSString stringWithContentsOfFile:QLMStartupIdle() encoding:NSUTF8StringEncoding error:NULL];
+    NSArray<NSString *> *lines = [text componentsSeparatedByString:@"\n"];
+    NSUInteger ask = [lines indexOfObjectPassingTest:^BOOL(NSString *line, NSUInteger i, BOOL *stop) {
+        return [line containsString:@" out 85 03 39 "];
+    }];
+    NSUInteger other = [lines indexOfObjectPassingTest:^BOOL(NSString *line, NSUInteger i, BOOL *stop) {
+        return [line containsString:@" out 85 02 39 "];
+    }];
+    XCTAssertTrue([lines[other + 1] containsString:@" in 3F 01 09 63 2D 32 3B 6D 6F 64 65 6C 2D 38 33 33 30 41 "]);
+    XCTAssertTrue([lines[other + 2] containsString:@" in "]);
+    NSMutableString *doctored = [text mutableCopy];
+    NSArray<NSString *> *added = @[lines[ask], lines[other + 1], lines[other + 2]];
+    for (NSUInteger i = 0; i < added.count; i++) {
+        NSString *line = added[i];
+        [doctored appendFormat:@"%.6f%@\n", 200 + i * 0.001, [line substringFromIndex:[line rangeOfString:@" "].location]];
+    }
+    NSString *path = [self temporaryFile:doctored extension:@"txt"];
+
+    NSString *output = nil;
+    NSString *errors = nil;
+    int status = [self run:@[QLMFixturePath(@"Main.sam"), path, @"--group", @"Main 2x1"] output:&output errors:&errors];
+    XCTAssertEqual(status, EX_DATAERR, @"%@%@", output, errors);
+    XCTAssertEqualObjects(output, @"");
+    XCTAssertTrue([errors containsString:@"session 03 answers 39 as the 8351B at 8.502 s and as the 8330A at 200.000 s"], @"%@", errors);
+
+    NSString *problem = nil;
+    QLMCapture *capture = [QLMCapture captureWithContentsOfFile:path error:NULL];
+    XCTAssertNil(QLMPassesInCapture(capture, 0, INFINITY, NULL, &problem));
+    XCTAssertNotNil(problem);
+    NSArray<QLMCapturedPass *> *passes = QLMPassesInCapture(capture, 0, 199, NULL, &problem);
+    XCTAssertEqual(passes.count, 6u);
+    XCTAssertEqualObjects(passes[1].model, @"8351B");
+    passes = QLMPassesInCapture(capture, 8.6, 8.7, NULL, &problem);
+    XCTAssertEqual(passes.count, 1u);
+    XCTAssertEqualObjects(passes[0].model, @"8351B", @"a window with no reply takes the nearest, at 8.735 s");
+
+    status = [self run:@[QLMFixturePath(@"Main.sam"), path, @"--group", @"Main 2x1", @"--to", @"199"] output:&output errors:&errors];
+    XCTAssertEqual(status, 0, @"%@%@", output, errors);
 }
 
 // A wrong flag, a bus's among them, or no group refuses before either file
@@ -289,6 +401,7 @@ static QLMCapturedPass *QLMLeftPass(void) {
         @[setup, capture, @"--group", @"Main 2x1", @"--dry-run"],
         @[setup, capture, @"--group", @"Main 2x1", @"--ceiling", @"-40"],
         @[setup, capture, @"--group", @"Main 2x1", @"--unverified-rate"],
+        @[setup, capture, @"--group", @"Main 2x1", @"--strict-outside", @"--strict-outside"],
         @[setup, capture, @"--group"],
         @[setup, capture, @"--group", @"Main 2x1", @"--from", @"1", @"--from", @"2"],
         @[setup, capture, @"--group", @"Main 2x1", @"--from", @"soon"],

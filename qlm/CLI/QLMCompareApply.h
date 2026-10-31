@@ -22,7 +22,8 @@ extern const int QLMCompareApplyDiffers;
 // pass, or the capture's start. At launch and wake it comes right before
 // 17 01, and in a group switch in the routing pass.
 @property (nonatomic, readonly) NSArray<NSData *> *generatorStops;
-// From the session's reply to 39, where the capture holds one.
+// From the session's reply to 39 in the window, else the nearest in the
+// capture, where it holds one.
 @property (nonatomic, readonly, nullable) NSString *model;
 // From the last lease of the session in the capture, where it holds one.
 @property (nonatomic, readonly, nullable) NSData *hardwareID;
@@ -31,24 +32,32 @@ extern const int QLMCompareApplyDiffers;
 @property (nonatomic, readonly) BOOL cutShort;
 @end
 
-// A generator stop GLM sent a session.
-@interface QLMCapturedStop : NSObject
+// A frame GLM sent a session.
+@interface QLMSessionFrame : NSObject
 @property (nonatomic) uint8_t session;
 @property (nonatomic) NSTimeInterval time;
 @property (nonatomic) NSData *payload;
+// For a DSP frame outside a pass: the session's pass before it, when that
+// pass is in the window.
+@property (nonatomic, nullable) QLMCapturedPass *follows;
 @end
 
 // Every generator stop, a 05 frame to a session, from `from` to before `to`,
 // pass or no pass. A switch sends one to each monitor of the setup, the ones
 // off in the new group included.
-NSArray<QLMCapturedStop *> *QLMGeneratorStopsInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
+NSArray<QLMSessionFrame *> *QLMGeneratorStopsInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
 
 // The generator stop's 14 bytes in every capture so far.
 BOOL QLMIsKnownGeneratorStop(NSData *payload);
 
 // Each pass whose 17 01 is from `from` to before `to`, in seconds into the
-// capture.
-NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to);
+// capture. `outside` gets each DSP frame in the window that no pass holds:
+// one GLM sent a session before its first pass, or after a pass closed. A
+// band GLM sends as it's edited is one. Nil, with the reason in `problem`,
+// when the window's 39 replies give one session two models.
+NSArray<QLMCapturedPass *> *_Nullable QLMPassesInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to,
+                                                         NSArray<QLMSessionFrame *> *_Nullable *_Nullable outside,
+                                                         NSString *_Nullable *_Nullable problem);
 
 // How a captured pass differs from a block. Payloads are compared by the
 // setting each names: a PEQ slot, a level subcommand, a routing input, or
@@ -104,13 +113,19 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
 NSArray<QLMPassMatch *> *QLMMatchPasses(NSArray<QLMCapturedPass *> *passes, QLMSetup *setup, QLMSetupGroup *group,
                                         NSArray<NSString *> *_Nullable *_Nullable refusals);
 
+// The block's frame for the slot a 10 0E band names, the last when it sends
+// the slot twice. Nil for a frame that isn't a band, or a slot the block lacks.
+NSData *_Nullable QLMBlockBand(QLMDSPBlock *block, NSData *band);
+
 // compare-apply, given what follows the command's name. It reads a setup
 // file and a capture's reports.txt, and opens no bus. It prints to `out`,
 // and why it can't compare to `err`. It returns 0 when every pass matches
-// and every generator stop in the window is the known one,
-// QLMCompareApplyDiffers when not, EX_USAGE for an argument it
-// doesn't know, and EX_DATAERR for a file it can't read, a group the setup
-// lacks, or no pass to compare.
+// and every generator stop in the window is the known one, and with
+// --strict-outside, every DSP frame outside a pass is a band that equals
+// its slot in the block. It returns QLMCompareApplyDiffers when not,
+// EX_USAGE for an argument it doesn't know, and EX_DATAERR for a file it
+// can't read, a group the setup lacks, no pass to compare, or a session
+// with two models in the window.
 int QLMCompareApply(NSArray<NSString *> *arguments, FILE *out, FILE *err);
 
 NS_ASSUME_NONNULL_END

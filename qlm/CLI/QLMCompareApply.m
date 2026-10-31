@@ -42,11 +42,41 @@ static NSData *QLMPayloadOf(QLMMessage message) {
     return [NSData dataWithBytes:message.payload length:message.length];
 }
 
-NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to) {
+// A session's model, from its reply to 39.
+@interface QLMCapturedModel : NSObject
+@property (nonatomic) uint8_t session;
+@property (nonatomic) NSTimeInterval time;
+@property (nonatomic) NSString *model;
+@end
+
+@implementation QLMCapturedModel
+@end
+
+static BOOL QLMInWindow(NSTimeInterval time, NSTimeInterval from, NSTimeInterval to) {
+    return time >= from && time < to;
+}
+
+// The model of the session's 39 reply nearest the pass, for a window with
+// none. Phase 0's captures lease monitors again at new sessions, so a
+// session's model holds only for a while.
+static NSString *_Nullable QLMNearestModel(QLMCapturedPass *pass, NSArray<QLMCapturedModel *> *models) {
+    QLMCapturedModel *nearest = nil;
+    for (QLMCapturedModel *model in models) {
+        if (model.session == pass.session && (nearest == nil || fabs(model.time - pass.time) < fabs(nearest.time - pass.time))) {
+            nearest = model;
+        }
+    }
+    return nearest.model;
+}
+
+NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to,
+                                               NSArray<QLMSessionFrame *> **outside, NSString **problem) {
     NSMutableArray<QLMCapturedPass *> *passes = [NSMutableArray array];
+    NSMutableArray<QLMSessionFrame *> *frames = [NSMutableArray array];
     NSMutableDictionary<NSNumber *, NSMutableArray<NSData *> *> *stops = [NSMutableDictionary dictionary];
     NSMutableDictionary<NSNumber *, NSData *> *leases = [NSMutableDictionary dictionary];
-    NSMutableDictionary<NSNumber *, NSString *> *models = [NSMutableDictionary dictionary];
+    NSMutableDictionary<NSNumber *, QLMCapturedPass *> *lastPasses = [NSMutableDictionary dictionary];
+    NSMutableArray<QLMCapturedModel *> *models = [NSMutableArray array];
     QLMCapturedPass *open = nil;
     NSMutableArray<NSData *> *openPayloads = nil;
     for (QLMCaptureExchange *exchange in capture.exchanges) {
@@ -65,7 +95,11 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
             char model[32];
             char firmware[32];
             if (QLMReplyText(&reply, text, sizeof text) && QLMSystemInfoParse(text, model, sizeof model, firmware, sizeof firmware)) {
-                models[@(message.address)] = @(model);
+                QLMCapturedModel *captured = [[QLMCapturedModel alloc] init];
+                captured.session = message.address;
+                captured.time = exchange.time;
+                captured.model = @(model);
+                [models addObject:captured];
             }
         }
         if (message.length >= 2 && payload[0] == 0x17 && payload[1] == 0x01) {
@@ -77,39 +111,69 @@ NSArray<QLMCapturedPass *> *QLMPassesInCapture(QLMCapture *capture, NSTimeInterv
             open.generatorStops = stops[@(message.address)] ?: @[];
             open.cutShort = YES;
             [stops removeObjectForKey:@(message.address)];
-            if (exchange.time >= from && exchange.time < to) {
+            lastPasses[@(message.address)] = open;
+            if (QLMInWindow(exchange.time, from, to)) {
                 [passes addObject:open];
             }
         }
-        if (open == nil || message.address != open.session) {
-            continue;
-        }
-        if (!open.cutShort && payload[0] != 0x40) {
+        BOOL inPass = open != nil && message.address == open.session;
+        if (inPass && !open.cutShort && payload[0] != 0x40) {
             open = nil;
+            inPass = NO;
+        }
+        if (message.length == 0 || !QLMIsDSPOpcode(payload[0])) {
             continue;
         }
-        if (QLMIsDSPOpcode(payload[0])) {
+        if (inPass) {
             [openPayloads addObject:QLMPayloadOf(message)];
             open.cutShort = open.cutShort && payload[0] != 0x3D;
+        } else if (QLMAddressIsLeasable(message.address) && QLMInWindow(exchange.time, from, to)) {
+            QLMSessionFrame *frame = [[QLMSessionFrame alloc] init];
+            frame.session = message.address;
+            frame.time = exchange.time;
+            frame.payload = QLMPayloadOf(message);
+            QLMCapturedPass *last = lastPasses[@(message.address)];
+            frame.follows = last != nil && QLMInWindow(last.time, from, to) ? last : nil;
+            [frames addObject:frame];
         }
     }
+
+    NSMutableDictionary<NSNumber *, QLMCapturedModel *> *windowModels = [NSMutableDictionary dictionary];
+    for (QLMCapturedModel *model in models) {
+        if (!QLMInWindow(model.time, from, to)) {
+            continue;
+        }
+        QLMCapturedModel *other = windowModels[@(model.session)];
+        if (other != nil && ![other.model isEqualToString:model.model]) {
+            if (problem != NULL) {
+                *problem = [NSString stringWithFormat:@"session %02X answers 39 as the %@ at %.3f s and as the %@ at %.3f s. "
+                                                      @"Give each its own window with --from and --to",
+                                                      model.session, other.model, other.time, model.model, model.time];
+            }
+            return nil;
+        }
+        windowModels[@(model.session)] = other ?: model;
+    }
     for (QLMCapturedPass *pass in passes) {
-        pass.model = models[@(pass.session)];
+        pass.model = windowModels[@(pass.session)].model ?: QLMNearestModel(pass, models);
         pass.hardwareID = leases[@(pass.session)];
+    }
+    if (outside != NULL) {
+        *outside = frames;
     }
     return passes;
 }
 
-@implementation QLMCapturedStop
+@implementation QLMSessionFrame
 @end
 
-NSArray<QLMCapturedStop *> *QLMGeneratorStopsInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to) {
-    NSMutableArray<QLMCapturedStop *> *stops = [NSMutableArray array];
+NSArray<QLMSessionFrame *> *QLMGeneratorStopsInCapture(QLMCapture *capture, NSTimeInterval from, NSTimeInterval to) {
+    NSMutableArray<QLMSessionFrame *> *stops = [NSMutableArray array];
     for (QLMCaptureExchange *exchange in capture.exchanges) {
         QLMMessage message = exchange.message;
-        if (message.length > 0 && message.payload[0] == 0x05 && QLMAddressIsLeasable(message.address) && exchange.time >= from &&
-            exchange.time < to) {
-            QLMCapturedStop *stop = [[QLMCapturedStop alloc] init];
+        if (message.length > 0 && message.payload[0] == 0x05 && QLMAddressIsLeasable(message.address) &&
+            QLMInWindow(exchange.time, from, to)) {
+            QLMSessionFrame *stop = [[QLMSessionFrame alloc] init];
             stop.session = message.address;
             stop.time = exchange.time;
             stop.payload = QLMPayloadOf(message);
@@ -137,6 +201,25 @@ static NSData *QLMSettingKey(NSData *payload) {
         length = 2;
     }
     return [payload subdataWithRange:NSMakeRange(0, MIN(length, payload.length))];
+}
+
+static BOOL QLMIsBand(NSData *payload) {
+    const uint8_t *bytes = payload.bytes;
+    return payload.length >= 3 && bytes[0] == 0x10 && bytes[1] == 0x0E;
+}
+
+NSData *QLMBlockBand(QLMDSPBlock *block, NSData *band) {
+    if (!QLMIsBand(band)) {
+        return nil;
+    }
+    NSData *key = QLMSettingKey(band);
+    NSData *found = nil;
+    for (NSData *payload in block.payloads) {
+        if ([QLMSettingKey(payload) isEqualToData:key]) {
+            found = payload;
+        }
+    }
+    return found;
 }
 
 @interface QLMBlockComparison ()
@@ -353,6 +436,65 @@ static int QLMCompareRefuse(FILE *err, NSString *problem) {
     return EX_USAGE;
 }
 
+// Whether a band outside a pass is its slot as the block of the session's
+// node sends it. With no match at the session in the window, any node's
+// block of the group counts.
+static BOOL QLMOutsideBandMatches(QLMSessionFrame *frame, NSArray<QLMPassMatch *> *matches, QLMSetupGroup *group) {
+    QLMPassMatch *own = nil;
+    for (QLMPassMatch *match in matches) {
+        if (match.pass == frame.follows || (frame.follows == nil && own == nil && match.pass.session == frame.session)) {
+            own = match;
+        }
+    }
+    NSMutableArray<QLMDSPBlock *> *blocks = [NSMutableArray array];
+    if (own.block != nil) {
+        [blocks addObject:own.block];
+    } else {
+        for (QLMSetupNode *node in group.nodes) {
+            QLMDSPBlock *block = [QLMDSPBlock blockForNode:node inGroup:group error:NULL];
+            if (block != nil) {
+                [blocks addObject:block];
+            }
+        }
+    }
+    for (QLMDSPBlock *block in blocks) {
+        if ([QLMBlockBand(block, frame.payload) isEqualToData:frame.payload]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+// Prints the frames outside a pass that follow `pass`, or with no pass,
+// those before their session's first pass in the window, which name it.
+// Returns how many are a band as its block sends it.
+static NSUInteger QLMPrintOutside(FILE *out, NSArray<QLMSessionFrame *> *frames, QLMCapturedPass *_Nullable pass,
+                                  NSArray<QLMPassMatch *> *matches, QLMSetupGroup *group) {
+    BOOL any = NO;
+    NSUInteger matchingBands = 0;
+    for (QLMSessionFrame *frame in frames) {
+        if (frame.follows != pass) {
+            continue;
+        }
+        if (!any) {
+            fprintf(out, pass != nil ? "  GLM, outside a pass\n" : "\nGLM, outside a pass, before its session's first pass in the window\n");
+            any = YES;
+        }
+        NSString *where = pass == nil ? [NSString stringWithFormat:@"session %02X  ", frame.session] : @"";
+        NSString *hex = QLMHexText(frame.payload);
+        if (!QLMIsBand(frame.payload)) {
+            fprintf(out, "  %10.3f s  %s%s\n", frame.time, where.UTF8String, hex.UTF8String);
+            continue;
+        }
+        BOOL band = QLMOutsideBandMatches(frame, matches, group);
+        matchingBands += band ? 1 : 0;
+        fprintf(out, "  %10.3f s  %sslot %02X, %s\n", frame.time, where.UTF8String, ((const uint8_t *)frame.payload.bytes)[2],
+                band ? "as the block sends it" : "not as the block sends it");
+        fprintf(out, "  %*s%s\n", (int)(14 + where.length), "", hex.UTF8String);
+    }
+    return matchingBands;
+}
+
 static void QLMPrintMatch(FILE *out, QLMPassMatch *match, QLMSetup *setup) {
     QLMCapturedPass *pass = match.pass;
     fprintf(out, "%8.3f s  session %02X  ", pass.time, pass.session);
@@ -423,7 +565,12 @@ int QLMCompareApply(NSArray<NSString *> *arguments, FILE *out, FILE *err) {
         fprintf(err, "qlmctl: %s: %s\n", reports.UTF8String, error.localizedDescription.UTF8String);
         return EX_DATAERR;
     }
-    NSArray<QLMCapturedPass *> *passes = QLMPassesInCapture(capture, from, to);
+    NSArray<QLMSessionFrame *> *outside = nil;
+    NSArray<QLMCapturedPass *> *passes = QLMPassesInCapture(capture, from, to, &outside, &problem);
+    if (passes == nil) {
+        fprintf(err, "qlmctl: %s: %s\n", reports.UTF8String, problem.UTF8String);
+        return EX_DATAERR;
+    }
     if (passes.count == 0) {
         fprintf(err, "qlmctl: %s holds no DSP pass%s\n", reports.UTF8String, isinf(to) && from == 0 ? "" : " in that window");
         return EX_DATAERR;
@@ -436,15 +583,18 @@ int QLMCompareApply(NSArray<NSString *> *arguments, FILE *out, FILE *err) {
     for (NSString *refusal in refusals) {
         fprintf(out, "qlm builds no block for %s\n", refusal.UTF8String);
     }
+    // Every frame outside a pass follows a pass in the window, or none.
+    NSUInteger matchingBands = QLMPrintOutside(out, outside, nil, matches, group);
     fprintf(out, "\n");
     NSUInteger matched = 0;
     for (QLMPassMatch *match in matches) {
         QLMPrintMatch(out, match, setup);
+        matchingBands += QLMPrintOutside(out, outside, match.pass, matches, group);
         matched += match.matches ? 1 : 0;
     }
-    NSArray<QLMCapturedStop *> *stops = QLMGeneratorStopsInCapture(capture, from, to);
+    NSArray<QLMSessionFrame *> *stops = QLMGeneratorStopsInCapture(capture, from, to);
     NSUInteger oddStops = 0;
-    for (QLMCapturedStop *stop in stops) {
+    for (QLMSessionFrame *stop in stops) {
         if (!QLMIsKnownGeneratorStop(stop.payload)) {
             if (oddStops++ == 0) {
                 fprintf(out, "\n");
@@ -455,10 +605,22 @@ int QLMCompareApply(NSArray<NSString *> *arguments, FILE *out, FILE *err) {
     }
     fprintf(out, "\n%lu of %lu generator %s are the known 05 04 00 00 00 FF FF EA 00 01 90 00 02 DA.\n",
             (unsigned long)(stops.count - oddStops), (unsigned long)stops.count, stops.count == 1 ? "stop" : "stops");
+    BOOL strict = given[@"--strict-outside"] != nil;
+    NSUInteger oddOutside = strict ? outside.count - matchingBands : 0;
+    if (outside.count > 0) {
+        fprintf(out, "%lu DSP %s outside a pass, %lu of them a band as its block sends it.%s\n", (unsigned long)outside.count,
+                outside.count == 1 ? "frame" : "frames", (unsigned long)matchingBands,
+                strict ? "" : " They don't count without --strict-outside.");
+    }
     fprintf(out, "%lu of %lu %s match", (unsigned long)matched, (unsigned long)matches.count, matches.count == 1 ? "pass" : "passes");
-    if (matched < matches.count || oddStops > 0) {
-        fprintf(out, ". %lu %s, and %lu generator %s.\n", (unsigned long)(matches.count - matched),
-                matches.count - matched == 1 ? "differs" : "differ", (unsigned long)oddStops, oddStops == 1 ? "stop differs" : "stops differ");
+    if (matched < matches.count || oddStops > 0 || oddOutside > 0) {
+        fprintf(out, ". %lu %s, %s%lu generator %s", (unsigned long)(matches.count - matched),
+                matches.count - matched == 1 ? "differs" : "differ", strict ? "" : "and ", (unsigned long)oddStops,
+                oddStops == 1 ? "stop differs" : "stops differ");
+        if (strict) {
+            fprintf(out, ", and %lu outside a pass %s", (unsigned long)oddOutside, oddOutside == 1 ? "differs" : "differ");
+        }
+        fprintf(out, ".\n");
         return QLMCompareApplyDiffers;
     }
     fprintf(out, ", apart from what qlm leaves out: the generator stop, and the 8351B's 43 00 02 and 4B 00 00 00 01.\n");
