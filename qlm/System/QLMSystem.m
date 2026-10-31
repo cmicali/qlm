@@ -1626,8 +1626,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMAdapterStatus status = adapter.status;
         state.knobPresent = status.knob;
         state.micPresent = status.mic;
-        state.micDE = status.mic ? @(status.micDE) : nil;
-        state.micDD = status.mic ? @(status.micDD) : nil;
+        state.micDE = status.mic && status.hasMicDE ? @(status.micDE) : nil;
+        state.micDD = status.mic && status.hasMicDD ? @(status.micDD) : nil;
         state.knobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
     }
     state.missedPolls = adapter.missedPolls;

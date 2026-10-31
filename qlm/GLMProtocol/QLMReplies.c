@@ -218,8 +218,14 @@ QLMAdapterStatusResult QLMReplyAdapterStatus(const QLMMessage *message, QLMAdapt
         case 0x32: status->mic = true; break;
         case 0x33: status->mic = false; break;
         case 0x34: case 0x36: break;
-        case 0xDD: status->micDD = QLMReadBigEndian32(value); break;
-        case 0xDE: status->micDE = QLMReadBigEndian32(value); break;
+        case 0xDD:
+            status->micDD = QLMReadBigEndian32(value);
+            status->hasMicDD = true;
+            break;
+        case 0xDE:
+            status->micDE = QLMReadBigEndian32(value);
+            status->hasMicDE = true;
+            break;
         case 0xDF:
             status->knobTenths = (int32_t)QLMReadBigEndian32(value);
             status->hasKnobPosition = true;
