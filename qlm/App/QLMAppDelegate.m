@@ -38,9 +38,9 @@ static const NSTimeInterval QLMStopAllowance = 3;
 @property (nonatomic, nullable) QLMFakeBusWindowController *fakeBusController;
 @property (nonatomic, nullable) QLMFakeBus *bus;
 @property (nonatomic, nullable) QLMSystem *system;
-// The mute record last kept, as System started from it or last saved.
-@property (nonatomic, copy) NSSet<NSData *> *keptMutedIDs;
-@property (nonatomic) BOOL keptMutingAll;
+// What System's bus keeps across launches. It changes with System, so a
+// snapshot from the fake bus never reaches the real monitors' store.
+@property (nonatomic) QLMBusPreferences *kept;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
@@ -128,22 +128,23 @@ static const NSTimeInterval QLMStopAllowance = 3;
 - (void)startSystemDimmed:(BOOL)dimmed {
     id<QLMAdapter> adapter = nil;
     QLMFakeBus *bus = nil;
+    QLMBusPreferences *kept = nil;
     if (self.preferences.usesAdapter) {
         adapter = [[QLMHIDAdapter alloc] init];
+        kept = self.preferences.adapterBus;
     } else {
         bus = [QLMFakeBus demoBusWithSubwoofer:YES];
         bus.recordsSentMessages = NO;
         adapter = bus;
+        kept = self.preferences.fakeBus;
     }
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.ceilingDecibels = self.preferences.ceilingDecibels;
-    self.keptMutedIDs = self.preferences.mutedHardwareIDs;
-    self.keptMutingAll = self.preferences.mutingAll;
-    settings.mutedHardwareIDs = self.keptMutedIDs;
-    settings.mutingAll = self.keptMutingAll;
+    [kept fillSettings:settings];
     QLMSystem *system = [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
     self.bus = bus;
     self.system = system;
+    self.kept = kept;
     self.popoverController.system = system;
     self.popoverController.showsFakeBus = bus != nil;
     self.fakeBusController.bus = bus;
@@ -167,7 +168,7 @@ static const NSTimeInterval QLMStopAllowance = 3;
     [system start];
     // At connect, keep the app's own level. The knob moves nothing until a
     // volume is set.
-    [system setVolumeDecibels:self.preferences.volumeDecibels];
+    [system setVolumeDecibels:kept.volumeDecibels];
 }
 
 // System lets go of the adapter before the Mac sleeps. As at quit, the
@@ -216,7 +217,8 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // A new adapter setting takes a new System, with a new adapter: a stopped
 // one is not handed to another. The new System starts once the old has let
 // go, so the two never hold the adapter at once. Dim carries over, read
-// from the old System's last snapshot. Each bus keeps its own mute record.
+// from the old System's last snapshot. Each bus keeps its own level, mute
+// record, and leases.
 // The active group and the fake bus's state do not carry over. A second
 // change during a restart finds the new System already made, and stops.
 - (void)restartSystem {
@@ -240,33 +242,8 @@ static const NSTimeInterval QLMStopAllowance = 3;
     if (self.fakeBusController.window.visible) {
         [self.fakeBusController refresh];
     }
-    [self keepMuteRecord:snapshot];
-    // The knob moves the volume too. Keep whichever set it last.
-    NSNumber *volume = snapshot.volumeDecibels;
-    if (volume != nil) {
-        double kept = fmin(volume.doubleValue, snapshot.ceilingDecibels);
-        if (fabs(kept - self.preferences.volumeDecibels) >= QLMVolumeDecibelsStep / 2) {
-            self.preferences.volumeDecibels = kept;
-        }
-    }
+    [self.kept keepFromSnapshot:snapshot];
     [self renderStatusItem];
-}
-
-// TRAP: a snapshot from before System starts carries an empty record, not
-// the one System starts from. Only a running System's record is kept. It is
-// compared with the last one kept, not read back from the defaults.
-- (void)keepMuteRecord:(QLMSnapshot *)snapshot {
-    if (!snapshot.running) {
-        return;
-    }
-    if (![snapshot.mutedHardwareIDs isEqualToSet:self.keptMutedIDs]) {
-        self.keptMutedIDs = snapshot.mutedHardwareIDs;
-        self.preferences.mutedHardwareIDs = snapshot.mutedHardwareIDs;
-    }
-    if (snapshot.mutingAll != self.keptMutingAll) {
-        self.keptMutingAll = snapshot.mutingAll;
-        self.preferences.mutingAll = snapshot.mutingAll;
-    }
 }
 
 - (void)renderStatusItem {
