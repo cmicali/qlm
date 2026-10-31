@@ -59,7 +59,9 @@ Nothing else is in the reply. No field changes with standby, a group switch, mut
 
 ### The mic: `DE` and `DD`
 
-These appear only with the calibration mic in. Normal use has no mic, so qlm can ignore them.
+These appear only with the calibration mic in. Normal use has no mic, and qlm doesn't act on them. It does show them, as raw counts, since we don't know their scale. `qlmctl info` and `qlmctl poll` print them on the mic line, and the debug channel's `dump_state` carries them as `micDE` and `micDD`.
+
+qlm reads the adapter twice every 0.107 s, but its snapshot takes the readings only once a cycle, about every 0.57 s. So `poll` shows about one `DE` in ten. Every reading is in a capture.
 
 - `DE` changes on every poll. The first poll of each pair usually reads higher than the second: in 809 of 1,092 pairs in `startup-idle-mic`, and 483 of 677 in `knob-sweep`. The first `DE` after GLM opens in `startup-idle-mic` is `1B AB FB A0` (7.31 s), about 200 times its median. **Guess:** `DE` is the peak since the last read.
 - `DD` changes about every 0.2 s, sometimes 0.1 s. It rarely changes between the two polls of a pair: in 16 of 618 changes in `startup-idle-mic`. **Guess:** an averaged level, updated on the adapter's own clock.
