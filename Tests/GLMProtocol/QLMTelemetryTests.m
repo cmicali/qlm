@@ -243,10 +243,12 @@ static QLMMessage QLMJoinedFrame(QLMMessage first, QLMMessage second) {
     XCTAssertEqual(splits, 47u);
 }
 
-// The time of a frame, less the seconds since the wake that 8A and 49 count
-// together: 8A is the count over 256, and 49 the count mod 256.
+// The time of a frame that carries 8A, less the seconds since the wake that
+// 8A and 49 count together: 8A is the count over 256, and 49 the count mod
+// 256.
 static NSTimeInterval QLMWakeTime(QLMTelemetryFrame *frame) {
-    return frame.time - (frame.telemetry.wakeSteps * 256 + frame.telemetry.wakeSeconds);
+    QLMTelemetry telemetry = frame.telemetry;
+    return frame.time - QLMTelemetryWakeCount(&telemetry);
 }
 
 // sleep-wake-darkwake: 8A rides one frame in 30 s. One frame that carried it
@@ -323,13 +325,33 @@ static uint8_t QLMSessionLeased(NSString *scenario, const uint8_t hardwareID[3],
 - (void)testAPowerOnStartsTheWakeCount {
     NSArray<QLMTelemetryFrame *> *run = QLMFramesBetween(QLMTelemetryFrames(@"qlm-control-all")[@0x07], 214.7, 283);
     XCTAssertEqualWithAccuracy(run.firstObject.time, 215.941, 0.001);
-    XCTAssertEqual(run.firstObject.telemetry.wakeSeconds, 1);
+    QLMTelemetry first = run.firstObject.telemetry;
+    XCTAssertEqual(first.wakeSeconds, 1);
+    XCTAssertEqual(QLMTelemetryWakeCount(&first), QLMTelemetryAbsent);  // no 8A
     NSArray<QLMTelemetryFrame *> *steps = QLMWakeStepFrames(run);
     XCTAssertEqual(steps.count, 2u);
     for (QLMTelemetryFrame *frame in steps) {
         XCTAssertEqual(frame.telemetry.wakeSteps, 0, @"%.3f", frame.time);
         XCTAssertEqualWithAccuracy(QLMWakeTime(frame), 214.9, 0.5, @"%.3f", frame.time);
     }
+}
+
+// qlm-control-all: the Rear Left 8330A's count ran from 175 s, and wrapped
+// at 431 s. qlmctl's run from 431.9 s leased it at 431.944 s, and its first
+// frame read 49 at 1 but 8A at 0, a tick from before the wrap that waited
+// for a poll. The next 8A, at 455.09 s, reads 1, and puts the wake back at
+// 175 s.
+- (void)testALeasesFirstFrameCanCarryAnOld8A {
+    NSArray<QLMTelemetryFrame *> *run = QLMFramesBetween(QLMTelemetryFrames(@"qlm-control-all")[@0x04], 431.9, 456);
+    NSArray<QLMTelemetryFrame *> *steps = QLMWakeStepFrames(run);
+    XCTAssertEqual(steps.count, 2u);
+    XCTAssertEqualWithAccuracy(steps[0].time, 431.955, 0.001);
+    XCTAssertEqual(run.firstObject, steps[0]);
+    XCTAssertEqual(steps[0].telemetry.wakeSeconds, 1);
+    XCTAssertEqual(steps[0].telemetry.wakeSteps, 0);
+    XCTAssertEqual(steps[1].telemetry.wakeSteps, 1);
+    XCTAssertEqualWithAccuracy(QLMWakeTime(steps[1]), 175, 0.5);
+    XCTAssertEqualWithAccuracy(QLMWakeTime(steps[0]) - QLMWakeTime(steps[1]), 256, 1);
 }
 
 // In every whole frame from a monitor that is on, the system info's c- is

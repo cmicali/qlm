@@ -428,7 +428,7 @@ static NSView *QLMSpacer(void) {
     [self.setupBanner showTitle:changed == nil ? nil : [NSString stringWithFormat:@"GLM saved %@", changed]
                          detail:@"Read it again for its new groups."];
     [self.groupBanner showTitle:snapshot.wokeWithoutGroup ? @"The monitors play without their group's settings" : nil
-                         detail:@"qlm woke them, and applies no group with a model whose filter design rate is unverified. "
+                         detail:@"Some were woken or switched on, and qlm applies no group with a model whose filter design rate is unverified. "
                                 @"They play on their stored settings until GLM applies the group."];
     self.deviceLabel.stringValue = snapshot.adapter.device ?: @"";
     self.deviceLabel.toolTip = snapshot.adapter.systemInfo;

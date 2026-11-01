@@ -23,6 +23,12 @@ NS_ASSUME_NONNULL_BEGIN
 // and to unicasts.
 @property (nonatomic) NSUInteger dropReplies;
 @property (nonatomic) uint8_t muteValue;       // the last 2B value received
+// When it last woke or was switched on, in seconds on the bus's clock. Set,
+// each frame it sends while on carries 49, the whole seconds since then mod
+// 256. Its first frame, and then one at least 30 s after the last, carries
+// 8A, the seconds over 256 (docs/telemetry.md). Nil sends neither. A wake
+// that turns it on sets it to now, and so does setting it.
+@property (nonatomic, nullable) NSNumber *wokeAt;
 
 @end
 

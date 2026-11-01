@@ -88,6 +88,11 @@ typedef enum {
 // filled. The second has no 41 and reads as QLMTelemetryErrorNotTelemetry.
 QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *telemetry);
 
+// The seconds since the wake, 8A by 256 plus 49, or QLMTelemetryAbsent
+// unless the frame carries both. A host's first poll after a lease may
+// carry an 8A from before 49 wrapped (docs/telemetry.md).
+int32_t QLMTelemetryWakeCount(const QLMTelemetry *telemetry);
+
 // The adapter's reply to 01 08: 09, then fields with no length byte. The top
 // two bits of a tag give its value's length: 00 none, 01 one byte, 10 two,
 // and 11 four. 30 or 31 says whether the knob is in, and 32 or 33 the mic.

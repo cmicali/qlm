@@ -8,8 +8,17 @@
 #import "QLMDSPBlock.h"
 #import "QLMKnob.h"
 #import "QLMSnapshotInternal.h"
+#import "QLMSystemInternal.h"
 
 NSErrorDomain const QLMSystemErrorDomain = @"com.commonwealthrecordings.qlm.system";
+
+// In every capture, a monitor woken or switched on put its wake 0.18 to
+// 1.99 s after the last probe no monitor answered. One leased again with
+// its count running on put it 327 s or more before, or 67 s with no probe
+// forgotten between host runs (QLMPowerOnGoldenTests). Only one capture has
+// a power-on at the switch, so the margin leaves room for a model slower to
+// answer.
+const NSTimeInterval QLMPowerOnMargin = 10;
 
 static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, NSError *_Nullable underlying) {
     NSMutableDictionary<NSErrorUserInfoKey, id> *info = [NSMutableDictionary dictionary];
@@ -97,6 +106,11 @@ static const NSTimeInterval QLMReconnectLongestWait = 30;
 @property (nonatomic) BOOL configured;
 // Hears its state of 2B after its next poll that says on.
 @property (nonatomic) BOOL needsState;
+// A wake count that puts its wake at or after this says it was switched on
+// or woken since its lease's last quiet probe. NAN for a lease taken before
+// the first quiet probe of a run or after a gap, or by serial, and once a
+// count is read.
+@property (nonatomic) NSTimeInterval wokeAfter;
 @property (nonatomic, readonly) BOOL isOn;  // its last telemetry says on
 @end
 
@@ -252,6 +266,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     id<QLMTimer> _cycleTimer;
     BOOL _cycleQueued;
     BOOL _probing;  // a lease chain runs
+    NSTimeInterval _quietProbeAt;  // this run's last probe no monitor answered, or NAN
     QLMTrackedAdapter *_adapterRecord;
     NSError *_adapterError;
     // Reopens of the adapter since its link gave up, and the one waiting.
@@ -326,6 +341,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _settings = [settings copy];
         _clock = _settings.clock;
         _lastVolumeSend = -INFINITY;
+        _quietProbeAt = NAN;
         _monitors = [NSMutableArray array];
         _sends = [NSMutableArray array];
         _mutedIDs = [settings.mutedHardwareIDs mutableCopy];
@@ -418,6 +434,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _levelAwaitsKnob = _volumeDecibels != nil;
     _levelHeld = NO;
     _nextSession = QLMAddressSessionFirst;
+    _quietProbeAt = NAN;
     [_adapter startOnQueue:_queue clock:_clock];
     _dirty = YES;
     // GLM's opening, less what qlm never sends: the adapter's status, its
@@ -800,6 +817,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // block: its last 2B may not have gone out, and the other host may have
 // changed it.
 - (void)takeBackAfterGap {
+    // Another host, such as GLM, may have woken the monitors and applied
+    // its group, so a monitor leased after the gap counts as one found at a
+    // start.
+    _quietProbeAt = NAN;
     if (_stopping || !self.settings.discoversMonitors) {
         return;
     }
@@ -975,6 +996,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         // monitor answers the next probe.
         self->_probing = NO;
         if (!found) {
+            if (reply == NULL && error == nil) {
+                self->_quietProbeAt = self->_clock.now;
+            }
             [self applyToNewMonitors];
         }
     }];
@@ -1009,7 +1033,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             self->_probing = NO;
             return;
         }
-        [self track:identity session:session serial:nil];
+        [self track:identity session:session serial:nil].wokeAfter = self->_quietProbeAt - QLMPowerOnMargin;
         [self probeNext];
     }];
 }
@@ -1086,7 +1110,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // A monitor that holds `session`, from a lease or one taken back. It
 // replaces any record of the same monitor, whose lease is gone.
-- (void)track:(NSData *)identity session:(uint8_t)session serial:(nullable NSString *)serial {
+- (QLMMonitorRecord *)track:(NSData *)identity session:(uint8_t)session serial:(nullable NSString *)serial {
     QLMMonitorRecord *stale = [self monitorWithHardwareID:identity];
     if (stale != nil) {
         [_monitors removeObject:stale];
@@ -1102,6 +1126,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     monitor.session = session;
     monitor.serialNumber = serial;
     monitor.lastReply = [NSDate date];
+    monitor.wokeAfter = NAN;
     [_monitors addObject:monitor];
     _dirty = YES;
     // Mute all holds for a monitor that first appears after it, unless the
@@ -1117,6 +1142,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     monitor.needsState = monitor.configured && ([_mutedIDs containsObject:identity] || [_unstatedIDs containsObject:identity]);
     [self identify:monitor];
     [self pollMonitor:monitor];
+    return monitor;
 }
 
 // Asks for whichever of the system info and the serial is still unknown.
@@ -1331,6 +1357,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     QLMTelemetry telemetry;
     QLMTelemetryStatus status = QLMReplyTelemetry(reply, &telemetry);
     if (status == QLMTelemetryOK || status == QLMTelemetryErrorUnknownTag) {
+        if (monitor.hasTelemetry) {
+            [self readWakeCountOf:monitor telemetry:&telemetry];
+        }
         monitor.telemetry = telemetry;
         monitor.hasTelemetry = YES;
     }
@@ -1344,6 +1373,23 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMApplySequence *sequence = [[QLMApplySequence alloc] initWithGroup:_activeGroup monitors:@[stated] adapterMuted:[self adapterMuted]];
         [self sendRecordsNext:[sequence stateOf:stated firstOfTwo:NO]];
     }
+}
+
+// A monitor switched on plays without its group's settings, as a woken one
+// does (docs/protocol.md: Monitors keep their level and their mute). So a
+// lease after a quiet probe reads the wake count, 8A by 256 plus 49, from
+// its first frame that carries 8A. Not from the lease's first frame: its 8A
+// may be a tick that waited for a poll, from before 49 wrapped
+// (docs/telemetry.md: 8A).
+- (void)readWakeCountOf:(QLMMonitorRecord *)monitor telemetry:(const QLMTelemetry *)telemetry {
+    int32_t count = QLMTelemetryWakeCount(telemetry);
+    if (isnan(monitor.wokeAfter) || count == QLMTelemetryAbsent) {
+        return;
+    }
+    if (_clock.now - count >= monitor.wokeAfter && _activeGroup == nil) {
+        _wokeWithoutGroup = YES;
+    }
+    monitor.wokeAfter = NAN;
 }
 
 // After the limit of missed polls, a burst of polls to the dead address.
