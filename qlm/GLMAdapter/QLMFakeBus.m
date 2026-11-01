@@ -29,19 +29,23 @@
 }
 
 // 49, and 8A when due, before and after the frame's closing 84, which is
-// its last three bytes.
-- (void)putWakeCountInto:(NSMutableData *)frame at:(NSTimeInterval)now {
+// its last three bytes. The frame has room for both. Returns its length.
+- (size_t)putWakeCountInto:(uint8_t *)frame length:(size_t)length at:(NSTimeInterval)now {
     if (_wokeAt == nil) {
-        return;
+        return length;
     }
     NSUInteger seconds = (NSUInteger)MAX(0, floor(now - _wokeAt.doubleValue));
-    const uint8_t count[2] = {0x49, (uint8_t)(seconds % 256)};
-    [frame replaceBytesInRange:NSMakeRange(frame.length - 3, 0) withBytes:count length:sizeof count];
+    memmove(frame + length - 1, frame + length - 3, 3);
+    frame[length - 3] = 0x49;
+    frame[length - 2] = (uint8_t)(seconds % 256);
+    length += 2;
     if (isnan(_stepsSentAt) || now - _stepsSentAt >= 30) {
         _stepsSentAt = now;
-        const uint8_t steps[3] = {0x8A, (uint8_t)(seconds / 256 >> 8), (uint8_t)(seconds / 256)};
-        [frame appendBytes:steps length:sizeof steps];
+        frame[length++] = 0x8A;
+        frame[length++] = (uint8_t)(seconds / 256 >> 8);
+        frame[length++] = (uint8_t)(seconds / 256);
     }
+    return length;
 }
 
 @end
@@ -300,18 +304,16 @@ static void QLMFakeTextReply(QLMMessage *reply, NSString *text, BOOL terminated)
             uint8_t bytes[] = {0x09, 0x41, temperature, 0x47, 0x02, 0x84, 0x03, 0x8E};
             *reply = QLMMessageMake(QLMAddressReply, bytes, sizeof bytes);
         } else {
-            NSMutableData *frame;
-            if (target.deviceClass == QLMTelemetryClassSubwoofer) {
-                uint8_t bytes[] = {0x09, 0x41, temperature, 0x83, 0x00, temperature, 0x42, 0x89, 0x46, 0x80,
-                                   0x43, 0x80, 0x45, 0x80, 0x47, 0x01, 0x84, 0x01, 0x66};
-                frame = [NSMutableData dataWithBytes:bytes length:sizeof bytes];
-            } else {
-                uint8_t bytes[] = {0x09, 0x41, temperature, 0x81, 0x00, temperature, 0x83, 0x00, temperature, 0x42, 0x89,
-                                   0x43, 0x80, 0x45, 0x80, 0x47, 0x01, 0x84, 0x02, 0xB0};
-                frame = [NSMutableData dataWithBytes:bytes length:sizeof bytes];
-            }
-            [target putWakeCountInto:frame at:_clock.now];
-            *reply = QLMMessageMake(QLMAddressReply, frame.bytes, frame.length);
+            const uint8_t subwoofer[] = {0x09, 0x41, temperature, 0x83, 0x00, temperature, 0x42, 0x89, 0x46, 0x80,
+                                         0x43, 0x80, 0x45, 0x80, 0x47, 0x01, 0x84, 0x01, 0x66};
+            const uint8_t twoWay[] = {0x09, 0x41, temperature, 0x81, 0x00, temperature, 0x83, 0x00, temperature, 0x42, 0x89,
+                                      0x43, 0x80, 0x45, 0x80, 0x47, 0x01, 0x84, 0x02, 0xB0};
+            BOOL isSubwoofer = target.deviceClass == QLMTelemetryClassSubwoofer;
+            uint8_t frame[QLMPayloadMax];
+            size_t length = isSubwoofer ? sizeof subwoofer : sizeof twoWay;
+            memcpy(frame, isSubwoofer ? subwoofer : twoWay, length);
+            length = [target putWakeCountInto:frame length:length at:_clock.now];
+            *reply = QLMMessageMake(QLMAddressReply, frame, length);
         }
         return YES;
     }

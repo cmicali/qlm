@@ -8,15 +8,16 @@
 #import "QLMDSPBlock.h"
 #import "QLMKnob.h"
 #import "QLMSnapshotInternal.h"
+#import "QLMSystemInternal.h"
 
 NSErrorDomain const QLMSystemErrorDomain = @"com.commonwealthrecordings.qlm.system";
 
 // In every capture, a monitor woken or switched on put its wake 0.18 to
 // 1.99 s after the last probe no monitor answered. One leased again with
 // its count running on put it 327 s or more before, or 67 s with no probe
-// forgotten between host runs (QLMTelemetryTests,
-// testThePowerOnMarginSplitsEveryLease). Only one capture has a power-on at
-// the switch, so the margin leaves room for a model slower to answer.
+// forgotten between host runs (QLMPowerOnGoldenTests). Only one capture has
+// a power-on at the switch, so the margin leaves room for a model slower to
+// answer.
 const NSTimeInterval QLMPowerOnMargin = 10;
 
 static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, NSError *_Nullable underlying) {
@@ -1297,11 +1298,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // may be a tick that waited for a poll, from before 49 wrapped
 // (docs/telemetry.md: 8A).
 - (void)readWakeCountOf:(QLMMonitorRecord *)monitor telemetry:(const QLMTelemetry *)telemetry {
-    if (isnan(monitor.wokeAfter) || telemetry->wakeSteps == QLMTelemetryAbsent || telemetry->wakeSeconds == QLMTelemetryAbsent) {
+    int32_t count = QLMTelemetryWakeCount(telemetry);
+    if (isnan(monitor.wokeAfter) || count == QLMTelemetryAbsent) {
         return;
     }
-    NSTimeInterval woke = _clock.now - (telemetry->wakeSteps * 256 + telemetry->wakeSeconds);
-    if (woke >= monitor.wokeAfter && _activeGroup == nil) {
+    if (_clock.now - count >= monitor.wokeAfter && _activeGroup == nil) {
         _wokeWithoutGroup = YES;
     }
     monitor.wokeAfter = NAN;

@@ -9,12 +9,6 @@ NS_ASSUME_NONNULL_BEGIN
 
 extern NSErrorDomain const QLMSystemErrorDomain;
 
-// A monitor leased after a probe no monitor answered was switched on or
-// woken since that probe when its wake count puts its wake no earlier than
-// this before it. Then, with no group active, the snapshot says
-// wokeWithoutGroup.
-extern const NSTimeInterval QLMPowerOnMargin;
-
 // Why System refused or failed a group apply. A refusal sends nothing.
 typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
     QLMSystemErrorUnverifiedRate = 1,  // a node's filter design rate is unverified on the wire

@@ -2205,16 +2205,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self startSystem];
     QLMSnapshot *first = [self waitForDiscovery];
     [_time advanceBy:2];
-
-    [self lapseLeases];
-    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        BOOL leasedAgain = snapshot.monitors.count == 2 && snapshot.allIdentified;
-        for (QLMMonitorState *monitor in snapshot.monitors) {
-            leasedAgain = leasedAgain && monitor.session != QLMFindMonitor(first, monitor.hardwareID).session;
-        }
-        return leasedAgain;
-    }];
-    XCTAssertNotNil(again);
+    [self lapseAndFindAgain:first];
     [_time advanceBy:65];
     XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
 }
