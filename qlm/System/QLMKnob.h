@@ -2,6 +2,16 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// The knob's position, in tenths of a dB, at the nearest step, from
+// QLMVolumeDecibelsMin to 0 dB. No tenth falls halfway between two steps.
+double QLMKnobStep(NSInteger tenths);
+
+// The knob moved from one reading to the other, by GLM's rule: more than a
+// whole dB, 11 tenths or more. At rest the reading wandered a whole dB at
+// most over 130 s (sleep-wake-no-sleep). A slow creep, as in
+// sleep-wake-darkwake, may count as a move.
+BOOL QLMKnobMoved(NSInteger fromTenths, NSInteger toTenths);
+
 // Turns the knob's readings into volume, by GLM's rule (docs/protocol.md,
 // "Volume and the knob"). A reading more than a whole dB from the last one
 // the volume followed moves the volume to the knob's nearest step, and for

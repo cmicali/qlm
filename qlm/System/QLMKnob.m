@@ -15,9 +15,11 @@ static const NSTimeInterval QLMKnobFollowInterval = 2.54;
 // holds all that with room, and a take-back only lowers the level.
 static const NSTimeInterval QLMKnobUnplugWindow = 1;
 
-// The nearest step, from QLMVolumeDecibelsMin to 0 dB. No tenth falls
-// halfway between two steps.
-static double QLMKnobStep(NSInteger tenths) {
+BOOL QLMKnobMoved(NSInteger fromTenths, NSInteger toTenths) {
+    return labs(toTenths - fromTenths) >= QLMKnobMoveTenths;
+}
+
+double QLMKnobStep(NSInteger tenths) {
     double decibels = round((double)tenths / (10 * QLMVolumeDecibelsStep)) * QLMVolumeDecibelsStep;
     return fmin(QLMVolumeDecibelsMax, fmax(QLMVolumeDecibelsMin, decibels));
 }
@@ -84,7 +86,7 @@ static double QLMKnobStep(NSInteger tenths) {
         return nil;
     }
     _last = tenths;
-    if (labs(tenths - _followed) >= QLMKnobMoveTenths) {
+    if (QLMKnobMoved(_followed, tenths)) {
         _followUntil = time + QLMKnobFollowInterval;
     }
     if (time >= _followUntil || volume == nil) {

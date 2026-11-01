@@ -53,6 +53,13 @@ NSString *_Nullable QLMHandBackLine(QLMSnapshot *_Nullable snapshot);
 // back.
 BOOL QLMStopMayRaiseLevel(QLMSnapshot *_Nullable snapshot);
 
+// Whether a stop's mute all can reach the monitors: the bus takes frames.
+// An adapter that stopped answering or taking reports takes none.
+BOOL QLMStopCanMute(QLMSnapshot *_Nullable snapshot);
+
+// What System's stop did to the level, from its snapshot once stopped.
+NSString *QLMStopText(QLMSnapshot *_Nullable stopped);
+
 // What a quit does before qlm lets go.
 typedef NS_ENUM(NSInteger, QLMQuitStep) {
     QLMQuitStepStop = 0,   // the take-over is no louder

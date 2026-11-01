@@ -1624,12 +1624,15 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
 
     // A volume change while dimmed stores the volume and sends it dimmed.
+    // A frame of the dim still in line says the new level as it goes out.
     [_system setDimmed:YES];
     [_system setVolumeDecibels:-20];
     [self waitUntil:^BOOL {
         QLMSnapshot *snapshot = self->_system.snapshot;
-        return [self countSent:minus40 from:before] == 1 && [snapshot.volumeDecibels isEqual:@(-20)] && snapshot.dimmed;
+        return [self countSent:minus40 from:before] >= 1 && [snapshot.volumeDecibels isEqual:@(-20)] && snapshot.dimmed && snapshot.idle;
     }];
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertEqualObjects(levels.lastObject, minus40);
 }
 
 // With no volume set, as in qlmctl dim over a replay, dim sends nothing.
@@ -2410,6 +2413,17 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
 }
 
+// Stops System with the stop no one can answer, and returns its snapshot
+// once it has.
+- (QLMSnapshot *)stopMutingAndWait {
+    QLMSystem *system = _system;
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stopMutingIfLouderWithCompletion:nil];
+    }];
+}
+
 // Stops System and returns its snapshot once it has.
 - (QLMSnapshot *)stopAndWait {
     QLMSystem *system = _system;
@@ -2482,12 +2496,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
             self->_right.muteValue = 0;
         }];
         NSUInteger before = _bus.sentMessages.count;
-        QLMSystem *system = _system;
-        QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-            return !snapshot.running;
-        } after:^{
-            [system stopMutingIfLouderWithCompletion:nil];
-        }];
+        QLMSnapshot *stopped = [self stopMutingAndWait];
         XCTAssertNotEqual(stopped.handBack.kind, QLMHandBackKnobLevel, @"%@", tenths);
         XCTAssertTrue(stopped.mutingAll, @"%@", tenths);
         XCTAssertGreaterThan([self sentWithOpcode:0x2B from:before].count, 0u, @"%@", tenths);
@@ -2500,12 +2509,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 
     [self startWithKnob:@(-600) volume:@(-40)];
     NSUInteger before = _bus.sentMessages.count;
-    QLMSystem *system = _system;
-    QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    } after:^{
-        [system stopMutingIfLouderWithCompletion:nil];
-    }];
+    QLMSnapshot *stopped = [self stopMutingAndWait];
     QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
     XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
         return YES;
@@ -2529,6 +2533,477 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertTrue(again.running);
     QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
     XCTAssertTrue([_bus.sentMessages containsObject:QLMAdapterRecord(&knob)]);
+}
+
+#pragma mark - A start, and a sleep's stop and wake
+
+// The index of the first message from `start` on that `test` passes, or
+// NSNotFound.
+- (NSUInteger)firstSentFrom:(NSUInteger)start matching:(BOOL (^)(NSData *message))test {
+    NSArray<NSData *> *sent = _bus.sentMessages;
+    for (NSUInteger i = start; i < sent.count; i++) {
+        if (test(sent[i])) {
+            return i;
+        }
+    }
+    return NSNotFound;
+}
+
+// The index of the first volume frame from `start` on, or NSNotFound.
+- (NSUInteger)firstLevelFrom:(NSUInteger)start {
+    return [self firstSentFrom:start matching:^BOOL(NSData *message) {
+        return message.length >= 2 && ((const uint8_t *)message.bytes)[1] == 0x1F;
+    }];
+}
+
+// While no host ran, the adapter ran the monitors at the knob's level
+// (captures/qlm-control-first, 289.7 s). When the knob moved meanwhile, by
+// more than a whole dB from the last run's last reading, as GLM tells a turn
+// from a wander at rest (sleep-wake-no-sleep), or went in, that turn is the
+// listener's last choice. Then a level set before the start goes out no
+// louder than the knob's first reading, under the ceiling. The knob sets the
+// undimmed level, as a turn does. The adapter is read first, as GLM's launch
+// reads it (captures/startup-idle, 7.293 s). With the knob unmoved, never
+// read, or out now, the level set stands. Each case names the level set,
+// dim, the last reading and the knob now, in tenths, with "unread" for no
+// reading and "out" for no knob, then the level that goes out and the
+// volume after.
+- (void)testAStartSendsNoLevelAboveAKnobTurnedMeanwhile {
+    NSString *unread = @"unread";
+    NSString *out = @"out";
+    NSArray<NSArray *> *cases = @[
+        @[@(-40), @NO, @(-300), @(-600), @(-60), @(-60)],   // turned down below: the knob's level
+        @[@(-40), @NO, @(-589), @(-600), @(-60), @(-60)],   // 11 tenths is a move
+        @[@(-40), @NO, @(-590), @(-600), @(-40), @(-40)],   // 10 tenths is not: the level set
+        @[@(-40), @NO, @(-600), @(-600), @(-40), @(-40)],   // unmoved below: the level set
+        @[@(-40), @NO, unread, @(-600), @(-40), @(-40)],    // never read: the level set
+        @[@(-40), @NO, out, @(-600), @(-60), @(-60)],       // plugged in since: a move
+        @[@(-40), @NO, @(-600), @(-300), @(-40), @(-40)],   // turned up above: the level set
+        @[@(-40), @NO, @(-600), out, @(-40), @(-40)],       // pulled out since: the level set
+        @[@(-10), @NO, @(-600), @(-100), @(-20), @(-20)],   // both above the -20 dB ceiling: the ceiling
+        @[@(-20), @YES, @(-300), @(-500), @(-70), @(-50)],  // dimmed, turned below: the knob less the dim
+        @[@(-20), @YES, @(-100), @(-150), @(-40), @(-20)],  // dimmed, turned above the level set: as set
+    ];
+    for (NSArray *row in cases) {
+        double set = [row[0] doubleValue];
+        BOOL dimmed = [row[1] boolValue];
+        _settings.knobRead = row[2] != unread;
+        _settings.knobTenths = [row[2] isKindOfClass:[NSNumber class]] ? row[2] : nil;
+        NSNumber *knob = row[3] == out ? nil : row[3];
+        double sent = [row[4] doubleValue];
+        double volume = [row[5] doubleValue];
+        _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
+        [_bus perform:^{
+            self->_bus.knobTenths = knob;
+            self->_left.session = 0;
+            self->_right.session = 0;
+        }];
+        _system = [[QLMSystem alloc] initWithAdapter:_bus settings:_settings];
+        [_system setDimmed:dimmed];
+        [_system setVolumeDecibels:set];
+        [_system start];
+        QLMSnapshot *settled = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+        }];
+        QLMMessage expected = QLMCommandVolume(sent, _settings.ceilingDecibels);
+        NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:0];
+        XCTAssertGreaterThanOrEqual(levels.count, 3u, @"%@", row);  // the cycle's, and each lease's
+        for (NSData *level in levels) {
+            XCTAssertEqualObjects(level, QLMAdapterRecord(&expected), @"%@", row);
+            XCTAssertLessThanOrEqual(QLMVolumeWordOf(QLMApplyMessage(level)), QLMVolumeWordForDecibels(_settings.ceilingDecibels), @"%@",
+                                     row);
+        }
+        XCTAssertEqual([self firstReadFrom:0 dropping:0], 0u, @"%@", row);
+        XCTAssertEqualWithAccuracy(settled.volumeDecibels.doubleValue, volume, 0.001, @"%@", row);
+        double held = fmin(set, _settings.ceilingDecibels);
+        XCTAssertEqualObjects(settled.startLoweredFromDecibels, volume != held ? @(held) : nil, @"%@", row);
+        [self stopSystem];
+    }
+}
+
+// The knob sets the undimmed level, so an undim after a dimmed start that
+// the knob capped goes back to the knob's level, not 20 dB above it.
+- (void)testAnUndimAfterACappedDimmedStartGoesToTheKnob {
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-500);
+    }];
+    _settings.knobRead = YES;
+    _settings.knobTenths = @(-300);
+    _system = [[QLMSystem alloc] initWithAdapter:_bus settings:_settings];
+    [_system setDimmed:YES];
+    [_system setVolumeDecibels:-20];
+    [_system start];
+    [self waitForDiscovery];
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSnapshot *undimmed = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.dimmed && snapshot.idle;
+    } after:^{
+        [self->_system setDimmed:NO];
+    }];
+    XCTAssertEqualObjects(undimmed.volumeDecibels, @(-50));
+    QLMMessage knob = QLMCommandVolume(-50, _settings.ceilingDecibels);
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertGreaterThan(levels.count, 0u);
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, QLMAdapterRecord(&knob));
+    }
+}
+
+// Within one System too: a knob pulled out during a run, then plugged back
+// in during a stop, counts as moved, so the next start caps at its level.
+// One pulled out during the stop leaves the level set.
+- (void)testAKnobPluggedBackInCountsAsMoved {
+    _settings.adapterPollInterval = 0.107;
+    for (NSNumber *pluggedIn in @[@YES, @NO]) {
+        [self startWithKnob:pluggedIn.boolValue ? @(-300) : @(-600) volume:@(-40)];
+        if (pluggedIn.boolValue) {
+            [_bus perform:^{
+                self->_bus.knobTenths = nil;
+            }];
+            [self waitForAdapterPolls:2];
+            [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+                return !snapshot.adapter.knobPresent && snapshot.idle;
+            }];
+        }
+        [self stopSystem];
+        [_bus perform:^{
+            self->_bus.knobTenths = pluggedIn.boolValue ? @(-600) : nil;
+        }];
+        NSUInteger before = _bus.sentMessages.count;
+        QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.running && snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+        } after:^{
+            [self->_system start];
+        }];
+        double expected = pluggedIn.boolValue ? -60 : -40;
+        XCTAssertEqualObjects(again.volumeDecibels, @(expected), @"%@", pluggedIn);
+        QLMMessage level = QLMCommandVolume(expected, _settings.ceilingDecibels);
+        for (NSData *sent in [self sentWithOpcode:0x1F from:before]) {
+            XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"%@", pluggedIn);
+        }
+        [self stopSystem];
+        [self lapseLeases];
+    }
+}
+
+// The index of the first adapter poll from `start` on that the fake bus
+// answered, when it dropped its first `drops` replies to the adapter.
+- (NSUInteger)firstReadFrom:(NSUInteger)start dropping:(NSUInteger)drops {
+    __block NSUInteger toAdapter = 0;
+    return [self firstSentFrom:start matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        if (bytes[0] != QLMAddressAdapter) {
+            return NO;
+        }
+        toAdapter += 1;
+        return toAdapter > drops && message.length == 2 && bytes[1] == 0x08;
+    }];
+}
+
+// No level goes out until the adapter's status is read. With the start's
+// reads lost, each level that reaches the line sends one more read ahead of
+// it, and is held back while that is lost too. The first read decides the
+// cap, and the level goes out then.
+- (void)testAStartWhoseFirstReadsAreLostHoldsTheLevelUntilOneIsRead {
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-600);
+        self->_bus.adapterDropReplies = 6;
+    }];
+    _settings.knobRead = YES;
+    _settings.knobTenths = @(-300);
+    _system = [[QLMSystem alloc] initWithAdapter:_bus settings:_settings];
+    [_system setVolumeDecibels:-40];
+    [_system start];
+    QLMSnapshot *settled = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle && !snapshot.levelAwaitsKnob;
+    }];
+    XCTAssertEqualObjects(settled.startLoweredFromDecibels, @(-40));
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:0];
+    XCTAssertGreaterThan(levels.count, 0u);
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, QLMAdapterRecord(&knob));
+    }
+    NSUInteger firstRead = [self firstReadFrom:0 dropping:6];
+    NSUInteger firstLevel = [self firstLevelFrom:0];
+    XCTAssertNotEqual(firstRead, NSNotFound);
+    XCTAssertGreaterThan(firstLevel, firstRead);
+}
+
+// A wake after a muting sleep lifts nothing either until the knob is read,
+// however many reads are lost, so the monitors never unmute at a level the
+// knob may not allow.
+- (void)testTheWakesLiftWaitsForTheKnob {
+    [self startWithKnob:@(-300) volume:@(-40)];
+    QLMSystem *system = _system;
+    [self stopMutingAndWait];
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-600);
+        self->_bus.adapterDropReplies = 5;
+    }];
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSnapshot *woken = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && !snapshot.muteAllFromStop && snapshot.idle;
+    } after:^{
+        [system start];
+    }];
+    XCTAssertFalse(woken.mutingAll);
+    NSUInteger firstRead = [self firstReadFrom:before dropping:5];
+    NSUInteger firstUnmute = [self firstSentFrom:before matching:^BOOL(NSData *message) {
+        const uint8_t *bytes = message.bytes;
+        return message.length == 3 && bytes[1] == 0x2B && (bytes[2] == QLMMuteValueUnmuted || bytes[2] == QLMMuteValueAdapterUnmuted);
+    }];
+    NSUInteger firstLevel = [self firstLevelFrom:before];
+    XCTAssertNotEqual(firstRead, NSNotFound);
+    XCTAssertGreaterThan(firstLevel, firstRead);
+    XCTAssertGreaterThan(firstUnmute, firstLevel);
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    for (NSData *level in [self sentWithOpcode:0x1F from:before]) {
+        XCTAssertEqualObjects(level, QLMAdapterRecord(&knob));
+    }
+}
+
+// An unmute of the listener's while the level awaits the knob would play
+// at the take-over's level, which the sleep's mute guarded against. So it
+// is held back too, and goes out after the level once the knob is read,
+// whether it unmutes all or one monitor.
+- (void)testAnUnmuteDuringTheHoldWaitsForTheLevel {
+    for (NSNumber *all in @[@YES, @NO]) {
+        [self startWithKnob:@(-300) volume:@(-40)];
+        QLMSystem *system = _system;
+        [self stopMutingAndWait];
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueMuted];
+        [_bus perform:^{
+            self->_bus.knobTenths = @(-600);
+            self->_bus.adapterDropReplies = 8;
+        }];
+        NSUInteger before = _bus.sentMessages.count;
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.running && snapshot.levelAwaitsKnob && snapshot.monitors.count == 2;
+        } after:^{
+            [system start];
+        }];
+        if (all.boolValue) {
+            [system setAllMuted:NO];
+        } else {
+            [system setMuted:NO forMonitorWithHardwareID:self->_right.hardwareID];
+        }
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return !snapshot.levelAwaitsKnob && snapshot.allIdentified && snapshot.idle;
+        }];
+        [self waitForLeftMute:all.boolValue ? QLMMuteValueUnmuted : QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
+        NSUInteger firstRead = [self firstReadFrom:before dropping:8];
+        NSUInteger firstUnmute = [self firstSentFrom:before matching:^BOOL(NSData *message) {
+            const uint8_t *bytes = message.bytes;
+            BOOL unmuted = bytes[0] == QLMAddressAdapter ? bytes[2] == QLMMuteValueAdapterUnmuted : bytes[2] == QLMMuteValueUnmuted;
+            return message.length == 3 && bytes[1] == 0x2B && unmuted;
+        }];
+        NSUInteger firstLevel = [self firstLevelFrom:before];
+        XCTAssertNotEqual(firstRead, NSNotFound, @"%@", all);
+        XCTAssertNotEqual(firstUnmute, NSNotFound, @"%@", all);
+        XCTAssertGreaterThan(firstLevel, firstRead, @"%@", all);
+        XCTAssertGreaterThan(firstUnmute, firstLevel, @"%@", all);
+        QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+        for (NSData *level in [self sentWithOpcode:0x1F from:before]) {
+            XCTAssertEqualObjects(level, QLMAdapterRecord(&knob), @"%@", all);
+        }
+        [self stopSystem];
+        [self lapseLeases];
+    }
+}
+
+// After a gap in the bus, the adapter played at the knob's level, as at a
+// start (#71). So the leases taken back hear no level until the adapter is
+// read, and a knob turned down during the gap caps it. One left alone
+// leaves the level as it was.
+- (void)testAGapCapsTheLevelAtAKnobTurnedDuringIt {
+    for (NSNumber *turned in @[@NO, @YES]) {
+        [self startWithKnob:@(-300) volume:@(-40)];
+        [_bus perform:^{
+            self->_bus.busyReason = @"GLM is running.";
+        }];
+        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.busProblem == QLMBusProblemGLM && snapshot.levelAwaitsKnob;
+        }];
+        [_bus perform:^{
+            self->_bus.knobTenths = turned.boolValue ? @(-600) : @(-300);
+            self->_bus.busyReason = nil;
+        }];
+        NSUInteger before = _bus.sentMessages.count;
+        QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.busProblem == QLMBusProblemNone && snapshot.monitors.count == 2 && snapshot.allIdentified &&
+                   snapshot.idle && !snapshot.levelAwaitsKnob;
+        }];
+        double expected = turned.boolValue ? -60 : -40;
+        XCTAssertEqualObjects(back.volumeDecibels, @(expected), @"%@", turned);
+        XCTAssertEqualObjects(back.startLoweredFromDecibels, turned.boolValue ? @(-40) : nil, @"%@", turned);
+        NSUInteger firstRead = [self firstReadFrom:before dropping:0];
+        NSUInteger firstLevel = [self firstLevelFrom:before];
+        XCTAssertLessThan(firstRead, firstLevel, @"%@", turned);
+        QLMMessage level = QLMCommandVolume(expected, _settings.ceilingDecibels);
+        for (NSData *sent in [self sentWithOpcode:0x1F from:before]) {
+            XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"%@", turned);
+        }
+        [self stopSystem];
+        [self lapseLeases];
+    }
+}
+
+// A level set once the start runs, as qlmctl sets one after discovery,
+// goes out as set, whatever the knob reads.
+- (void)testALevelSetAfterTheStartGoesOutAsSet {
+    QLMSnapshot *running = [self startWithKnob:@(-600) volume:@(-40)];
+    XCTAssertEqualObjects(running.volumeDecibels, @(-40));
+    XCTAssertNil(running.startLoweredFromDecibels);
+    QLMMessage set = QLMCommandVolume(-40, _settings.ceilingDecibels);
+    XCTAssertGreaterThan([self countSent:QLMAdapterRecord(&set) from:0], 0u);
+}
+
+// A sleep whose take-over would be louder mutes every monitor before it
+// lets go, as a logout does (#70). A mute outlasts the host
+// (captures/qlm-control-first, 648.7 s). The wake's start sends qlm's level
+// first, then lifts that mute all, back to the mutes from before: the one
+// the listener set stays. So it does whether the leases held through the
+// sleep or lapsed. A knob turned down below qlm's level during the sleep
+// caps the level the lift comes back at.
+- (void)testALouderSleepMutesAllAndTheWakeLiftsItAfterTheLevel {
+    for (NSArray<NSNumber *> *row in @[@[@NO, @NO], @[@YES, @NO], @[@NO, @YES]]) {
+        NSNumber *lapses = row[0];
+        BOOL turned = row[1].boolValue;
+        [self startWithKnob:@(-300) volume:@(-40)];
+        [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
+        QLMSystem *system = _system;
+        QLMSnapshot *stopped = [self stopMutingAndWait];
+        XCTAssertEqual(stopped.handBack.kind, QLMHandBackLouder, @"%@", row);
+        XCTAssertTrue(stopped.mutingAll, @"%@", row);
+        XCTAssertTrue(stopped.muteAllFromStop, @"%@", row);
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueMuted];
+        if (lapses.boolValue) {
+            [self lapseLeases];
+        }
+        if (turned) {
+            [_bus perform:^{
+                self->_bus.knobTenths = @(-600);
+            }];
+        }
+
+        NSUInteger before = _bus.sentMessages.count;
+        QLMSnapshot *woken = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.running && !snapshot.muteAllFromStop && snapshot.monitors.count == 2 && snapshot.allIdentified &&
+                   snapshot.idle;
+        } after:^{
+            [system start];
+        }];
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
+        XCTAssertFalse(woken.mutingAll, @"%@", row);
+        XCTAssertEqualObjects(woken.mutedHardwareIDs, [NSSet setWithObject:_left.hardwareID], @"%@", row);
+        XCTAssertEqualObjects(woken.startLoweredFromDecibels, turned ? @(-40) : nil, @"%@", row);
+        uint8_t rightSession = QLMFindMonitor(woken, _right.hardwareID).session;
+        NSUInteger firstLevel = [self firstLevelFrom:before];
+        NSUInteger firstLift = [self firstSentFrom:before matching:^BOOL(NSData *message) {
+            const uint8_t *bytes = message.bytes;
+            BOOL adapterUnmuted = bytes[0] == QLMAddressAdapter && bytes[2] == QLMMuteValueAdapterUnmuted;
+            BOOL rightUnmuted = bytes[0] == rightSession && bytes[2] == QLMMuteValueUnmuted;
+            return message.length == 3 && bytes[1] == 0x2B && (adapterUnmuted || rightUnmuted);
+        }];
+        XCTAssertNotEqual(firstLevel, NSNotFound, @"%@", row);
+        XCTAssertNotEqual(firstLift, NSNotFound, @"%@", row);
+        XCTAssertLessThan(firstLevel, firstLift, @"%@", row);
+        QLMMessage level = QLMCommandVolume(turned ? -60 : -40, _settings.ceilingDecibels);
+        for (NSData *sent in [self sentWithOpcode:0x1F from:before]) {
+            XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"%@", row);
+        }
+        [self stopSystem];
+        [self lapseLeases];
+    }
+}
+
+// A sleep whose take-over is no louder sends the knob's level and mutes
+// nothing. With the knob left alone, the wake sends the level set, as
+// before the sleep. With the knob turned during the sleep, below the level
+// set, the wake sends the knob's.
+- (void)testAQuieterSleepSendsTheKnobsLevelAndTheWakeCapsOnlyATurn {
+    for (NSNumber *turned in @[@NO, @YES]) {
+        [self quieterSleepWithKnobTurned:turned.boolValue];
+        [self stopSystem];
+        [self lapseLeases];
+    }
+}
+
+- (void)quieterSleepWithKnobTurned:(BOOL)turned {
+    [self startWithKnob:@(-600) volume:@(-40)];
+    NSUInteger before = _bus.sentMessages.count;
+    QLMSystem *system = _system;
+    QLMSnapshot *stopped = [self stopMutingAndWait];
+    QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
+    XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
+        return YES;
+    }], @[QLMAdapterRecord(&knob)]);
+    XCTAssertFalse(stopped.mutingAll);
+    XCTAssertFalse(stopped.muteAllFromStop);
+
+    if (turned) {
+        [_bus perform:^{
+            self->_bus.knobTenths = @(-700);
+        }];
+    }
+    before = _bus.sentMessages.count;
+    QLMSnapshot *woken = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+    } after:^{
+        [system start];
+    }];
+    double expected = turned ? -70 : -40;
+    XCTAssertEqualObjects(woken.volumeDecibels, @(expected));
+    XCTAssertEqualObjects(woken.startLoweredFromDecibels, turned ? @(-40) : nil);
+    QLMMessage level = QLMCommandVolume(expected, _settings.ceilingDecibels);
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+    XCTAssertGreaterThan(levels.count, 0u);
+    for (NSData *sent in levels) {
+        XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"turned %d", turned);
+    }
+    for (NSData *mute in [self sentWithOpcode:0x2B from:0]) {
+        XCTAssertNotEqual(((const uint8_t *)mute.bytes)[2], QLMMuteValueMuted, @"%@", mute);
+    }
+}
+
+// Until a level of the wake's goes out, the sleep's mute all holds. A
+// change to the mutes meanwhile is the listener's, so no lift undoes it.
+- (void)testAMuteChangeBeforeTheLiftStands {
+    [self startWithKnob:nil volume:@(-40)];
+    QLMSystem *system = _system;
+    [self stopMutingAndWait];
+    [_bus perform:^{
+        self->_bus.busyReason = @"GLM is running.";
+    }];
+    QLMSnapshot *held = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && snapshot.busProblem == QLMBusProblemGLM && snapshot.idle;
+    } after:^{
+        [system start];
+    }];
+    XCTAssertTrue(held.muteAllFromStop);
+    XCTAssertTrue(held.mutingAll);
+    [_system setMuted:NO forMonitorWithHardwareID:_left.hardwareID];
+    QLMSnapshot *changed = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.muteAllFromStop;
+    }];
+    XCTAssertTrue(changed.mutingAll);
+    XCTAssertEqualObjects(changed.liftedHardwareIDs, [NSSet setWithObject:_left.hardwareID]);
+
+    // GLM lets go, and the level goes out: the listener's change stands.
+    [_bus perform:^{
+        self->_bus.busyReason = nil;
+    }];
+    QLMSnapshot *back = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.busProblem == QLMBusProblemNone && snapshot.monitors.count == 2 && snapshot.allIdentified &&
+               snapshot.idle && !snapshot.levelAwaitsKnob;
+    }];
+    XCTAssertTrue(back.mutingAll);
+    XCTAssertFalse(back.muteAllFromStop);
+    XCTAssertEqualObjects(back.liftedHardwareIDs, [NSSet setWithObject:_left.hardwareID]);
+    XCTAssertEqualObjects(back.mutedHardwareIDs, [NSSet setWithObject:_right.hardwareID]);
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
 }
 
 // A poll that never went out, while another host held the adapter, says

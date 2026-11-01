@@ -18,6 +18,7 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
     QLMSystemErrorNotRunning,          // also given to an apply cut short by stop
     QLMSystemErrorNoVolume,            // no volume is set, so the restore has nothing to send
     QLMSystemErrorSendFailed,          // a frame failed or a monitor did not ack it
+    QLMSystemErrorKnobUnread,          // the level waits for the knob's first reading
 };
 
 @interface QLMSystemSettings : NSObject <NSCopying>
@@ -53,6 +54,12 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // serial, takes back each monitor whose own serial answers, and leases
 // nothing to a session another monitor answers.
 @property (nonatomic, copy) NSArray<QLMKnownLease *> *knownLeases;  // empty
+// The knob's last reading of the last run, as a snapshot's adapter gave
+// it. knobRead is NO when none was read. Then knobTenths is the position in
+// tenths of a dB, or nil with no knob in. A start compares the knob's first
+// reading with it.
+@property (nonatomic) BOOL knobRead;                         // NO
+@property (nonatomic, copy, nullable) NSNumber *knobTenths;  // nil
 // TRAP: AGENTS.md's Safety rule refuses a group apply for any model whose
 // filter design rate is unverified, such as the 8351B. Only qlmctl's
 // supervised test sets this, behind --unverified-rate. The app never does.
@@ -99,6 +106,16 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Never from System's queue.
 - (nullable QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds;
 
+// While no host ran, the adapter ran the monitors at the knob's level. So
+// a volume set before the start, or kept from the last run, waits for the
+// knob's first reading, and no level goes out meanwhile. When the knob
+// moved since the last reading of the last run, or the settings', by GLM's
+// rule (QLMKnobMoved), or went in, that turn is the listener's last choice.
+// Then the volume falls to the knob's, when that is lower, and the
+// snapshot's startLoweredFromDecibels says so. With the knob unmoved, no
+// last reading, or no knob in now, the volume goes out as set. So does one
+// set after the start. The same holds after a gap in the bus, from the
+// last reading before it.
 - (QLMCallNumber)start;
 // Before it lets go, sends the knob's level when the knob is at or below the
 // level System sends, so the adapter's take-over changes nothing. The
@@ -113,7 +130,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // outlasts the host, so the take-over can't make the monitors louder. A
 // snapshot that still runs carries mute all in the record before the stop
 // ends, so a keeper of the record, as the app is, starts the next System
-// muted.
+// muted. This System's own next start lifts that mute all once its level
+// is out, back to the record before the stop, as the Mac's wake needs. A
+// change to the mutes before then keeps the user's.
 - (QLMCallNumber)stopMutingIfLouderWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every

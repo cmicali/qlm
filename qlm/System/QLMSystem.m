@@ -64,6 +64,8 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.mutingAll = self.mutingAll;
     copy.liftedHardwareIDs = self.liftedHardwareIDs;
     copy.knownLeases = self.knownLeases;
+    copy.knobRead = self.knobRead;
+    copy.knobTenths = self.knobTenths;
     copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
     copy.clock = self.clock;
     return copy;
@@ -137,6 +139,16 @@ static const NSTimeInterval QLMReconnectLongestWait = 30;
 @implementation QLMTrackedAdapter
 @end
 
+// The mute record as a muting stop found it.
+@interface QLMMuteRecord : NSObject
+@property (nonatomic, copy) NSSet<NSData *> *mutedIDs;
+@property (nonatomic, copy) NSSet<NSData *> *liftedIDs;
+@property (nonatomic) BOOL mutingAll;
+@end
+
+@implementation QLMMuteRecord
+@end
+
 static BOOL QLMIsVolumeFrame(const QLMMessage *message) {
     return message->length == 4 && message->payload[0] == 0x1F;
 }
@@ -156,10 +168,28 @@ static BOOL QLMIsMonitorState(const QLMMessage *message) {
     return QLMAddressIsLeasable(message->address) && message->length == 2 && message->payload[0] == 0x2B;
 }
 
+// A frame that may make the monitors louder: a level, but the duck, or a
+// 2B that unmutes a monitor or the adapter.
+static BOOL QLMMayRaiseLevel(const QLMMessage *message) {
+    if (QLMIsVolumeFrame(message)) {
+        return QLMVolumeWordOf(message) != QLMVolumeWordDuck;
+    }
+    if (message->length != 2 || message->payload[0] != 0x2B) {
+        return NO;
+    }
+    uint8_t unmuted = message->address == QLMAddressAdapter ? QLMMuteValueAdapterUnmuted : QLMMuteValueUnmuted;
+    return message->payload[1] == unmuted;
+}
+
 // A frame to a session, or the lease of one.
 static BOOL QLMNamesSession(const QLMMessage *message) {
     return QLMAddressIsLeasable(message->address) ||
            (message->address == QLMAddressMulticast && message->length > 0 && message->payload[0] == 0x02);
+}
+
+// The knob's position, or nil with no knob in.
+static NSNumber *_Nullable QLMKnobTenthsOf(const QLMAdapterStatus *status) {
+    return status->knob && status->hasKnobPosition ? @(status->knobTenths) : nil;
 }
 
 static BOOL QLMAdapterStatusDiffers(const QLMAdapterStatus *a, const QLMAdapterStatus *b) {
@@ -270,6 +300,16 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSUInteger _adapterPollsQueued;
     QLMKnob *_knob;
     NSNumber *_volumeDecibels;
+    // No level goes out until the knob is read: at a start with a volume
+    // set, and after a gap in the bus. See capLevelAtKnob:.
+    BOOL _levelAwaitsKnob;
+    BOOL _levelHeld;  // a level frame was held back meanwhile
+    BOOL _muteHeld;   // and an unmute
+    NSNumber *_startLoweredFrom;  // see QLMSnapshot
+    // The knob's last reading, kept across a stop: whether one was read,
+    // and its tenths, nil with no knob in.
+    BOOL _knobRead;
+    NSNumber *_lastKnobTenths;
     BOOL _volumeSendPending;
     NSTimeInterval _lastVolumeSend;  // on the clock; -INFINITY before the first
     BOOL _dimmed;
@@ -285,6 +325,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // one that appears later included.
     BOOL _mutingAll;
     NSMutableSet<NSData *> *_liftedIDs;
+    // The record before a muting stop, while its mute all holds. This
+    // System's next start goes back to it. Never in the snapshot's record,
+    // so a new System started from that record stays muted.
+    QLMMuteRecord *_beforeStopMute;
     NSString *_activeGroupName;
     // Set when an apply starts, since GLM's routing pass already treats the
     // new group's members as such; _activeGroupName waits for it to finish.
@@ -336,6 +380,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_liftedIDs minusSet:settings.mutedHardwareIDs];
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
+        _knobRead = settings.knobRead;
+        _lastKnobTenths = settings.knobTenths;
         _snapshot = [[QLMSnapshot alloc] init];
     }
     return self;
@@ -403,6 +449,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)beginRunning {
     _running = YES;
     _stoppedHandBack = nil;
+    _startLoweredFrom = nil;
+    _levelAwaitsKnob = _volumeDecibels != nil;
     _nextSession = QLMAddressSessionFirst;
     _quietProbeAt = NAN;
     [_adapter startOnQueue:_queue clock:_clock];
@@ -471,6 +519,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (knobLevel) {
             [self send:[self knobOrBottomLevel] then:nil];
         } else {
+            // A second muting stop before the lift keeps the first's record.
+            if (self->_beforeStopMute == nil) {
+                QLMMuteRecord *before = [[QLMMuteRecord alloc] init];
+                before.mutedIDs = self->_mutedIDs;
+                before.liftedIDs = self->_liftedIDs;
+                before.mutingAll = self->_mutingAll;
+                self->_beforeStopMute = before;
+            }
             [self muteAll:YES];
             // A record keeper takes only a running System's record, so this
             // one carries mute all before the stop ends.
@@ -494,6 +550,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)finishStop {
     _running = NO;
     _stopping = NO;
+    _levelAwaitsKnob = NO;
+    _levelHeld = NO;
+    _muteHeld = NO;
     _run += 1;
     [_sends removeAllObjects];
     // A reply that never comes must not stall the next start.
@@ -592,6 +651,23 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         // then, nor after, if it was queued before System checked the
         // leases again. It fails as a refusal would, with _adapterError as
         // old as when System noted it.
+        // TRAP: while the level awaits the knob, nothing that may make the
+        // monitors louder goes out: no level, nor an unmute, which would
+        // play at the take-over's level. Each is held back, a 2B as one not
+        // gone out, and the level, then the mute state, go out once the knob
+        // is read. A stop's own frames go out as ever.
+        if (strongSelf->_levelAwaitsKnob && !strongSelf->_stopping && QLMMayRaiseLevel(&sent)) {
+            if (QLMIsVolumeFrame(&sent)) {
+                strongSelf->_levelHeld = YES;
+            } else {
+                strongSelf->_muteHeld = YES;
+            }
+            NSError *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, @"The frame waits for the knob's first reading.", nil);
+            [strongSelf->_clock async:strongSelf->_queue run:^{
+                handler(NULL, error);
+            }];
+            return;
+        }
         if (QLMNamesSession(&sent) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
             reopens = strongSelf->_adapterErrorReopens;
             NSError *error = strongSelf->_adapterError
@@ -704,6 +780,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _adapterError = error;
         _adapterErrorReopens = _reopens;
         _dirty = YES;
+        // After about 2.6 s, the adapter takes over at the knob's level.
+        // So the next level waits for the knob, as at a start.
+        _levelAwaitsKnob = _levelAwaitsKnob || _volumeDecibels != nil;
     } else if (error == nil && _adapterError != nil) {
         _adapterError = nil;
         _dirty = YES;
@@ -866,7 +945,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [self probe];
     }
     if (_volumeDecibels != nil) {
-        [self sendVolume];
+        // A muting stop's mute all lifts once a level of this start's has
+        // gone out, after the leases taken back got theirs.
+        [self enqueue:[self volumeItemThen:_beforeStopMute == nil ? nil : ^(const QLMMessage *reply, NSError *error) {
+                  if (QLMSendWentOut(error)) {
+                      [self liftStopMute];
+                  }
+              }]];
     }
     if (self.settings.discoversMonitors) {
         for (QLMMonitorRecord *monitor in [_monitors copy]) {
@@ -1188,27 +1273,63 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (!_running || _adapterPollsQueued > 0) {
         return;
     }
-    QLMTrackedAdapter *adapter = _adapterRecord;
     for (NSUInteger i = 0; i < self.settings.adapterPollsPerRound; i++) {
-        _adapterPollsQueued += 1;
-        [self send:QLMCommandPoll(QLMAddressAdapter) then:^(const QLMMessage *reply, NSError *error) {
-            self->_adapterPollsQueued -= 1;
-            QLMAdapterStatus status;
-            if (reply == NULL || QLMReplyAdapterStatus(reply, &status) != QLMAdapterStatusOK) {
-                adapter.missedPolls += QLMSendWentOut(error) ? 1 : 0;
-                self->_dirty = YES;
-                return;
-            }
-            QLMAdapterStatus last = adapter.status;
-            if (!adapter.hasStatus || adapter.missedPolls > 0 || QLMAdapterStatusDiffers(&last, &status)) {
-                self->_dirty = YES;
-            }
-            adapter.status = status;
-            adapter.hasStatus = YES;
-            adapter.missedPolls = 0;
-            adapter.lastReply = [NSDate date];
-            [self followKnob:&status];
-        }];
+        [self enqueue:[self adapterPollItem]];
+    }
+}
+
+- (dispatch_block_t)adapterPollItem {
+    _adapterPollsQueued += 1;
+    QLMTrackedAdapter *adapter = _adapterRecord;
+    return [self itemSending:QLMCommandPoll(QLMAddressAdapter) then:^(const QLMMessage *reply, NSError *error) {
+        self->_adapterPollsQueued -= 1;
+        QLMAdapterStatus status;
+        if (reply == NULL || QLMReplyAdapterStatus(reply, &status) != QLMAdapterStatusOK) {
+            adapter.missedPolls += QLMSendWentOut(error) ? 1 : 0;
+            self->_dirty = YES;
+            return;
+        }
+        QLMAdapterStatus last = adapter.status;
+        if (!adapter.hasStatus || adapter.missedPolls > 0 || QLMAdapterStatusDiffers(&last, &status)) {
+            self->_dirty = YES;
+        }
+        adapter.status = status;
+        adapter.hasStatus = YES;
+        adapter.missedPolls = 0;
+        adapter.lastReply = [NSDate date];
+        if (self->_levelAwaitsKnob) {
+            [self capLevelAtKnob:&status];
+        }
+        self->_knobRead = YES;
+        self->_lastKnobTenths = QLMKnobTenthsOf(&status);
+        [self followKnob:&status];
+    }];
+}
+
+// TRAP: the take-over ran at the knob's level (docs/protocol.md: The
+// hand-back), so a turn meanwhile is the listener's last choice. As
+// followKnob: does, the knob sets the undimmed volume. What was held back
+// goes out now, the level first.
+- (void)capLevelAtKnob:(const QLMAdapterStatus *)status {
+    _levelAwaitsKnob = NO;
+    NSNumber *now = QLMKnobTenthsOf(status);
+    NSNumber *last = _lastKnobTenths;
+    BOOL moved = _knobRead && now != nil && (last == nil || QLMKnobMoved(last.integerValue, now.integerValue));
+    double knob = now != nil ? QLMKnobStep(now.integerValue) : 0;
+    QLMMessage set = QLMCommandVolume(_volumeDecibels.doubleValue, self.settings.ceilingDecibels);
+    if (moved && QLMVolumeWordForDecibels(knob) < QLMVolumeWordOf(&set)) {
+        _startLoweredFrom = _volumeDecibels;
+        _volumeDecibels = @(knob);
+        _dirty = YES;
+    }
+    // Ahead of everything queued, so no 2B a poll brings precedes it.
+    if (_levelHeld || _muteHeld) {
+        _levelHeld = NO;
+        [self enqueueNext:@[[self volumeItem]]];
+    }
+    if (_muteHeld) {
+        _muteHeld = NO;
+        [self sendMuteState];
     }
 }
 
@@ -1341,7 +1462,15 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (QLMCallNumber)setVolumeDecibels:(double)decibels {
     return [self call:^{
         [self->_knob forgetFollows];
+        self->_levelAwaitsKnob = NO;
+        self->_levelHeld = NO;
         self->_volumeDecibels = [self underCeiling:decibels];
+        // The user's level stands, so an unmute held back goes out after it.
+        if (self->_muteHeld) {
+            self->_muteHeld = NO;
+            [self sendMuteAllState];
+            return;
+        }
         [self scheduleVolumeSend];
     }];
 }
@@ -1397,8 +1526,35 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 }
 
 - (dispatch_block_t)volumeItem {
+    return [self volumeItemThen:nil];
+}
+
+// TRAP: the level may change while a frame waits in line, and fall to the
+// knob's once the knob is read. So the frame says the level as it goes
+// out. While the level awaits the knob, one adapter poll goes ahead of it,
+// and itemSending: holds it back if that is lost too.
+- (dispatch_block_t)volumeItemThen:(nullable QLMSendCompletion)completion {
     _lastVolumeSend = _clock.now;
-    return [self itemSending:[self volumeMessage] then:nil];
+    __weak QLMSystem *weakSelf = self;
+    dispatch_block_t send = ^{
+        QLMSystem *system = weakSelf;
+        if (system == nil) {
+            return;
+        }
+        if (system->_levelAwaitsKnob) {
+            dispatch_block_t again = ^{
+                QLMSystem *later = weakSelf;
+                if (later != nil) {
+                    [later itemSending:[later volumeMessage] then:completion]();
+                }
+            };
+            [system enqueueNext:@[[system adapterPollItem], again]];
+            [system finishItem:nil];
+            return;
+        }
+        [system itemSending:[system volumeMessage] then:completion]();
+    };
+    return send;
 }
 
 - (void)sendVolume {
@@ -1416,7 +1572,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (nullable NSNumber *)knobDecibels {
     QLMTrackedAdapter *adapter = _adapterRecord;
     QLMAdapterStatus status = adapter.status;
-    return adapter.hasStatus && status.knob && status.hasKnobPosition ? @(status.knobTenths / 10.0) : nil;
+    NSNumber *tenths = adapter.hasStatus ? QLMKnobTenthsOf(&status) : nil;
+    return tenths != nil ? @(tenths.doubleValue / 10) : nil;
 }
 
 - (void)sendInputPair {
@@ -1452,6 +1609,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (!self->_running) {
             return;
         }
+        self->_beforeStopMute = nil;
         BOOL adapterMuted = [self adapterMuted];
         if (muted) {
             [self->_mutedIDs addObject:identity];
@@ -1483,12 +1641,21 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return [self call:^{
         [self->_mutedIDs unionSet:copied];
         [self->_liftedIDs minusSet:copied];
+        // They stay muted once a muting stop's mute all lifts.
+        QLMMuteRecord *before = self->_beforeStopMute;
+        if (before != nil) {
+            before.mutedIDs = [before.mutedIDs setByAddingObjectsFromSet:copied];
+            NSMutableSet<NSData *> *lifted = [before.liftedIDs mutableCopy];
+            [lifted minusSet:copied];
+            before.liftedIDs = lifted;
+        }
     }];
 }
 
 - (QLMCallNumber)setAllMuted:(BOOL)muted {
     return [self call:^{
         if (self->_running) {
+            self->_beforeStopMute = nil;
             [self muteAll:muted];
         }
     }];
@@ -1516,6 +1683,30 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // lifted, as a relaunch from the record restores it.
 - (BOOL)adapterMuted {
     return _mutingAll && _liftedIDs.count == 0;
+}
+
+// Back to the record before a muting stop, as GLM's unmute all goes: the
+// level, then the mute state. Mute all holds again for every monitor
+// leased since, unless the user lifted it.
+- (void)liftStopMute {
+    QLMMuteRecord *before = _beforeStopMute;
+    if (before == nil || _stopping) {
+        return;
+    }
+    _beforeStopMute = nil;
+    [_unstatedIDs unionSet:_mutedIDs];
+    _mutedIDs = [before.mutedIDs mutableCopy];
+    _liftedIDs = [before.liftedIDs mutableCopy];
+    _mutingAll = before.mutingAll;
+    for (QLMMonitorRecord *monitor in _monitors) {
+        if (_mutingAll && ![_liftedIDs containsObject:monitor.hardwareID]) {
+            [_mutedIDs addObject:monitor.hardwareID];
+        }
+        monitor.needsState = monitor.needsState || !monitor.isOn;
+        [_unstatedIDs addObject:monitor.hardwareID];
+    }
+    _dirty = YES;
+    [self sendMuteAllState];
 }
 
 // GLM's mute all and unmute all: the level, then the mute state
@@ -1726,6 +1917,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         *error = QLMSystemErrorMake(QLMSystemErrorNoVolume, @"Set a volume before a group apply.", nil);
         return nil;
     }
+    // The switch's restore is a level.
+    if (_levelAwaitsKnob) {
+        *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, @"The level waits for the knob's first reading.", nil);
+        return nil;
+    }
     return blocks;
 }
 
@@ -1815,7 +2011,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         state.micPresent = status.mic;
         state.micDE = status.mic && status.hasMicDE ? @(status.micDE) : nil;
         state.micDD = status.mic && status.hasMicDD ? @(status.micDD) : nil;
-        state.knobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
+        state.knobTenths = QLMKnobTenthsOf(&status);
     }
     state.missedPolls = adapter.missedPolls;
     state.lastReply = adapter.lastReply;
@@ -1909,6 +2105,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.mutedHardwareIDs = [_mutedIDs copy];
     snapshot.mutingAll = _mutingAll;
     snapshot.liftedHardwareIDs = [_liftedIDs copy];
+    snapshot.muteAllFromStop = _beforeStopMute != nil;
+    snapshot.startLoweredFromDecibels = _startLoweredFrom;
+    snapshot.levelAwaitsKnob = _levelAwaitsKnob;
     snapshot.knownLeases = [_knownLeases.allValues sortedArrayUsingComparator:^NSComparisonResult(QLMKnownLease *a, QLMKnownLease *b) {
         if (a.session != b.session) {
             return a.session < b.session ? NSOrderedAscending : NSOrderedDescending;

@@ -44,7 +44,7 @@ The menu bar app runs on a fake bus until you turn on "Drive the real monitors t
 The app is new to the real adapter, so turn the setting on at a low level, one monitor first:
 
 1. In Settings, set the ceiling to −40 dB or lower. The field saves when you leave it, and when Settings closes. It refuses a level above 0 dB, so type the minus sign. The default is −30 dB. No volume goes out above the ceiling.
-2. Turn the knob all the way down. The ceiling doesn't reach the knob, and when qlm quits or the Mac sleeps, the adapter takes over at the knob's level.
+2. Turn the knob all the way down. The ceiling doesn't reach the knob, and when qlm quits or the Mac sleeps, the adapter takes over at the knob's level. Where that would be louder, a quit asks first, and a sleep mutes every monitor until the wake has sent qlm's level. A crash or a force quit can't do either. At launch and at wake, qlm starts at its own level, unless you turned the knob since it last ran. Then it starts no louder than the knob. A knob left alone brings back qlm's level, which may be louder than the knob's level you heard meanwhile.
 3. In GLM, put every monitor but one in standby. Then quit GLM, since qlm drives nothing while GLM runs. Leave "Wake the monitors" off.
 4. Turn the setting on.
 

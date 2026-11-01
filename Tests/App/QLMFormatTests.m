@@ -83,6 +83,43 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertEqual(QLMQuitStepFor(QLMStopMayRaiseLevel(knobLevel), 0), QLMQuitStepStop);
 }
 
+// A sleep mutes where the take-over may be louder, as a logout does, and
+// alerts only where the mute can't go out: while the adapter stopped
+// answering or taking reports.
+- (void)testASleepMutesWhereItCanAndAlertsWhereItCant {
+    QLMSnapshot *louder = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
+    XCTAssertTrue(QLMStopMayRaiseLevel(louder));
+    XCTAssertTrue(QLMStopCanMute(louder));
+    for (NSNumber *problem in @[@(QLMAdapterProblemUnresponsive), @(QLMAdapterProblemLostTrack), @(QLMAdapterProblemNotTaking)]) {
+        QLMSnapshot *stuck = QLMSnapshotWithProblem(problem.integerValue, QLMHandBackLouder, @(-10), @(-50));
+        XCTAssertTrue(QLMStopMayRaiseLevel(stuck), @"%@", problem);
+        XCTAssertFalse(QLMStopCanMute(stuck), @"%@", problem);
+    }
+    XCTAssertFalse(QLMStopCanMute(nil));
+}
+
+// The sleep's log line says what the stop did, from System's stopped
+// snapshot.
+- (void)testTheStopTextSaysWhatTheStopDid {
+    QLMSnapshot *stopped = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
+    stopped.running = NO;
+    stopped.mutingAll = YES;
+    stopped.muteAllFromStop = YES;
+    XCTAssertEqualObjects(QLMStopText(stopped),
+                          @"qlm muted every monitor before it let go. Its next start lifts the mute once its level is out.");
+    stopped = QLMSnapshotWith(QLMHandBackKnobLevel, @(-60), @(-50));
+    stopped.running = NO;
+    XCTAssertEqualObjects(QLMStopText(stopped), @"qlm sent the knob's level before it let go, so the take-over changes nothing.");
+    // A mute all left from an earlier stop does not make this one a mute.
+    stopped.mutingAll = YES;
+    stopped.muteAllFromStop = YES;
+    XCTAssertEqualObjects(QLMStopText(stopped), @"qlm sent the knob's level before it let go, so the take-over changes nothing.");
+    stopped = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
+    stopped.running = NO;
+    XCTAssertEqualObjects(QLMStopText(stopped), @"qlm let go with nothing more sent.");
+    XCTAssertEqualObjects(QLMStopText(QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50))), @"qlm had not let go of the adapter in time.");
+}
+
 // The knob is read before the level, as in qlmctl's note.
 - (void)testTheTakeOverTextSaysWhy {
     XCTAssertEqualObjects(QLMTakeOverText(QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50))),

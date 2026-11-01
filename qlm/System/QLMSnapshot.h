@@ -159,6 +159,14 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly) NSUInteger reconnects;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed, at most the ceiling
+// The level set before this start or gap, when the knob had moved since
+// its last reading, and System lowered the level to the knob's. Nil when it
+// lowered nothing. Kept until the next start.
+@property (nonatomic, readonly, nullable) NSNumber *startLoweredFromDecibels;
+// No level goes out until the adapter's status is read: at a start with a
+// volume set, and after a gap in the bus. Meanwhile the monitors keep what
+// they last heard, or the take-over's level.
+@property (nonatomic, readonly) BOOL levelAwaitsKnob;
 @property (nonatomic, readonly) double ceilingDecibels;            // every volume frame is capped at it
 @property (nonatomic, readonly) BOOL dimmed;
 @property (nonatomic, readonly) BOOL applying;
@@ -182,6 +190,11 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly) NSSet<NSData *> *mutedHardwareIDs;
 @property (nonatomic, readonly) BOOL mutingAll;
 @property (nonatomic, readonly) NSSet<NSData *> *liftedHardwareIDs;
+// Mute all is a muting stop's. This System's next start lifts it, back to
+// the record before the stop, once the first cycle's level has gone out,
+// after the knob's read. Not part of the record: a new System started from
+// it stays muted.
+@property (nonatomic, readonly) BOOL muteAllFromStop;
 // The session each monitor System identified last held, in session order,
 // kept across a stop. Give them back through QLMSystemSettings, so a new
 // System checks them before it leases anything.

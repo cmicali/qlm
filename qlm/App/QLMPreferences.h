@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 
+@class QLMFakeBus;
 @class QLMKnownLease;
 @class QLMSnapshot;
 @class QLMSystemSettings;
@@ -28,9 +29,18 @@ extern const double QLMVolumeRangeMinimumSpan;
 // The session each monitor last held, which the next System checks before
 // it leases anything.
 @property (nonatomic, copy) NSArray<QLMKnownLease *> *knownLeases;
+// The knob's last reading: whether one was read, and then its tenths of a
+// dB, or nil with no knob in. The next start compares the knob with it. A
+// reading kept wrong reads as no knob, so the next start can only cap.
+@property (nonatomic, readonly) BOOL knobRead;
+@property (nonatomic, readonly, nullable) NSNumber *knobTenths;
+- (void)keepKnobTenths:(nullable NSNumber *)knobTenths;
+// Puts a fresh fake bus's knob where the last one read, so a relaunch on
+// the fake bus finds it unmoved.
+- (void)restoreKnobOn:(QLMFakeBus *)bus;
 
-// Keeps what changed in the snapshot. The record and the leases come only
-// from a running System's.
+// Keeps what changed in the snapshot. The record, the leases, and the knob
+// come only from a running System's.
 - (void)keepFromSnapshot:(QLMSnapshot *)snapshot;
 
 // Sets the mute record and the leases System starts from.
