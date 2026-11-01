@@ -168,6 +168,19 @@ static BOOL QLMIsMonitorState(const QLMMessage *message) {
     return QLMAddressIsLeasable(message->address) && message->length == 2 && message->payload[0] == 0x2B;
 }
 
+// A frame that may make the monitors louder: a level, but the duck, or a
+// 2B that unmutes a monitor or the adapter.
+static BOOL QLMMayRaiseLevel(const QLMMessage *message) {
+    if (QLMIsVolumeFrame(message)) {
+        return QLMVolumeWordOf(message) != QLMVolumeWordDuck;
+    }
+    if (message->length != 2 || message->payload[0] != 0x2B) {
+        return NO;
+    }
+    uint8_t unmuted = message->address == QLMAddressAdapter ? QLMMuteValueAdapterUnmuted : QLMMuteValueUnmuted;
+    return message->payload[1] == unmuted;
+}
+
 // A frame to a session, or the lease of one.
 static BOOL QLMNamesSession(const QLMMessage *message) {
     return QLMAddressIsLeasable(message->address) ||
@@ -286,6 +299,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // set, and after a gap in the bus. See capLevelAtKnob:.
     BOOL _levelAwaitsKnob;
     BOOL _levelHeld;  // a level frame was held back meanwhile
+    BOOL _muteHeld;   // and an unmute
     NSNumber *_startLoweredFrom;  // see QLMSnapshot
     // The knob's last reading, kept across a stop: whether one was read,
     // and its tenths, nil with no knob in.
@@ -433,6 +447,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _startLoweredFrom = nil;
     _levelAwaitsKnob = _volumeDecibels != nil;
     _levelHeld = NO;
+    _muteHeld = NO;
     _nextSession = QLMAddressSessionFirst;
     _quietProbeAt = NAN;
     [_adapter startOnQueue:_queue clock:_clock];
@@ -534,6 +549,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _stopping = NO;
     _levelAwaitsKnob = NO;
     _levelHeld = NO;
+    _muteHeld = NO;
     _run += 1;
     [_sends removeAllObjects];
     // A reply that never comes must not stall the next start.
@@ -632,6 +648,23 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         // then, nor after, if it was queued before System checked the
         // leases again. It fails as a refusal would, with _adapterError as
         // old as when System noted it.
+        // TRAP: while the level awaits the knob, nothing that may make the
+        // monitors louder goes out: no level, nor an unmute, which would
+        // play at the take-over's level. Each is held back, a 2B as one not
+        // gone out, and the level, then the mute state, go out once the knob
+        // is read. A stop's own frames go out as ever.
+        if (strongSelf->_levelAwaitsKnob && !strongSelf->_stopping && QLMMayRaiseLevel(&sent)) {
+            if (QLMIsVolumeFrame(&sent)) {
+                strongSelf->_levelHeld = YES;
+            } else {
+                strongSelf->_muteHeld = YES;
+            }
+            NSError *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, @"The frame waits for the knob's first reading.", nil);
+            [strongSelf->_clock async:strongSelf->_queue run:^{
+                handler(NULL, error);
+            }];
+            return;
+        }
         if (QLMNamesSession(&sent) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
             reopens = strongSelf->_adapterErrorReopens;
             NSError *error = strongSelf->_adapterError
@@ -1290,9 +1323,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _volumeDecibels = @(knob);
         _dirty = YES;
     }
-    if (_levelHeld) {
+    // Ahead of everything queued, so no 2B a poll brings precedes it.
+    if (_levelHeld || _muteHeld) {
         _levelHeld = NO;
-        [self scheduleVolumeSend];
+        [self enqueueNext:@[[self volumeItem]]];
+    }
+    if (_muteHeld) {
+        _muteHeld = NO;
+        [self sendMuteState];
     }
 }
 
@@ -1428,6 +1466,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_levelAwaitsKnob = NO;
         self->_levelHeld = NO;
         self->_volumeDecibels = [self underCeiling:decibels];
+        // The user's level stands, so an unmute held back goes out after it.
+        if (self->_muteHeld && self->_running) {
+            self->_muteHeld = NO;
+            [self sendMuteAllState];
+            return;
+        }
         [self scheduleVolumeSend];
     }];
 }
@@ -1486,27 +1530,18 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return [self volumeItemThen:nil];
 }
 
-// TRAP: while the level awaits the knob, it may yet fall to the knob's. So
-// a frame that reaches the head of the line then sends one adapter poll
-// ahead of it, and goes out after that only if the knob was read, at the
-// level then. Otherwise it is held back, and a level goes out once the knob
-// is read. A frame queued while the level waited says it as it goes out.
+// TRAP: the level may change while a frame waits in line, and fall to the
+// knob's once the knob is read. So the frame says the level as it goes
+// out. While the level awaits the knob, one adapter poll goes ahead of it,
+// and itemSending: holds it back if that is lost too.
 - (dispatch_block_t)volumeItemThen:(nullable QLMSendCompletion)completion {
     _lastVolumeSend = _clock.now;
-    BOOL built = !_levelAwaitsKnob;
-    QLMMessage message = [self volumeMessage];
     __weak QLMSystem *weakSelf = self;
-    dispatch_block_t afterPoll = ^{
+    dispatch_block_t send = ^{
         QLMSystem *system = weakSelf;
-        if (system == nil) {
-            return;
+        if (system != nil) {
+            [system itemSending:[system volumeMessage] then:completion]();
         }
-        if (system->_levelAwaitsKnob) {
-            system->_levelHeld = YES;
-            [system finishItem:nil];
-            return;
-        }
-        [system itemSending:[system volumeMessage] then:completion]();
     };
     return ^{
         QLMSystem *system = weakSelf;
@@ -1514,10 +1549,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             return;
         }
         if (!system->_levelAwaitsKnob) {
-            [system itemSending:built ? message : [system volumeMessage] then:completion]();
+            send();
             return;
         }
-        [system enqueueNext:@[[system adapterPollItem], afterPoll]];
+        [system enqueueNext:@[[system adapterPollItem], send]];
         [system finishItem:nil];
     };
 }
