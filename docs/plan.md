@@ -19,7 +19,7 @@ Main passes 470 tests. Every protocol fact in them names its source: a capture i
 | `qlmctl mute` | One monitor, before #27's fixes | `qlm-control-first` |
 | The app | All six monitors, once, driven by hand under a −35 dB ceiling. It ran volume, the knob, mute, mute all, dim, standby, and wake, across four launches. | `qlm-app-first`, #43 |
 | The hand-back at a stop | All six, through the app, both ways. Both of `qlmctl`'s control runs were built before #32, so `qlmctl` hasn't run it. | `qlm-app-first` |
-| The fixes since the app's run: System's, GLMAdapter's, and the app's | The fake bus | #49, #52, #53, #71, #PRNUM |
+| The fixes since the app's run: System's, GLMAdapter's, and the app's | The fake bus | #49, #52, #53, #71, #74 |
 | The debug channel | The fake bus | #50, #51 |
 | The group apply | Its dry run, and the fake bus. `qlmctl apply-group` can send it over USB behind `--unverified-rate`, but it hasn't. | #32 |
 | Phase 3's measurement | Not yet. It's an optional final check now. | [measurement.md](measurement.md) |
@@ -41,7 +41,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - has the fixes from a safety review and a fuzz (#49). It caps every volume frame at the ceiling as it goes out. After a gap, it trusts none of its old sessions until each one's own serial answers. It also starts from the leases it's given, states a mute whose `2B` never went out, holds a lift of one mute under mute all, and drops a reply from before a stop.
   - holds its volume at or under the ceiling, so a turn of the knob above it sends nothing, and gives a snapshot of itself now, for a stop's warning (#52);
   - says when a wake went out with no group active, so the woken monitors play without their group's settings (#53).
-  - says the same when a monitor is switched on while it runs with no group active. A lease that follows a probe no monitor answered reads the monitor's wake count. A wake no more than 2 s before that probe means it was switched on. In every capture, a woken monitor's count put its wake 0.18 to 1.99 s after the probe, and the rest 327 s or more before it. A monitor found at a start, or after GLM held the adapter, doesn't count (#PRNUM).
+  - says the same when a monitor is switched on while it runs with no group active. A lease that follows a probe no monitor answered reads the monitor's wake count. A wake no more than 2 s before that probe means it was switched on. In every capture, a woken monitor's count put its wake 0.18 to 1.99 s after the probe, and the rest 327 s or more before it. A monitor found at a start, or after GLM held the adapter, doesn't count (#74).
   - numbers each call to a command, and stamps each snapshot with the last call that ran on its queue before it. So a wait in `qlmctl` takes only a snapshot from after its own action, whatever else publishes meanwhile (#60).
   - counts a volume held by its 50 ms coalescing as work in flight. So a stamped call's frames are out or queued, and once a snapshot is idle, none is left to go out (#66).
   - has a stop for when no one can answer. Where the take-over would be louder, or is unknown, it sends mute all before it lets go. It publishes the record with mute all while it still runs, so the app keeps it (#70).
