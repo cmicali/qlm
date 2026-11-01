@@ -23,6 +23,7 @@ static NSString *const QLMMutedName = @"MutedHardwareIDs";
 static NSString *const QLMMutingAllName = @"MutingAll";
 static NSString *const QLMLiftedName = @"LiftedHardwareIDs";
 static NSString *const QLMLeasesName = @"KnownLeases";
+static NSString *const QLMKnobName = @"KnobTenths";
 static NSString *const QLMLeaseHardwareIDKey = @"hardwareID";
 static NSString *const QLMLeaseSerialKey = @"serialNumber";
 static NSString *const QLMLeaseSessionKey = @"session";
@@ -159,6 +160,18 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     [_defaults setObject:QLMLeasesPlist(knownLeases) forKey:[self key:QLMLeasesName]];
 }
 
+// Anything but a whole number of tenths, at or under 0 dB, reads as no
+// reading. One that reads wrong can only cap the next start, never raise it.
+- (NSNumber *)knobTenths {
+    id kept = [_defaults objectForKey:[self key:QLMKnobName]];
+    double tenths = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
+    return tenths == floor(tenths) && tenths <= 0 && tenths > INT32_MIN ? @((NSInteger)tenths) : nil;
+}
+
+- (void)setKnobTenths:(NSNumber *)knobTenths {
+    [_defaults setObject:knobTenths forKey:[self key:QLMKnobName]];
+}
+
 // TRAP: a snapshot from before System starts carries an empty record, not
 // the one System starts from. Each is compared with the one kept, so an
 // unchanged one writes nothing.
@@ -183,6 +196,10 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     if (![QLMLeasesPlist(snapshot.knownLeases) isEqualToArray:[_defaults arrayForKey:[self key:QLMLeasesName]] ?: @[]]) {
         self.knownLeases = snapshot.knownLeases;
     }
+    NSNumber *knob = snapshot.adapter.knobTenths;
+    if (snapshot.adapter.hasStatus && ![(knob ?: NSNull.null) isEqual:(self.knobTenths ?: NSNull.null)]) {
+        self.knobTenths = knob;
+    }
 }
 
 - (void)fillSettings:(QLMSystemSettings *)settings {
@@ -190,6 +207,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     settings.mutingAll = self.mutingAll;
     settings.liftedHardwareIDs = self.liftedHardwareIDs;
     settings.knownLeases = self.knownLeases;
+    settings.knobTenths = self.knobTenths;
 }
 
 @end

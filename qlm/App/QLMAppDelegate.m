@@ -197,7 +197,7 @@ static OSType QLMQuitReason(void) {
     } queue:dispatch_get_main_queue()];
     // On a stopped System these only record it, so the first frame is
     // dimmed, and the start sends the app's own level, or the knob's when
-    // that is lower.
+    // the knob was turned since the last reading kept and sits lower.
     if (dimmed) {
         [system setDimmed:YES];
     }
@@ -254,8 +254,8 @@ static OSType QLMQuitReason(void) {
 
 // The same System starts again. It keeps the volume, dim, the mutes, and
 // the active group across a stop, and takes back the leases the monitors
-// still hold. It sends no level above the knob's, and lifts the sleep's
-// mute all once its level is out.
+// still hold. It sends no level above a knob turned during the sleep, and
+// lifts the sleep's mute all once its level is out.
 - (void)macDidWake:(NSNotification *)notification {
     [self.system start];
 }

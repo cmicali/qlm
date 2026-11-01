@@ -53,6 +53,10 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
 // serial, takes back each monitor whose own serial answers, and leases
 // nothing to a session another monitor answers.
 @property (nonatomic, copy) NSArray<QLMKnownLease *> *knownLeases;  // empty
+// The knob's last reading of the last run, in tenths of a dB, as a
+// snapshot's adapter gave it. Nil with none, or with no knob in then. A
+// start compares the knob's first reading with it.
+@property (nonatomic, copy, nullable) NSNumber *knobTenths;  // nil
 // TRAP: AGENTS.md's Safety rule refuses a group apply for any model whose
 // filter design rate is unverified, such as the 8351B. Only qlmctl's
 // supervised test sets this, behind --unverified-rate. The app never does.
@@ -99,10 +103,14 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Never from System's queue.
 - (nullable QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds;
 
-// A volume set before the start, or kept from the last run, goes out no
-// louder than the knob's first reading: the adapter ran the monitors at the
-// knob's level meanwhile. The snapshot's startLoweredFromDecibels says when
-// that lowered it. A volume set after the start goes out as set.
+// While no host ran, the adapter ran the monitors at the knob's level. When
+// the knob moved meanwhile, by GLM's rule (QLMKnobMoved), from the last
+// reading of the last run, or the settings', that turn is the listener's
+// last choice. Then a volume set before the start, or kept from the last
+// run, goes out no louder than the knob's first reading, and the
+// snapshot's startLoweredFromDecibels says so. With the knob unmoved, no
+// last reading, or no knob in, the volume goes out as set. So does one set
+// after the start.
 - (QLMCallNumber)start;
 // Before it lets go, sends the knob's level when the knob is at or below the
 // level System sends, so the adapter's take-over changes nothing. The

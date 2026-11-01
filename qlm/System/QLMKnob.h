@@ -6,6 +6,10 @@ NS_ASSUME_NONNULL_BEGIN
 // QLMVolumeDecibelsMin to 0 dB. No tenth falls halfway between two steps.
 double QLMKnobStep(NSInteger tenths);
 
+// The knob moved from one reading to the other, by GLM's rule: more than a
+// whole dB, 11 tenths or more. Jitter at rest never strays that far.
+BOOL QLMKnobMoved(NSInteger fromTenths, NSInteger toTenths);
+
 // Turns the knob's readings into volume, by GLM's rule (docs/protocol.md,
 // "Volume and the knob"). A reading more than a whole dB from the last one
 // the volume followed moves the volume to the knob's nearest step, and for

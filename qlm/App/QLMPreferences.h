@@ -28,9 +28,12 @@ extern const double QLMVolumeRangeMinimumSpan;
 // The session each monitor last held, which the next System checks before
 // it leases anything.
 @property (nonatomic, copy) NSArray<QLMKnownLease *> *knownLeases;
+// The knob's last reading, in tenths of a dB, or nil with no knob in then,
+// or none read yet. The next start compares the knob with it.
+@property (nonatomic, copy, nullable) NSNumber *knobTenths;
 
-// Keeps what changed in the snapshot. The record and the leases come only
-// from a running System's.
+// Keeps what changed in the snapshot. The record, the leases, and the knob
+// come only from a running System's.
 - (void)keepFromSnapshot:(QLMSnapshot *)snapshot;
 
 // Sets the mute record and the leases System starts from.

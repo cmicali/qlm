@@ -344,6 +344,51 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
     [self stop:relaunched clock:time muting:NO];
 }
 
+// The knob's last reading is kept per bus, from a running System's
+// snapshot, and handed to the next one. The fake bus's knob rests at the
+// bottom stop, so a launch with it left there keeps the saved level, as
+// does a first launch with no reading kept. A knob turned between launches
+// caps the start at its level, and the level kept follows.
+- (void)testAKnobLeftAloneKeepsTheSavedLevelAndATurnCapsIt {
+    QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
+    QLMBusPreferences *kept = _preferences.fakeBus;
+    XCTAssertNil(kept.knobTenths);
+    for (NSNumber *turnedTo in @[[NSNull null], [NSNull null], @(-600)]) {
+        if (turnedTo != (id)[NSNull null]) {
+            [bus perform:^{
+                bus.knobTenths = turnedTo;
+            }];
+        }
+        QLMSystem *system = [self systemOn:bus clock:time keeping:kept];
+        XCTAssertTrue([time runUntil:^BOOL {
+            QLMSnapshot *snapshot = system.snapshot;
+            return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+        } within:60]);
+        BOOL turned = turnedTo != (id)[NSNull null];
+        XCTAssertEqualObjects(system.snapshot.volumeDecibels, turned ? @(-60) : @(-40), @"%@", turnedTo);
+        XCTAssertEqualObjects(system.snapshot.startLoweredFromDecibels, turned ? @(-40) : nil, @"%@", turnedTo);
+        XCTAssertEqual(kept.volumeDecibels, turned ? -60 : -40, @"%@", turnedTo);
+        XCTAssertEqualObjects(kept.knobTenths, turned ? @(-600) : @(-1004), @"%@", turnedTo);
+        [self stop:system clock:time muting:NO];
+    }
+}
+
+// A kept reading that is no whole number of tenths at or under 0 dB reads
+// as none.
+- (void)testAKnobReadingKeptWrongReadsAsNone {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    for (id wrong in @[@"-300", @(-300.5), @(5), @(NAN), @[@(-300)]]) {
+        [_defaults setObject:wrong forKey:@"QLMKnobTenths"];
+        XCTAssertNil(kept.knobTenths, @"%@", wrong);
+    }
+    [_defaults setObject:@(-300) forKey:@"QLMKnobTenths"];
+    XCTAssertEqualObjects(kept.knobTenths, @(-300));
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    [kept fillSettings:settings];
+    XCTAssertEqualObjects(settings.knobTenths, @(-300));
+}
+
 // The Mac's sleep stops System muting where the take-over would be louder.
 // The same System's start at wake lifts that mute all once its level is
 // out, and the record kept follows, back to no mutes.

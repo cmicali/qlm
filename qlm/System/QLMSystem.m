@@ -55,6 +55,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.mutingAll = self.mutingAll;
     copy.liftedHardwareIDs = self.liftedHardwareIDs;
     copy.knownLeases = self.knownLeases;
+    copy.knobTenths = self.knobTenths;
     copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
     copy.clock = self.clock;
     return copy;
@@ -269,6 +270,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // lowerStartLevelToKnob:.
     BOOL _startLevelPending;
     NSNumber *_startLoweredFrom;  // see QLMSnapshot
+    // The knob's last reading, nil with no knob in, kept across a stop.
+    NSNumber *_lastKnobTenths;
     BOOL _volumeSendPending;
     NSTimeInterval _lastVolumeSend;  // on the clock; -INFINITY before the first
     BOOL _dimmed;
@@ -338,6 +341,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_liftedIDs minusSet:settings.mutedHardwareIDs];
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
+        _lastKnobTenths = settings.knobTenths;
         _snapshot = [[QLMSnapshot alloc] init];
     }
     return self;
@@ -1224,18 +1228,22 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (self->_startLevelPending) {
             [self lowerStartLevelToKnob:&status];
         }
+        self->_lastKnobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
         [self followKnob:&status];
     }];
 }
 
 // TRAP: while no host ran, the adapter ran the monitors at the knob's
-// level, so the listener last heard it (docs/protocol.md: The hand-back).
-// So at a start, the level System sends, dimmed or not, is never above the
-// knob's first reading. The start reads the adapter first, as GLM's launch
-// does (captures/startup-idle, 7.293 s). With no knob in, the level stands.
+// level (docs/protocol.md: The hand-back). A turn of the knob meanwhile is
+// the listener's last choice. So when the knob moved since the last run's
+// last reading, the level System sends at a start, dimmed or not, is never
+// above the knob's first reading. The start reads the adapter first, as
+// GLM's launch does (captures/startup-idle, 7.293 s). With the knob
+// unmoved, no last reading, or no knob in, the level stands.
 - (void)lowerStartLevelToKnob:(const QLMAdapterStatus *)status {
     _startLevelPending = NO;
-    if (!status->knob || !status->hasKnobPosition) {
+    NSNumber *last = _lastKnobTenths;
+    if (!status->knob || !status->hasKnobPosition || last == nil || !QLMKnobMoved(last.integerValue, status->knobTenths)) {
         return;
     }
     double knob = QLMKnobStep(status->knobTenths);
