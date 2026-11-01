@@ -2092,14 +2092,32 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
 }
 
-// The monitor comes on at its power switch, with a wake count from now.
-- (void)switchOn:(QLMFakeMonitor *)monitor {
+// The monitor comes on at its power switch, with a count that puts its wake
+// `seconds` ago.
+- (void)switchOn:(QLMFakeMonitor *)monitor wokeSecondsAgo:(NSTimeInterval)seconds {
     [_bus perform:^{
         monitor.present = YES;
         monitor.on = YES;
         monitor.session = 0;
-        monitor.wokeAt = @(self->_time.now);
+        monitor.wokeAt = @(self->_time.now - seconds);
     }];
+}
+
+- (void)switchOn:(QLMFakeMonitor *)monitor {
+    [self switchOn:monitor wokeSecondsAgo:0];
+}
+
+// Starts with the Left alone, long woken, and runs past the first quiet
+// probes.
+- (void)startWithTheRightOff {
+    _settings.cycleInterval = 0.5;
+    _left.wokeAt = @(-5000);
+    _right.present = NO;
+    [self startSystem];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 1 && snapshot.allIdentified;
+    }];
+    [_time advanceBy:2];
 }
 
 // captures/qlm-control-all, 214.8 s: the Rear Right 8330A, switched on
@@ -2110,14 +2128,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 // so, as after a wake. The lease's first frame carries an 8A, which System
 // skips, so it reads the next, 30 s on.
 - (void)testAMonitorSwitchedOnWhileSystemRunsSaysSo {
-    _settings.cycleInterval = 0.5;
-    _left.wokeAt = @(-5000);
-    _right.present = NO;
-    [self startSystem];
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.monitors.count == 1 && snapshot.allIdentified;
-    }];
-    [_time advanceBy:2];
+    [self startWithTheRightOff];
     XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
 
     [self switchOn:_right];
@@ -2130,6 +2141,30 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         return snapshot.wokeWithoutGroup;
     }];
     XCTAssertEqualWithAccuracy(_time.now - switchedOn, 30, 1);
+}
+
+// Whether the Right, switched on with a count that puts its wake `seconds`
+// before now, says so once System reads its 8A. The last quiet probe came
+// at most a cycle, 0.5 s, before now, and the count drops the fraction of a
+// second, so the wake reads up to 1.5 s later against the probe.
+- (BOOL)switchOnSaysSoWokenSecondsAgo:(NSTimeInterval)seconds {
+    [self startWithTheRightOff];
+    [self switchOn:_right wokeSecondsAgo:seconds];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 2 && snapshot.allIdentified;
+    }];
+    [_time advanceBy:35];
+    return _system.snapshot.wokeWithoutGroup;
+}
+
+// QLMPowerOnMargin is 10 s, so a wake 8 s before the probe says so.
+- (void)testAWakeJustInsideTheMarginSaysSo {
+    XCTAssertTrue([self switchOnSaysSoWokenSecondsAgo:8]);
+}
+
+// And one 12 s before it does not.
+- (void)testAWakeJustOutsideTheMarginDoesNotSaySo {
+    XCTAssertFalse([self switchOnSaysSoWokenSecondsAgo:12]);
 }
 
 // The monitors found at a start count from whenever they woke, and qlm
@@ -2145,10 +2180,24 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
 }
 
-// After a gap, both monitors' leases lapsed, so the probe leases them
-// again. The Left's count is in the hundreds. The Right's 49 wraps 6 s
-// after the start, so it reads under 30 when System reads the next 8A, and
-// with 49 alone the Right would look switched on.
+// A start forgets the last run's quiet probe, so a monitor switched on
+// while System was stopped counts as one found at the start.
+- (void)testAMonitorSwitchedOnWhileStoppedDoesNotSaySo {
+    [self startWithTheRightOff];
+    [self stopSystem];
+    [self switchOn:_right];
+    [_system start];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.monitors.count == 2 && snapshot.allIdentified;
+    }];
+    [_time advanceBy:35];
+    XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
+}
+
+// Both monitors' leases lapse, so the probe leases them again, after a
+// quiet probe. The Left's count is in the hundreds. The Right's 49 wraps
+// 6 s after the start, so it reads under 30 when System reads the next 8A,
+// and with 49 alone the Right would look switched on.
 - (void)testAMonitorLeasedAgainWithItsCountRunningOnDoesNotSaySo {
     _settings.cycleInterval = 0.5;
     _left.wokeAt = @(_time.now - 300);
@@ -2157,38 +2206,24 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     QLMSnapshot *first = [self waitForDiscovery];
     [_time advanceBy:2];
 
-    [_bus perform:^{
-        self->_bus.disconnected = YES;
-    }];
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.busProblem == QLMBusProblemNoAdapter;
-    }];
-    [_time advanceBy:3];
     [self lapseLeases];
-    [_bus perform:^{
-        self->_bus.disconnected = NO;
-    }];
     QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.adapterError == nil;
+        BOOL leasedAgain = snapshot.monitors.count == 2 && snapshot.allIdentified;
+        for (QLMMonitorState *monitor in snapshot.monitors) {
+            leasedAgain = leasedAgain && monitor.session != QLMFindMonitor(first, monitor.hardwareID).session;
+        }
+        return leasedAgain;
     }];
-    for (QLMMonitorState *monitor in again.monitors) {
-        XCTAssertNotEqual(monitor.session, QLMFindMonitor(first, monitor.hardwareID).session);
-    }
+    XCTAssertNotNil(again);
     [_time advanceBy:65];
     XCTAssertFalse(_system.snapshot.wokeWithoutGroup);
 }
 
-// GLM applies its group to a monitor it finds, so one switched on while
-// GLM held the adapter counts as one found at a start.
+// After a gap, another host may have woken the monitors and applied its
+// group, as GLM does, so a monitor leased after it counts as one found at a
+// start.
 - (void)testAMonitorSwitchedOnWhileGLMHeldTheAdapterDoesNotSaySo {
-    _settings.cycleInterval = 0.5;
-    _left.wokeAt = @(-5000);
-    _right.present = NO;
-    [self startSystem];
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.monitors.count == 1 && snapshot.allIdentified;
-    }];
-    [_time advanceBy:2];
+    [self startWithTheRightOff];
     [_bus perform:^{
         self->_bus.busyReason = @"GLM is running (pid 1). Quit GLM first.";
     }];

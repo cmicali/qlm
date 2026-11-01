@@ -12,10 +12,12 @@
 NSErrorDomain const QLMSystemErrorDomain = @"com.commonwealthrecordings.qlm.system";
 
 // In every capture, a monitor woken or switched on put its wake 0.18 to
-// 1.99 s after the last probe no monitor answered, and one leased again
-// with its count running on 327 s or more before it
-// (QLMTelemetryTests, testThePowerOnMarginSplitsEveryLease).
-const NSTimeInterval QLMPowerOnMargin = 2;
+// 1.99 s after the last probe no monitor answered. One leased again with
+// its count running on put it 327 s or more before, or 67 s with no probe
+// forgotten between host runs (QLMTelemetryTests,
+// testThePowerOnMarginSplitsEveryLease). Only one capture has a power-on at
+// the switch, so the margin leaves room for a model slower to answer.
+const NSTimeInterval QLMPowerOnMargin = 10;
 
 static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, NSError *_Nullable underlying) {
     NSMutableDictionary<NSErrorUserInfoKey, id> *info = [NSMutableDictionary dictionary];
@@ -103,7 +105,8 @@ static const NSTimeInterval QLMReconnectLongestWait = 30;
 @property (nonatomic) BOOL needsState;
 // A wake count that puts its wake at or after this says it was switched on
 // or woken since its lease's last quiet probe. NAN for a lease taken before
-// the run's first quiet probe, or by serial, and once a count is read.
+// the first quiet probe of a run or after a gap, or by serial, and once a
+// count is read.
 @property (nonatomic) NSTimeInterval wokeAfter;
 @property (nonatomic, readonly) BOOL isOn;  // its last telemetry says on
 @end
@@ -692,11 +695,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (gone) {
         [self forgetAdapter];
     }
-    // GLM's launch applies its group, and so does GLM to a monitor it
-    // finds. So a monitor leased after GLM counts as one found at a start.
+    // GLM's launch applies its group.
     if (QLMBusProblemFor(error) == QLMBusProblemGLM) {
         _wokeWithoutGroup = NO;
-        _quietProbeAt = NAN;
     }
     if (noBus && ![_adapterError isEqual:error]) {
         _adapterError = error;
@@ -772,6 +773,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // block: its last 2B may not have gone out, and the other host may have
 // changed it.
 - (void)takeBackAfterGap {
+    // Another host, such as GLM, may have woken the monitors and applied
+    // its group, so a monitor leased after the gap counts as one found at a
+    // start.
+    _quietProbeAt = NAN;
     if (_stopping || !self.settings.discoversMonitors) {
         return;
     }

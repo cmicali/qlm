@@ -1092,7 +1092,9 @@ In `qlm-control-first`, the meters show the Right 8351B silent from 829.40 to 83
 
 A monitor that is switched on gets qlm's level, but not the group's settings. In `qlm-control-all`, the Rear Right 8330A played a little louder than the rest until GLM's launch applied the group, and then it matched.[^own-settings] A woken monitor runs without them too ([Sleep and wake](#sleep-and-wake)). **Guess:** each runs the settings it had stored, without the group's trims.
 
-qlm tells a monitor switched on from one leased again by its wake count, `8A` × 256 + `49`. A monitor switched on or woken puts its wake just after the last probe before its lease that no monitor answered: 0.18 to 1.99 s after, in every capture. A monitor leased again with its count running on puts it 327 s or more before.[^power-on-count] So qlm counts a lease whose count puts the wake no more than 2 s before that probe as a monitor switched on. With no group active, the popover then says the monitors play without their group's settings, as after a wake. A monitor found at qlm's start, or after GLM held the adapter, doesn't count.
+qlm tells a monitor switched on from one leased again by its wake count, `8A` × 256 + `49`. A monitor switched on or woken puts its wake just after the last probe before its lease that no monitor answered: 0.18 to 1.99 s after, in every capture. A monitor leased again with its count running on puts it 327 s or more before, or 67 s if no host run's probe is ever forgotten.[^power-on-count] So qlm counts a lease whose count puts the wake no more than 10 s before that probe as a monitor switched on or woken. Only one capture has a power-on at the switch, and how long a slower model counts before it answers a probe is unmeasured, so the margin leaves room on that side. With no group active, the popover then says the monitors play without their group's settings, as after a wake.
+
+qlm forgets the probe at each start and after each gap, when another host may have applied its group, so a monitor found then doesn't count. A monitor that still holds a lease from GLM or a failed run answers the probe only once the lease lapses, 2.45 to 2.84 s on ([When a monitor loses its lease](#when-a-monitor-loses-its-lease)). So a quiet probe comes first, and qlm reads its count. Its wake is long before the probe, so it doesn't count either.
 
 A mute outlasts the host, and no reply reports it. The Right 8351B stayed muted after qlm's exit, until `mute off`.[^mute-outlasts] [Telemetry](#telemetry) has why no reply shows it.
 
@@ -1114,7 +1116,7 @@ On or in standby, monitors drop a quiet host's leases, within 2.84 s of the last
 [^woken-mute]: [telemetry.md](telemetry.md#what-the-meters-showed-about-the-control-run).
 [^woken-plays]: `qlm-control-all`, 8481.938 to 8494.1 s, and its notes; `qlm-app-first`, 1232.644 to 1237.4 s; `qlm-control-first`, 827.791 to 840.0 s; `testAWokenMonitorWaitsForALevelNotItsMute`.
 [^own-settings]: `qlm-control-all`, 214.8 s, and GLM's apply at 379.8 to 380.5 s, and its notes.
-[^power-on-count]: `qlm-control-all`, the Rear Right's lease at 214.774 s after the probe at 214.206 s, and every wake in the captures; `testThePowerOnMarginSplitsEveryLease`. [telemetry.md](telemetry.md#49-seconds-since-the-wake) has the rule, and why it skips a lease's first frame.
+[^power-on-count]: `qlm-control-all`, the Rear Right's lease at 214.774 s after the probe at 214.206 s, and every wake in the captures. The 67 s is the Rear Right again, leased by GLM at 379.660 s, against the probe of `qlmctl`'s run before; `testThePowerOnMarginSplitsEveryLease`. [telemetry.md](telemetry.md#49-seconds-since-the-wake) has the rule, and why it skips a lease's first frame.
 [^over-ceiling]: `qlm-control-all`, 8425.4 to 8471.0 s, and 8494.1 s, and its notes.
 [^mute-outlasts]: `qlm-control-first`, 648.7 to 660.5 s.
 [^standby-answers]: `qlm-standby-discover`.

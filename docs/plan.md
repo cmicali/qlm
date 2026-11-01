@@ -6,7 +6,7 @@
 
 This section is a snapshot of main: what has run on the real adapter, what each layer holds, what we decided and learned on the way, and what comes next. [protocol.md](protocol.md) holds the protocol itself, with a source for every fact, so this section links to it rather than restate it.
 
-Main passes 470 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
+Main passes 473 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
 
 ### What has run where
 
@@ -41,7 +41,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - has the fixes from a safety review and a fuzz (#49). It caps every volume frame at the ceiling as it goes out. After a gap, it trusts none of its old sessions until each one's own serial answers. It also starts from the leases it's given, states a mute whose `2B` never went out, holds a lift of one mute under mute all, and drops a reply from before a stop.
   - holds its volume at or under the ceiling, so a turn of the knob above it sends nothing, and gives a snapshot of itself now, for a stop's warning (#52);
   - says when a wake went out with no group active, so the woken monitors play without their group's settings (#53).
-  - says the same when a monitor is switched on while it runs with no group active. A lease that follows a probe no monitor answered reads the monitor's wake count. A wake no more than 2 s before that probe means it was switched on. In every capture, a woken monitor's count put its wake 0.18 to 1.99 s after the probe, and the rest 327 s or more before it. A monitor found at a start, or after GLM held the adapter, doesn't count (#74).
+  - says the same when a monitor is switched on while it runs with no group active. A lease that follows a probe no monitor answered reads the monitor's wake count. A wake no more than 10 s before that probe means it was switched on or woken. In every capture, a woken monitor's count put its wake 0.18 to 1.99 s after the probe, and the rest 327 s or more before it, or 67 s with no probe ever forgotten. Only one capture has a power-on at the switch, so the margin leaves room for a slower model. System forgets the probe at a start and after a gap, so a monitor found then doesn't count (#74).
   - numbers each call to a command, and stamps each snapshot with the last call that ran on its queue before it. So a wait in `qlmctl` takes only a snapshot from after its own action, whatever else publishes meanwhile (#60).
   - counts a volume held by its 50 ms coalescing as work in flight. So a stamped call's frames are out or queued, and once a snapshot is idle, none is left to go out (#66).
   - has a stop for when no one can answer. Where the take-over would be louder, or is unknown, it sends mute all before it lets go. It publishes the record with mute all while it still runs, so the app keeps it (#70).
@@ -55,7 +55,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - Each bus keeps its own level, mute record, and known leases across launches, so nothing set on the fake bus reaches the real monitors (#52).
   - The banner says when the adapter stops answering, or qlm loses track of it, and what the take-over does then (#52). It now says when qlm reconnects, with the attempt, and when the adapter stopped taking reports, so qlm stopped reconnecting. When qlm has lost track, it says only a replug or a relaunch helps (#71).
   - The default ceiling is −30 dB, qlmctl's highest without `--allow-high-ceiling`, and the field saves as it ends editing (#52).
-  - After a wake, or a monitor switched on, with no group active, it says the monitors play without their group's settings until GLM applies the group. System's snapshot carries that. With a group active, System already sends GLM's apply at wake to each monitor leased again (#53).
+  - After a wake, or a monitor switched on, with no group active, it says the monitors play without their group's settings. Its detail says some were woken or switched on, and they play on their stored settings until GLM applies the group. System's snapshot carries that (#53, #74). With a group active, System already sends GLM's apply at wake to each monitor leased again (#53).
   - It names each monitor as the setup file does, and forgets the fake bus's monitors when the setting changes (#53).
   - A logout, restart, or shutdown no longer waits on the louder hand-back's alert, which hung a Mac left to restart overnight. Where the user's quit asks, it mutes every monitor first, so the take-over can't make them louder. The record keeps mute all, so the next launch restates the mutes (#70).
   - Its notifications play no sound, since the Mac's sound likely plays through the monitors. Each fires once until its cause clears: a dropped monitor back and on, or a hot one cooled. A sleep while dimmed, whose take-over is louder every time, alerts at most once a day. The alerts' rules have tests now (#70).

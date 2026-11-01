@@ -20,6 +20,19 @@
 @implementation QLMTelemetryFrame
 @end
 
+// A lease that System's rule for a monitor switched on would watch, as a
+// capture shows it.
+@interface QLMWatchedLease : NSObject
+@property (nonatomic, copy) NSString *scenario;
+@property (nonatomic) NSTimeInterval time;
+@property (nonatomic) NSTimeInterval sinceWake;  // since the last broadcast wake, or INFINITY
+// The wake the count puts, less the probe: above 0 after it.
+@property (nonatomic) NSTimeInterval sinceProbe;
+@end
+
+@implementation QLMWatchedLease
+@end
+
 @implementation QLMTelemetryTests
 
 // A monitor's 08 poll, answered.
@@ -352,26 +365,21 @@ static uint8_t QLMSessionLeased(NSString *scenario, const uint8_t hardwareID[3],
     XCTAssertEqualWithAccuracy(QLMWakeTime(steps[0]) - QLMWakeTime(steps[1]), 256, 1);
 }
 
-// System's rule for a monitor switched on, on every capture. A host's run
-// ends when it goes quiet for 2.6 s, as the adapter then takes over. In a
-// run, a lease after a probe no monitor answered reads the wake count from
-// the first frame after the lease's first that carries 8A. In 43 such
-// leases, the count put the wake 0.18 to 1.99 s after that probe. Each came
-// within 1.5 s of a broadcast wake, but for the Rear Right 8330A, switched
-// on in qlm-control-all and leased at 214.774 s. Its count put the wake
-// 0.84 s after the probe at 214.206 s. In the other 12, the count put the
-// wake 327 s or more before the probe. QLMPowerOnMargin lies between.
-- (void)testThePowerOnMarginSplitsEveryLease {
-    NSUInteger woken = 0, runningOn = 0;
-    double earliestWoken = INFINITY, latestRunningOn = -INFINITY;
+// System's rule for a monitor switched on, on every capture. In a run, a
+// lease after a probe no monitor answered reads the wake count from the
+// first frame after the lease's first that carries 8A. With `forgets`, a
+// host's run ends when it goes quiet for 2.6 s, as the adapter then takes
+// over, and its probe is forgotten.
+static NSArray<QLMWatchedLease *> *QLMWatchedLeases(BOOL forgets) {
+    NSMutableArray<QLMWatchedLease *> *leases = [NSMutableArray array];
     for (NSString *scenario in QLMCaptureScenarios()) {
         NSTimeInterval lastSent = -INFINITY, quietProbe = NAN, lastWake = -INFINITY;
         NSMutableDictionary<NSNumber *, NSNumber *> *watched = [NSMutableDictionary dictionary];  // session to its quiet probe
-        NSMutableDictionary<NSNumber *, NSNumber *> *leasedAt = [NSMutableDictionary dictionary];
+        NSMutableDictionary<NSNumber *, QLMWatchedLease *> *pending = [NSMutableDictionary dictionary];
         NSMutableSet<NSNumber *> *heard = [NSMutableSet set];
         for (QLMCaptureExchange *exchange in QLMReadCapture(scenario, NULL).exchanges) {
             QLMMessage message = exchange.message;
-            if (exchange.time - lastSent > 2.6) {
+            if (forgets && exchange.time - lastSent > 2.6) {
                 quietProbe = NAN;
                 [watched removeAllObjects];
             }
@@ -389,8 +397,12 @@ static uint8_t QLMSessionLeased(NSString *scenario, const uint8_t hardwareID[3],
                 [watched removeObjectForKey:session];
                 [heard removeObject:session];
                 if (!isnan(quietProbe)) {
+                    QLMWatchedLease *lease = [QLMWatchedLease new];
+                    lease.scenario = scenario;
+                    lease.time = exchange.time;
+                    lease.sinceWake = exchange.time - lastWake;
                     watched[session] = @(quietProbe);
-                    leasedAt[session] = @(exchange.time);
+                    pending[session] = lease;
                 }
             } else if (QLMIsAnsweredPoll(exchange) && watched[@(message.address)] != nil) {
                 NSNumber *session = @(message.address);
@@ -407,28 +419,74 @@ static uint8_t QLMSessionLeased(NSString *scenario, const uint8_t hardwareID[3],
                 if (t.wakeSteps == QLMTelemetryAbsent || t.wakeSeconds == QLMTelemetryAbsent) {
                     continue;
                 }
-                double sinceProbe = exchange.time - (t.wakeSteps * 256 + t.wakeSeconds) - watched[session].doubleValue;
-                NSTimeInterval lease = leasedAt[session].doubleValue;
+                QLMWatchedLease *lease = pending[session];
+                lease.sinceProbe = exchange.time - (t.wakeSteps * 256 + t.wakeSeconds) - watched[session].doubleValue;
+                [leases addObject:lease];
                 [watched removeObjectForKey:session];
-                if (sinceProbe >= -QLMPowerOnMargin) {
-                    woken += 1;
-                    earliestWoken = MIN(earliestWoken, sinceProbe);
-                    BOOL switchedOn = [scenario isEqualToString:@"qlm-control-all"] && fabs(lease - 214.774) < 0.001;
-                    XCTAssertTrue(switchedOn || lease - lastWake < 1.5, @"%@, leased at %.3f s", scenario, lease);
-                    if (switchedOn) {
-                        XCTAssertEqualWithAccuracy(sinceProbe, 0.84, 0.01);
-                    }
-                } else {
-                    runningOn += 1;
-                    latestRunningOn = MAX(latestRunningOn, sinceProbe);
-                }
             }
         }
     }
-    XCTAssertEqual(woken, 43u);
-    XCTAssertEqual(runningOn, 12u);
-    XCTAssertEqualWithAccuracy(earliestWoken, 0.18, 0.01);
-    XCTAssertEqualWithAccuracy(latestRunningOn, -327.28, 0.01);
+    return leases;
+}
+
+// Checks that the leases split in two around QLMPowerOnMargin, and returns
+// the split: the earliest and latest wake after the probe among those woken
+// since it, and the latest among the rest. Each one woken came within 1.5 s
+// of a broadcast wake, or is a lease in qlm-control-all at one of
+// `switchedOn`.
+- (NSArray<NSNumber *> *)splitOf:(NSArray<QLMWatchedLease *> *)leases
+                      woken:(NSUInteger)wokenCount
+                  runningOn:(NSUInteger)runningOnCount
+                 switchedOn:(NSArray<NSNumber *> *)switchedOn {
+    NSUInteger woken = 0, runningOn = 0;
+    double earliestWoken = INFINITY, latestWoken = -INFINITY, latestRunningOn = -INFINITY;
+    for (QLMWatchedLease *lease in leases) {
+        if (lease.sinceProbe >= 0) {
+            woken += 1;
+            earliestWoken = MIN(earliestWoken, lease.sinceProbe);
+            latestWoken = MAX(latestWoken, lease.sinceProbe);
+            BOOL known = NO;
+            for (NSNumber *time in switchedOn) {
+                known = known || ([lease.scenario isEqualToString:@"qlm-control-all"] && fabs(lease.time - time.doubleValue) < 0.001);
+            }
+            XCTAssertTrue(known || lease.sinceWake < 1.5, @"%@, leased at %.3f s", lease.scenario, lease.time);
+        } else {
+            runningOn += 1;
+            latestRunningOn = MAX(latestRunningOn, lease.sinceProbe);
+        }
+    }
+    XCTAssertEqual(woken, wokenCount);
+    XCTAssertEqual(runningOn, runningOnCount);
+    XCTAssertLessThan(latestRunningOn, -QLMPowerOnMargin);
+    XCTAssertGreaterThan(earliestWoken, -QLMPowerOnMargin);
+    return @[@(earliestWoken), @(latestWoken), @(latestRunningOn)];
+}
+
+// With each host run's probe forgotten, as System forgets it at a start and
+// a gap, 43 leases put the wake 0.18 to 1.99 s after the probe. Each came
+// within 1.5 s of a broadcast wake, but for the Rear Right 8330A switched
+// on in qlm-control-all, leased at 214.774 s 0.84 s after its wake. The
+// other 12 put it 327 s or more before. With no probe ever forgotten, the
+// nearest of the rest is the Rear Right again, leased by GLM at 379.660 s,
+// 67 s before a qlmctl run's last probe. The one more woken is the Rear
+// Left at 191.986 s, whose count restarted at 175 s, between two runs.
+// Only one capture has a power-on at the switch, and how long a slower
+// model counts before it answers a probe is unmeasured, so the margin,
+// 10 s, sits well clear of both sides.
+- (void)testThePowerOnMarginSplitsEveryLease {
+    NSArray<NSNumber *> *split = [self splitOf:QLMWatchedLeases(YES) woken:43 runningOn:12 switchedOn:@[@214.774]];
+    XCTAssertEqualWithAccuracy(split[0].doubleValue, 0.18, 0.01);
+    XCTAssertEqualWithAccuracy(split[1].doubleValue, 1.99, 0.01);
+    XCTAssertEqualWithAccuracy(split[2].doubleValue, -327.28, 0.01);
+    for (QLMWatchedLease *lease in QLMWatchedLeases(YES)) {
+        if ([lease.scenario isEqualToString:@"qlm-control-all"] && fabs(lease.time - 214.774) < 0.001) {
+            XCTAssertEqualWithAccuracy(lease.sinceProbe, 0.84, 0.01);
+        }
+    }
+
+    split = [self splitOf:QLMWatchedLeases(NO) woken:44 runningOn:69 switchedOn:@[@214.774, @191.986]];
+    XCTAssertEqualWithAccuracy(split[0].doubleValue, 0.18, 0.01);
+    XCTAssertEqualWithAccuracy(split[2].doubleValue, -67.29, 0.01);
 }
 
 // In every whole frame from a monitor that is on, the system info's c- is
