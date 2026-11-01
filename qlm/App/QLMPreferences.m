@@ -167,8 +167,6 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     return [kept isKindOfClass:[NSNumber class]] && [kept boolValue];
 }
 
-// Anything but a whole number of tenths, at or under 0 dB, reads as no
-// knob, so a knob in at the next start counts as moved.
 - (NSNumber *)knobTenths {
     if (!self.knobRead) {
         return nil;
@@ -180,7 +178,9 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 
 - (void)keepKnobTenths:(NSNumber *)knobTenths {
     [_defaults setObject:knobTenths forKey:[self key:QLMKnobName]];
-    [_defaults setBool:YES forKey:[self key:QLMKnobReadName]];
+    if (!self.knobRead) {
+        [_defaults setBool:YES forKey:[self key:QLMKnobReadName]];
+    }
 }
 
 - (void)restoreKnobOn:(QLMFakeBus *)bus {

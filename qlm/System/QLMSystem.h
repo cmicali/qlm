@@ -130,10 +130,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // outlasts the host, so the take-over can't make the monitors louder. A
 // snapshot that still runs carries mute all in the record before the stop
 // ends, so a keeper of the record, as the app is, starts the next System
-// muted. This System's own next start lifts that mute all, back to the
-// record before the stop, as the Mac's wake needs. The lift waits for the
-// knob's read and the first cycle's level frame, which follows the leases'
-// own levels. A change to the mutes before then keeps the user's.
+// muted. This System's own next start lifts that mute all once its level
+// is out, back to the record before the stop, as the Mac's wake needs. A
+// change to the mutes before then keeps the user's.
 - (QLMCallNumber)stopMutingIfLouderWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every

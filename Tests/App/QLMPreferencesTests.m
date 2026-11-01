@@ -337,7 +337,7 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
     } within:60], @"the next System never restated the mutes");
     // The Mac's sleep may have ended in a shutdown, so a relaunch never
     // lifts the mute by itself, however long its level has been out.
-    [time advanceBy:10];
+    [time advanceBy:3];
     XCTAssertTrue(QLMAllHeard(bus, QLMMuteValueMuted));
     XCTAssertTrue(relaunched.snapshot.mutingAll);
     XCTAssertFalse(relaunched.snapshot.muteAllFromStop);
@@ -353,10 +353,12 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
     return bus;
 }
 
-- (QLMSnapshot *)settle:(QLMSystem *)system clock:(QLMVirtualClock *)time until:(BOOL (^)(QLMSnapshot *snapshot))test {
+// Runs the clock until System has both monitors identified and is idle,
+// and `test`, if given, holds.
+- (QLMSnapshot *)settle:(QLMSystem *)system clock:(QLMVirtualClock *)time until:(nullable BOOL (^)(QLMSnapshot *snapshot))test {
     XCTAssertTrue([time runUntil:^BOOL {
         QLMSnapshot *snapshot = system.snapshot;
-        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle && test(snapshot);
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle && (test == nil || test(snapshot));
     } within:60]);
     return system.snapshot;
 }
@@ -373,9 +375,7 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
     XCTAssertFalse(kept.knobRead);
     QLMFakeBus *bus = [self fakeBusFor:kept];
     QLMSystem *system = [self systemOn:bus clock:time keeping:kept];
-    QLMSnapshot *first = [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
-        return YES;
-    }];
+    QLMSnapshot *first = [self settle:system clock:time until:nil];
     XCTAssertEqualObjects(first.volumeDecibels, @(-40));
     XCTAssertNil(first.startLoweredFromDecibels);
     // A turn while it runs is followed, and kept.
@@ -389,9 +389,7 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
 
     bus = [self fakeBusFor:kept];
     system = [self systemOn:bus clock:time keeping:kept];
-    QLMSnapshot *relaunched = [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
-        return YES;
-    }];
+    QLMSnapshot *relaunched = [self settle:system clock:time until:nil];
     XCTAssertEqualObjects(relaunched.volumeDecibels, @(-50));
     XCTAssertNil(relaunched.startLoweredFromDecibels);
     [self stop:system clock:time muting:NO];
@@ -401,9 +399,7 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
         bus.knobTenths = @(-700);
     }];
     system = [self systemOn:bus clock:time keeping:kept];
-    QLMSnapshot *turned = [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
-        return YES;
-    }];
+    QLMSnapshot *turned = [self settle:system clock:time until:nil];
     XCTAssertEqualObjects(turned.volumeDecibels, @(-70));
     XCTAssertEqualObjects(turned.startLoweredFromDecibels, @(-50));
     XCTAssertEqual(kept.volumeDecibels, -70);

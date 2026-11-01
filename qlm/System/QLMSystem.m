@@ -187,6 +187,11 @@ static BOOL QLMNamesSession(const QLMMessage *message) {
            (message->address == QLMAddressMulticast && message->length > 0 && message->payload[0] == 0x02);
 }
 
+// The knob's position, or nil with no knob in.
+static NSNumber *_Nullable QLMKnobTenthsOf(const QLMAdapterStatus *status) {
+    return status->knob && status->hasKnobPosition ? @(status->knobTenths) : nil;
+}
+
 static BOOL QLMAdapterStatusDiffers(const QLMAdapterStatus *a, const QLMAdapterStatus *b) {
     return a->knob != b->knob || a->mic != b->mic || a->hasKnobPosition != b->hasKnobPosition || a->knobTenths != b->knobTenths;
 }
@@ -376,7 +381,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
         _knobRead = settings.knobRead;
-        _lastKnobTenths = settings.knobRead ? settings.knobTenths : nil;
+        _lastKnobTenths = settings.knobTenths;
         _snapshot = [[QLMSnapshot alloc] init];
     }
     return self;
@@ -446,8 +451,6 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _stoppedHandBack = nil;
     _startLoweredFrom = nil;
     _levelAwaitsKnob = _volumeDecibels != nil;
-    _levelHeld = NO;
-    _muteHeld = NO;
     _nextSession = QLMAddressSessionFirst;
     _quietProbeAt = NAN;
     [_adapter startOnQueue:_queue clock:_clock];
@@ -1298,25 +1301,21 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             [self capLevelAtKnob:&status];
         }
         self->_knobRead = YES;
-        self->_lastKnobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
+        self->_lastKnobTenths = QLMKnobTenthsOf(&status);
         [self followKnob:&status];
     }];
 }
 
-// TRAP: while no host ran, the adapter ran the monitors at the knob's
-// level (docs/protocol.md: The hand-back). A turn of the knob meanwhile is
-// the listener's last choice. So when the knob moved since the last
-// reading, or went in, the volume falls to the knob's when that is lower.
-// As followKnob: does, the knob sets the undimmed volume. The start reads
-// the adapter first, as GLM's launch does (captures/startup-idle, 7.293 s).
-// With the knob unmoved, no last reading, or no knob in now, the volume
-// stands. A level held back meanwhile goes out at once.
+// TRAP: the take-over ran at the knob's level (docs/protocol.md: The
+// hand-back), so a turn meanwhile is the listener's last choice. As
+// followKnob: does, the knob sets the undimmed volume. What was held back
+// goes out now, the level first.
 - (void)capLevelAtKnob:(const QLMAdapterStatus *)status {
     _levelAwaitsKnob = NO;
-    BOOL in = status->knob && status->hasKnobPosition;
+    NSNumber *now = QLMKnobTenthsOf(status);
     NSNumber *last = _lastKnobTenths;
-    BOOL moved = _knobRead && in && (last == nil || QLMKnobMoved(last.integerValue, status->knobTenths));
-    double knob = in ? QLMKnobStep(status->knobTenths) : 0;
+    BOOL moved = _knobRead && now != nil && (last == nil || QLMKnobMoved(last.integerValue, now.integerValue));
+    double knob = now != nil ? QLMKnobStep(now.integerValue) : 0;
     QLMMessage set = QLMCommandVolume(_volumeDecibels.doubleValue, self.settings.ceilingDecibels);
     if (moved && QLMVolumeWordForDecibels(knob) < QLMVolumeWordOf(&set)) {
         _startLoweredFrom = _volumeDecibels;
@@ -1467,7 +1466,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_levelHeld = NO;
         self->_volumeDecibels = [self underCeiling:decibels];
         // The user's level stands, so an unmute held back goes out after it.
-        if (self->_muteHeld && self->_running) {
+        if (self->_muteHeld) {
             self->_muteHeld = NO;
             [self sendMuteAllState];
             return;
@@ -1539,22 +1538,23 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     __weak QLMSystem *weakSelf = self;
     dispatch_block_t send = ^{
         QLMSystem *system = weakSelf;
-        if (system != nil) {
-            [system itemSending:[system volumeMessage] then:completion]();
-        }
-    };
-    return ^{
-        QLMSystem *system = weakSelf;
         if (system == nil) {
             return;
         }
-        if (!system->_levelAwaitsKnob) {
-            send();
+        if (system->_levelAwaitsKnob) {
+            dispatch_block_t again = ^{
+                QLMSystem *later = weakSelf;
+                if (later != nil) {
+                    [later itemSending:[later volumeMessage] then:completion]();
+                }
+            };
+            [system enqueueNext:@[[system adapterPollItem], again]];
+            [system finishItem:nil];
             return;
         }
-        [system enqueueNext:@[[system adapterPollItem], send]];
-        [system finishItem:nil];
+        [system itemSending:[system volumeMessage] then:completion]();
     };
+    return send;
 }
 
 - (void)sendVolume {
@@ -1572,7 +1572,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (nullable NSNumber *)knobDecibels {
     QLMTrackedAdapter *adapter = _adapterRecord;
     QLMAdapterStatus status = adapter.status;
-    return adapter.hasStatus && status.knob && status.hasKnobPosition ? @(status.knobTenths / 10.0) : nil;
+    NSNumber *tenths = adapter.hasStatus ? QLMKnobTenthsOf(&status) : nil;
+    return tenths != nil ? @(tenths.doubleValue / 10) : nil;
 }
 
 - (void)sendInputPair {
@@ -1689,7 +1690,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // leased since, unless the user lifted it.
 - (void)liftStopMute {
     QLMMuteRecord *before = _beforeStopMute;
-    if (before == nil || _stopping || _levelAwaitsKnob) {
+    if (before == nil || _stopping) {
         return;
     }
     _beforeStopMute = nil;
@@ -2010,7 +2011,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         state.micPresent = status.mic;
         state.micDE = status.mic && status.hasMicDE ? @(status.micDE) : nil;
         state.micDD = status.mic && status.hasMicDD ? @(status.micDD) : nil;
-        state.knobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
+        state.knobTenths = QLMKnobTenthsOf(&status);
     }
     state.missedPolls = adapter.missedPolls;
     state.lastReply = adapter.lastReply;

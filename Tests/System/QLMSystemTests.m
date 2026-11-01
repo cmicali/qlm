@@ -2413,6 +2413,17 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
 }
 
+// Stops System with the stop no one can answer, and returns its snapshot
+// once it has.
+- (QLMSnapshot *)stopMutingAndWait {
+    QLMSystem *system = _system;
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    } after:^{
+        [system stopMutingIfLouderWithCompletion:nil];
+    }];
+}
+
 // Stops System and returns its snapshot once it has.
 - (QLMSnapshot *)stopAndWait {
     QLMSystem *system = _system;
@@ -2485,12 +2496,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
             self->_right.muteValue = 0;
         }];
         NSUInteger before = _bus.sentMessages.count;
-        QLMSystem *system = _system;
-        QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-            return !snapshot.running;
-        } after:^{
-            [system stopMutingIfLouderWithCompletion:nil];
-        }];
+        QLMSnapshot *stopped = [self stopMutingAndWait];
         XCTAssertNotEqual(stopped.handBack.kind, QLMHandBackKnobLevel, @"%@", tenths);
         XCTAssertTrue(stopped.mutingAll, @"%@", tenths);
         XCTAssertGreaterThan([self sentWithOpcode:0x2B from:before].count, 0u, @"%@", tenths);
@@ -2503,12 +2509,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 
     [self startWithKnob:@(-600) volume:@(-40)];
     NSUInteger before = _bus.sentMessages.count;
-    QLMSystem *system = _system;
-    QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    } after:^{
-        [system stopMutingIfLouderWithCompletion:nil];
-    }];
+    QLMSnapshot *stopped = [self stopMutingAndWait];
     QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
     XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
         return YES;
@@ -2536,11 +2537,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 
 #pragma mark - A start, and a sleep's stop and wake
 
-// Every volume frame sent from `start` on.
-- (NSArray<NSData *> *)levelsFrom:(NSUInteger)start {
-    return [self sentWithOpcode:0x1F from:start];
-}
-
 // The index of the first message from `start` on that `test` passes, or
 // NSNotFound.
 - (NSUInteger)firstSentFrom:(NSUInteger)start matching:(BOOL (^)(NSData *message))test {
@@ -2551,6 +2547,13 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         }
     }
     return NSNotFound;
+}
+
+// The index of the first volume frame from `start` on, or NSNotFound.
+- (NSUInteger)firstLevelFrom:(NSUInteger)start {
+    return [self firstSentFrom:start matching:^BOOL(NSData *message) {
+        return message.length >= 2 && ((const uint8_t *)message.bytes)[1] == 0x1F;
+    }];
 }
 
 // While no host ran, the adapter ran the monitors at the knob's level
@@ -2603,18 +2606,14 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
             return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
         }];
         QLMMessage expected = QLMCommandVolume(sent, _settings.ceilingDecibels);
-        NSArray<NSData *> *levels = [self levelsFrom:0];
+        NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:0];
         XCTAssertGreaterThanOrEqual(levels.count, 3u, @"%@", row);  // the cycle's, and each lease's
         for (NSData *level in levels) {
             XCTAssertEqualObjects(level, QLMAdapterRecord(&expected), @"%@", row);
             XCTAssertLessThanOrEqual(QLMVolumeWordOf(QLMApplyMessage(level)), QLMVolumeWordForDecibels(_settings.ceilingDecibels), @"%@",
                                      row);
         }
-        NSUInteger firstPoll = [self firstSentFrom:0 matching:^BOOL(NSData *message) {
-            const uint8_t *bytes = message.bytes;
-            return message.length == 2 && bytes[0] == QLMAddressAdapter && bytes[1] == 0x08;
-        }];
-        XCTAssertEqual(firstPoll, 0u, @"%@", row);
+        XCTAssertEqual([self firstReadFrom:0 dropping:0], 0u, @"%@", row);
         XCTAssertEqualWithAccuracy(settled.volumeDecibels.doubleValue, volume, 0.001, @"%@", row);
         double held = fmin(set, _settings.ceilingDecibels);
         XCTAssertEqualObjects(settled.startLoweredFromDecibels, volume != held ? @(held) : nil, @"%@", row);
@@ -2643,7 +2642,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertEqualObjects(undimmed.volumeDecibels, @(-50));
     QLMMessage knob = QLMCommandVolume(-50, _settings.ceilingDecibels);
-    NSArray<NSData *> *levels = [self levelsFrom:before];
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
     XCTAssertGreaterThan(levels.count, 0u);
     for (NSData *level in levels) {
         XCTAssertEqualObjects(level, QLMAdapterRecord(&knob));
@@ -2679,7 +2678,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         double expected = pluggedIn.boolValue ? -60 : -40;
         XCTAssertEqualObjects(again.volumeDecibels, @(expected), @"%@", pluggedIn);
         QLMMessage level = QLMCommandVolume(expected, _settings.ceilingDecibels);
-        for (NSData *sent in [self levelsFrom:before]) {
+        for (NSData *sent in [self sentWithOpcode:0x1F from:before]) {
             XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"%@", pluggedIn);
         }
         [self stopSystem];
@@ -2720,15 +2719,13 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }];
     XCTAssertEqualObjects(settled.startLoweredFromDecibels, @(-40));
     QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
-    NSArray<NSData *> *levels = [self levelsFrom:0];
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:0];
     XCTAssertGreaterThan(levels.count, 0u);
     for (NSData *level in levels) {
         XCTAssertEqualObjects(level, QLMAdapterRecord(&knob));
     }
     NSUInteger firstRead = [self firstReadFrom:0 dropping:6];
-    NSUInteger firstLevel = [self firstSentFrom:0 matching:^BOOL(NSData *message) {
-        return ((const uint8_t *)message.bytes)[1] == 0x1F;
-    }];
+    NSUInteger firstLevel = [self firstLevelFrom:0];
     XCTAssertNotEqual(firstRead, NSNotFound);
     XCTAssertGreaterThan(firstLevel, firstRead);
 }
@@ -2739,11 +2736,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 - (void)testTheWakesLiftWaitsForTheKnob {
     [self startWithKnob:@(-300) volume:@(-40)];
     QLMSystem *system = _system;
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    } after:^{
-        [system stopMutingIfLouderWithCompletion:nil];
-    }];
+    [self stopMutingAndWait];
     [_bus perform:^{
         self->_bus.knobTenths = @(-600);
         self->_bus.adapterDropReplies = 5;
@@ -2760,14 +2753,12 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         const uint8_t *bytes = message.bytes;
         return message.length == 3 && bytes[1] == 0x2B && (bytes[2] == QLMMuteValueUnmuted || bytes[2] == QLMMuteValueAdapterUnmuted);
     }];
-    NSUInteger firstLevel = [self firstSentFrom:before matching:^BOOL(NSData *message) {
-        return ((const uint8_t *)message.bytes)[1] == 0x1F;
-    }];
+    NSUInteger firstLevel = [self firstLevelFrom:before];
     XCTAssertNotEqual(firstRead, NSNotFound);
     XCTAssertGreaterThan(firstLevel, firstRead);
     XCTAssertGreaterThan(firstUnmute, firstLevel);
     QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
-    for (NSData *level in [self levelsFrom:before]) {
+    for (NSData *level in [self sentWithOpcode:0x1F from:before]) {
         XCTAssertEqualObjects(level, QLMAdapterRecord(&knob));
     }
 }
@@ -2780,12 +2771,8 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     for (NSNumber *all in @[@YES, @NO]) {
         [self startWithKnob:@(-300) volume:@(-40)];
         QLMSystem *system = _system;
-        [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-            return !snapshot.running;
-        } after:^{
-            [system stopMutingIfLouderWithCompletion:nil];
-        }];
-        [self waitForLeft:QLMMuteValueMuted right:QLMMuteValueMuted];
+        [self stopMutingAndWait];
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueMuted];
         [_bus perform:^{
             self->_bus.knobTenths = @(-600);
             self->_bus.adapterDropReplies = 8;
@@ -2804,29 +2791,24 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
             return !snapshot.levelAwaitsKnob && snapshot.allIdentified && snapshot.idle;
         }];
-        [self waitForLeft:all.boolValue ? QLMMuteValueUnmuted : QLMMuteValueMuted right:QLMMuteValueUnmuted];
+        [self waitForLeftMute:all.boolValue ? QLMMuteValueUnmuted : QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
         NSUInteger firstRead = [self firstReadFrom:before dropping:8];
         NSUInteger firstUnmute = [self firstSentFrom:before matching:^BOOL(NSData *message) {
             const uint8_t *bytes = message.bytes;
             BOOL unmuted = bytes[0] == QLMAddressAdapter ? bytes[2] == QLMMuteValueAdapterUnmuted : bytes[2] == QLMMuteValueUnmuted;
             return message.length == 3 && bytes[1] == 0x2B && unmuted;
         }];
-        NSUInteger firstLevel = [self firstSentFrom:before matching:^BOOL(NSData *message) {
-            return ((const uint8_t *)message.bytes)[1] == 0x1F;
-        }];
+        NSUInteger firstLevel = [self firstLevelFrom:before];
         XCTAssertNotEqual(firstRead, NSNotFound, @"%@", all);
         XCTAssertNotEqual(firstUnmute, NSNotFound, @"%@", all);
         XCTAssertGreaterThan(firstLevel, firstRead, @"%@", all);
         XCTAssertGreaterThan(firstUnmute, firstLevel, @"%@", all);
         QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
-        for (NSData *level in [self levelsFrom:before]) {
+        for (NSData *level in [self sentWithOpcode:0x1F from:before]) {
             XCTAssertEqualObjects(level, QLMAdapterRecord(&knob), @"%@", all);
         }
         [self stopSystem];
         [self lapseLeases];
-        [_bus perform:^{
-            self->_bus.knobTenths = @(-300);
-        }];
     }
 }
 
@@ -2856,12 +2838,10 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         XCTAssertEqualObjects(back.volumeDecibels, @(expected), @"%@", turned);
         XCTAssertEqualObjects(back.startLoweredFromDecibels, turned.boolValue ? @(-40) : nil, @"%@", turned);
         NSUInteger firstRead = [self firstReadFrom:before dropping:0];
-        NSUInteger firstLevel = [self firstSentFrom:before matching:^BOOL(NSData *message) {
-            return ((const uint8_t *)message.bytes)[1] == 0x1F;
-        }];
+        NSUInteger firstLevel = [self firstLevelFrom:before];
         XCTAssertLessThan(firstRead, firstLevel, @"%@", turned);
         QLMMessage level = QLMCommandVolume(expected, _settings.ceilingDecibels);
-        for (NSData *sent in [self levelsFrom:before]) {
+        for (NSData *sent in [self sentWithOpcode:0x1F from:before]) {
             XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"%@", turned);
         }
         [self stopSystem];
@@ -2879,17 +2859,6 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertGreaterThan([self countSent:QLMAdapterRecord(&set) from:0], 0u);
 }
 
-// Waits until each monitor last heard these 2B values.
-- (void)waitForLeft:(uint8_t)left right:(uint8_t)right {
-    __block BOOL heard = NO;
-    [self waitUntil:^BOOL {
-        [self->_bus perform:^{
-            heard = self->_left.muteValue == left && self->_right.muteValue == right;
-        }];
-        return heard;
-    }];
-}
-
 // A sleep whose take-over would be louder mutes every monitor before it
 // lets go, as a logout does (#70). A mute outlasts the host
 // (captures/qlm-control-first, 648.7 s). The wake's start sends qlm's level
@@ -2903,17 +2872,13 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         BOOL turned = row[1].boolValue;
         [self startWithKnob:@(-300) volume:@(-40)];
         [_system setMuted:YES forMonitorWithHardwareID:_left.hardwareID];
-        [self waitForLeft:QLMMuteValueMuted right:QLMMuteValueUnmuted];
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
         QLMSystem *system = _system;
-        QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-            return !snapshot.running;
-        } after:^{
-            [system stopMutingIfLouderWithCompletion:nil];
-        }];
+        QLMSnapshot *stopped = [self stopMutingAndWait];
         XCTAssertEqual(stopped.handBack.kind, QLMHandBackLouder, @"%@", row);
         XCTAssertTrue(stopped.mutingAll, @"%@", row);
         XCTAssertTrue(stopped.muteAllFromStop, @"%@", row);
-        [self waitForLeft:QLMMuteValueMuted right:QLMMuteValueMuted];
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueMuted];
         if (lapses.boolValue) {
             [self lapseLeases];
         }
@@ -2930,14 +2895,12 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         } after:^{
             [system start];
         }];
-        [self waitForLeft:QLMMuteValueMuted right:QLMMuteValueUnmuted];
+        [self waitForLeftMute:QLMMuteValueMuted rightMute:QLMMuteValueUnmuted];
         XCTAssertFalse(woken.mutingAll, @"%@", row);
         XCTAssertEqualObjects(woken.mutedHardwareIDs, [NSSet setWithObject:_left.hardwareID], @"%@", row);
         XCTAssertEqualObjects(woken.startLoweredFromDecibels, turned ? @(-40) : nil, @"%@", row);
         uint8_t rightSession = QLMFindMonitor(woken, _right.hardwareID).session;
-        NSUInteger firstLevel = [self firstSentFrom:before matching:^BOOL(NSData *message) {
-            return ((const uint8_t *)message.bytes)[1] == 0x1F;
-        }];
+        NSUInteger firstLevel = [self firstLevelFrom:before];
         NSUInteger firstLift = [self firstSentFrom:before matching:^BOOL(NSData *message) {
             const uint8_t *bytes = message.bytes;
             BOOL adapterUnmuted = bytes[0] == QLMAddressAdapter && bytes[2] == QLMMuteValueAdapterUnmuted;
@@ -2948,14 +2911,11 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
         XCTAssertNotEqual(firstLift, NSNotFound, @"%@", row);
         XCTAssertLessThan(firstLevel, firstLift, @"%@", row);
         QLMMessage level = QLMCommandVolume(turned ? -60 : -40, _settings.ceilingDecibels);
-        for (NSData *sent in [self levelsFrom:before]) {
+        for (NSData *sent in [self sentWithOpcode:0x1F from:before]) {
             XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"%@", row);
         }
         [self stopSystem];
         [self lapseLeases];
-        [_bus perform:^{
-            self->_bus.knobTenths = @(-300);
-        }];
     }
 }
 
@@ -2975,11 +2935,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self startWithKnob:@(-600) volume:@(-40)];
     NSUInteger before = _bus.sentMessages.count;
     QLMSystem *system = _system;
-    QLMSnapshot *stopped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    } after:^{
-        [system stopMutingIfLouderWithCompletion:nil];
-    }];
+    QLMSnapshot *stopped = [self stopMutingAndWait];
     QLMMessage knob = QLMCommandVolume(-60, _settings.ceilingDecibels);
     XCTAssertEqualObjects([self sentFrom:before matching:^BOOL(NSData *message) {
         return YES;
@@ -3002,7 +2958,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects(woken.volumeDecibels, @(expected));
     XCTAssertEqualObjects(woken.startLoweredFromDecibels, turned ? @(-40) : nil);
     QLMMessage level = QLMCommandVolume(expected, _settings.ceilingDecibels);
-    NSArray<NSData *> *levels = [self levelsFrom:before];
+    NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
     XCTAssertGreaterThan(levels.count, 0u);
     for (NSData *sent in levels) {
         XCTAssertEqualObjects(sent, QLMAdapterRecord(&level), @"turned %d", turned);
@@ -3017,11 +2973,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
 - (void)testAMuteChangeBeforeTheLiftStands {
     [self startWithKnob:nil volume:@(-40)];
     QLMSystem *system = _system;
-    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    } after:^{
-        [system stopMutingIfLouderWithCompletion:nil];
-    }];
+    [self stopMutingAndWait];
     [_bus perform:^{
         self->_bus.busyReason = @"GLM is running.";
     }];
@@ -3051,7 +3003,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertFalse(back.muteAllFromStop);
     XCTAssertEqualObjects(back.liftedHardwareIDs, [NSSet setWithObject:_left.hardwareID]);
     XCTAssertEqualObjects(back.mutedHardwareIDs, [NSSet setWithObject:_right.hardwareID]);
-    [self waitForLeft:QLMMuteValueUnmuted right:QLMMuteValueMuted];
+    [self waitForLeftMute:QLMMuteValueUnmuted rightMute:QLMMuteValueMuted];
 }
 
 // A poll that never went out, while another host held the adapter, says
