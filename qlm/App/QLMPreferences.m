@@ -3,6 +3,7 @@
 #include <math.h>
 
 #include "QLMCommands.h"
+#import "QLMFakeBus.h"
 #import "QLMSystem.h"
 
 const double QLMVolumeRangeMinimumSpan = 10;
@@ -23,6 +24,7 @@ static NSString *const QLMMutedName = @"MutedHardwareIDs";
 static NSString *const QLMMutingAllName = @"MutingAll";
 static NSString *const QLMLiftedName = @"LiftedHardwareIDs";
 static NSString *const QLMLeasesName = @"KnownLeases";
+static NSString *const QLMKnobReadName = @"KnobRead";
 static NSString *const QLMKnobName = @"KnobTenths";
 static NSString *const QLMLeaseHardwareIDKey = @"hardwareID";
 static NSString *const QLMLeaseSerialKey = @"serialNumber";
@@ -160,16 +162,35 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     [_defaults setObject:QLMLeasesPlist(knownLeases) forKey:[self key:QLMLeasesName]];
 }
 
+- (BOOL)knobRead {
+    id kept = [_defaults objectForKey:[self key:QLMKnobReadName]];
+    return [kept isKindOfClass:[NSNumber class]] && [kept boolValue];
+}
+
 // Anything but a whole number of tenths, at or under 0 dB, reads as no
-// reading. One that reads wrong can only cap the next start, never raise it.
+// knob, so a knob in at the next start counts as moved.
 - (NSNumber *)knobTenths {
+    if (!self.knobRead) {
+        return nil;
+    }
     id kept = [_defaults objectForKey:[self key:QLMKnobName]];
     double tenths = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
     return tenths == floor(tenths) && tenths <= 0 && tenths > INT32_MIN ? @((NSInteger)tenths) : nil;
 }
 
-- (void)setKnobTenths:(NSNumber *)knobTenths {
+- (void)keepKnobTenths:(NSNumber *)knobTenths {
     [_defaults setObject:knobTenths forKey:[self key:QLMKnobName]];
+    [_defaults setBool:YES forKey:[self key:QLMKnobReadName]];
+}
+
+- (void)restoreKnobOn:(QLMFakeBus *)bus {
+    if (!self.knobRead) {
+        return;
+    }
+    NSNumber *tenths = self.knobTenths;
+    [bus perform:^{
+        bus.knobTenths = tenths;
+    }];
 }
 
 // TRAP: a snapshot from before System starts carries an empty record, not
@@ -197,8 +218,8 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         self.knownLeases = snapshot.knownLeases;
     }
     NSNumber *knob = snapshot.adapter.knobTenths;
-    if (snapshot.adapter.hasStatus && ![(knob ?: NSNull.null) isEqual:(self.knobTenths ?: NSNull.null)]) {
-        self.knobTenths = knob;
+    if (snapshot.adapter.hasStatus && (!self.knobRead || ![(knob ?: NSNull.null) isEqual:(self.knobTenths ?: NSNull.null)])) {
+        [self keepKnobTenths:knob];
     }
 }
 
@@ -207,6 +228,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     settings.mutingAll = self.mutingAll;
     settings.liftedHardwareIDs = self.liftedHardwareIDs;
     settings.knownLeases = self.knownLeases;
+    settings.knobRead = self.knobRead;
     settings.knobTenths = self.knobTenths;
 }
 

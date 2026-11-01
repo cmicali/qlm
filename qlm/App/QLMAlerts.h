@@ -44,8 +44,9 @@ NSTimeInterval QLMSecondsCountingSleep(void);
 - (void)updateWithMonitorList:(QLMMonitorList *)list;
 
 // Call once as the Mac sleeps, when System's stop may make the monitors
-// louder and its mute all can't reach them. No one can answer a prompt then. While dimmed, every sleep would
-// alert, so a dimmed one alerts at most once a day.
+// louder and its mute all can't reach them. No one can answer a prompt
+// then. While dimmed, every sleep would alert, so a dimmed one alerts at
+// most once a day.
 - (void)alertSleepWithSnapshot:(QLMSnapshot *)snapshot;
 
 @end

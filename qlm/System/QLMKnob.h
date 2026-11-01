@@ -7,7 +7,9 @@ NS_ASSUME_NONNULL_BEGIN
 double QLMKnobStep(NSInteger tenths);
 
 // The knob moved from one reading to the other, by GLM's rule: more than a
-// whole dB, 11 tenths or more. Jitter at rest never strays that far.
+// whole dB, 11 tenths or more. At rest the reading wandered a whole dB at
+// most over 130 s (sleep-wake-no-sleep). A slow creep, as in
+// sleep-wake-darkwake, may count as a move.
 BOOL QLMKnobMoved(NSInteger fromTenths, NSInteger toTenths);
 
 // Turns the knob's readings into volume, by GLM's rule (docs/protocol.md,

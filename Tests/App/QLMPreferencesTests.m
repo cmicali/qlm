@@ -264,8 +264,9 @@ static NSData *QLMID(uint8_t last) {
 
 #pragma mark - A stop no one can answer
 
-// A System on the fake bus and the virtual clock, started from the record
-// kept at -40 dB, and keeping each snapshot's record, as the app does.
+// A System on the fake bus and the virtual clock, started from the level,
+// the record, and the knob kept, and keeping each snapshot's, as the app
+// does.
 - (QLMSystem *)systemOn:(QLMFakeBus *)bus clock:(QLMVirtualClock *)time keeping:(QLMBusPreferences *)kept {
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.clock = time;
@@ -274,7 +275,7 @@ static NSData *QLMID(uint8_t last) {
     [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
         [kept keepFromSnapshot:snapshot];
     } queue:dispatch_get_main_queue()];
-    [system setVolumeDecibels:-40];
+    [system setVolumeDecibels:kept.volumeDecibels];
     [system start];
     return system;
 }
@@ -344,48 +345,94 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
     [self stop:relaunched clock:time muting:NO];
 }
 
-// The knob's last reading is kept per bus, from a running System's
-// snapshot, and handed to the next one. The fake bus's knob rests at the
-// bottom stop, so a launch with it left there keeps the saved level, as
-// does a first launch with no reading kept. A knob turned between launches
-// caps the start at its level, and the level kept follows.
-- (void)testAKnobLeftAloneKeepsTheSavedLevelAndATurnCapsIt {
-    QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+// The fake bus's knob, as the app makes it: a new demo bus for each launch,
+// with its knob put back where the last one read.
+- (QLMFakeBus *)fakeBusFor:(QLMBusPreferences *)kept {
     QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
-    QLMBusPreferences *kept = _preferences.fakeBus;
-    XCTAssertNil(kept.knobTenths);
-    for (NSNumber *turnedTo in @[[NSNull null], [NSNull null], @(-600)]) {
-        if (turnedTo != (id)[NSNull null]) {
-            [bus perform:^{
-                bus.knobTenths = turnedTo;
-            }];
-        }
-        QLMSystem *system = [self systemOn:bus clock:time keeping:kept];
-        XCTAssertTrue([time runUntil:^BOOL {
-            QLMSnapshot *snapshot = system.snapshot;
-            return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
-        } within:60]);
-        BOOL turned = turnedTo != (id)[NSNull null];
-        XCTAssertEqualObjects(system.snapshot.volumeDecibels, turned ? @(-60) : @(-40), @"%@", turnedTo);
-        XCTAssertEqualObjects(system.snapshot.startLoweredFromDecibels, turned ? @(-40) : nil, @"%@", turnedTo);
-        XCTAssertEqual(kept.volumeDecibels, turned ? -60 : -40, @"%@", turnedTo);
-        XCTAssertEqualObjects(kept.knobTenths, turned ? @(-600) : @(-1004), @"%@", turnedTo);
-        [self stop:system clock:time muting:NO];
-    }
+    [kept restoreKnobOn:bus];
+    return bus;
 }
 
-// A kept reading that is no whole number of tenths at or under 0 dB reads
-// as none.
-- (void)testAKnobReadingKeptWrongReadsAsNone {
+- (QLMSnapshot *)settle:(QLMSystem *)system clock:(QLMVirtualClock *)time until:(BOOL (^)(QLMSnapshot *snapshot))test {
+    XCTAssertTrue([time runUntil:^BOOL {
+        QLMSnapshot *snapshot = system.snapshot;
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle && test(snapshot);
+    } within:60]);
+    return system.snapshot;
+}
+
+// The knob's last reading is kept per bus, from a running System's
+// snapshot, and handed to the next one. A first launch has none, so its
+// level stands. A relaunch on a fresh fake bus finds the knob where the
+// last one left it, so its level stands too. A knob turned between
+// launches caps the start at its level, and the level kept follows. The
+// real monitors' reading stays apart.
+- (void)testAFakeBusRelaunchKeepsItsLevelAndATurnCapsIt {
+    QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+    QLMBusPreferences *kept = _preferences.fakeBus;
+    XCTAssertFalse(kept.knobRead);
+    QLMFakeBus *bus = [self fakeBusFor:kept];
+    QLMSystem *system = [self systemOn:bus clock:time keeping:kept];
+    QLMSnapshot *first = [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
+        return YES;
+    }];
+    XCTAssertEqualObjects(first.volumeDecibels, @(-40));
+    XCTAssertNil(first.startLoweredFromDecibels);
+    // A turn while it runs is followed, and kept.
+    [bus perform:^{
+        bus.knobTenths = @(-500);
+    }];
+    [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
+        return [snapshot.volumeDecibels isEqual:@(-50)] && [kept.knobTenths isEqual:@(-500)];
+    }];
+    [self stop:system clock:time muting:NO];
+
+    bus = [self fakeBusFor:kept];
+    system = [self systemOn:bus clock:time keeping:kept];
+    QLMSnapshot *relaunched = [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
+        return YES;
+    }];
+    XCTAssertEqualObjects(relaunched.volumeDecibels, @(-50));
+    XCTAssertNil(relaunched.startLoweredFromDecibels);
+    [self stop:system clock:time muting:NO];
+
+    bus = [self fakeBusFor:kept];
+    [bus perform:^{
+        bus.knobTenths = @(-700);
+    }];
+    system = [self systemOn:bus clock:time keeping:kept];
+    QLMSnapshot *turned = [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
+        return YES;
+    }];
+    XCTAssertEqualObjects(turned.volumeDecibels, @(-70));
+    XCTAssertEqualObjects(turned.startLoweredFromDecibels, @(-50));
+    XCTAssertEqual(kept.volumeDecibels, -70);
+    XCTAssertEqualObjects(kept.knobTenths, @(-700));
+    [self stop:system clock:time muting:NO];
+    XCTAssertFalse(_preferences.adapterBus.knobRead);
+}
+
+// A reading is kept with whether one was read, so "no knob" differs from
+// "never read". A reading kept wrong reads as no knob, so a knob in at the
+// next start counts as moved, and can only cap it.
+- (void)testAKnobReadingKeptWrongReadsAsNoKnob {
     QLMBusPreferences *kept = _preferences.adapterBus;
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    [_defaults setObject:@(-300) forKey:@"QLMKnobTenths"];
+    XCTAssertFalse(kept.knobRead);
+    XCTAssertNil(kept.knobTenths);
+    [kept keepKnobTenths:nil];
+    XCTAssertTrue(kept.knobRead);
+    XCTAssertNil(kept.knobTenths);
     for (id wrong in @[@"-300", @(-300.5), @(5), @(NAN), @[@(-300)]]) {
         [_defaults setObject:wrong forKey:@"QLMKnobTenths"];
+        XCTAssertTrue(kept.knobRead, @"%@", wrong);
         XCTAssertNil(kept.knobTenths, @"%@", wrong);
     }
-    [_defaults setObject:@(-300) forKey:@"QLMKnobTenths"];
+    [kept keepKnobTenths:@(-300)];
     XCTAssertEqualObjects(kept.knobTenths, @(-300));
-    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     [kept fillSettings:settings];
+    XCTAssertTrue(settings.knobRead);
     XCTAssertEqualObjects(settings.knobTenths, @(-300));
 }
 

@@ -160,6 +160,7 @@ static NSDictionary *QLMDebugSnapshot(QLMSnapshot *snapshot) {
         @"wokeWithoutGroup": @(snapshot.wokeWithoutGroup),
         @"mutingAll": @(snapshot.mutingAll),
         @"muteAllFromStop": @(snapshot.muteAllFromStop),
+        @"levelAwaitsKnob": @(snapshot.levelAwaitsKnob),
         @"allMuted": @(snapshot.allMuted),
         @"anyOn": @(snapshot.anyOn),
         @"handBack": QLMDebugHandBack(snapshot),

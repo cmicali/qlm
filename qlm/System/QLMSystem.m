@@ -55,6 +55,7 @@ static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, N
     copy.mutingAll = self.mutingAll;
     copy.liftedHardwareIDs = self.liftedHardwareIDs;
     copy.knownLeases = self.knownLeases;
+    copy.knobRead = self.knobRead;
     copy.knobTenths = self.knobTenths;
     copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
     copy.clock = self.clock;
@@ -266,11 +267,14 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSUInteger _adapterPollsQueued;
     QLMKnob *_knob;
     NSNumber *_volumeDecibels;
-    // A start with a volume set has not read the knob yet. See
-    // lowerStartLevelToKnob:.
-    BOOL _startLevelPending;
+    // No level goes out until the knob is read: at a start with a volume
+    // set, and after a gap in the bus. See capLevelAtKnob:.
+    BOOL _levelAwaitsKnob;
+    BOOL _levelHeld;  // a level frame was held back meanwhile
     NSNumber *_startLoweredFrom;  // see QLMSnapshot
-    // The knob's last reading, nil with no knob in, kept across a stop.
+    // The knob's last reading, kept across a stop: whether one was read,
+    // and its tenths, nil with no knob in.
+    BOOL _knobRead;
     NSNumber *_lastKnobTenths;
     BOOL _volumeSendPending;
     NSTimeInterval _lastVolumeSend;  // on the clock; -INFINITY before the first
@@ -341,7 +345,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         [_liftedIDs minusSet:settings.mutedHardwareIDs];
         _adapterRecord = [[QLMTrackedAdapter alloc] init];
         _knob = [[QLMKnob alloc] init];
-        _lastKnobTenths = settings.knobTenths;
+        _knobRead = settings.knobRead;
+        _lastKnobTenths = settings.knobRead ? settings.knobTenths : nil;
         _snapshot = [[QLMSnapshot alloc] init];
     }
     return self;
@@ -410,7 +415,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _running = YES;
     _stoppedHandBack = nil;
     _startLoweredFrom = nil;
-    _startLevelPending = _volumeDecibels != nil;
+    _levelAwaitsKnob = _volumeDecibels != nil;
+    _levelHeld = NO;
     _nextSession = QLMAddressSessionFirst;
     [_adapter startOnQueue:_queue clock:_clock];
     _dirty = YES;
@@ -509,7 +515,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)finishStop {
     _running = NO;
     _stopping = NO;
-    _startLevelPending = NO;
+    _levelAwaitsKnob = NO;
+    _levelHeld = NO;
     _run += 1;
     [_sends removeAllObjects];
     // A reply that never comes must not stall the next start.
@@ -720,6 +727,9 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _adapterError = error;
         _adapterErrorReopens = _reopens;
         _dirty = YES;
+        // After about 2.6 s, the adapter takes over at the knob's level.
+        // So the next level waits for the knob, as at a start.
+        _levelAwaitsKnob = _levelAwaitsKnob || _volumeDecibels != nil;
     } else if (error == nil && _adapterError != nil) {
         _adapterError = nil;
         _dirty = YES;
@@ -1225,9 +1235,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         adapter.hasStatus = YES;
         adapter.missedPolls = 0;
         adapter.lastReply = [NSDate date];
-        if (self->_startLevelPending) {
-            [self lowerStartLevelToKnob:&status];
+        if (self->_levelAwaitsKnob) {
+            [self capLevelAtKnob:&status];
         }
+        self->_knobRead = YES;
         self->_lastKnobTenths = status.knob && status.hasKnobPosition ? @(status.knobTenths) : nil;
         [self followKnob:&status];
     }];
@@ -1235,25 +1246,28 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 
 // TRAP: while no host ran, the adapter ran the monitors at the knob's
 // level (docs/protocol.md: The hand-back). A turn of the knob meanwhile is
-// the listener's last choice. So when the knob moved since the last run's
-// last reading, the level System sends at a start, dimmed or not, is never
-// above the knob's first reading. The start reads the adapter first, as
-// GLM's launch does (captures/startup-idle, 7.293 s). With the knob
-// unmoved, no last reading, or no knob in, the level stands.
-- (void)lowerStartLevelToKnob:(const QLMAdapterStatus *)status {
-    _startLevelPending = NO;
+// the listener's last choice. So when the knob moved since the last
+// reading, or went in, the volume falls to the knob's when that is lower.
+// As followKnob: does, the knob sets the undimmed volume. The start reads
+// the adapter first, as GLM's launch does (captures/startup-idle, 7.293 s).
+// With the knob unmoved, no last reading, or no knob in now, the volume
+// stands. A level held back meanwhile goes out at once.
+- (void)capLevelAtKnob:(const QLMAdapterStatus *)status {
+    _levelAwaitsKnob = NO;
+    BOOL in = status->knob && status->hasKnobPosition;
     NSNumber *last = _lastKnobTenths;
-    if (!status->knob || !status->hasKnobPosition || last == nil || !QLMKnobMoved(last.integerValue, status->knobTenths)) {
-        return;
+    BOOL moved = _knobRead && in && (last == nil || QLMKnobMoved(last.integerValue, status->knobTenths));
+    double knob = in ? QLMKnobStep(status->knobTenths) : 0;
+    QLMMessage set = QLMCommandVolume(_volumeDecibels.doubleValue, self.settings.ceilingDecibels);
+    if (moved && QLMVolumeWordForDecibels(knob) < QLMVolumeWordOf(&set)) {
+        _startLoweredFrom = _volumeDecibels;
+        _volumeDecibels = @(knob);
+        _dirty = YES;
     }
-    double knob = QLMKnobStep(status->knobTenths);
-    QLMMessage sent = [self volumeMessage];
-    if (QLMVolumeWordForDecibels(knob) >= QLMVolumeWordOf(&sent)) {
-        return;
+    if (_levelHeld) {
+        _levelHeld = NO;
+        [self scheduleVolumeSend];
     }
-    _startLoweredFrom = _volumeDecibels;
-    _volumeDecibels = [self underCeiling:_dimmed ? knob + QLMDimDecibels : knob];
-    _dirty = YES;
 }
 
 // A volume the knob sets goes out as GLM sends it: the level three times,
@@ -1365,7 +1379,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (QLMCallNumber)setVolumeDecibels:(double)decibels {
     return [self call:^{
         [self->_knob forgetFollows];
-        self->_startLevelPending = NO;
+        self->_levelAwaitsKnob = NO;
+        self->_levelHeld = NO;
         self->_volumeDecibels = [self underCeiling:decibels];
         [self scheduleVolumeSend];
     }];
@@ -1425,31 +1440,38 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     return [self volumeItemThen:nil];
 }
 
-// TRAP: at a start, the level may yet fall to the knob's. So a frame queued
-// before the knob is read says the level as it goes out, and while the knob
-// is still unread then, one adapter poll goes ahead of it.
+// TRAP: while the level awaits the knob, it may yet fall to the knob's. So
+// a frame that reaches the head of the line then sends one adapter poll
+// ahead of it, and goes out after that only if the knob was read, at the
+// level then. Otherwise it is held back, and a level goes out once the knob
+// is read. A frame queued while the level waited says it as it goes out.
 - (dispatch_block_t)volumeItemThen:(nullable QLMSendCompletion)completion {
     _lastVolumeSend = _clock.now;
-    if (!_startLevelPending) {
-        return [self itemSending:[self volumeMessage] then:completion];
-    }
+    BOOL built = !_levelAwaitsKnob;
+    QLMMessage message = [self volumeMessage];
     __weak QLMSystem *weakSelf = self;
-    dispatch_block_t send = ^{
+    dispatch_block_t afterPoll = ^{
         QLMSystem *system = weakSelf;
-        if (system != nil) {
-            [system itemSending:[system volumeMessage] then:completion]();
+        if (system == nil) {
+            return;
         }
+        if (system->_levelAwaitsKnob) {
+            system->_levelHeld = YES;
+            [system finishItem:nil];
+            return;
+        }
+        [system itemSending:[system volumeMessage] then:completion]();
     };
     return ^{
         QLMSystem *system = weakSelf;
         if (system == nil) {
             return;
         }
-        if (!system->_startLevelPending) {
-            send();
+        if (!system->_levelAwaitsKnob) {
+            [system itemSending:built ? message : [system volumeMessage] then:completion]();
             return;
         }
-        [system enqueueNext:@[[system adapterPollItem], send]];
+        [system enqueueNext:@[[system adapterPollItem], afterPoll]];
         [system finishItem:nil];
     };
 }
@@ -1586,7 +1608,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // leased since, unless the user lifted it.
 - (void)liftStopMute {
     QLMMuteRecord *before = _beforeStopMute;
-    if (before == nil || _stopping) {
+    if (before == nil || _stopping || _levelAwaitsKnob) {
         return;
     }
     _beforeStopMute = nil;
@@ -1813,6 +1835,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         *error = QLMSystemErrorMake(QLMSystemErrorNoVolume, @"Set a volume before a group apply.", nil);
         return nil;
     }
+    // The switch's restore is a level.
+    if (_levelAwaitsKnob) {
+        *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, @"The level waits for the knob's first reading.", nil);
+        return nil;
+    }
     return blocks;
 }
 
@@ -1998,6 +2025,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.liftedHardwareIDs = [_liftedIDs copy];
     snapshot.muteAllFromStop = _beforeStopMute != nil;
     snapshot.startLoweredFromDecibels = _startLoweredFrom;
+    snapshot.levelAwaitsKnob = _levelAwaitsKnob;
     snapshot.knownLeases = [_knownLeases.allValues sortedArrayUsingComparator:^NSComparisonResult(QLMKnownLease *a, QLMKnownLease *b) {
         if (a.session != b.session) {
             return a.session < b.session ? NSOrderedAscending : NSOrderedDescending;

@@ -143,11 +143,11 @@ NSString *QLMStopText(QLMSnapshot *stopped) {
     if (stopped.running) {
         return @"qlm had not let go of the adapter in time.";
     }
-    if (stopped.muteAllFromStop) {
-        return @"qlm muted every monitor before it let go. Its next start lifts the mute once its level is out.";
-    }
     if (stopped.handBack.kind == QLMHandBackKnobLevel) {
         return @"qlm sent the knob's level before it let go, so the take-over changes nothing.";
+    }
+    if (stopped.muteAllFromStop) {
+        return @"qlm muted every monitor before it let go. Its next start lifts the mute once its level is out.";
     }
     return @"qlm let go with nothing more sent.";
 }

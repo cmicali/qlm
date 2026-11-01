@@ -110,6 +110,10 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     stopped = QLMSnapshotWith(QLMHandBackKnobLevel, @(-60), @(-50));
     stopped.running = NO;
     XCTAssertEqualObjects(QLMStopText(stopped), @"qlm sent the knob's level before it let go, so the take-over changes nothing.");
+    // A mute all left from an earlier stop does not make this one a mute.
+    stopped.mutingAll = YES;
+    stopped.muteAllFromStop = YES;
+    XCTAssertEqualObjects(QLMStopText(stopped), @"qlm sent the knob's level before it let go, so the take-over changes nothing.");
     stopped = QLMSnapshotWith(QLMHandBackLouder, @(-10), @(-50));
     stopped.running = NO;
     XCTAssertEqualObjects(QLMStopText(stopped), @"qlm let go with nothing more sent.");

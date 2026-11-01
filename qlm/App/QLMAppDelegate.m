@@ -170,6 +170,9 @@ static OSType QLMQuitReason(void) {
     } else {
         bus = [QLMFakeBus demoBusWithSubwoofer:YES];
         bus.recordsSentMessages = NO;
+        // A fresh bus's knob rests at the bottom. Where the last one read
+        // elsewhere, a relaunch would find it turned.
+        [self.preferences.fakeBus restoreKnobOn:bus];
         adapter = bus;
     }
     self.bus = bus;
