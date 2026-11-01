@@ -265,7 +265,7 @@ static NSData *QLMID(uint8_t last) {
 #pragma mark - A stop no one can answer
 
 // A System on the fake bus and the virtual clock, started from the record
-// kept, and keeping each snapshot's record as the app does.
+// kept at -40 dB, and keeping each snapshot's record, as the app does.
 - (QLMSystem *)systemOn:(QLMFakeBus *)bus clock:(QLMVirtualClock *)time keeping:(QLMBusPreferences *)kept {
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
     settings.clock = time;
@@ -274,9 +274,20 @@ static NSData *QLMID(uint8_t last) {
     [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
         [kept keepFromSnapshot:snapshot];
     } queue:dispatch_get_main_queue()];
-    [system start];
     [system setVolumeDecibels:-40];
+    [system start];
     return system;
+}
+
+// Every monitor last heard this 2B value.
+static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
+    __block BOOL heard = YES;
+    [bus perform:^{
+        for (QLMFakeMonitor *monitor in bus.monitors) {
+            heard = heard && monitor.muteValue == value;
+        }
+    }];
+    return heard;
 }
 
 - (void)stop:(QLMSystem *)system clock:(QLMVirtualClock *)time muting:(BOOL)mutes {
@@ -314,7 +325,6 @@ static NSData *QLMID(uint8_t last) {
     XCTAssertTrue(kept.mutingAll);
     XCTAssertEqual(kept.mutedHardwareIDs.count, 2u);
 
-    __block BOOL heard = YES;
     [bus perform:^{
         for (QLMFakeMonitor *monitor in bus.monitors) {
             monitor.muteValue = 0;
@@ -322,16 +332,47 @@ static NSData *QLMID(uint8_t last) {
     }];
     QLMSystem *relaunched = [self systemOn:bus clock:time keeping:kept];
     XCTAssertTrue([time runUntil:^BOOL {
-        [bus perform:^{
-            heard = YES;
-            for (QLMFakeMonitor *monitor in bus.monitors) {
-                heard = heard && monitor.muteValue == QLMMuteValueMuted;
-            }
-        }];
-        return heard;
+        return QLMAllHeard(bus, QLMMuteValueMuted);
     } within:60], @"the next System never restated the mutes");
+    // The Mac's sleep may have ended in a shutdown, so a relaunch never
+    // lifts the mute by itself, however long its level has been out.
+    [time advanceBy:10];
+    XCTAssertTrue(QLMAllHeard(bus, QLMMuteValueMuted));
     XCTAssertTrue(relaunched.snapshot.mutingAll);
+    XCTAssertFalse(relaunched.snapshot.muteAllFromStop);
+    XCTAssertTrue(kept.mutingAll);
     [self stop:relaunched clock:time muting:NO];
+}
+
+// The Mac's sleep stops System muting where the take-over would be louder.
+// The same System's start at wake lifts that mute all once its level is
+// out, and the record kept follows, back to no mutes.
+- (void)testASleepsMuteLiftsAtWakeAndTheRecordFollows {
+    QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
+    [bus perform:^{
+        bus.knobTenths = @(-300);
+    }];
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    QLMSystem *system = [self systemOn:bus clock:time keeping:kept];
+    XCTAssertTrue([time runUntil:^BOOL {
+        QLMSnapshot *snapshot = system.snapshot;
+        return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle && snapshot.handBack.kind == QLMHandBackLouder;
+    } within:60]);
+    [self stop:system clock:time muting:YES];
+    XCTAssertTrue(kept.mutingAll);
+    XCTAssertTrue(QLMAllHeard(bus, QLMMuteValueMuted));
+
+    [system start];
+    XCTAssertTrue([time runUntil:^BOOL {
+        QLMSnapshot *snapshot = system.snapshot;
+        return !snapshot.muteAllFromStop && snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle &&
+               QLMAllHeard(bus, QLMMuteValueUnmuted);
+    } within:60], @"the wake never lifted the sleep's mute");
+    XCTAssertFalse(kept.mutingAll);
+    XCTAssertEqual(kept.mutedHardwareIDs.count, 0u);
+    XCTAssertEqual(kept.volumeDecibels, -40);
+    [self stop:system clock:time muting:NO];
 }
 
 @end

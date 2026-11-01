@@ -6,7 +6,7 @@
 
 This section is a snapshot of main: what has run on the real adapter, what each layer holds, what we decided and learned on the way, and what comes next. [protocol.md](protocol.md) holds the protocol itself, with a source for every fact, so this section links to it rather than restate it.
 
-Main passes 463 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
+Main passes 472 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
 
 ### What has run where
 
@@ -213,7 +213,7 @@ Every layer has its directory. `project.yml` compiles the layers into each targe
 - **Every apply sends all twenty bands to each monitor**, changed or not, as GLM does ([protocol.md](protocol.md#payloads)).
 - **Volume changes go out at once**, out of cadence. State changes are sent twice.
 - **Poll the adapter with `01 08` about every 110 ms, and never pause longer than 1.7 s.** The reply is the knob's only path. GLM's polling is likely what tells the adapter a host is present.
-- **At connect, keep the app's own level. At the knob's first move, jump to the knob's position**, under the ceiling. After that, follow the knob, but not its jitter at rest. [adapter-status.md](adapter-status.md) has what GLM does.
+- **At connect, keep the app's own level, or the knob's when that is lower.** The adapter ran the monitors at the knob's level while no host did ([protocol.md](protocol.md#the-hand-back)). **At the knob's first move, jump to the knob's position**, under the ceiling. After that, follow the knob, but not its jitter at rest. [adapter-status.md](adapter-status.md) has what GLM does.
 - **TRAP: when the app quits, sleeps, or loses USB, the adapter takes over with its own level about 2.6 s later.** That level is the knob's position (`qlm-control-first`), and the ceiling does not hold it. If it differs from the app's, the volume jumps.
 
 ### The UI

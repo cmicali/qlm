@@ -195,14 +195,14 @@ static OSType QLMQuitReason(void) {
             [strongSelf showSnapshot:snapshot];
         }
     } queue:dispatch_get_main_queue()];
-    // On a stopped System this only records it, so the first frame is dimmed.
+    // On a stopped System these only record it, so the first frame is
+    // dimmed, and the start sends the app's own level, or the knob's when
+    // that is lower.
     if (dimmed) {
         [system setDimmed:YES];
     }
-    [system start];
-    // At connect, keep the app's own level. The knob moves nothing until a
-    // volume is set.
     [system setVolumeDecibels:self.kept.volumeDecibels];
+    [system start];
 }
 
 - (QLMBusPreferences *)kept {
@@ -211,15 +211,19 @@ static OSType QLMQuitReason(void) {
 
 // System lets go of the adapter before the Mac sleeps. As at quit, the
 // adapter takes over at the knob's level about 2.6 s after the last report
-// (qlm-control-first). A louder take-over is logged, and on the real
-// monitors it is an alert.
+// (qlm-control-first). No one can answer then, so where that may be louder,
+// the stop mutes every monitor first, as a logout does, and the wake lifts
+// the mute once qlm's level is out. Where the mute can't go out, it alerts.
 - (void)macWillSleep:(NSNotification *)notification {
     QLMSnapshot *snapshot = [self snapshotNow];
-    NSLog(@"qlm: the Mac sleeps. %@", QLMHandBackLine(snapshot) ?: @"the level at the take-over is unknown.");
-    if ([self stopMayRaiseLevel:snapshot]) {
+    BOOL louder = [self stopMayRaiseLevel:snapshot];
+    BOOL alerts = louder && !QLMStopCanMute(snapshot);
+    if (alerts) {
         [self.alerts alertSleepWithSnapshot:snapshot];
     }
-    [self stopSystemAndWaitMuting:NO];
+    [self stopSystemAndWaitMuting:louder];
+    NSString *did = alerts ? @"The bus took no frames, so qlm could not mute the monitors, and alerted." : QLMStopText(self.system.snapshot);
+    NSLog(@"qlm: the Mac sleeps. %@ %@", QLMHandBackLine(snapshot) ?: @"The level at the take-over is unknown.", did);
 }
 
 // Waits up to QLMStopAllowance for System to let go: the Mac waits for a
@@ -250,7 +254,8 @@ static OSType QLMQuitReason(void) {
 
 // The same System starts again. It keeps the volume, dim, the mutes, and
 // the active group across a stop, and takes back the leases the monitors
-// still hold.
+// still hold. It sends no level above the knob's, and lifts the sleep's
+// mute all once its level is out.
 - (void)macDidWake:(NSNotification *)notification {
     [self.system start];
 }

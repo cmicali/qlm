@@ -2,6 +2,10 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+// The knob's position, in tenths of a dB, at the nearest step, from
+// QLMVolumeDecibelsMin to 0 dB. No tenth falls halfway between two steps.
+double QLMKnobStep(NSInteger tenths);
+
 // Turns the knob's readings into volume, by GLM's rule (docs/protocol.md,
 // "Volume and the knob"). A reading more than a whole dB from the last one
 // the volume followed moves the volume to the knob's nearest step, and for

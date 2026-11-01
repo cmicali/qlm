@@ -99,6 +99,10 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // Never from System's queue.
 - (nullable QLMSnapshot *)snapshotNowWithin:(NSTimeInterval)seconds;
 
+// A volume set before the start, or kept from the last run, goes out no
+// louder than the knob's first reading: the adapter ran the monitors at the
+// knob's level meanwhile. The snapshot's startLoweredFromDecibels says when
+// that lowered it. A volume set after the start goes out as set.
 - (QLMCallNumber)start;
 // Before it lets go, sends the knob's level when the knob is at or below the
 // level System sends, so the adapter's take-over changes nothing. The
@@ -113,7 +117,9 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 // outlasts the host, so the take-over can't make the monitors louder. A
 // snapshot that still runs carries mute all in the record before the stop
 // ends, so a keeper of the record, as the app is, starts the next System
-// muted.
+// muted. This System's own next start lifts that mute all once a level has
+// gone out, back to the record before the stop, as the Mac's wake needs. A
+// change to the mutes before then keeps the user's.
 - (QLMCallNumber)stopMutingIfLouderWithCompletion:(nullable dispatch_block_t)completion;
 
 // Goes out at once, coalesced to one frame per volumeInterval, again every

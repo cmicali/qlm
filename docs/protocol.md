@@ -650,6 +650,10 @@ qlm's app chooses its stop by where the knob sits. With the knob above the app's
 
 A logout, restart, or shutdown can't wait on that question. Where a quit would ask, the app mutes every monitor first, then lets go, since a mute outlasts the host ([Monitors keep their level and their mute](#monitors-keep-their-level-and-their-mute)). The app saves mute all in its record before the stop ends, so the next launch restates the mutes. That stop hasn't run on the monitors yet.[^hand-back-mac]
 
+The Mac's sleep can't wait either. Where its take-over may be louder, the app's stop mutes every monitor first, as a logout's does. At the wake, the same System starts again. Once its first level has gone out, it lifts that mute all, back to the mutes from before the sleep, so a monitor the listener muted stays muted. Only the running app knows the mute came from a sleep. A relaunch starts from the saved record, still muted, since the sleep may have ended in a shutdown. Where the mute can't go out, because the adapter stopped answering or taking reports, the app alerts instead. A crash or a force quit of the app can't be caught, so nothing mutes, and the take-over brings the knob's level.[^hand-back-sleep]
+
+A start after a gap meets the reverse. While no host ran, the adapter ran the monitors at the knob's level, so that's what the listener heard last. So at a start, qlm never sends a level above the knob's first reading, dimmed or not. With the knob lower, the app's level gives way to the knob's, and System's snapshot says so. With the knob higher, or no knob in, the app's level goes out, under the ceiling as always. System reads the adapter before anything else, as GLM's launch does, so the knob is known before the first level goes out. The rule holds for a level set before the start, as the app sets its own. A level set once System runs, as `qlmctl` sets one after discovery, goes out as set. Neither rule has run on the monitors yet.[^hand-back-start]
+
 [^no-keep-alive]: `startup-idle`, from 10 s; #12.
 [^hlm-keep-alive]: hlm §7.
 [^second-poll]: [adapter-status.md](adapter-status.md#the-poll).
@@ -660,6 +664,8 @@ A logout, restart, or shutdown can't wait on that question. Where a quit would a
 [^hand-back-all]: `qlm-control-all`, at 81.4, 442.0, 456.8, 8410.5, 8425.4, 8494.1, and 8663.8 s, and its notes.
 [^hand-back-app]: `qlm-app-first`, and its notes; `testEachStopHandsBackAtTheKnob`; `QLMSnapshot.h`.
 [^hand-back-mac]: `testAQuitByTheMacMutesWhereTheUsersQuitAsks`; `testAStopMutingIfLouderMutesAllWhereTheTakeOverIsLouder`.
+[^hand-back-sleep]: `testASleepMutesWhereItCanAndAlertsWhereItCant`; `testALouderSleepMutesAllAndTheWakeLiftsItAfterTheLevel`; `testAQuieterSleepSendsTheKnobsLevelAndTheWakeKeepsIt`; `testASleepsMuteLiftsAtWakeAndTheRecordFollows`; `testTheMutingStopsRecordOutlastsALaunch`.
+[^hand-back-start]: The take-over, `qlm-control-first`, 289.7 s. GLM's first read, `startup-idle`, 7.293 s. `testAStartSendsNoLevelAboveTheKnob`; `testAStartWhoseFirstReadsAreLostReadsTheKnobBeforeTheLevel`; `testALevelSetAfterTheStartGoesOutAsSet`.
 
 ## Sequences
 
@@ -726,7 +732,7 @@ sequenceDiagram
 
 The sync's replies answer no request.[^open-sync] System's opening is from `qlm-first-discover`, at 24.940 to 24.947 s, before #33 added the sync. #32 adds the `19 01` to each monitor's old session, before the first probe.
 
-qlm leaves out `01 22`, `01 51 82`, the wake, the pair, and `01 2B 00` at connect. It sends no volume until one is set. The adapter bridged qlm without them.[^qlm-leaves-out]
+qlm leaves out `01 22`, `01 51 82`, the wake, the pair, and `01 2B 00` at connect. It sends no volume until one is set. The adapter bridged qlm without them.[^qlm-leaves-out] The app sets its level before the start, so its first level goes out after the adapter's first read, no louder than the knob ([The hand-back](#the-hand-back)).
 
 ### Discovery
 
