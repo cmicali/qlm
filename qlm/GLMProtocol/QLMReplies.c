@@ -191,6 +191,13 @@ QLMTelemetryStatus QLMReplyTelemetry(const QLMMessage *message, QLMTelemetry *te
     return whole ? QLMTelemetryOK : QLMTelemetryErrorPartial;
 }
 
+int32_t QLMTelemetryWakeCount(const QLMTelemetry *telemetry) {
+    if (telemetry->wakeSteps == QLMTelemetryAbsent || telemetry->wakeSeconds == QLMTelemetryAbsent) {
+        return QLMTelemetryAbsent;
+    }
+    return telemetry->wakeSteps * 256 + telemetry->wakeSeconds;
+}
+
 static uint32_t QLMReadBigEndian32(const uint8_t *bytes) {
     return (uint32_t)bytes[0] << 24 | (uint32_t)bytes[1] << 16 | (uint32_t)bytes[2] << 8 | (uint32_t)bytes[3];
 }

@@ -163,8 +163,10 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly) BOOL dimmed;
 @property (nonatomic, readonly) BOOL applying;
 @property (nonatomic, readonly, nullable) NSString *activeGroupName;  // the last group applied in full
-// A wake went out with no group active, so the monitors that woke play on
-// their stored settings. It ends when a group applies, or when GLM holds
+// A wake went out with no group active, or a monitor was switched on while
+// System ran with none, so the monitors that woke play on their stored
+// settings. A monitor found at a start, or right after a gap in the bus,
+// does not count. It ends when a group applies, or when GLM holds
 // the adapter, since GLM's launch applies its group. Kept across a stop.
 @property (nonatomic, readonly) BOOL wokeWithoutGroup;
 // Nothing was queued for the bus, in flight, or, while System runs, held by

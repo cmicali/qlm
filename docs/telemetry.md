@@ -73,6 +73,7 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 - **A wake resets it.** In `standby-wake`, GLM woke the six at 46.0 s. At 49.05 s, each read `01` or `02`. Monitors that join a group from standby read `02` too (`group-switch-main-2x1-main-4x2`, 38.2 s, and `group-switch-main-2x2-main-4x2`, 12.8 s). After qlm's wake, the 8351Bs and the 7370A read `01` (`qlm-control-first`, 829.4 s).
 - **Monitors woken together count together.** The two 8330A woke in the same group switch at about 21:14:48. A minute later, in `mute-dim`, both read `35` at 0.19 s.
 - **A power-on at the power switch resets it too.** In `qlm-control-all`, the Rear Right 8330A was switched on and answered the probe at 214.755 s. Its first frame, at 215.94 s, read `01`, and its `8A` read `00 00` (`testAPowerOnStartsTheWakeCount`). The other 8330A's count restarted at about 175 s too, though the notes don't say it was switched.
+- **qlm reads it, with `8A`, to tell a monitor switched on while it runs.** For a lease that follows a probe no monitor answered, System takes `8A` × 256 + `49` from the first frame after the lease's first that carries `8A`. When that count puts the wake no more than 10 s before the probe, the monitor was switched on or woken since. With no group active, the snapshot then says the monitors play without their group's settings. In every capture, such a count put the wake 0.18 to 1.99 s after the probe, or 327 s or more before it. With no host run's probe ever forgotten, the nearest before it is 67 s (`testThePowerOnMarginSplitsEveryLease`). `49` alone can't tell, since it wraps. When the frame that carries `8A` comes split, the read waits for the next, about 60 s after the lease, since System ignores a split's parts.
 
 ## `8A`: the seconds since the wake, over 256
 
@@ -83,6 +84,7 @@ Any of them may end with `8A`. Every whole frame ends with `84`, or `84` and `8A
 - **It is 0 after a wake.** In `standby-wake`, each of the six read `00 00` from 52.0 s. After qlm's wake, the 8351Bs read `00 00` at 833.4 s, and the 7370A at 839.1 s.
 - **With `49`, it counts the seconds since the wake.** Take two frames in a row that carry `8A` from one session, with no lease of that session and no broadcast `3A 03 7F` or `3A 03 01` between. The captures hold 508 such pairs. In 505, the time less `8A` × 256 + `49` moves less than 1.5 s from one to the next, through every step. In `sleep-wake-darkwake`, it holds within a second (`testWakeStepsEveryThirtySeconds`). In `qlm-control-all`, all six read `00 1E` from 8400.45 to 8481.47 s, after their wake at 575.1 s: 30 steps of 256 s is 7,680 s.
 - **In the other three, the earlier frame lags a step.** Each came 9 to 22 s after `49` wrapped, and carried the `8A` from before the wrap (`knob-sweep`, 9.185 s; `qlm-first-discover`, 79.695 and 79.753 s). **Guess:** a frame's `8A` is read when its 30 s slot falls due, a little before the frame.
+- **A lease's first frame can carry such an `8A`.** In `qlm-control-all`, the Rear Left 8330A's count ran from 175 s. `qlmctl` leased it at 431.944 s, 1 s after `49` wrapped, and its first frame read `49` at `01` and `8A` at `00 00`. The next `8A`, at 455.09 s, read `00 01` (`testALeasesFirstFrameCanCarryAnOld8A`). Each of the three above is a host's first poll after a lease too. So qlm never reads `8A` from a lease's first frame.
 - **A step looks like 240 s from the outside.** In `sleep-wake-darkwake`, the first frames to show `00 03` and `00 04` came 240 s apart. That's a multiple of the 30 s between frames that carry it, not the step. The count runs on across both steps without a jump. It counts in standby too: the Left went from `00 02` to `00 05` in 721 s (`qlm-control-first`).
 - **The value is big-endian, by section 4.** Only the low byte moves in the captures. No capture shows a carry.
 - **The values the captures show:**
@@ -177,7 +179,7 @@ Show each output as its count less `80`, in dB, over a window of about 60 dB, as
 ## What qlm can use
 
 - **`wakeSeconds`** tells a new frame from an old one, and shows how long ago a monitor woke, within 256 s.
-- **`wakeSteps`** × 256 + `wakeSeconds` is how long a monitor has been up, in seconds. `wakeSteps` arrives once in 30 s, so keep the last one.
+- **`wakeSteps`** × 256 + `wakeSeconds` is how long a monitor has been up, in seconds. `wakeSteps` arrives once in 30 s, so keep the last one. A lease's first frame may carry an old one.
 - **The meters** can drive the window's input and output bars.
 - **The temperature** is unsettled for a minute after a wake.
 
