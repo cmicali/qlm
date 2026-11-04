@@ -52,13 +52,24 @@ BOOL QLMIsSavableLevel(double decibels) {
     return decibels <= QLMVolumeDecibelsMax;
 }
 
-// Anything but a number at or under 0 dB reads as the default. The levels
-// register no default, so a key with none can't read as 0 dB. TRAP:
-// doubleForKey: reads a string that is no number, or nothing, as 0 dB.
-static double QLMKeptLevel(NSUserDefaults *defaults, NSString *key, double fallback) {
+// NAN when nothing is kept, or what is kept is no number. TRAP:
+// doubleForKey: reads a string that is no number, or nothing, as 0.
+static double QLMKeptNumber(NSUserDefaults *defaults, NSString *key) {
     id kept = [defaults objectForKey:key];
-    double decibels = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
+    return [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
+}
+
+// Anything but a number at or under 0 dB reads as the default. The levels
+// register no default, so a key with none can't read as 0 dB.
+static double QLMKeptLevel(NSUserDefaults *defaults, NSString *key, double fallback) {
+    double decibels = QLMKeptNumber(defaults, key);
     return QLMIsSavableLevel(decibels) ? decibels : fallback;
+}
+
+// In QLMOSDPlacement's order. A function, since a literal array is no
+// constant at file scope.
+static NSArray<NSString *> *QLMOSDPlacementNames(void) {
+    return @[@"topLeft", @"topCenter", @"topRight", @"bottomLeft", @"bottomCenter", @"bottomRight"];
 }
 
 // Kept as a property list.
@@ -352,12 +363,8 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 
 - (QLMOSDPlacement)osdPlacement {
     id kept = [_defaults objectForKey:QLMOSDPlacementKey];
-    for (QLMOSDPlacement placement = QLMOSDPlacementTopLeft; placement <= QLMOSDPlacementBottomRight; placement++) {
-        if ([kept isEqual:QLMOSDPlacementName(placement)]) {
-            return placement;
-        }
-    }
-    return QLMOSDPlacementBottomCenter;
+    NSUInteger index = kept == nil ? NSNotFound : [QLMOSDPlacementNames() indexOfObject:kept];
+    return index == NSNotFound ? QLMOSDPlacementBottomCenter : (QLMOSDPlacement)index;
 }
 
 - (void)setOsdPlacement:(QLMOSDPlacement)osdPlacement {
@@ -368,11 +375,8 @@ static NSTimeInterval QLMBoundedOSDSeconds(NSTimeInterval seconds) {
     return fmax(QLMOSDSecondsMin, fmin(QLMOSDSecondsMax, round(seconds / QLMOSDSecondsStep) * QLMOSDSecondsStep));
 }
 
-// TRAP: doubleForKey: reads a string that is no number as 0 s, so the kept
-// object is checked.
 - (NSTimeInterval)osdSeconds {
-    id kept = [_defaults objectForKey:QLMOSDSecondsKey];
-    double seconds = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
+    double seconds = QLMKeptNumber(_defaults, QLMOSDSecondsKey);
     return isfinite(seconds) ? QLMBoundedOSDSeconds(seconds) : QLMDefaultOSDSeconds;
 }
 
@@ -386,15 +390,7 @@ static NSTimeInterval QLMBoundedOSDSeconds(NSTimeInterval seconds) {
 @end
 
 NSString *QLMOSDPlacementName(QLMOSDPlacement placement) {
-    switch (placement) {
-        case QLMOSDPlacementTopLeft: return @"topLeft";
-        case QLMOSDPlacementTopCenter: return @"topCenter";
-        case QLMOSDPlacementTopRight: return @"topRight";
-        case QLMOSDPlacementBottomLeft: return @"bottomLeft";
-        case QLMOSDPlacementBottomCenter: return @"bottomCenter";
-        case QLMOSDPlacementBottomRight: return @"bottomRight";
-    }
-    return @"bottomCenter";
+    return QLMOSDPlacementNames()[(NSUInteger)placement];
 }
 
 NSString *QLMSetupDirectory(void) {

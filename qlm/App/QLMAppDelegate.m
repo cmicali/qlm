@@ -478,6 +478,10 @@ static OSType QLMQuitReason(void) {
     return [self mayStop:@"Turning off the adapter" anyway:@"Turn Off Anyway"];
 }
 
+- (void)settingsDidChangeOSD:(QLMSettingsWindowController *)controller {
+    [self.osdController reloadPreferences];
+}
+
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
     [self restartSystem];
 }
@@ -580,12 +584,15 @@ static OSType QLMQuitReason(void) {
 
 // As Settings' skin picker will: a skin the library refuses is not kept.
 - (NSString *)debugChooseSkin:(NSString *)name {
-    return [self.mainWindowController chooseSkinNamed:name];
+    NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
+    if (refusal == nil) {
+        [self.osdController reloadPreferences];
+    }
+    return refusal;
 }
 
-- (BOOL)debugShowOSD {
-    QLMSnapshot *snapshot = self.monitorList.snapshot;
-    return snapshot != nil && [self.osdController showSnapshot:snapshot];
+- (NSString *)debugShowOSD {
+    return [self.osdController showSnapshot:self.monitorList.snapshot];
 }
 
 - (void)debugHideOSD {
@@ -596,8 +603,11 @@ static OSType QLMQuitReason(void) {
     return self.osdController.showing;
 }
 
-- (QLMFakeBus *)debugFakeBus {
-    return self.bus;
+- (NSString *)debugTurnFakeKnobTo:(NSInteger)tenths {
+    if (self.bus == nil) {
+        return @"qlm drives the GLM adapter, not the fake bus";
+    }
+    return [QLMFakeBusWindowController turnKnobOf:self.bus to:tenths];
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

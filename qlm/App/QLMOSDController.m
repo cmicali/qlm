@@ -1,9 +1,11 @@
 #import "QLMOSDController.h"
 
 #import "QLMFormat.h"
+#import "QLMKnobMath.h"
 #import "QLMOSDRule.h"
 #import "QLMSkinControls.h"
 #import "QLMSkinLibrary.h"
+#import "QLMSkinView.h"
 
 static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 
@@ -29,13 +31,13 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 @interface QLMOSDController ()
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMOSDRule *rule;
+// Both made on the first show.
+@property (nonatomic, nullable) NSWindow *window;
 @property (nonatomic, nullable) QLMSkinOSDView *osdView;
-@property (nonatomic, copy, nullable) NSString *skinName;
+@property (nonatomic, nullable) QLMSnapshot *shown;
+// The hold, then the fade.
 @property (nonatomic, nullable) NSTimer *timer;
-@property (nonatomic) id<NSObject> defaultsObserver;
-// Each show and hide moves it on, so a fade a show interrupted orders
-// nothing out.
-@property (nonatomic) NSUInteger generation;
+@property (nonatomic) BOOL fading;
 @end
 
 @implementation QLMOSDController
@@ -44,160 +46,152 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     self = [super init];
     if (self) {
         _preferences = preferences;
-        _rule = [[QLMOSDRule alloc] initWithNow:^NSTimeInterval {
-            return NSProcessInfo.processInfo.systemUptime;
-        }];
-        _window = [[QLMOSDWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100) styleMask:NSWindowStyleMaskBorderless
-                                                   backing:NSBackingStoreBuffered defer:YES];
-        _window.title = @"qlm OSD";
-        _window.releasedWhenClosed = NO;
-        _window.level = NSPopUpMenuWindowLevel;
-        _window.ignoresMouseEvents = YES;
-        _window.hidesOnDeactivate = NO;
-        _window.hasShadow = NO;
-        _window.opaque = NO;
-        _window.backgroundColor = NSColor.clearColor;
-        _window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
-                                    | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle;
-        [self reloadPreferences];
-        // The notification posts on the thread that wrote the defaults.
-        __weak QLMOSDController *weakSelf = self;
-        _defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil
-                                                                             queue:NSOperationQueue.mainQueue
-                                                                        usingBlock:^(NSNotification *notification) {
-            [weakSelf reloadPreferences];
-        }];
+        _rule = [[QLMOSDRule alloc] init];
+        _rule.enabled = preferences.showsOSD;
     }
     return self;
 }
 
 - (void)dealloc {
-    [NSNotificationCenter.defaultCenter removeObserver:_defaultsObserver];
     [_timer invalidate];
 }
 
-// Every save posts the notification, a knob's level kept among them, so
-// only a new skin rebuilds the view.
 - (void)reloadPreferences {
     self.rule.enabled = self.preferences.showsOSD;
-    self.rule.seconds = self.preferences.osdSeconds;
-    if (!self.rule.enabled && self.window.visible) {
+    if (!self.rule.enabled) {
         [self hide];
     }
-    NSString *name = self.preferences.skinName;
-    if (self.osdView == nil || ![name isEqualToString:self.skinName]) {
-        [self loadSkinNamed:name];
-    }
-    if (self.window.visible) {
+    // The next show loads the skin again.
+    self.osdView = nil;
+    QLMSnapshot *shown = self.shown;
+    if (self.window.visible && shown != nil) {
+        [self loadSkin];
+        [self render:shown];
         [self place];
     }
 }
 
-// TRAP: dump_screenshot draws a flipped content view upside down, as
-// QLMSkinPreview says, so the skin's view fills an unflipped container.
-- (void)loadSkinNamed:(NSString *)name {
-    QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:name refusal:NULL];
+- (void)makeWindow {
+    NSWindow *window = [[QLMOSDWindow alloc] initWithContentRect:NSMakeRect(0, 0, 100, 100) styleMask:NSWindowStyleMaskBorderless
+                                                         backing:NSBackingStoreBuffered defer:YES];
+    window.title = @"qlm OSD";
+    window.releasedWhenClosed = NO;
+    window.level = NSPopUpMenuWindowLevel;
+    window.ignoresMouseEvents = YES;
+    window.hasShadow = NO;
+    window.opaque = NO;
+    window.backgroundColor = NSColor.clearColor;
+    window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
+                                | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle;
+    window.contentView = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 100, 100)];
+    self.window = window;
+}
+
+- (void)loadSkin {
+    QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:self.preferences.skinName refusal:NULL];
     if (skin == nil) {
         return;
     }
     QLMSkinOSDView *view = [[QLMSkinOSDView alloc] initWithSkin:skin];
-    QLMSkinOSDView *old = self.osdView;
-    view.level = old.level;
-    view.unit = old.unit;
-    view.title = old.title;
-    view.subtitle = old.subtitle;
-    view.fraction = old.fraction;
-    NSView *container = [[NSView alloc] initWithFrame:view.frame];
-    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    [container addSubview:view];
-    self.osdView = view;
-    self.skinName = name;
+    view.unit = @"dB";
     [self.window setContentSize:view.frame.size];
-    self.window.contentView = container;
+    QLMSkinHost(self.window, view);
+    self.osdView = view;
 }
 
 - (void)place {
-    NSScreen *screen = NSScreen.mainScreen ?: NSScreen.screens.firstObject;
+    NSScreen *screen = NSScreen.mainScreen;
     if (screen == nil) {
         return;
     }
-    NSRect frame = QLMOSDFrame(screen.visibleFrame, self.window.frame.size, self.preferences.osdPlacement);
-    [self.window setFrame:frame display:NO];
+    [self.window setFrame:QLMOSDFrame(screen.visibleFrame, self.window.frame.size, self.preferences.osdPlacement) display:NO];
 }
 
 - (void)takeSnapshot:(QLMSnapshot *)snapshot {
-    if ([self.rule showsSnapshot:snapshot]) {
+    if ([self.rule showsSnapshot:snapshot whileShowing:self.timer != nil]) {
         [self present:snapshot];
     }
 }
 
-- (BOOL)showSnapshot:(QLMSnapshot *)snapshot {
-    if (snapshot.volumeDecibels == nil) {
-        return NO;
+- (NSString *)showSnapshot:(QLMSnapshot *)snapshot {
+    if (!self.rule.enabled) {
+        return @"the OSD is off in Settings";
     }
-    [self.rule show];
+    if (snapshot.volumeDecibels == nil) {
+        return @"no level yet";
+    }
     [self present:snapshot];
-    return YES;
+    return nil;
 }
 
-// No animation in: it is up at full strength at once.
-- (void)present:(QLMSnapshot *)snapshot {
+- (void)render:(QLMSnapshot *)snapshot {
     double decibels = snapshot.volumeDecibels.doubleValue;
     QLMSkinOSDView *view = self.osdView;
     view.level = QLMDecibelsNumberText(decibels, 1);
-    view.unit = @"dB";
-    view.title = QLMOSDTitle(snapshot);
-    view.subtitle = QLMOSDSubtitle(snapshot);
-    view.fraction = QLMOSDFraction(decibels, self.preferences.lowestDecibels, self.preferences.ceilingDecibels);
+    view.title = QLMGroupNameText(snapshot);
+    view.subtitle = QLMOutputStateText(snapshot) ?: @"qlm · Output level";
+    view.fraction = QLMKnobFraction(decibels, self.preferences.lowestDecibels, QLMShownCeiling(snapshot, self.preferences.ceilingDecibels));
+}
 
-    self.generation += 1;
-    [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-        context.duration = 0;
-        self.window.animator.alphaValue = 1;
-    }];
-    [self place];
+// No animation in.
+- (void)present:(QLMSnapshot *)snapshot {
+    if (self.window == nil) {
+        [self makeWindow];
+    }
+    if (self.osdView == nil) {
+        [self loadSkin];
+    }
+    self.shown = snapshot;
+    [self render:snapshot];
+    self.fading = NO;
+    self.window.alphaValue = 1;
+    if (!self.window.visible) {
+        [self place];
+    }
     [self.window orderFrontRegardless];
+    [self holdFor:self.preferences.osdSeconds then:^(QLMOSDController *controller) {
+        [controller fade];
+    }];
+}
+
+// In the common modes, so it ends during a slider drag or a menu held open.
+- (void)holdFor:(NSTimeInterval)seconds then:(void (^)(QLMOSDController *controller))then {
     [self.timer invalidate];
-    // In the common modes, so it ends during a slider drag or a menu held open.
     __weak QLMOSDController *weakSelf = self;
-    self.timer = [NSTimer timerWithTimeInterval:self.rule.seconds repeats:NO block:^(NSTimer *timer) {
-        [weakSelf timerEnded];
+    self.timer = [NSTimer timerWithTimeInterval:seconds repeats:NO block:^(NSTimer *timer) {
+        QLMOSDController *strongSelf = weakSelf;
+        if (strongSelf != nil) {
+            then(strongSelf);
+        }
     }];
     self.timer.tolerance = 0.02;
     [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
 }
 
-- (void)timerEnded {
-    self.timer = nil;
-    [self.rule hide];
-    NSUInteger generation = self.generation;
+// TRAP: ordered out from the animation group's completion handler, the
+// window stayed in at alpha 0 in a run with the app inactive. A timer of
+// its own orders it out.
+- (void)fade {
+    self.fading = YES;
     [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
         context.duration = QLMOSDFadeSeconds;
         self.window.animator.alphaValue = 0;
     }];
-    // TRAP: ordered out from the group's completion handler, the window
-    // stayed in at alpha 0 in a run with the app inactive. A delay of its
-    // own orders it out.
-    __weak QLMOSDController *weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(QLMOSDFadeSeconds * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        QLMOSDController *strongSelf = weakSelf;
-        if (strongSelf != nil && strongSelf.generation == generation) {
-            [strongSelf hide];
-        }
-    });
+    [self holdFor:QLMOSDFadeSeconds then:^(QLMOSDController *controller) {
+        [controller hide];
+    }];
 }
 
 - (void)hide {
-    self.generation += 1;
     [self.timer invalidate];
     self.timer = nil;
-    [self.rule hide];
+    self.fading = NO;
     [self.window orderOut:nil];
     self.window.alphaValue = 1;
 }
 
 - (BOOL)showing {
-    return self.window.visible && self.rule.showing;
+    return self.timer != nil && !self.fading;
 }
 
 @end

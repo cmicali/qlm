@@ -18,6 +18,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (BOOL)settingsShouldTurnOffAdapter:(QLMSettingsWindowController *)controller;
 // The preferences switched between the GLM adapter and the fake bus.
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller;
+// The OSD's setting, place, or seconds changed in the preferences.
+- (void)settingsDidChangeOSD:(QLMSettingsWindowController *)controller;
 @end
 
 // Settings: the GLM adapter or the fake bus and its hand-back, the setup

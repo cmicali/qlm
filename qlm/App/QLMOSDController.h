@@ -6,24 +6,22 @@
 NS_ASSUME_NONNULL_BEGIN
 
 // The on-screen display: a borderless window that shows the level when the
-// adapter's knob turns, then fades. It takes no focus and no clicks, joins
-// every Space, and shows over full-screen apps. QLMOSDRule decides when. It
-// rereads the preferences, the skin among them, whenever the defaults
-// change. On the main queue.
+// adapter's knob turns, then fades. QLMOSDRule decides when. On the main
+// queue.
 @interface QLMOSDController : NSObject
 
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
-// Takes each snapshot. It shows the OSD when the rule says so.
+// Call after the OSD's settings or the skin change in the preferences.
+- (void)reloadPreferences;
 - (void)takeSnapshot:(QLMSnapshot *)snapshot;
-// Shows the snapshot's level now, as a turn would. NO with no level yet.
-- (BOOL)showSnapshot:(QLMSnapshot *)snapshot;
-// Orders it out at once, with no fade.
+// Shows the snapshot's level now, as a turn would, or says why not.
+- (nullable NSString *)showSnapshot:(nullable QLMSnapshot *)snapshot;
+// At once, with no fade.
 - (void)hide;
 
 @property (nonatomic, readonly) BOOL showing;
-@property (nonatomic, readonly) NSWindow *window;
 
 @end
 

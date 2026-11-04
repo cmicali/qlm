@@ -234,6 +234,7 @@ targets:
       # start, and any view's layer asks for it.
       - qlm/App/QLMAlerts.m
       - qlm/App/QLMDebugChannel.m
+      - qlm/App/QLMFakeBusWindowController.m
       - qlm/App/QLMFormat.m
       - qlm/App/QLMMainWindowModel.m
       - qlm/App/QLMMonitorList.m
@@ -242,6 +243,7 @@ targets:
       - qlm/App/QLMSkin.m
       - qlm/App/QLMSkinLayout.m
       - qlm/App/QLMSkinLibrary.m
+      - qlm/App/QLMViews.m
     settings:
       base:
         PRODUCT_NAME: "$(TARGET_NAME)"

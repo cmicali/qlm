@@ -195,10 +195,21 @@ static const NSInteger QLMKnobBottomTenths = -1004;
 }
 
 - (void)knobTurned:(NSSlider *)slider {
-    NSNumber *knob = @((NSInteger)lround(slider.doubleValue));
-    [self change:^(QLMFakeBus *bus) {
-        bus.knobTenths = knob;
+    QLMFakeBus *bus = self.bus;
+    if (bus != nil) {
+        (void)[QLMFakeBusWindowController turnKnobOf:bus to:lround(slider.doubleValue)];
+    }
+    [self change:nil];
+}
+
++ (NSString *)turnKnobOf:(QLMFakeBus *)bus to:(NSInteger)tenths {
+    if (tenths < QLMKnobBottomTenths || tenths > 0) {
+        return [NSString stringWithFormat:@"%ld is outside the knob's travel, %ld to 0", (long)tenths, (long)QLMKnobBottomTenths];
+    }
+    [bus perform:^{
+        bus.knobTenths = @(tenths);
     }];
+    return nil;
 }
 
 - (void)busyClicked:(NSButton *)checkbox {

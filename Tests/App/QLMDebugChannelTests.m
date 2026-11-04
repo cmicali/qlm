@@ -7,6 +7,7 @@
 #import "QLMApplySequence.h"
 #import "QLMDebugChannel.h"
 #import "QLMFakeBus.h"
+#import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
 #import "QLMPreferences.h"
 #import "QLMSystem.h"
@@ -30,6 +31,7 @@
 @property (nonatomic, copy, nullable) NSString *debugQuitGLMTitle;
 @property (nonatomic) BOOL debugQuitAsksFirst;
 @property (nonatomic) BOOL debugOSDShowing;
+// The bus the app delegate has, or nil on the adapter.
 @property (nonatomic, nullable) QLMFakeBus *debugFakeBus;
 @property (nonatomic) BOOL debugWindowShowing;
 @property (nonatomic, copy, nullable) NSString *debugWindowApplyError;
@@ -96,18 +98,29 @@
     return @{@"ok": @YES, @"skin": name};
 }
 
-- (BOOL)debugShowOSD {
+// As the OSD's controller refuses.
+- (NSString *)debugShowOSD {
+    if (!self.debugPreferences.showsOSD) {
+        return @"the OSD is off in Settings";
+    }
     if (self.debugSnapshot.volumeDecibels == nil) {
-        return NO;
+        return @"no level yet";
     }
     [self.actions addObject:@"show osd"];
     self.debugOSDShowing = YES;
-    return YES;
+    return nil;
 }
 
 - (void)debugHideOSD {
     [self.actions addObject:@"hide osd"];
     self.debugOSDShowing = NO;
+}
+
+- (NSString *)debugTurnFakeKnobTo:(NSInteger)tenths {
+    if (self.debugFakeBus == nil) {
+        return @"qlm drives the GLM adapter, not the fake bus";
+    }
+    return [QLMFakeBusWindowController turnKnobOf:self.debugFakeBus to:tenths];
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

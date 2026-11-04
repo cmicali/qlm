@@ -83,12 +83,12 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.setupNote.selectable = YES;
 
     self.lowestField = [self decibelsField];
-    self.lowestStepper = [self stepper];
+    self.lowestStepper = [self stepperWithIncrement:QLMVolumeDecibelsStep action:@selector(rangeChanged:)];
     NSStackView *lowestRow = [NSStackView stackViewWithViews:@[self.lowestField, self.lowestStepper, [NSTextField labelWithString:@"dB, up to the ceiling"]]];
     lowestRow.spacing = 4;
 
     self.ceilingField = [self decibelsField];
-    self.ceilingStepper = [self stepper];
+    self.ceilingStepper = [self stepperWithIncrement:QLMVolumeDecibelsStep action:@selector(rangeChanged:)];
     NSStackView *ceilingRow = [NSStackView stackViewWithViews:@[self.ceilingField, self.ceilingStepper, [NSTextField labelWithString:@"dB"]]];
     ceilingRow.spacing = 4;
     self.rangeNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
@@ -159,13 +159,12 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [self.window setContentSize:self.window.contentView.fittingSize];
 }
 
-- (NSTextField *)decibelsField {
+- (NSTextField *)numberFieldWithFormatter:(NSFormatter *)formatter action:(SEL)action {
     NSTextField *field = [NSTextField textFieldWithString:@""];
-    field.formatter = [[QLMDecibelsFormatter alloc] init];
+    field.formatter = formatter;
     field.alignment = NSTextAlignmentRight;
     field.target = self;
-    field.action = @selector(rangeChanged:);
-    field.delegate = self;
+    field.action = action;
     // TRAP: by default only Return sends the action. In qlm-app-first, a
     // ceiling typed and left was lost.
     field.cell.sendsActionOnEndEditing = YES;
@@ -173,13 +172,20 @@ static const CGFloat QLMSettingsTextWidth = 360;
     return field;
 }
 
-- (NSStepper *)stepper {
+// The level fields' refusals come through control:didFailToFormatString:.
+- (NSTextField *)decibelsField {
+    NSTextField *field = [self numberFieldWithFormatter:[[QLMDecibelsFormatter alloc] init] action:@selector(rangeChanged:)];
+    field.delegate = self;
+    return field;
+}
+
+- (NSStepper *)stepperWithIncrement:(double)increment action:(SEL)action {
     NSStepper *stepper = [[NSStepper alloc] init];
-    stepper.increment = QLMVolumeDecibelsStep;
+    stepper.increment = increment;
     stepper.autorepeat = YES;
     stepper.valueWraps = NO;
     stepper.target = self;
-    stepper.action = @selector(rangeChanged:);
+    stepper.action = action;
     return stepper;
 }
 
@@ -354,22 +360,10 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
     formatter.numberStyle = NSNumberFormatterDecimalStyle;
     formatter.minimumFractionDigits = 1;
     formatter.maximumFractionDigits = 1;
-    self.osdSecondsField = [NSTextField textFieldWithString:@""];
-    self.osdSecondsField.formatter = formatter;
-    self.osdSecondsField.alignment = NSTextAlignmentRight;
-    self.osdSecondsField.target = self;
-    self.osdSecondsField.action = @selector(osdSecondsChanged:);
-    // TRAP: by default only Return sends the action, as with the level fields.
-    self.osdSecondsField.cell.sendsActionOnEndEditing = YES;
-    [self.osdSecondsField.widthAnchor constraintEqualToConstant:64].active = YES;
-    self.osdSecondsStepper = [[NSStepper alloc] init];
+    self.osdSecondsField = [self numberFieldWithFormatter:formatter action:@selector(osdSecondsChanged:)];
+    self.osdSecondsStepper = [self stepperWithIncrement:QLMOSDSecondsStep action:@selector(osdSecondsChanged:)];
     self.osdSecondsStepper.minValue = QLMOSDSecondsMin;
     self.osdSecondsStepper.maxValue = QLMOSDSecondsMax;
-    self.osdSecondsStepper.increment = QLMOSDSecondsStep;
-    self.osdSecondsStepper.autorepeat = YES;
-    self.osdSecondsStepper.valueWraps = NO;
-    self.osdSecondsStepper.target = self;
-    self.osdSecondsStepper.action = @selector(osdSecondsChanged:);
 }
 
 - (NSStackView *)osdSecondsRow {
@@ -378,14 +372,15 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
     return row;
 }
 
-// The OSD's controller rereads the preferences when the defaults change.
 - (void)osdClicked:(NSButton *)checkbox {
     self.preferences.showsOSD = checkbox.state == NSControlStateValueOn;
     [self renderOSD];
+    [self.delegate settingsDidChangeOSD:self];
 }
 
 - (void)osdPlacementChosen:(NSPopUpButton *)picker {
     self.preferences.osdPlacement = (QLMOSDPlacement)picker.indexOfSelectedItem;
+    [self.delegate settingsDidChangeOSD:self];
 }
 
 // The preferences hold it to the range, on the half seconds. An emptied
@@ -395,6 +390,7 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
         self.preferences.osdSeconds = control.doubleValue;
     }
     [self renderOSD];
+    [self.delegate settingsDidChangeOSD:self];
 }
 
 - (void)renderOSD {
