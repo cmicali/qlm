@@ -96,7 +96,7 @@
     "capInsets": [8, 8, 9, 8],
     "title": {"size": 11, "color": "label", "disabledColor": "#dfd4b980"},
     "focus": {"color": "focus", "width": 2, "radius": 6, "outset": 1},
-    "led": {"size": 16, "x": 28}
+    "led": {"size": 16, "gap": 8}
   },
   "led": {"on": "#e66a30", "off": "#4a3a2c", "glow": 4},
   "markings": {

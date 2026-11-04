@@ -239,7 +239,7 @@
     XCTAssertEqual([skin element:@"nameplate"].anchors, QLMSkinAnchorLeft | QLMSkinAnchorTop);
     XCTAssertEqual([skin element:@"knob"].anchors, QLMSkinAnchorRight);
 
-    XCTAssertEqual(skin.button.ledX, 28);
+    XCTAssertEqual(skin.button.ledGap, 8);
     XCTAssertEqual(skin.markings.boxes.count, 2u);
     XCTAssertEqualObjects(skin.markings.boxes[0].gap, @"groupsTitle");
     XCTAssertEqual(skin.markings.boxes[1].outset.left, 8);
@@ -493,8 +493,8 @@
 
 - (void)testAnLEDPastTheButtonIsRefused {
     [self assertChange:^(NSMutableDictionary *json) {
-        json[@"button"][@"led"][@"x"] = @160;
-    } refusedWith:@"button.led.x puts the LED past the button's width, 174"];
+        json[@"button"][@"led"][@"x"] = @28;
+    } refusedWith:@"button.led has an unknown key, x"];
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"button"][@"led"][@"size"] = @41;
     } refusedWith:@"button.led.size is taller than the button, 40"];

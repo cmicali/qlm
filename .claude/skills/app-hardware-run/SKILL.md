@@ -55,6 +55,7 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
 | `quit_glm` | The banner's Quit GLM. GLM may ask to save | the banner offers no Quit GLM, or GLM was asked already |
 | `quit_answering <cancel\|anyway>` | Quit. The argument answers the louder hand-back alert, if it would show | never |
 | `window <show\|close>` | The popover's Window… button, or the window's close | never |
+| `window_size <width> <height>` | A drag of the window's corner, to that content size in points, never below the skin's | the window is closed |
 | `group <name>` | The window's button for that group. System's own refusal comes later, in `windowApplyError` | no button reads the name, System is stopped or tracks no monitor, or an apply runs |
 | `knob <dB>` | The window's knob, as a drag, on GLM's 0.5 dB steps | System is stopped, or the level is outside the slider's range |
 | `skin <name>` | The window's skin, kept in the settings | the skin library refuses the skin |

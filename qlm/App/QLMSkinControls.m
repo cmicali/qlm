@@ -248,17 +248,13 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
     QLMSkinDrawStyle(self.skin, button.style, state, bounds, NO);
 
     NSAttributedString *title = [self titleString];
-    CGFloat width = MIN(_titleWidth, bounds.size.width);
     CGFloat led = self.showsLED ? button.ledSize : 0;
-    BOOL beforeTitle = self.showsLED && button.ledX < 0;
-    CGFloat total = beforeTitle ? led + button.ledGap + width : width;
-    CGFloat x = round(NSMidX(bounds) - total / 2);
+    QLMSkinLabel label = QLMSkinLabelLayout(bounds.size.width, _titleWidth, led, button.ledGap);
     if (self.showsLED) {
-        CGFloat ledX = beforeTitle ? x : button.ledX;
-        QLMSkinDrawLED(self.skin.led, NSMakeRect(ledX, round(NSMidY(bounds) - led / 2), led, led), self.ledLit, self.enabled);
+        QLMSkinDrawLED(self.skin.led, NSMakeRect(label.ledX, round(NSMidY(bounds) - led / 2), led, led), self.ledLit,
+                       self.enabled);
     }
-    CGFloat textX = beforeTitle ? x + led + button.ledGap : x;
-    QLMSkinDrawAttributed(title, NSMakeRect(textX, 0, width, bounds.size.height));
+    QLMSkinDrawCenteredCaps(title, NSMakeRect(label.textX, 0, label.textWidth, bounds.size.height));
 
     if (self.focused && self.enabled) {
         QLMSkinDrawFocus(button.focus, bounds, NO);
@@ -326,10 +322,9 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
                 : round((bounds.size.width - total) / 2);
     if (symbol != nil) {
         NSRect frame = NSMakeRect(x, round(NSMidY(bounds) - symbolSize.height / 2), symbolSize.width, symbolSize.height);
-        [symbol drawInRect:frame fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
-            respectFlipped:YES hints:nil];
+        QLMSkinDrawImage(symbol, frame);
     }
-    QLMSkinDrawAttributed(title, NSMakeRect(x + symbolSize.width + gap, 0, total - symbolSize.width - gap, bounds.size.height));
+    QLMSkinDrawCenteredCaps(title, NSMakeRect(x + symbolSize.width + gap, 0, total - symbolSize.width - gap, bounds.size.height));
 
     if (self.focused && self.enabled) {
         QLMSkinDrawFocus(self.skin.button.focus, NSInsetRect(bounds, -4, 0), NO);

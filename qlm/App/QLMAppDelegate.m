@@ -598,6 +598,14 @@ static OSType QLMQuitReason(void) {
     return self.mainWindowController.shownSkinName;
 }
 
+- (NSString *)debugResizeWindowTo:(NSSize)size {
+    return [self.mainWindowController resizeTo:size];
+}
+
+- (NSSize)debugWindowSize {
+    return self.mainWindowController.contentSize;
+}
+
 - (NSString *)debugChooseSkin:(NSString *)name {
     return [self chooseSkinNamed:name];
 }

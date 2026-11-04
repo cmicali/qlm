@@ -67,7 +67,7 @@ CGRect QLMSkinSlotFrame(QLMSkinElement *element, QLMSkinTextSlot *slot, CGSize s
     self = [super init];
     if (self) {
         _skin = skin;
-        _size = CGSizeMake(MAX(size.width, skin.windowSize.width), MAX(size.height, skin.windowSize.height));
+        _size = QLMSizeAtLeast(size, skin.windowSize);
     }
     return self;
 }

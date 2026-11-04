@@ -79,7 +79,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     window.contentMinSize = minimum;
     NSSize size = window.contentView.bounds.size;
     if (size.width < minimum.width || size.height < minimum.height) {
-        [window setContentSize:NSMakeSize(MAX(size.width, minimum.width), MAX(size.height, minimum.height))];
+        [window setContentSize:QLMSizeAtLeast(size, minimum)];
     }
 }
 
@@ -304,6 +304,28 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     QLMKnobControl *knob = self.skinView.knob;
     [knob moveTo:decibels];
     return knob.doubleValue;
+}
+
+- (NSString *)resizeTo:(NSSize)size {
+    if (!self.showing) {
+        return @"the window is closed";
+    }
+    NSWindow *window = super.window;
+    // Within the screen, so the frame kept on quit still shows.
+    NSRect visible = (window.screen ?: NSScreen.mainScreen).visibleFrame;
+    NSSize most = [window contentRectForFrameRect:visible].size;
+    size = NSMakeSize(MIN(size.width, most.width), MIN(size.height, most.height));
+    [window setContentSize:QLMSizeAtLeast(size, self.skin.windowSize)];
+    NSRect frame = window.frame;
+    if (NSMaxY(frame) > NSMaxY(visible)) {
+        frame.origin.y = MAX(NSMinY(visible), NSMaxY(visible) - frame.size.height);
+        [window setFrame:frame display:YES];
+    }
+    return nil;
+}
+
+- (NSSize)contentSize {
+    return _windowMade ? super.window.contentView.bounds.size : NSZeroSize;
 }
 
 - (void)monitorsClicked:(id)sender {

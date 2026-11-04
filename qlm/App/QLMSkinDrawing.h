@@ -19,6 +19,10 @@ BOOL QLMSkinColorIsClear(QLMSkinColor color);
 // skin, so a skin read again loads its files again.
 void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NSRect rect, BOOL circle);
 
+// An image in `rect`, right side up in a flipped view, whatever its size
+// and cap insets. Every image the skin draws goes through here.
+void QLMSkinDrawImage(NSImage *_Nullable image, NSRect rect);
+
 // The shadow `path` casts, filled with `fill`.
 void QLMSkinDrawShadow(QLMSkinShadow *shadow, NSBezierPath *path, NSColor *fill);
 
@@ -45,6 +49,18 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
 // ellipsis where it overflows. A slot's accent colors its trailing period.
 void QLMSkinDrawSlot(NSString *_Nullable text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits,
                      CGFloat alpha);
-void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame);
+// Where a button's label goes on a face `faceWidth` wide: the LED, `led`
+// wide, then `gap`, then the title, centered as one block. A title too long
+// for the face, inside its padding, is cut short, never pushed off it.
+typedef struct {
+    CGFloat ledX;
+    CGFloat textX;
+    CGFloat textWidth;
+} QLMSkinLabel;
+extern const CGFloat QLMSkinLabelPadding;
+QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap);
+
+// A button's label, its capitals centered on the frame's height.
+void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame);
 
 NS_ASSUME_NONNULL_END

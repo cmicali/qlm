@@ -46,6 +46,10 @@ NS_ASSUME_NONNULL_BEGIN
 // A turn of the knob to the level, as a drag's. The caller checks the
 // range. Returns the level the knob points at.
 - (double)turnKnobTo:(double)decibels;
+// The content size, as a drag of the window's corner sets it, never below
+// the skin's size. Returns why not while the window is closed.
+- (nullable NSString *)resizeTo:(NSSize)size;
+@property (nonatomic, readonly) NSSize contentSize;
 
 @end
 

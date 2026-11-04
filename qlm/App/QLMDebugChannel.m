@@ -72,8 +72,8 @@ static NSDictionary *QLMDebugControl(NSString *usage, BOOL needsMonitors, QLMDeb
     });
 }
 
-static BOOL QLMDebugParseDecibels(NSString *token, double *decibels) {
-    return VibeParseDouble(token, decibels) && isfinite(*decibels);
+static BOOL QLMDebugParseFinite(NSString *token, double *value) {
+    return VibeParseDouble(token, value) && isfinite(*value);
 }
 
 // A control over the volume range. A level outside it is refused, not moved
@@ -81,7 +81,7 @@ static BOOL QLMDebugParseDecibels(NSString *token, double *decibels) {
 static NSDictionary *QLMDebugLevel(NSString *usage, NSString *control, double (^move)(id<QLMDebugApp> app, double stepped)) {
     return QLMDebugControl(usage, NO, QLM_HANDLER {
         double decibels = 0;
-        if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
+        if (!QLMDebugParseFinite(tokens[1], &decibels)) {
             return nil;
         }
         double lowest = app.debugPreferences.lowestDecibels;
@@ -270,6 +270,21 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             reply[@"windowShowing"] = @(app.debugWindowShowing);
             return reply;
         }),
+        // The window's content size in points, as a drag of its corner sets
+        // it, for dump_screenshot past the skin's size.
+        QLMDebugVerb(@"window_size <width> <height>", QLM_HANDLER {
+            double width = 0;
+            double height = 0;
+            if (!QLMDebugParseFinite(tokens[1], &width) || !QLMDebugParseFinite(tokens[2], &height)) {
+                return nil;
+            }
+            NSString *refusal = [app debugResizeWindowTo:NSMakeSize(width, height)];
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
+            }
+            NSSize size = app.debugWindowSize;
+            return @{@"ok": @YES, @"width": @(size.width), @"height": @(size.height)};
+        }),
         // The window's group button. The apply's own refusal comes later, in
         // dump_state's windowApplyError.
         QLMDebugVerb(@"group <name>", QLM_HANDLER {
@@ -335,7 +350,7 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // preferences bound the rest, as they do a typed one.
         QLMDebugVerb(@"ceiling <dB>", QLM_HANDLER {
             double decibels = 0;
-            if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
+            if (!QLMDebugParseFinite(tokens[1], &decibels)) {
                 return nil;
             }
             NSString *refusal = QLMTypedLevelRefusal(decibels);

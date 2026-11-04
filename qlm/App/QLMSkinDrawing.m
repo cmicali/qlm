@@ -131,9 +131,32 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
         QLMSkinDrawBlock(draw, rect, circle);
         return;
     }
-    NSImage *image = QLMSkinStretchedImage(skin, [style imageNameForState:state], style.capInsets);
+    QLMSkinDrawImage(QLMSkinStretchedImage(skin, [style imageNameForState:state], style.capInsets), rect);
+}
+
+// TRAP: an image with cap insets ignores respectFlipped whenever it draws at
+// any size but its own, so in a flipped view it stretches upside down. So
+// it draws through a CTM flipped about the rect, unflipped by AppKit.
+void QLMSkinDrawImage(NSImage *image, NSRect rect) {
+    if (image == nil || rect.size.width <= 0 || rect.size.height <= 0) {
+        return;
+    }
+    NSEdgeInsets insets = image.capInsets;
+    BOOL sliced = insets.top > 0 || insets.left > 0 || insets.bottom > 0 || insets.right > 0;
+    NSGraphicsContext *context = NSGraphicsContext.currentContext;
+    if (!context.flipped || !sliced) {
+        [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
+           respectFlipped:YES hints:nil];
+        return;
+    }
+    CGContextRef cg = context.CGContext;
+    CGContextSaveGState(cg);
+    // Maps the rect onto itself, upside down.
+    CGContextTranslateCTM(cg, 0, NSMinY(rect) + NSMaxY(rect));
+    CGContextScaleCTM(cg, 1, -1);
     [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
-       respectFlipped:YES hints:nil];
+       respectFlipped:NO hints:nil];
+    CGContextRestoreGState(cg);
 }
 
 
@@ -275,7 +298,7 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
     };
 }
 
-void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
+static void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
     if (text.length == 0) {
         return;
     }
@@ -283,6 +306,34 @@ void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
     CGFloat line = ceil(font.ascender - font.descender);
     NSRect box = NSMakeRect(frame.origin.x, frame.origin.y + (frame.size.height - line) / 2, frame.size.width, line);
     [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
+}
+
+// An image face's bevel, on each side.
+const CGFloat QLMSkinLabelPadding = 6;
+
+QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap) {
+    CGFloat lead = led > 0 ? led + gap : 0;
+    CGFloat room = faceWidth - 2 * QLMSkinLabelPadding - lead;
+    CGFloat width = MIN(titleWidth, MAX(room, 0));
+    CGFloat x = round(faceWidth / 2 - (lead + width) / 2);
+    QLMSkinLabel label;
+    label.ledX = x;
+    label.textX = x + lead;
+    label.textWidth = width;
+    return label;
+}
+
+// The caps' middle on the frame's: a label with no descenders, as most are,
+// looks centered only so. The line's box puts it a little high or low,
+// with the font's leading and descent.
+void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame) {
+    if (text.length == 0) {
+        return;
+    }
+    NSFont *font = [text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
+    // With no line fragment origin, the rect's origin is the baseline.
+    NSRect baseline = NSMakeRect(frame.origin.x, NSMidY(frame) + font.capHeight / 2, frame.size.width, 0);
+    [text drawWithRect:baseline options:0];
 }
 
 void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits, CGFloat alpha) {
