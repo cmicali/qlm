@@ -83,6 +83,11 @@
     return YES;
 }
 
+- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd {
+    [self.actions addObject:[NSString stringWithFormat:@"%@ preview %@", osd ? @"osd" : @"skin", name]];
+    return @{@"ok": @YES, @"skin": name};
+}
+
 - (void)debugQuitAnswering:(BOOL)quitAnyway {
     [self.actions addObject:quitAnyway ? @"quit anyway" : @"quit, cancel"];
 }
@@ -297,6 +302,8 @@
         @"wake": @[@[@"wake", @"up"]],
         @"quit_glm": @[@[@"quit_glm", @"now"]],
         @"quit_answering <cancel|anyway>": @[@[@"quit_answering"], @[@"quit_answering", @"yes"]],
+        @"skin_preview <name>": @[@[@"skin_preview"], @[@"skin_preview", @"modern", @"big"]],
+        @"skin_preview_osd <name>": @[@[@"skin_preview_osd"]],
     };
     for (NSString *usage in cases) {
         for (NSArray<NSString *> *args in cases[usage]) {
@@ -414,6 +421,16 @@
     [self runOK:@[@"show_settings"]];
     [self runOK:@[@"read_setup"]];
     XCTAssertEqualObjects(_app.actions, (@[@"show popover", @"show monitors", @"show settings", @"read setup"]));
+}
+
+// A skin's look sends nothing to the monitors.
+- (void)testTheSkinPreviewsCallTheAppAndSendNothing {
+    NSUInteger mark = _bus.sentMessages.count;
+    NSDictionary *reply = [self runOK:@[@"skin_preview", @"modern"]];
+    XCTAssertEqualObjects(reply[@"skin"], @"modern");
+    [self runOK:@[@"skin_preview_osd", @"modern"]];
+    XCTAssertEqualObjects(_app.actions, (@[@"skin preview modern", @"osd preview modern"]));
+    [self assertNothingSentSince:mark];
 }
 
 #pragma mark - The controls

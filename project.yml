@@ -108,6 +108,18 @@ targets:
           - "**/.DS_Store"
           - "**/*.md"
           - "Info.plist"                    # generated below; consumed via INFOPLIST_FILE
+          - "Skins/**"                      # the skins and the pack's record; copied below
+      # Each skin ships its skin.json and png/ alone, in Resources/Skins/<name>/.
+      # The pack's masters, sources, tools, previews, and layouts ship in
+      # nothing. A skin with images adds its png/ the same way, with
+      # `type: folder`, which keeps the directory. TRAP: a plain resources
+      # phase flattens every file into Resources/, where two skins' images
+      # of one name collide.
+      - path: qlm/App/Skins/modern/skin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/modern
     info:
       path: qlm/App/Info.plist
       properties:
@@ -155,7 +167,8 @@ targets:
       excludedPlatform: iOS
     sources:
       - path: Tests
-        excludes: ["**/.DS_Store", "**/*.md"]
+        # The skin fixture is read from the repository, not the bundle.
+        excludes: ["**/.DS_Store", "**/*.md", "App/Fixtures/**"]
       # qlmctl's gates and dry run. Its main.m is the tool's own.
       - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md", "main.m"]
@@ -167,6 +180,9 @@ targets:
       - qlm/App/QLMFormat.m
       - qlm/App/QLMMonitorList.m
       - qlm/App/QLMPreferences.m
+      - qlm/App/QLMSkin.m
+      - qlm/App/QLMSkinLayout.m
+      - qlm/App/QLMSkinLibrary.m
     settings:
       base:
         PRODUCT_NAME: "$(TARGET_NAME)"
