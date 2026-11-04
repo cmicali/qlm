@@ -30,6 +30,12 @@ BOOL QLMLevelHolds(NSTimeInterval movedAt, NSTimeInterval now);
 // preferences say it.
 double QLMShownCeiling(QLMSnapshot *_Nullable snapshot, double preferredCeiling);
 
+// The active group's name, else "Monitors".
+NSString *QLMGroupNameText(QLMSnapshot *snapshot);
+
+// "MUTED" while every monitor is muted, else "DIM" while dimmed, else nil.
+NSString *_Nullable QLMOutputStateText(QLMSnapshot *snapshot);
+
 // Why a level typed for the ceiling, or the range's bottom, is refused, or
 // nil. 0 dB is the monitors' full level, so a level above it is refused, not
 // clamped: a clamp would make 35, typed for −35, the loudest ceiling. It

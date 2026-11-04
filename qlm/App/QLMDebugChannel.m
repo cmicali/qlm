@@ -216,6 +216,12 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             reply[@"skinName"] = preferences.skinName;
             reply[@"windowSkin"] = app.debugWindowSkinName;
             reply[@"opensWindowAtLaunch"] = @(preferences.opensWindowAtLaunch);
+            reply[@"osd"] = @{
+                @"showsOSD": @(preferences.showsOSD),
+                @"placement": QLMOSDPlacementName(preferences.osdPlacement),
+                @"seconds": @(preferences.osdSeconds),
+                @"showing": @(app.debugOSDShowing),
+            };
             return reply;
         }),
         QLMDebugVerb(@"popover <show|close>", QLM_HANDLER {
@@ -279,6 +285,36 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
                 return QLMDebugError(@"%@", refusal);
             }
             return @{@"ok": @YES, @"skinName": app.debugPreferences.skinName};
+        }),
+        // The OSD as a turn of the knob shows it, for dump_screenshot.
+        QLMDebugVerb(@"osd <show|hide>", QLM_HANDLER {
+            if ([tokens[1] isEqualToString:@"show"]) {
+                NSString *refusal = [app debugShowOSD];
+                if (refusal != nil) {
+                    return QLMDebugError(@"%@", refusal);
+                }
+            }
+            else if ([tokens[1] isEqualToString:@"hide"]) {
+                [app debugHideOSD];
+            }
+            else {
+                return nil;
+            }
+            return @{@"ok": @YES, @"showing": @(app.debugOSDShowing)};
+        }),
+        // The fake bus's knob, as its window's slider turns it, in tenths of
+        // a dB.
+        QLMDebugVerb(@"fake_knob <tenths>", QLM_HANDLER {
+            NSInteger tenths = 0;
+            NSScanner *scanner = [NSScanner scannerWithString:tokens[1]];
+            if (![scanner scanInteger:&tenths] || !scanner.atEnd) {
+                return nil;
+            }
+            NSString *refusal = [app debugTurnFakeKnobTo:tenths];
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
+            }
+            return @{@"ok": @YES, @"knobTenths": @(tenths)};
         }),
         // The read lands on a utility queue, so the reply only acknowledges it.
         QLMDebugVerb(@"read_setup", QLM_HANDLER {

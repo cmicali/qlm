@@ -29,6 +29,17 @@ double QLMShownCeiling(QLMSnapshot *snapshot, double preferredCeiling) {
     return snapshot.volumeDecibels != nil ? snapshot.ceilingDecibels : preferredCeiling;
 }
 
+NSString *QLMGroupNameText(QLMSnapshot *snapshot) {
+    return snapshot.activeGroupName.length > 0 ? snapshot.activeGroupName : @"Monitors";
+}
+
+NSString *QLMOutputStateText(QLMSnapshot *snapshot) {
+    if (snapshot.allMuted) {
+        return @"MUTED";
+    }
+    return snapshot.dimmed ? @"DIM" : nil;
+}
+
 // A no-break space keeps the unit on the number's line.
 NSString *QLMDecibelsText(double decibels) {
     return [QLMDecibelsNumberText(decibels, 1) stringByAppendingString:@"\u00A0dB"];

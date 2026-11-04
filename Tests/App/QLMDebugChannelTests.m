@@ -7,6 +7,7 @@
 #import "QLMApplySequence.h"
 #import "QLMDebugChannel.h"
 #import "QLMFakeBus.h"
+#import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
 #import "QLMPreferences.h"
 #import "QLMSystem.h"
@@ -29,6 +30,9 @@
 @property (nonatomic) NSPopover *debugPopover;
 @property (nonatomic, copy, nullable) NSString *debugQuitGLMTitle;
 @property (nonatomic) BOOL debugQuitAsksFirst;
+@property (nonatomic) BOOL debugOSDShowing;
+// The bus the app delegate has, or nil on the adapter.
+@property (nonatomic, nullable) QLMFakeBus *debugFakeBus;
 @property (nonatomic) BOOL debugWindowShowing;
 @property (nonatomic, copy, nullable) NSString *debugWindowApplyError;
 // The window's group buttons.
@@ -92,6 +96,31 @@
     NSString *kind = osd ? @"osd" : disabled ? @"disabled skin" : @"skin";
     [self.actions addObject:[NSString stringWithFormat:@"%@ preview %@", kind, name]];
     return @{@"ok": @YES, @"skin": name};
+}
+
+// As the OSD's controller refuses.
+- (NSString *)debugShowOSD {
+    if (!self.debugPreferences.showsOSD) {
+        return @"the OSD is off in Settings";
+    }
+    if (self.debugSnapshot.volumeDecibels == nil) {
+        return @"no level yet";
+    }
+    [self.actions addObject:@"show osd"];
+    self.debugOSDShowing = YES;
+    return nil;
+}
+
+- (void)debugHideOSD {
+    [self.actions addObject:@"hide osd"];
+    self.debugOSDShowing = NO;
+}
+
+- (NSString *)debugTurnFakeKnobTo:(NSInteger)tenths {
+    if (self.debugFakeBus == nil) {
+        return @"qlm drives the GLM adapter, not the fake bus";
+    }
+    return [QLMFakeBusWindowController turnKnobOf:self.debugFakeBus to:tenths];
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {
@@ -165,6 +194,7 @@
     _app = [[QLMTestDebugApp alloc] init];
     _app.debugPreferences = preferences;
     _app.debugSystem = [self systemOn:_bus];
+    _app.debugFakeBus = _bus;
     // As the app starts it: its own level, kept across launches.
     [_app.debugSystem start];
     [_app.debugSystem setVolumeDecibels:preferences.fakeBus.volumeDecibels];
@@ -355,6 +385,8 @@
         @"skin_preview <name>": @[@[@"skin_preview"], @[@"skin_preview", @"modern", @"big"]],
         @"skin_preview_disabled <name>": @[@[@"skin_preview_disabled"]],
         @"skin_preview_osd <name>": @[@[@"skin_preview_osd"]],
+        @"osd <show|hide>": @[@[@"osd"], @[@"osd", @"on"], @[@"osd", @"show", @"now"]],
+        @"fake_knob <tenths>": @[@[@"fake_knob"], @[@"fake_knob", @"-40dB"], @[@"fake_knob", @"-40.5"], @[@"fake_knob", @"x"]],
         @"window <show|close>": @[@[@"window"], @[@"window", @"open"]],
         @"group <name>": @[@[@"group"], @[@"group", @"Main", @"now"]],
         @"knob <dB>": @[@[@"knob"], @[@"knob", @"loud"], @[@"knob", @"nan"], @[@"knob", @"-40", @"-41"]],
@@ -493,6 +525,61 @@
     XCTAssertEqualObjects(_app.actions,
                           (@[@"skin preview modern", @"disabled skin preview modern", @"osd preview modern"]));
     [self assertNothingSentSince:mark];
+}
+
+#pragma mark - The OSD
+
+- (void)testDumpStateCarriesTheOSD {
+    NSDictionary *osd = [self runOK:@[@"dump_state"]][@"osd"];
+    XCTAssertEqualObjects(osd, (@{@"showsOSD": @YES, @"placement": @"bottomCenter", @"seconds": @2, @"showing": @NO}));
+    _app.debugPreferences.osdPlacement = QLMOSDPlacementTopRight;
+    _app.debugPreferences.osdSeconds = 4.5;
+    [self runOK:@[@"osd", @"show"]];
+    osd = [self runOK:@[@"dump_state"]][@"osd"];
+    XCTAssertEqualObjects(osd, (@{@"showsOSD": @YES, @"placement": @"topRight", @"seconds": @4.5, @"showing": @YES}));
+}
+
+// The OSD's look sends nothing to the monitors.
+- (void)testTheOSDVerbShowsAndHidesIt {
+    NSUInteger mark = _bus.sentMessages.count;
+    XCTAssertEqualObjects(([self runOK:@[@"osd", @"show"]][@"showing"]), @YES);
+    XCTAssertEqualObjects(([self runOK:@[@"osd", @"hide"]][@"showing"]), @NO);
+    XCTAssertEqualObjects(_app.actions, (@[@"show osd", @"hide osd"]));
+    [self assertNothingSentSince:mark];
+}
+
+// A turn shows nothing while Settings has it off, so neither does the verb.
+- (void)testTheOSDVerbRefusesWhileItIsOff {
+    _app.debugPreferences.showsOSD = NO;
+    XCTAssertEqualObjects(([self errorOf:@[@"osd", @"show"]]), @"the OSD is off in Settings");
+    XCTAssertEqualObjects(_app.actions, @[]);
+}
+
+- (void)testTheOSDVerbRefusesWithNoLevel {
+    [self stopSystem];
+    _app.debugSystem = [self systemOn:[QLMFakeBus demoBusWithSubwoofer:NO]];
+    XCTAssertEqualObjects(([self errorOf:@[@"osd", @"show"]]), @"no level yet");
+    XCTAssertEqualObjects(_app.actions, @[]);
+}
+
+// The fake bus's knob turns, as its window's slider turns it. System polls
+// the adapter only at start here, so it follows at the next start.
+- (void)testTheFakeKnobTurns {
+    XCTAssertEqualObjects(([self runOK:@[@"fake_knob", @"-500"]][@"knobTenths"]), @(-500));
+    __block NSNumber *knob = nil;
+    QLMFakeBus *bus = _bus;
+    [bus perform:^{
+        knob = bus.knobTenths;
+    }];
+    XCTAssertEqualObjects(knob, @(-500));
+    XCTAssertEqualObjects(_app.actions, @[]);
+}
+
+- (void)testTheFakeKnobRefusesOutsideItsTravelAndOnTheAdapter {
+    XCTAssertEqualObjects(([self errorOf:@[@"fake_knob", @"10"]]), @"10 is outside the knob's travel, -1004 to 0");
+    XCTAssertEqualObjects(([self errorOf:@[@"fake_knob", @"-1005"]]), @"-1005 is outside the knob's travel, -1004 to 0");
+    _app.debugFakeBus = nil;
+    XCTAssertEqualObjects(([self errorOf:@[@"fake_knob", @"-500"]]), @"qlm drives the GLM adapter, not the fake bus");
 }
 
 #pragma mark - The controls

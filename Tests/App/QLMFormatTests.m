@@ -185,7 +185,25 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertEqual(QLMShownCeiling(snapshot, -30), -10);
 }
 
+// docs/ui.md's open questions: MUTED or DIM where the number alone would
+// mislead.
+- (void)testTheOutputStateSaysMutedOrDim {
+    QLMSnapshot *snapshot = QLMSnapshotWith(QLMHandBackUnknown, nil, nil);
+    XCTAssertNil(QLMOutputStateText(snapshot));
+    snapshot.dimmed = YES;
+    XCTAssertEqualObjects(QLMOutputStateText(snapshot), @"DIM");
+    snapshot.allMuted = YES;
+    XCTAssertEqualObjects(QLMOutputStateText(snapshot), @"MUTED");
+}
+
 #pragma mark - Names
+
+- (void)testTheGroupNameIsTheActiveGroup {
+    QLMSnapshot *snapshot = QLMSnapshotWith(QLMHandBackUnknown, nil, nil);
+    XCTAssertEqualObjects(QLMGroupNameText(snapshot), @"Monitors");
+    snapshot.activeGroupName = @"Main";
+    XCTAssertEqualObjects(QLMGroupNameText(snapshot), @"Main");
+}
 
 // In qlm-app-first, the user couldn't tell the Left 8351B from the Right by
 // serial. The setup file names each device, matched by hardware ID.

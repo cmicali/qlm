@@ -46,6 +46,14 @@ NS_ASSUME_NONNULL_BEGIN
 // A disabled look shows every control, or the OSD, disabled. The reply says
 // which skin shows, and why it fell back, if it did.
 - (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd disabled:(BOOL)disabled;
+// The OSD: shows the latest snapshot's level, as a turn of the adapter's
+// knob would, timer and all, or says why not. The hide is at once.
+// dump_screenshot takes it while the app has no key window.
+- (nullable NSString *)debugShowOSD;
+- (void)debugHideOSD;
+@property (nonatomic, readonly) BOOL debugOSDShowing;
+// Turns the fake bus's knob, as its window's slider does, or says why not.
+- (nullable NSString *)debugTurnFakeKnobTo:(NSInteger)tenths;
 // The app's Quit. quitAnyway answers the louder hand-back alert, if it would
 // show. Returns only when the quit is cancelled.
 - (void)debugQuitAnswering:(BOOL)quitAnyway;
