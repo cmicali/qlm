@@ -174,7 +174,15 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     _still = [NSImage imageWithSize:self.bounds.size flipped:YES drawingHandler:^BOOL(NSRect rect) {
         if (knob.shadow != nil) {
             NSRect disc = NSMakeRect(center.x - shadow, center.y - shadow, shadow * 2, shadow * 2);
-            QLMSkinDrawShadow(knob.shadow, [NSBezierPath bezierPathWithOvalInRect:disc], QLMSkinNSColor(knob.shadow.color));
+            NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:disc];
+            QLMSkinDrawShadow(knob.shadow, path, QLMSkinNSColor(knob.shadow.color));
+            // Only the cast shadow stays. A body that isn't opaque, as a
+            // disabled image body, would show the disc through it.
+            [NSGraphicsContext saveGraphicsState];
+            NSGraphicsContext.currentContext.compositingOperation = NSCompositingOperationDestinationOut;
+            [NSColor.blackColor setFill];
+            [path fill];
+            [NSGraphicsContext restoreGraphicsState];
         }
         if (knob.tickCount > 0) {
             NSBezierPath *ticks = [NSBezierPath bezierPath];

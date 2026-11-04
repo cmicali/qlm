@@ -130,27 +130,49 @@ targets:
           copyFiles:
             destination: resources
             subpath: Skins/retro
-      # Only the sixteen images a skin names. The pack's png/ also holds its
-      # drawn parts, which qlm draws from the skin's colors instead.
+      # Only the sixteen images a skin names, by name, so a re-export that
+      # adds a file ships nothing new. The pack's png/ also holds its drawn
+      # parts, which qlm draws from the skin's colors instead.
       - path: qlm/App/Skins/vintage/png
-        excludes: &QLMDrawnParts
-          - "panel-markings*"
-          - "display-disabled-overlay*"
-          - "osd-disabled-overlay*"
-          - "osd-track*"
-          - "osd-fill*"
-          - "button-focus-ring*"
-          - "knob-shadow*"
-          - "knob-pointer*"
-          - "knob-ticks*"
-          - "knob-focus-ring*"
-          - "led-*"
+        includes: &QLMSkinImages
+          - "panel-background.png"
+          - "panel-background@2x.png"
+          - "nameplate.png"
+          - "nameplate@2x.png"
+          - "display-glass.png"
+          - "display-glass@2x.png"
+          - "osd-background.png"
+          - "osd-background@2x.png"
+          - "button-normal.png"
+          - "button-normal@2x.png"
+          - "button-hover.png"
+          - "button-hover@2x.png"
+          - "button-pressed.png"
+          - "button-pressed@2x.png"
+          - "button-disabled.png"
+          - "button-disabled@2x.png"
+          - "button-selected.png"
+          - "button-selected@2x.png"
+          - "button-selected-hover.png"
+          - "button-selected-hover@2x.png"
+          - "button-selected-pressed.png"
+          - "button-selected-pressed@2x.png"
+          - "button-selected-disabled.png"
+          - "button-selected-disabled@2x.png"
+          - "knob-body-normal.png"
+          - "knob-body-normal@2x.png"
+          - "knob-body-hover.png"
+          - "knob-body-hover@2x.png"
+          - "knob-body-pressed.png"
+          - "knob-body-pressed@2x.png"
+          - "knob-body-disabled.png"
+          - "knob-body-disabled@2x.png"
         buildPhase:
           copyFiles:
             destination: resources
             subpath: Skins/vintage/png
       - path: qlm/App/Skins/retro/png
-        excludes: *QLMDrawnParts
+        includes: *QLMSkinImages
         buildPhase:
           copyFiles:
             destination: resources

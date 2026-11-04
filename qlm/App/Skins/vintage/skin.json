@@ -37,7 +37,7 @@
     "groups": {
       "frame": [48, 120, 546, 40],
       "anchors": ["left", "right", "top"],
-      "columns": 3,
+      "columns": 4,
       "rows": 1,
       "gap": [12, 0],
       "text": {
@@ -72,7 +72,7 @@
       "body": {"size": 144, "image": "knob-body"},
       "ticks": {"count": 11, "inner": 73, "outer": 78, "width": 0.9, "color": "#dfd4b9d9"},
       "pointer": {"inner": 19, "outer": 38, "width": 1.6, "color": "pointer", "disabledColor": "#e8e0c666"},
-      "shadow": {"color": "#000000d9", "radius": 48, "blur": 40, "offset": [2, 7]},
+      "shadow": {"color": "#000000ff", "radius": 48, "blur": 30, "offset": [2, 7]},
       "focus": {"color": "focus", "width": 1.2, "outset": -11.6},
       "text": {
         "min": {"frame": [10, 163, 40, 16], "font": "Menlo", "mono": true, "size": 9, "color": "secondary"},
