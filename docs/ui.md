@@ -139,14 +139,15 @@ The OSD is a bezel, not a window, and stays at its size.
 
 ### What the assets don't settle yet
 
-The pack delivers both skins at the reference sizes, and four things go past them:
+The pack delivers both skins at the reference sizes, and three things go past them:
 
 - **Retro's knob should be larger.** The pack draws both skins' knob bodies on 144 point canvases. The retro body comes from a 1254 pixel component master, so it can be re-exported at about 200 points. The ring, pointer, and shadow draw at any size, and the layout reflows around the knob's frame.
 - **Retro's display glass must stretch.** See [Resizing](#resizing).
 - **The shipped knob bodies are cropped.** Each body's `png/` images are cut from the pack's 144 point canvas to the body itself, 98 points for vintage and 112 for retro, so `body.size` is the knob's diameter and the shadow, the focus ring, and the drag follow it. The masters keep the canvas. A re-export from them must crop again, or `tools/build_assets.py` learns to.
-- **The OSD should be larger than 300 by 72.** The plan wants about 480 by 150 points, so it reads from across the room. Vintage's housing is vector and re-renders at that size. Retro's was normalized from a 556 by 172 pixel crop, so at that size it needs a fresh render from its master, not a scale-up.
 
 Each is asset work with `tools/build_assets.py`, after the engine lands. The engine takes any size the layout gives.
+
+The OSD went past them too, and needed no new image. Vintage's and retro's OSDs are 480 by 150 points, as modern's is, so they read from across the room. Each stretches the pack's 300 by 72 housing through its cap insets. The frame keeps its corners and edges, and only the flat glass grows. Vintage's master is an SVG around an 800 by 192 pixel bitmap, so a re-render would add no detail.
 
 ### What draws it
 
@@ -184,7 +185,7 @@ Five pull requests. The first two are independent, and the rest build on them.
 2. **The skin engine, with modern built in.** `QLMSkin` and its reader, the fixture skin, each refusal's test, `QLMSkinView`, `QLMKnobControl` and `QLMKnobMath.h` with their tests, and the modern skin's layout. No window yet beyond what a test needs. `project.yml` excludes `qlm/App/Skins/` from the sources and copies each skin's `skin.json` and `png/` into the bundle.
 3. **The main window.** `QLMMainWindowController` over the engine, the resize layout and its test, the popover's `Window…` button, the Window menu, the launch setting, the position kept, and the verbs `window`, `group`, `knob`, and `skin`. The listening setup buttons follow the picker's rules, refusal and all.
 4. **The OSD and its settings.** `QLMOSDController`, the show rule and its tests, the Settings section, and the verb `osd`. Needs 1 and 2.
-5. **Vintage and retro.** Their layouts wired to the shipped assets, the skin picker in Settings, which lists the user's folder too, and then the larger retro knob and the larger OSD re-exported from the masters. Needs 2 and 3.
+5. **Vintage and retro.** Their layouts wired to the shipped assets, the skin picker in Settings, which lists the user's folder too, then the larger OSD over the pack's housing, and the larger retro knob re-exported from its master. Needs 2 and 3.
 
 A run on the monitors follows 3 and 4, through the verbs, under the skill's supervision: the knob from the window, a group button's refusal, and the OSD on a turn of the adapter's knob.
 
