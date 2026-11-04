@@ -6,6 +6,7 @@
 #import "QLMFormat.h"
 #import "QLMHIDAdapter.h"
 #import "QLMMainMenu.h"
+#import "QLMMainWindowController.h"
 #import "QLMMonitorList.h"
 #import "QLMMonitorsWindowController.h"
 #import "QLMOSDController.h"
@@ -27,13 +28,15 @@ static const NSTimeInterval QLMStopAllowance = 3;
 // How long a stop's warning waits for System's snapshot now.
 static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 
-@interface QLMAppDelegate () <QLMPopoverControllerDelegate, QLMSettingsWindowControllerDelegate>
+@interface QLMAppDelegate () <QLMMainMenuActions, QLMMainWindowControllerDelegate, QLMPopoverControllerDelegate,
+                              QLMSettingsWindowControllerDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMMonitorAlerts *alerts;
 @property (nonatomic) NSStatusItem *statusItem;
 @property (nonatomic) NSPopover *popover;
 @property (nonatomic) QLMPopoverController *popoverController;
+@property (nonatomic) QLMMainWindowController *mainWindowController;
 @property (nonatomic, nullable) QLMMonitorsWindowController *monitorsController;
 @property (nonatomic, nullable) QLMSettingsWindowController *settingsController;
 @property (nonatomic, nullable) QLMFakeBusWindowController *fakeBusController;
@@ -75,6 +78,7 @@ static OSType QLMQuitReason(void) {
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     NSApp.mainMenu = QLMMainMenu();
+    NSApp.windowsMenu = [NSApp.mainMenu itemWithTitle:@"Window"].submenu;
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
     self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:[[QLMNotifier alloc] init] now:^NSTimeInterval {
@@ -86,6 +90,8 @@ static OSType QLMQuitReason(void) {
     self.popover = [[NSPopover alloc] init];
     self.popover.contentViewController = self.popoverController;
     self.popover.behavior = NSPopoverBehaviorTransient;
+    self.mainWindowController = [[QLMMainWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
+    self.mainWindowController.delegate = self;
 
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
     self.statusItem.button.target = self;
@@ -98,6 +104,9 @@ static OSType QLMQuitReason(void) {
         [self.system wake];
     }
     [self loadSetup];
+    if (self.preferences.opensWindowAtLaunch) {
+        [self showMainWindow:nil];
+    }
 
     NSNotificationCenter *workspace = NSWorkspace.sharedWorkspace.notificationCenter;
     [workspace addObserver:self selector:@selector(macWillSleep:) name:NSWorkspaceWillSleepNotification object:nil];
@@ -187,6 +196,7 @@ static OSType QLMQuitReason(void) {
     QLMSystem *system = [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
     self.system = system;
     self.popoverController.system = system;
+    self.mainWindowController.system = system;
     self.popoverController.showsFakeBus = bus != nil;
     self.fakeBusController.bus = bus;
     if (bus == nil) {
@@ -290,6 +300,7 @@ static OSType QLMQuitReason(void) {
     [self.monitorList updateWithSnapshot:snapshot];
     [self.alerts updateWithMonitorList:self.monitorList];
     [self.popoverController refresh];
+    [self.mainWindowController refresh];
     [self.monitorsController refresh];
     [self.settingsController refresh];
     if (self.fakeBusController.window.visible) {
@@ -336,6 +347,9 @@ static OSType QLMQuitReason(void) {
     NSString *name = chosen != nil && [names containsObject:chosen] ? chosen : names.firstObject;
     NSString *path = name == nil ? nil : [QLMSetupDirectory() stringByAppendingPathComponent:name];
     self.popoverController.changedSetupName = nil;
+    if (self.setup == nil) {
+        [self.mainWindowController showSetup:nil fileName:name error:nil];
+    }
     [self watchSetupAtPath:path];
     __weak QLMAppDelegate *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
@@ -350,6 +364,7 @@ static OSType QLMQuitReason(void) {
             strongSelf.alerts.setup = setup;
             strongSelf.setupError = setup == nil ? error : nil;
             strongSelf.popoverController.setup = setup;
+            [strongSelf.mainWindowController showSetup:setup fileName:name error:strongSelf.setupError];
             [strongSelf.settingsController showSetup:setup error:strongSelf.setupError];
         });
     });
@@ -402,7 +417,23 @@ static OSType QLMQuitReason(void) {
     [controller showWindow:self];
 }
 
+- (void)showMainWindow:(id)sender {
+    [self bringForward:self.mainWindowController];
+}
+
+- (void)popoverControllerShowWindow:(QLMPopoverController *)controller {
+    [self showMainWindow:nil];
+}
+
+- (void)mainWindowControllerShowMonitors:(QLMMainWindowController *)controller {
+    [self showMonitors];
+}
+
 - (void)popoverControllerShowMonitors:(QLMPopoverController *)controller {
+    [self showMonitors];
+}
+
+- (void)showMonitors {
     if (self.monitorsController == nil) {
         self.monitorsController = [[QLMMonitorsWindowController alloc] initWithMonitorList:self.monitorList];
     }
@@ -435,6 +466,7 @@ static OSType QLMQuitReason(void) {
 // under the new ceiling. Mutes and the active group are untouched.
 - (void)settingsDidChangeVolumeRange:(QLMSettingsWindowController *)controller {
     [self.popoverController reloadVolumeRange];
+    [self.mainWindowController reloadVolumeRange];
     [self.system setCeilingDecibels:self.preferences.ceilingDecibels];
 }
 
@@ -471,7 +503,7 @@ static OSType QLMQuitReason(void) {
 }
 
 - (void)debugShowMonitors {
-    [self popoverControllerShowMonitors:self.popoverController];
+    [self showMonitors];
 }
 
 - (void)debugShowSettings {
@@ -512,10 +544,43 @@ static OSType QLMQuitReason(void) {
     return [self stopMayRaiseLevel:[self snapshotNow]];
 }
 
-- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd {
+- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd disabled:(BOOL)disabled {
     [self.popover close];
     [self activateApp];
-    return QLMShowSkinPreview(name, osd);
+    return QLMShowSkinPreview(name, osd, disabled);
+}
+
+- (BOOL)debugWindowShowing {
+    return self.mainWindowController.showing;
+}
+
+- (void)debugShowWindow {
+    [self showMainWindow:nil];
+}
+
+- (void)debugCloseWindow {
+    [self.mainWindowController close];
+}
+
+- (NSString *)debugClickGroupNamed:(NSString *)name {
+    return [self.mainWindowController clickGroupNamed:name];
+}
+
+- (NSString *)debugWindowApplyError {
+    return self.mainWindowController.applyError;
+}
+
+- (double)debugTurnKnobTo:(double)decibels {
+    return [self.mainWindowController turnKnobTo:decibels];
+}
+
+- (NSString *)debugWindowSkinName {
+    return self.mainWindowController.shownSkinName;
+}
+
+// As Settings' skin picker will: a skin the library refuses is not kept.
+- (NSString *)debugChooseSkin:(NSString *)name {
+    return [self.mainWindowController chooseSkinNamed:name];
 }
 
 - (BOOL)debugShowOSD {

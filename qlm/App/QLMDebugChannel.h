@@ -44,8 +44,9 @@ NS_ASSUME_NONNULL_BEGIN
 // The banner's Quit GLM button. NO while it is hidden or disabled.
 - (BOOL)debugQuitGLM;
 // Opens a look at the named skin, its window or its OSD, and makes it key.
-// The reply says which skin shows, and why it fell back, if it did.
-- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd;
+// A disabled look shows every control, or the OSD, disabled. The reply says
+// which skin shows, and why it fell back, if it did.
+- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd disabled:(BOOL)disabled;
 // The OSD: shows the latest snapshot's level, as a turn of the adapter's
 // knob would, timer and all. NO with no level yet. The hide is at once.
 // dump_screenshot takes it while the app has no key window.
@@ -57,6 +58,17 @@ NS_ASSUME_NONNULL_BEGIN
 // The app's Quit. quitAnyway answers the louder hand-back alert, if it would
 // show. Returns only when the quit is cancelled.
 - (void)debugQuitAnswering:(BOOL)quitAnyway;
+
+// The main window: what the popover's Window… button opens, and its close.
+// The rest are as QLMMainWindowController's.
+@property (nonatomic, readonly) BOOL debugWindowShowing;
+- (void)debugShowWindow;
+- (void)debugCloseWindow;
+- (nullable NSString *)debugClickGroupNamed:(NSString *)name;
+@property (nonatomic, readonly, copy, nullable) NSString *debugWindowApplyError;
+- (double)debugTurnKnobTo:(double)decibels;
+@property (nonatomic, readonly, copy) NSString *debugWindowSkinName;
+- (nullable NSString *)debugChooseSkin:(NSString *)name;
 @end
 
 // Installs the channel under the bundle identifier. Call it once, at launch.

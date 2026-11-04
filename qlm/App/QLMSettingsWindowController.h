@@ -21,8 +21,8 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 // Settings: the GLM adapter or the fake bus and its hand-back, the setup
-// file, the volume range and ceiling, waking the monitors at launch, and
-// opening at login. Each change is saved at once.
+// file, the volume range and ceiling, waking the monitors and opening the
+// main window at launch, and opening at login. Each change is saved at once.
 // On the main queue.
 @interface QLMSettingsWindowController : NSWindowController
 

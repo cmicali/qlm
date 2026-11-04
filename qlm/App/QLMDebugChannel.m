@@ -77,6 +77,23 @@ static BOOL QLMDebugParseDecibels(NSString *token, double *decibels) {
     return VibeParseDouble(token, decibels) && isfinite(*decibels);
 }
 
+// A control over the volume range. A level outside it is refused, not moved
+// into it. `move` takes the level on GLM's steps and returns where it went.
+static NSDictionary *QLMDebugLevel(NSString *usage, NSString *control, double (^move)(id<QLMDebugApp> app, double stepped)) {
+    return QLMDebugControl(usage, NO, QLM_HANDLER {
+        double decibels = 0;
+        if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
+            return nil;
+        }
+        double lowest = app.debugPreferences.lowestDecibels;
+        double ceiling = app.debugPreferences.ceilingDecibels;
+        if (decibels < lowest || decibels > ceiling) {
+            return QLMDebugError(@"%.1f dB is outside the %@'s range, %.1f to %.1f dB", decibels, control, lowest, ceiling);
+        }
+        return @{@"ok": @YES, @"volumeDecibels": @(move(app, QLMNearestStepDecibels(decibels)))};
+    });
+}
+
 // One decimal, as the app shows it. A knob's tenths over ten would print as
 // a binary fraction.
 static id QLMDebugDecibels(NSNumber *_Nullable decibels) {
@@ -158,6 +175,7 @@ static NSDictionary *QLMDebugSnapshot(QLMSnapshot *snapshot) {
         @"ceilingDecibels": @(snapshot.ceilingDecibels),
         @"dimmed": @(snapshot.dimmed),
         @"applying": @(snapshot.applying),
+        @"applyingGroupName": snapshot.applyingGroupName ?: NSNull.null,
         @"activeGroupName": snapshot.activeGroupName ?: NSNull.null,
         @"wokeWithoutGroup": @(snapshot.wokeWithoutGroup),
         @"mutingAll": @(snapshot.mutingAll),
@@ -194,6 +212,11 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             };
             reply[@"quitGLMButton"] = app.debugQuitGLMTitle ?: NSNull.null;
             reply[@"quitAsksFirst"] = @(app.debugQuitAsksFirst);
+            reply[@"windowShowing"] = @(app.debugWindowShowing);
+            reply[@"windowApplyError"] = app.debugWindowApplyError ?: NSNull.null;
+            reply[@"skinName"] = preferences.skinName;
+            reply[@"windowSkin"] = app.debugWindowSkinName;
+            reply[@"opensWindowAtLaunch"] = @(preferences.opensWindowAtLaunch);
             reply[@"osd"] = @{
                 @"showsOSD": @(preferences.showsOSD),
                 @"placement": QLMOSDPlacementName(preferences.osdPlacement),
@@ -225,10 +248,44 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // A look at a skin, with the mockups' sample text, for
         // dump_screenshot. It drives nothing.
         QLMDebugVerb(@"skin_preview <name>", QLM_HANDLER {
-            return [app debugShowSkinPreview:tokens[1] osd:NO];
+            return [app debugShowSkinPreview:tokens[1] osd:NO disabled:NO];
+        }),
+        QLMDebugVerb(@"skin_preview_disabled <name>", QLM_HANDLER {
+            return [app debugShowSkinPreview:tokens[1] osd:NO disabled:YES];
         }),
         QLMDebugVerb(@"skin_preview_osd <name>", QLM_HANDLER {
-            return [app debugShowSkinPreview:tokens[1] osd:YES];
+            return [app debugShowSkinPreview:tokens[1] osd:YES disabled:NO];
+        }),
+        QLMDebugVerb(@"window <show|close>", QLM_HANDLER {
+            if ([tokens[1] isEqualToString:@"show"]) {
+                [app debugShowWindow];
+            }
+            else if ([tokens[1] isEqualToString:@"close"]) {
+                [app debugCloseWindow];
+            }
+            else {
+                return nil;
+            }
+            NSMutableDictionary *reply = [QLMDebugWindows(app) mutableCopy];
+            reply[@"windowShowing"] = @(app.debugWindowShowing);
+            return reply;
+        }),
+        // The window's group button. The apply's own refusal comes later, in
+        // dump_state's windowApplyError.
+        QLMDebugVerb(@"group <name>", QLM_HANDLER {
+            NSString *refusal = [app debugClickGroupNamed:tokens[1]];
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
+            }
+            return @{@"ok": @YES, @"group": tokens[1]};
+        }),
+        // The window's skin, kept in the preferences.
+        QLMDebugVerb(@"skin <name>", QLM_HANDLER {
+            NSString *refusal = [app debugChooseSkin:tokens[1]];
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
+            }
+            return @{@"ok": @YES, @"skinName": app.debugPreferences.skinName};
         }),
         // The OSD as a turn of the knob shows it, for dump_screenshot. It
         // refuses while Settings has it off.
@@ -274,21 +331,14 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             [app debugReadSetup];
             return @{@"ok": @YES, @"reading": @YES};
         }),
-        // The slider: GLM's 0.5 dB steps, from the range's bottom to the
-        // ceiling. A level outside it is refused, not moved into it.
-        QLMDebugControl(@"volume <dB>", NO, QLM_HANDLER {
-            double decibels = 0;
-            if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
-                return nil;
-            }
-            double lowest = app.debugPreferences.lowestDecibels;
-            double ceiling = app.debugPreferences.ceilingDecibels;
-            if (decibels < lowest || decibels > ceiling) {
-                return QLMDebugError(@"%.1f dB is outside the slider's range, %.1f to %.1f dB", decibels, lowest, ceiling);
-            }
-            double stepped = QLMNearestStepDecibels(decibels);
+        // The popover's slider and the window's knob: GLM's 0.5 dB steps, from
+        // the range's bottom to the ceiling.
+        QLMDebugLevel(@"volume <dB>", @"slider", ^double(id<QLMDebugApp> app, double stepped) {
             [app.debugSystem setVolumeDecibels:stepped];
-            return @{@"ok": @YES, @"volumeDecibels": @(stepped)};
+            return stepped;
+        }),
+        QLMDebugLevel(@"knob <dB>", @"knob", ^double(id<QLMDebugApp> app, double stepped) {
+            return [app debugTurnKnobTo:stepped];
         }),
         // Settings' ceiling. It refuses what the field refuses, and the
         // preferences bound the rest, as they do a typed one.

@@ -4096,6 +4096,79 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertTrue(snapshot.idle);
 }
 
+// The snapshot names the group an apply sends, so each UI can show it,
+// whichever started it.
+- (void)testTheSnapshotNamesTheGroupItApplies {
+    _settings.cycleInterval = 10;
+    [self useMainsMonitors];
+    [self startSystem];
+    [self waitForDiscovery];
+    [_system setVolumeDecibels:-30];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    XCTAssertNil(_system.snapshot.applyingGroupName);
+    QLMSetupGroup *source = QLMReadFixtureSetup().groups[1];
+    QLMSetupGroup *group = [self groupNamed:@"Off" from:source nodes:@[source.nodes[0], source.nodes[2]]];
+    __block BOOL done = NO;
+    QLMSnapshot *applying = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.applying;
+    } after:^{
+        [self->_system applyGroup:group completion:^(NSError *error) {
+            done = YES;
+        }];
+    }];
+    XCTAssertEqualObjects(applying.applyingGroupName, @"Off");
+    [self waitUntil:^BOOL {
+        return done;
+    }];
+    QLMSnapshot *after = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.applying;
+    }];
+    XCTAssertNil(after.applyingGroupName);
+}
+
+// QLMSystemErrorRefused: a refusal sent nothing. The gate's NotRunning is
+// one. A stop mid-apply, with the same code, is not: frames may be out.
+- (void)testAnApplyErrorSaysWhetherAnythingWentOut {
+    _settings.cycleInterval = 10;
+    [self useMainsMonitors];
+    [self startSystem];
+    [self waitForDiscovery];
+    NSError *unverified = [self applyGroup:QLMReadFixtureSetup().groups[0]];
+    XCTAssertEqual(unverified.code, QLMSystemErrorUnverifiedRate);
+    XCTAssertTrue(QLMSystemErrorRefused(unverified));
+    QLMSetupGroup *source = QLMReadFixtureSetup().groups[1];
+    QLMSetupGroup *group = [self groupNamed:@"Off" from:source nodes:@[source.nodes[0], source.nodes[2]]];
+    NSError *noVolume = [self applyGroup:group];
+    XCTAssertEqual(noVolume.code, QLMSystemErrorNoVolume);
+    XCTAssertTrue(QLMSystemErrorRefused(noVolume));
+
+    [_system setVolumeDecibels:-30];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.volumeDecibels != nil && snapshot.idle;
+    }];
+    __block NSError *cut = nil;
+    __block BOOL done = NO;
+    [_system applyGroup:group completion:^(NSError *error) {
+        cut = error;
+        done = YES;
+    }];
+    // Queued behind the apply, the stop cuts it short.
+    [self stopSystem];
+    [self waitUntil:^BOOL {
+        return done;
+    }];
+    XCTAssertEqual(cut.code, QLMSystemErrorNotRunning);
+    XCTAssertFalse(QLMSystemErrorRefused(cut));
+
+    NSError *stopped = [self applyGroup:group];
+    XCTAssertEqual(stopped.code, QLMSystemErrorNotRunning);
+    XCTAssertTrue(QLMSystemErrorRefused(stopped));
+    XCTAssertFalse(QLMSystemErrorRefused(nil));
+    XCTAssertFalse(QLMSystemErrorRefused([NSError errorWithDomain:NSPOSIXErrorDomain code:5 userInfo:nil]));
+}
+
 #pragma mark - Call numbers
 
 // The numbers run in their order on System's queue, whatever thread calls.

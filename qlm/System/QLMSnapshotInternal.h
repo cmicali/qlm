@@ -67,6 +67,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) BOOL dimmed;
 @property (nonatomic, readwrite) BOOL applying;
+@property (nonatomic, readwrite, copy, nullable) NSString *applyingGroupName;
 @property (nonatomic, readwrite, nullable) NSString *activeGroupName;
 @property (nonatomic, readwrite) BOOL wokeWithoutGroup;
 @property (nonatomic, readwrite) BOOL idle;

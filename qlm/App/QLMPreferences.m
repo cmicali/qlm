@@ -4,6 +4,7 @@
 
 #include "QLMCommands.h"
 #import "QLMFakeBus.h"
+#import "QLMSkinLibrary.h"
 #import "QLMSystem.h"
 
 const double QLMVolumeRangeMinimumSpan = 10;
@@ -19,8 +20,8 @@ static NSString *const QLMLowestKey = @"QLMLowestDecibels";
 static NSString *const QLMWakesAtLaunchKey = @"QLMWakesAtLaunch";
 static NSString *const QLMUsesAdapterKey = @"QLMUsesAdapter";
 static NSString *const QLMSetupFileNameKey = @"QLMSetupFileName";
+static NSString *const QLMOpensWindowAtLaunchKey = @"QLMOpensWindowAtLaunch";
 static NSString *const QLMSkinNameKey = @"QLMSkinName";
-static NSString *const QLMDefaultSkinName = @"modern";
 static NSString *const QLMShowsOSDKey = @"QLMShowsOSD";
 static NSString *const QLMOSDPlacementKey = @"QLMOSDPlacement";
 static NSString *const QLMOSDSecondsKey = @"QLMOSDSeconds";
@@ -258,6 +259,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         [defaults registerDefaults:@{
             QLMWakesAtLaunchKey: @NO,
             QLMUsesAdapterKey: @NO,
+            QLMOpensWindowAtLaunchKey: @NO,
             QLMShowsOSDKey: @YES,
         }];
     }
@@ -323,9 +325,17 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     [_defaults setObject:setupFileName forKey:QLMSetupFileNameKey];
 }
 
+- (BOOL)opensWindowAtLaunch {
+    return [_defaults boolForKey:QLMOpensWindowAtLaunchKey];
+}
+
+- (void)setOpensWindowAtLaunch:(BOOL)opensWindowAtLaunch {
+    [_defaults setBool:opensWindowAtLaunch forKey:QLMOpensWindowAtLaunchKey];
+}
+
 - (NSString *)skinName {
     NSString *name = [_defaults stringForKey:QLMSkinNameKey];
-    return name.length > 0 ? name : QLMDefaultSkinName;
+    return name.length > 0 ? name : QLMSkinDefaultName;
 }
 
 - (void)setSkinName:(NSString *)skinName {

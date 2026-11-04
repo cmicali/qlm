@@ -52,6 +52,20 @@ static NSData *QLMID(uint8_t last) {
     }
 }
 
+#pragma mark - The window
+
+// docs/ui.md: the menu bar item is still the app, so the window opens at
+// launch only when asked, and modern is the skin until one is chosen.
+- (void)testTheWindowsChoicesStartOffAndModern {
+    XCTAssertFalse(_preferences.opensWindowAtLaunch);
+    XCTAssertEqualObjects(_preferences.skinName, @"modern");
+    _preferences.opensWindowAtLaunch = YES;
+    _preferences.skinName = @"vintage";
+    QLMPreferences *relaunched = [[QLMPreferences alloc] initWithDefaults:_defaults];
+    XCTAssertTrue(relaunched.opensWindowAtLaunch);
+    XCTAssertEqualObjects(relaunched.skinName, @"vintage");
+}
+
 #pragma mark - Above 0 dB
 
 // 0 dB is the monitors' full level. Each level, saved at it, stays.

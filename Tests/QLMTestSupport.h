@@ -36,6 +36,12 @@ NSData *QLMBytes(const uint8_t *bytes, size_t length);
 // A hand-back as System would give it.
 QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume);
 
+// A monitor as System tracks it, with the hardware ID {first, 4B, session}.
+QLMMonitorState *QLMMakeMonitor(uint8_t first, uint8_t session, QLMMonitorStatus status);
+
+// A running System's snapshot with these monitors and nothing else set.
+QLMSnapshot *QLMMakeRunningSnapshot(NSArray<QLMMonitorState *> *monitors);
+
 // The snapshot's monitor with this hardware ID, or nil.
 QLMMonitorState *_Nullable QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID);
 
@@ -53,7 +59,9 @@ NSString *QLMRepositoryPath(NSString *relative);
 // A file in Tests/Setups/Fixtures/.
 NSString *QLMFixturePath(NSString *name);
 
-// The shipped modern skin, and the image fixture in Tests/App/Fixtures/.
+// The shipped skins' directory, the modern skin in it, and the image
+// fixture in Tests/App/Fixtures/.
+NSURL *QLMBuiltInSkinsURL(void);
 NSURL *QLMModernSkinURL(void);
 NSURL *QLMFixtureSkinURL(void);
 

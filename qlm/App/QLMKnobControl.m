@@ -1,6 +1,7 @@
 #import "QLMKnobControl.h"
 
 #import "PlatformColor.h"
+#import "QLMFormat.h"
 #import "QLMKnobMath.h"
 #import "QLMSkinDrawing.h"
 
@@ -22,8 +23,33 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
         _minValue = -80;
         _maxValue = 0;
         _value = -80;
+        self.accessibilityRole = NSAccessibilitySliderRole;
     }
     return self;
+}
+
+- (id)accessibilityValue {
+    return @(_value);
+}
+
+- (NSString *)accessibilityValueDescription {
+    return QLMDecibelsText(_value);
+}
+
+- (BOOL)stepBy:(int)steps {
+    if (!self.enabled) {
+        return NO;
+    }
+    [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];
+    return YES;
+}
+
+- (BOOL)accessibilityPerformIncrement {
+    return [self stepBy:1];
+}
+
+- (BOOL)accessibilityPerformDecrement {
+    return [self stepBy:-1];
 }
 
 - (double)doubleValue {
@@ -157,10 +183,10 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     return arc;
 }
 
-- (NSRect)bodyRect {
+// A square on the center.
+- (NSRect)rectAround:(CGFloat)radius {
     NSPoint center = [self center];
-    CGFloat side = self.skin.knob.bodySize;
-    return NSMakeRect(center.x - side / 2, center.y - side / 2, side, side);
+    return NSMakeRect(center.x - radius, center.y - radius, radius * 2, radius * 2);
 }
 
 // What no turn changes, drawn once per size.
@@ -170,11 +196,21 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     }
     QLMSkinKnob *knob = self.skin.knob;
     NSPoint center = [self center];
-    NSRect body = [self bodyRect];
+    NSRect disc = [self rectAround:knob.bodySize / 2 - 1];
     _still = [NSImage imageWithSize:self.bounds.size flipped:YES drawingHandler:^BOOL(NSRect rect) {
         if (knob.shadow != nil) {
-            QLMSkinDrawShadow(knob.shadow, [NSBezierPath bezierPathWithOvalInRect:NSInsetRect(body, 1, 1)],
-                              QLMSkinNSColor(knob.shadow.color));
+            NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:disc];
+            QLMSkinDrawShadow(knob.shadow, path, NSColor.blackColor);
+            // Only the cast shadow stays, so a body that isn't opaque, as a
+            // disabled image body, shows no disc through it. TRAP: the
+            // erase is safe only because the still is its own fresh image.
+            // In a view's context, as in QLMSkinDrawShadow, it would punch
+            // a hole in the panel under every button.
+            [NSGraphicsContext saveGraphicsState];
+            NSGraphicsContext.currentContext.compositingOperation = NSCompositingOperationDestinationOut;
+            [NSColor.blackColor setFill];
+            [path fill];
+            [NSGraphicsContext restoreGraphicsState];
         }
         if (knob.tickCount > 0) {
             NSBezierPath *ticks = [NSBezierPath bezierPath];
@@ -195,7 +231,7 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinKnob *knob = self.skin.knob;
     NSPoint center = [self center];
-    NSRect body = [self bodyRect];
+    NSRect body = [self rectAround:knob.bodySize / 2];
     double angle = QLMKnobAngleForDecibels(_value, self.minValue, self.maxValue);
 
     [[self still] drawInRect:self.bounds fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1

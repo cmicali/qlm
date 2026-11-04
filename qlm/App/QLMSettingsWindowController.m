@@ -4,6 +4,8 @@
 
 #include "QLMCommands.h"
 #import "QLMFormat.h"
+#import "QLMSkinLayout.h"
+#import "QLMSkinLibrary.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMSettingsTextWidth = 360;
@@ -22,6 +24,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic) NSStepper *ceilingStepper;
 @property (nonatomic) NSTextField *rangeNote;
 @property (nonatomic) NSButton *wakeCheckbox;
+@property (nonatomic) NSButton *windowCheckbox;
 @property (nonatomic) NSButton *loginCheckbox;
 @property (nonatomic) NSTextField *loginNote;
 @property (nonatomic) NSButton *loginItemsButton;
@@ -95,6 +98,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
         QLMSettingsTextWidth);
 
     self.wakeCheckbox = [NSButton checkboxWithTitle:@"Wake the monitors" target:self action:@selector(wakeClicked:)];
+    self.windowCheckbox = [NSButton checkboxWithTitle:@"Open the window" target:self action:@selector(windowClicked:)];
     self.loginCheckbox = [NSButton checkboxWithTitle:@"Open qlm at login" target:self action:@selector(loginClicked:)];
     self.loginNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
     self.loginItemsButton = [NSButton buttonWithTitle:@"Open Login Items" target:self action:@selector(openLoginItems:)];
@@ -117,6 +121,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @[[NSGridCell emptyContentView], self.rangeNote],
         @[[NSGridCell emptyContentView], ceilingNote],
         @[launchTitle, self.wakeCheckbox],
+        @[[NSGridCell emptyContentView], self.windowCheckbox],
         @[[NSGridCell emptyContentView], self.loginCheckbox],
         @[[NSGridCell emptyContentView], self.loginNote],
         @[[NSGridCell emptyContentView], self.loginItemsButton],
@@ -314,6 +319,10 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.preferences.wakesAtLaunch = checkbox.state == NSControlStateValueOn;
 }
 
+- (void)windowClicked:(NSButton *)checkbox {
+    self.preferences.opensWindowAtLaunch = checkbox.state == NSControlStateValueOn;
+}
+
 - (void)loginClicked:(NSButton *)checkbox {
     SMAppService *service = SMAppService.mainAppService;
     NSError *error = nil;
@@ -423,6 +432,13 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
         }
         NSString *count = self.setup.groups.count == 1 ? @"1 group" : [NSString stringWithFormat:@"%lu groups", (unsigned long)self.setup.groups.count];
         self.setupNote.stringValue = [NSString stringWithFormat:@"%@: %@.", count, [names componentsJoinedByString:@", "]];
+        // The library's fallback gives the skin the window shows.
+        QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:self.preferences.skinName refusal:NULL];
+        NSUInteger buttons = skin != nil ? QLMSkinGroupButtonCount(skin) : QLMSkinMaxGroups;
+        if (names.count > buttons) {
+            self.setupNote.stringValue = [self.setupNote.stringValue
+                stringByAppendingFormat:@" The window shows the first %lu.", (unsigned long)buttons];
+        }
     } else if (self.setupError != nil) {
         self.setupNote.stringValue = [NSString stringWithFormat:@"It does not read: %@", self.setupError.localizedDescription];
     } else {
@@ -447,6 +463,7 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
 // Asks macOS for the login item's status, so only when the window shows.
 - (void)renderLaunch {
     self.wakeCheckbox.state = self.preferences.wakesAtLaunch ? NSControlStateValueOn : NSControlStateValueOff;
+    self.windowCheckbox.state = self.preferences.opensWindowAtLaunch ? NSControlStateValueOn : NSControlStateValueOff;
 
     SMAppServiceStatus status = SMAppService.mainAppService.status;
     self.loginCheckbox.state = status == SMAppServiceStatusEnabled || status == SMAppServiceStatusRequiresApproval

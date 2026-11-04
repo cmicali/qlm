@@ -144,7 +144,7 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 - (void)present:(QLMSnapshot *)snapshot {
     double decibels = snapshot.volumeDecibels.doubleValue;
     QLMSkinOSDView *view = self.osdView;
-    view.level = QLMDecibelsNumberText(decibels);
+    view.level = QLMDecibelsNumberText(decibels, 1);
     view.unit = @"dB";
     view.title = QLMOSDTitle(snapshot);
     view.subtitle = QLMOSDSubtitle(snapshot);

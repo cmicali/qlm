@@ -9,10 +9,6 @@
 
 static const CGFloat QLMPopoverWidth = 320;
 static const CGFloat QLMPopoverInset = 14;
-// After the user moves the slider, snapshots leave it alone this long, so a
-// snapshot from before the move cannot pull it back mid-drag.
-static const NSTimeInterval QLMSliderHoldInterval = 0.5;
-
 static NSTextField *QLMSmallLabel(NSString *text) {
     NSTextField *label = [NSTextField labelWithString:text];
     label.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
@@ -63,7 +59,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSButton *muteButton;
 @property (nonatomic) NSButton *dimButton;
 @property (nonatomic) NSButton *powerButton;
-@property (nonatomic) NSButton *fakeBusButton;
+@property (nonatomic) NSStackView *fakeBusRow;
 @property (nonatomic) NSPopUpButton *groupPicker;
 @property (nonatomic) NSTextField *summaryLabel;
 @property (nonatomic) NSStackView *monitorsStack;
@@ -146,7 +142,7 @@ static NSView *QLMSpacer(void) {
 
 - (void)setShowsFakeBus:(BOOL)showsFakeBus {
     _showsFakeBus = showsFakeBus;
-    self.fakeBusButton.hidden = !showsFakeBus;
+    self.fakeBusRow.hidden = !showsFakeBus;
 }
 
 - (void)setChangedSetupName:(NSString *)changedSetupName {
@@ -243,18 +239,21 @@ static NSView *QLMSpacer(void) {
     self.monitorsStack.alignment = NSLayoutAttributeLeading;
     self.monitorsStack.spacing = 5;
 
+    NSButton *windowButton = QLMSmallButton(@"Window…", self, @selector(showWindowClicked:));
     NSButton *monitorsButton = QLMSmallButton(@"Monitors…", self, @selector(showMonitorsClicked:));
     NSButton *settingsButton = QLMSmallButton(@"Settings…", self, @selector(showSettingsClicked:));
-    self.fakeBusButton = QLMSmallButton(@"Fake Bus…", self, @selector(showFakeBusClicked:));
-    self.fakeBusButton.hidden = !self.showsFakeBus;
+    // Its own row: with Window…, one footer is too narrow for it.
+    self.fakeBusRow = [NSStackView stackViewWithViews:@[QLMSmallButton(@"Fake Bus…", self, @selector(showFakeBusClicked:)), QLMSpacer()]];
+    self.fakeBusRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    self.fakeBusRow.hidden = !self.showsFakeBus;
     NSButton *quit = QLMSmallButton(@"Quit", NSApp, @selector(terminate:));
-    NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, self.fakeBusButton, QLMSpacer(), quit]];
+    NSStackView *footer = [NSStackView stackViewWithViews:@[windowButton, monitorsButton, settingsButton, QLMSpacer(), quit]];
     footer.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     footer.spacing = 6;
 
     NSArray<NSView *> *fullWidth = @[
         self.banner, self.setupBanner, self.groupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
-        [self separator], monitorsHeader, self.monitorsStack, [self separator], footer,
+        [self separator], monitorsHeader, self.monitorsStack, [self separator], footer, self.fakeBusRow,
     ];
     NSStackView *stack = [NSStackView stackViewWithViews:fullWidth];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
@@ -384,6 +383,10 @@ static NSView *QLMSpacer(void) {
     return QLMRunningGLM();
 }
 
+- (void)showWindowClicked:(id)sender {
+    [self.delegate popoverControllerShowWindow:self];
+}
+
 - (void)showMonitorsClicked:(id)sender {
     [self.delegate popoverControllerShowMonitors:self];
 }
@@ -477,11 +480,9 @@ static NSView *QLMSpacer(void) {
     }
 }
 
-// With a volume set, the snapshot is a published one, so its ceiling is the
-// one System caps at. Before that, the preferences say it.
 - (void)renderVolume:(nullable QLMSnapshot *)snapshot {
     NSNumber *volume = snapshot.volumeDecibels;
-    double ceiling = volume != nil ? snapshot.ceilingDecibels : self.preferences.ceilingDecibels;
+    double ceiling = QLMShownCeiling(snapshot, self.preferences.ceilingDecibels);
     NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
     self.volumeSlider.enabled = snapshot.running;
     if (volume == nil) {
@@ -491,8 +492,7 @@ static NSView *QLMSpacer(void) {
     }
     double decibels = volume.doubleValue;
     self.volumeLabel.stringValue = QLMDecibelsText(decibels);
-    BOOL held = NSProcessInfo.processInfo.systemUptime - self.sliderMovedAt < QLMSliderHoldInterval;
-    if (!held) {
+    if (!QLMLevelHolds(self.sliderMovedAt, NSProcessInfo.processInfo.systemUptime)) {
         self.volumeSlider.doubleValue = fmax(self.volumeSlider.minValue, decibels);
     }
     NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithObject:ceilingText];

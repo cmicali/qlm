@@ -12,6 +12,13 @@ static void QLMSkinSpringAxis(CGFloat *origin, CGFloat *length, BOOL low, BOOL h
     }
 }
 
+const NSUInteger QLMSkinMaxGroups = 6;
+
+NSUInteger QLMSkinGroupButtonCount(QLMSkin *skin) {
+    QLMSkinElement *groups = [skin element:@"groups"];
+    return MIN((NSUInteger)MAX(groups.columns * groups.rows, 0), QLMSkinMaxGroups);
+}
+
 CGRect QLMSkinSpring(CGRect frame, QLMSkinAnchors anchors, CGSize extra) {
     QLMSkinSpringAxis(&frame.origin.x, &frame.size.width, (anchors & QLMSkinAnchorLeft) != 0,
                       (anchors & QLMSkinAnchorRight) != 0, extra.width);
