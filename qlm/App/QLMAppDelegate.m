@@ -16,6 +16,7 @@
 #import "QLMSystem.h"
 #if DEBUG
 #import "QLMDebugChannel.h"
+#import "QLMSkinPreview.h"
 #endif
 
 // How long quit and sleep wait for System to let go, well within the Mac's
@@ -505,6 +506,12 @@ static OSType QLMQuitReason(void) {
 
 - (BOOL)debugQuitAsksFirst {
     return [self stopMayRaiseLevel:[self snapshotNow]];
+}
+
+- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd {
+    [self.popover close];
+    [self activateApp];
+    return QLMShowSkinPreview(name, osd);
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

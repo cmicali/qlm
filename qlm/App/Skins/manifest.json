@@ -1,0 +1,1964 @@
+{
+  "version": 1,
+  "coordinate_system": "top-left, logical points",
+  "scales": [
+    1,
+    2
+  ],
+  "skins": {
+    "vintage": {
+      "assets": {
+        "panel-background": {
+          "size_points": [
+            640,
+            480
+          ],
+          "files": {
+            "1x": "png/panel-background.png",
+            "2x": "png/panel-background@2x.png"
+          },
+          "source": "masters/panel-background.svg",
+          "cap_insets": {
+            "top": 22,
+            "left": 24,
+            "bottom": 30,
+            "right": 24
+          },
+          "asset_catalog_name": "QLMVintage_panel-background"
+        },
+        "panel-markings": {
+          "size_points": [
+            640,
+            480
+          ],
+          "files": {
+            "1x": "png/panel-markings.png",
+            "2x": "png/panel-markings@2x.png"
+          },
+          "source": "masters/panel-markings.svg",
+          "note": "No text. Gap in setup frame is reserved for the native label.",
+          "asset_catalog_name": "QLMVintage_panel-markings"
+        },
+        "display-glass": {
+          "size_points": [
+            356,
+            132
+          ],
+          "files": {
+            "1x": "png/display-glass.png",
+            "2x": "png/display-glass@2x.png"
+          },
+          "source": "masters/display-glass.svg",
+          "cap_insets": {
+            "top": 6,
+            "left": 6,
+            "bottom": 6,
+            "right": 6
+          },
+          "asset_catalog_name": "QLMVintage_display-glass"
+        },
+        "nameplate": {
+          "size_points": [
+            78,
+            38
+          ],
+          "files": {
+            "1x": "png/nameplate.png",
+            "2x": "png/nameplate@2x.png"
+          },
+          "source": "masters/nameplate.svg",
+          "cap_insets": {
+            "top": 6,
+            "left": 6,
+            "bottom": 7,
+            "right": 6
+          },
+          "asset_catalog_name": "QLMVintage_nameplate"
+        },
+        "osd-background": {
+          "size_points": [
+            300,
+            72
+          ],
+          "files": {
+            "1x": "png/osd-background.png",
+            "2x": "png/osd-background@2x.png"
+          },
+          "source": "masters/osd-background.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 9,
+            "bottom": 8,
+            "right": 9
+          },
+          "asset_catalog_name": "QLMVintage_osd-background"
+        },
+        "button-normal": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-normal.png",
+            "2x": "png/button-normal@2x.png"
+          },
+          "source": "masters/button-normal.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-normal"
+        },
+        "button-hover": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-hover.png",
+            "2x": "png/button-hover@2x.png"
+          },
+          "source": "masters/button-hover.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-hover"
+        },
+        "button-pressed": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-pressed.png",
+            "2x": "png/button-pressed@2x.png"
+          },
+          "source": "masters/button-pressed.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-pressed"
+        },
+        "button-selected": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected.png",
+            "2x": "png/button-selected@2x.png"
+          },
+          "source": "masters/button-selected.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-selected"
+        },
+        "button-selected-hover": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected-hover.png",
+            "2x": "png/button-selected-hover@2x.png"
+          },
+          "source": "masters/button-selected-hover.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-selected-hover"
+        },
+        "button-selected-pressed": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected-pressed.png",
+            "2x": "png/button-selected-pressed@2x.png"
+          },
+          "source": "masters/button-selected-pressed.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-selected-pressed"
+        },
+        "button-disabled": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-disabled.png",
+            "2x": "png/button-disabled@2x.png"
+          },
+          "source": "masters/button-disabled.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-disabled"
+        },
+        "button-selected-disabled": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected-disabled.png",
+            "2x": "png/button-selected-disabled@2x.png"
+          },
+          "source": "masters/button-selected-disabled.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 9,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMVintage_button-selected-disabled"
+        },
+        "button-focus-ring": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-focus-ring.png",
+            "2x": "png/button-focus-ring@2x.png"
+          },
+          "source": "masters/button-focus-ring.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 8,
+            "right": 8
+          },
+          "note": "Overlay any enabled state. Do not replace its base artwork.",
+          "asset_catalog_name": "QLMVintage_button-focus-ring"
+        },
+        "knob-shadow": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-shadow.png",
+            "2x": "png/knob-shadow@2x.png"
+          },
+          "source": "masters/knob-shadow.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMVintage_knob-shadow"
+        },
+        "knob-body-normal": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-normal.png",
+            "2x": "png/knob-body-normal@2x.png"
+          },
+          "source": "masters/knob-body-normal.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMVintage_knob-body-normal"
+        },
+        "knob-body-hover": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-hover.png",
+            "2x": "png/knob-body-hover@2x.png"
+          },
+          "source": "masters/knob-body-hover.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMVintage_knob-body-hover"
+        },
+        "knob-body-pressed": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-pressed.png",
+            "2x": "png/knob-body-pressed@2x.png"
+          },
+          "source": "masters/knob-body-pressed.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMVintage_knob-body-pressed"
+        },
+        "knob-body-disabled": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-disabled.png",
+            "2x": "png/knob-body-disabled@2x.png"
+          },
+          "source": "masters/knob-body-disabled.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMVintage_knob-body-disabled"
+        },
+        "knob-pointer": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-pointer.png",
+            "2x": "png/knob-pointer@2x.png"
+          },
+          "source": "masters/knob-pointer.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "note": "Rotate this layer only. Clockwise angle in top-left coordinates. Body and shadow stay fixed.",
+          "asset_catalog_name": "QLMVintage_knob-pointer"
+        },
+        "knob-pointer-disabled": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-pointer-disabled.png",
+            "2x": "png/knob-pointer-disabled@2x.png"
+          },
+          "source": "masters/knob-pointer-disabled.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "note": "Rotate this layer only. Clockwise angle in top-left coordinates. Body and shadow stay fixed.",
+          "asset_catalog_name": "QLMVintage_knob-pointer-disabled"
+        },
+        "knob-ticks": {
+          "size_points": [
+            176,
+            176
+          ],
+          "files": {
+            "1x": "png/knob-ticks.png",
+            "2x": "png/knob-ticks@2x.png"
+          },
+          "source": "masters/knob-ticks.svg",
+          "pivot_points": [
+            88,
+            88
+          ],
+          "asset_catalog_name": "QLMVintage_knob-ticks"
+        },
+        "knob-focus-ring": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-focus-ring.png",
+            "2x": "png/knob-focus-ring@2x.png"
+          },
+          "source": "masters/knob-focus-ring.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMVintage_knob-focus-ring"
+        },
+        "led-on": {
+          "size_points": [
+            16,
+            16
+          ],
+          "files": {
+            "1x": "png/led-on.png",
+            "2x": "png/led-on@2x.png"
+          },
+          "source": "masters/led-on.svg",
+          "asset_catalog_name": "QLMVintage_led-on"
+        },
+        "led-off": {
+          "size_points": [
+            16,
+            16
+          ],
+          "files": {
+            "1x": "png/led-off.png",
+            "2x": "png/led-off@2x.png"
+          },
+          "source": "masters/led-off.svg",
+          "asset_catalog_name": "QLMVintage_led-off"
+        },
+        "led-disabled": {
+          "size_points": [
+            16,
+            16
+          ],
+          "files": {
+            "1x": "png/led-disabled.png",
+            "2x": "png/led-disabled@2x.png"
+          },
+          "source": "masters/led-disabled.svg",
+          "asset_catalog_name": "QLMVintage_led-disabled"
+        },
+        "osd-track": {
+          "size_points": [
+            130,
+            3
+          ],
+          "files": {
+            "1x": "png/osd-track.png",
+            "2x": "png/osd-track@2x.png"
+          },
+          "source": "masters/osd-track.svg",
+          "cap_insets": {
+            "top": 1,
+            "left": 2,
+            "bottom": 1,
+            "right": 2
+          },
+          "asset_catalog_name": "QLMVintage_osd-track"
+        },
+        "osd-fill": {
+          "size_points": [
+            130,
+            3
+          ],
+          "files": {
+            "1x": "png/osd-fill.png",
+            "2x": "png/osd-fill@2x.png"
+          },
+          "source": "masters/osd-fill.svg",
+          "cap_insets": {
+            "top": 1,
+            "left": 2,
+            "bottom": 1,
+            "right": 2
+          },
+          "asset_catalog_name": "QLMVintage_osd-fill"
+        },
+        "display-disabled-overlay": {
+          "size_points": [
+            356,
+            132
+          ],
+          "files": {
+            "1x": "png/display-disabled-overlay.png",
+            "2x": "png/display-disabled-overlay@2x.png"
+          },
+          "source": "masters/display-disabled-overlay.svg",
+          "asset_catalog_name": "QLMVintage_display-disabled-overlay"
+        },
+        "osd-disabled-overlay": {
+          "size_points": [
+            300,
+            72
+          ],
+          "files": {
+            "1x": "png/osd-disabled-overlay.png",
+            "2x": "png/osd-disabled-overlay@2x.png"
+          },
+          "source": "masters/osd-disabled-overlay.svg",
+          "asset_catalog_name": "QLMVintage_osd-disabled-overlay"
+        }
+      },
+      "palette": {
+        "label": "#dfd4b9",
+        "secondary": "#bdb39c",
+        "display": "#ec9179",
+        "badgeInk": "#34352b",
+        "focus": "#f4c57b",
+        "panel": "#34342d"
+      },
+      "layout": {
+        "panel_size": [
+          640,
+          480
+        ],
+        "osd_size": [
+          300,
+          72
+        ],
+        "layers": [
+          {
+            "asset": "panel-background",
+            "frame": [
+              0,
+              0,
+              640,
+              480
+            ]
+          },
+          {
+            "asset": "panel-markings",
+            "frame": [
+              0,
+              0,
+              640,
+              480
+            ]
+          },
+          {
+            "asset": "nameplate",
+            "frame": [
+              48,
+              27,
+              78,
+              38
+            ]
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              48,
+              120,
+              174,
+              40
+            ],
+            "role": "setup-main"
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              234,
+              120,
+              174,
+              40
+            ],
+            "role": "setup-nearfield"
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              420,
+              120,
+              174,
+              40
+            ],
+            "role": "setup-full-range"
+          },
+          {
+            "asset": "display-glass",
+            "frame": [
+              48,
+              184,
+              356,
+              132
+            ]
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              48,
+              338,
+              174,
+              40
+            ],
+            "role": "mute"
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              230,
+              338,
+              174,
+              40
+            ],
+            "role": "dim"
+          },
+          {
+            "asset": "knob-shadow",
+            "frame": [
+              436,
+              178,
+              144,
+              144
+            ]
+          },
+          {
+            "asset": "knob-ticks",
+            "frame": [
+              420,
+              162,
+              176,
+              176
+            ]
+          },
+          {
+            "asset": "knob-body-normal",
+            "frame": [
+              436,
+              178,
+              144,
+              144
+            ]
+          },
+          {
+            "asset": "knob-pointer",
+            "frame": [
+              436,
+              178,
+              144,
+              144
+            ],
+            "rotation_degrees": 70.2
+          }
+        ],
+        "text": [
+          {
+            "text": "qlm.",
+            "frame": [
+              48,
+              30,
+              78,
+              32
+            ],
+            "font": "Helvetica Neue",
+            "size": 24,
+            "weight": "bold-italic",
+            "alignment": "center",
+            "color": "badgeInk"
+          },
+          {
+            "text": "6 ONLINE",
+            "frame": [
+              529,
+              37,
+              70,
+              16
+            ],
+            "font": "Menlo",
+            "size": 10,
+            "color": "secondary"
+          },
+          {
+            "text": "LISTENING SETUP",
+            "frame": [
+              53,
+              101,
+              131,
+              18
+            ],
+            "font": "Helvetica Neue",
+            "size": 10,
+            "weight": "medium",
+            "color": "label"
+          },
+          {
+            "text": "MAIN",
+            "frame": [
+              48,
+              130,
+              174,
+              19
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "NEARFIELD",
+            "frame": [
+              234,
+              130,
+              174,
+              19
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "FULL RANGE",
+            "frame": [
+              420,
+              130,
+              174,
+              19
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "MAIN",
+            "frame": [
+              67,
+              197,
+              90,
+              16
+            ],
+            "font": "Menlo",
+            "size": 10,
+            "color": "display"
+          },
+          {
+            "text": "LEVEL",
+            "frame": [
+              346,
+              197,
+              48,
+              16
+            ],
+            "font": "Menlo",
+            "size": 10,
+            "color": "display"
+          },
+          {
+            "text": "\u221242.0",
+            "frame": [
+              67,
+              219,
+              213,
+              65
+            ],
+            "font": "Menlo",
+            "size": 45,
+            "color": "display"
+          },
+          {
+            "text": "dB",
+            "frame": [
+              216,
+              248,
+              34,
+              19
+            ],
+            "size": 12,
+            "color": "display"
+          },
+          {
+            "text": "OUTPUT \u221242.0",
+            "frame": [
+              67,
+              279,
+              140,
+              15
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "display"
+          },
+          {
+            "text": "MAX \u221230",
+            "frame": [
+              328,
+              279,
+              63,
+              15
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "display"
+          },
+          {
+            "text": "MUTE",
+            "frame": [
+              48,
+              348,
+              174,
+              18
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "DIM \u221220",
+            "frame": [
+              230,
+              348,
+              174,
+              18
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "\u221280",
+            "frame": [
+              430,
+              325,
+              40,
+              16
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "secondary"
+          },
+          {
+            "text": "\u221230",
+            "frame": [
+              554,
+              325,
+              40,
+              16
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "secondary"
+          },
+          {
+            "text": "VOLUME",
+            "frame": [
+              474,
+              351,
+              69,
+              18
+            ],
+            "size": 10,
+            "alignment": "center",
+            "color": "secondary"
+          },
+          {
+            "text": "\u2212",
+            "frame": [
+              445,
+              348,
+              22,
+              22
+            ],
+            "size": 16,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "+",
+            "frame": [
+              550,
+              348,
+              22,
+              22
+            ],
+            "size": 16,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "Monitors",
+            "frame": [
+              66,
+              411,
+              94,
+              21
+            ],
+            "size": 11,
+            "color": "label"
+          },
+          {
+            "text": "MAIN \u00b7 ACTIVE",
+            "frame": [
+              290,
+              414,
+              140,
+              18
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "secondary"
+          },
+          {
+            "text": "Standby",
+            "frame": [
+              550,
+              411,
+              64,
+              21
+            ],
+            "size": 11,
+            "color": "label"
+          }
+        ],
+        "indicator_frames": {
+          "online": [
+            514,
+            37,
+            16,
+            16
+          ],
+          "setup-main": [
+            76,
+            131,
+            16,
+            16
+          ],
+          "mute": [
+            76,
+            348,
+            16,
+            16
+          ]
+        },
+        "knob": {
+          "minimum_db": -80,
+          "maximum_db": -30,
+          "step_db": 0.5,
+          "start_degrees": -135,
+          "end_degrees": 135,
+          "reference_direction": "pointer points up at zero rotation",
+          "clockwise": true,
+          "pivot_in_asset": [
+            72,
+            72
+          ],
+          "body_must_not_rotate": true
+        },
+        "symbols": {
+          "monitors": "slider.horizontal.3",
+          "standby": "power",
+          "volume_up": "plus",
+          "volume_down": "minus"
+        },
+        "osd": {
+          "background": [
+            0,
+            0,
+            300,
+            72
+          ],
+          "level": [
+            22,
+            18,
+            116,
+            38
+          ],
+          "setup": [
+            145,
+            15,
+            136,
+            18
+          ],
+          "status": [
+            145,
+            34,
+            136,
+            15
+          ],
+          "track": [
+            145,
+            52,
+            130,
+            3
+          ]
+        }
+      },
+      "source_kind": "vector reconstruction of the original HTML design"
+    },
+    "retro": {
+      "assets": {
+        "panel-background": {
+          "size_points": [
+            640,
+            480
+          ],
+          "files": {
+            "1x": "png/panel-background.png",
+            "2x": "png/panel-background@2x.png"
+          },
+          "source": "masters/panel-background.png",
+          "cap_insets": {
+            "top": 22,
+            "left": 32,
+            "bottom": 48,
+            "right": 32
+          },
+          "note": "Fixed-size use preferred. Caps preserve wood cheeks and base rail when stretched.",
+          "asset_catalog_name": "QLMRetro_panel-background"
+        },
+        "panel-markings": {
+          "size_points": [
+            640,
+            480
+          ],
+          "files": {
+            "1x": "png/panel-markings.png",
+            "2x": "png/panel-markings@2x.png"
+          },
+          "source": "masters/panel-markings.svg",
+          "note": "No text. Gap in setup frame is reserved for the native label.",
+          "asset_catalog_name": "QLMRetro_panel-markings"
+        },
+        "display-glass": {
+          "size_points": [
+            356,
+            132
+          ],
+          "files": {
+            "1x": "png/display-glass.png",
+            "2x": "png/display-glass@2x.png"
+          },
+          "source": "masters/display-glass.png",
+          "cap_insets": {
+            "top": 12,
+            "left": 12,
+            "bottom": 12,
+            "right": 12
+          },
+          "note": "Source crop is 549\u00d7238 pixels. 2x normalization resamples it; use at the specified point size.",
+          "asset_catalog_name": "QLMRetro_display-glass"
+        },
+        "nameplate": {
+          "size_points": [
+            78,
+            38
+          ],
+          "files": {
+            "1x": "png/nameplate.png",
+            "2x": "png/nameplate@2x.png"
+          },
+          "source": "masters/nameplate.png",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 8,
+            "right": 8
+          },
+          "asset_catalog_name": "QLMRetro_nameplate"
+        },
+        "osd-background": {
+          "size_points": [
+            300,
+            72
+          ],
+          "files": {
+            "1x": "png/osd-background.png",
+            "2x": "png/osd-background@2x.png"
+          },
+          "source": "masters/osd-background.png",
+          "cap_insets": {
+            "top": 12,
+            "left": 14,
+            "bottom": 12,
+            "right": 14
+          },
+          "asset_catalog_name": "QLMRetro_osd-background"
+        },
+        "button-normal": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-normal.png",
+            "2x": "png/button-normal@2x.png"
+          },
+          "source": "masters/button-normal.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-normal"
+        },
+        "button-hover": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-hover.png",
+            "2x": "png/button-hover@2x.png"
+          },
+          "source": "masters/button-hover.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-hover"
+        },
+        "button-pressed": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-pressed.png",
+            "2x": "png/button-pressed@2x.png"
+          },
+          "source": "masters/button-pressed.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-pressed"
+        },
+        "button-selected": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected.png",
+            "2x": "png/button-selected@2x.png"
+          },
+          "source": "masters/button-selected.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-selected"
+        },
+        "button-selected-hover": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected-hover.png",
+            "2x": "png/button-selected-hover@2x.png"
+          },
+          "source": "masters/button-selected-hover.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-selected-hover"
+        },
+        "button-selected-pressed": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected-pressed.png",
+            "2x": "png/button-selected-pressed@2x.png"
+          },
+          "source": "masters/button-selected-pressed.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-selected-pressed"
+        },
+        "button-disabled": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-disabled.png",
+            "2x": "png/button-disabled@2x.png"
+          },
+          "source": "masters/button-disabled.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-disabled"
+        },
+        "button-selected-disabled": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-selected-disabled.png",
+            "2x": "png/button-selected-disabled@2x.png"
+          },
+          "source": "masters/button-selected-disabled.png",
+          "cap_insets": {
+            "top": 9,
+            "left": 12,
+            "bottom": 10,
+            "right": 12
+          },
+          "asset_catalog_name": "QLMRetro_button-selected-disabled"
+        },
+        "button-focus-ring": {
+          "size_points": [
+            174,
+            40
+          ],
+          "files": {
+            "1x": "png/button-focus-ring.png",
+            "2x": "png/button-focus-ring@2x.png"
+          },
+          "source": "masters/button-focus-ring.svg",
+          "cap_insets": {
+            "top": 8,
+            "left": 8,
+            "bottom": 8,
+            "right": 8
+          },
+          "note": "Overlay any enabled state. Do not replace its base artwork.",
+          "asset_catalog_name": "QLMRetro_button-focus-ring"
+        },
+        "knob-shadow": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-shadow.png",
+            "2x": "png/knob-shadow@2x.png"
+          },
+          "source": "masters/knob-shadow.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMRetro_knob-shadow"
+        },
+        "knob-body-normal": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-normal.png",
+            "2x": "png/knob-body-normal@2x.png"
+          },
+          "source": "masters/knob-body-normal.png",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMRetro_knob-body-normal"
+        },
+        "knob-body-hover": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-hover.png",
+            "2x": "png/knob-body-hover@2x.png"
+          },
+          "source": "masters/knob-body-hover.png",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMRetro_knob-body-hover"
+        },
+        "knob-body-pressed": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-pressed.png",
+            "2x": "png/knob-body-pressed@2x.png"
+          },
+          "source": "masters/knob-body-pressed.png",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMRetro_knob-body-pressed"
+        },
+        "knob-body-disabled": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-body-disabled.png",
+            "2x": "png/knob-body-disabled@2x.png"
+          },
+          "source": "masters/knob-body-disabled.png",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMRetro_knob-body-disabled"
+        },
+        "knob-pointer": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-pointer.png",
+            "2x": "png/knob-pointer@2x.png"
+          },
+          "source": "masters/knob-pointer.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "note": "Rotate this layer only. Clockwise angle in top-left coordinates. Body and shadow stay fixed.",
+          "asset_catalog_name": "QLMRetro_knob-pointer"
+        },
+        "knob-pointer-disabled": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-pointer-disabled.png",
+            "2x": "png/knob-pointer-disabled@2x.png"
+          },
+          "source": "masters/knob-pointer-disabled.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "note": "Rotate this layer only. Clockwise angle in top-left coordinates. Body and shadow stay fixed.",
+          "asset_catalog_name": "QLMRetro_knob-pointer-disabled"
+        },
+        "knob-ticks": {
+          "size_points": [
+            176,
+            176
+          ],
+          "files": {
+            "1x": "png/knob-ticks.png",
+            "2x": "png/knob-ticks@2x.png"
+          },
+          "source": "masters/knob-ticks.svg",
+          "pivot_points": [
+            88,
+            88
+          ],
+          "asset_catalog_name": "QLMRetro_knob-ticks"
+        },
+        "knob-focus-ring": {
+          "size_points": [
+            144,
+            144
+          ],
+          "files": {
+            "1x": "png/knob-focus-ring.png",
+            "2x": "png/knob-focus-ring@2x.png"
+          },
+          "source": "masters/knob-focus-ring.svg",
+          "pivot_points": [
+            72,
+            72
+          ],
+          "asset_catalog_name": "QLMRetro_knob-focus-ring"
+        },
+        "led-on": {
+          "size_points": [
+            16,
+            16
+          ],
+          "files": {
+            "1x": "png/led-on.png",
+            "2x": "png/led-on@2x.png"
+          },
+          "source": "masters/led-on.png",
+          "asset_catalog_name": "QLMRetro_led-on"
+        },
+        "led-off": {
+          "size_points": [
+            16,
+            16
+          ],
+          "files": {
+            "1x": "png/led-off.png",
+            "2x": "png/led-off@2x.png"
+          },
+          "source": "masters/led-off.svg",
+          "asset_catalog_name": "QLMRetro_led-off"
+        },
+        "led-disabled": {
+          "size_points": [
+            16,
+            16
+          ],
+          "files": {
+            "1x": "png/led-disabled.png",
+            "2x": "png/led-disabled@2x.png"
+          },
+          "source": "masters/led-disabled.svg",
+          "asset_catalog_name": "QLMRetro_led-disabled"
+        },
+        "osd-track": {
+          "size_points": [
+            130,
+            3
+          ],
+          "files": {
+            "1x": "png/osd-track.png",
+            "2x": "png/osd-track@2x.png"
+          },
+          "source": "masters/osd-track.svg",
+          "cap_insets": {
+            "top": 1,
+            "left": 2,
+            "bottom": 1,
+            "right": 2
+          },
+          "asset_catalog_name": "QLMRetro_osd-track"
+        },
+        "osd-fill": {
+          "size_points": [
+            130,
+            3
+          ],
+          "files": {
+            "1x": "png/osd-fill.png",
+            "2x": "png/osd-fill@2x.png"
+          },
+          "source": "masters/osd-fill.svg",
+          "cap_insets": {
+            "top": 1,
+            "left": 2,
+            "bottom": 1,
+            "right": 2
+          },
+          "asset_catalog_name": "QLMRetro_osd-fill"
+        },
+        "display-disabled-overlay": {
+          "size_points": [
+            356,
+            132
+          ],
+          "files": {
+            "1x": "png/display-disabled-overlay.png",
+            "2x": "png/display-disabled-overlay@2x.png"
+          },
+          "source": "masters/display-disabled-overlay.svg",
+          "asset_catalog_name": "QLMRetro_display-disabled-overlay"
+        },
+        "osd-disabled-overlay": {
+          "size_points": [
+            300,
+            72
+          ],
+          "files": {
+            "1x": "png/osd-disabled-overlay.png",
+            "2x": "png/osd-disabled-overlay@2x.png"
+          },
+          "source": "masters/osd-disabled-overlay.svg",
+          "asset_catalog_name": "QLMRetro_osd-disabled-overlay"
+        }
+      },
+      "palette": {
+        "label": "#efe1bd",
+        "secondary": "#cabd9e",
+        "display": "#ff702c",
+        "badgeInk": "#34352b",
+        "focus": "#f4c57b",
+        "panel": "#332d26"
+      },
+      "layout": {
+        "panel_size": [
+          640,
+          480
+        ],
+        "osd_size": [
+          300,
+          72
+        ],
+        "layers": [
+          {
+            "asset": "panel-background",
+            "frame": [
+              0,
+              0,
+              640,
+              480
+            ]
+          },
+          {
+            "asset": "panel-markings",
+            "frame": [
+              0,
+              0,
+              640,
+              480
+            ]
+          },
+          {
+            "asset": "nameplate",
+            "frame": [
+              48,
+              27,
+              78,
+              38
+            ]
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              48,
+              120,
+              174,
+              40
+            ],
+            "role": "setup-main"
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              234,
+              120,
+              174,
+              40
+            ],
+            "role": "setup-nearfield"
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              420,
+              120,
+              174,
+              40
+            ],
+            "role": "setup-full-range"
+          },
+          {
+            "asset": "display-glass",
+            "frame": [
+              48,
+              184,
+              356,
+              132
+            ]
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              48,
+              338,
+              174,
+              40
+            ],
+            "role": "mute"
+          },
+          {
+            "asset": "button-normal",
+            "frame": [
+              230,
+              338,
+              174,
+              40
+            ],
+            "role": "dim"
+          },
+          {
+            "asset": "knob-shadow",
+            "frame": [
+              436,
+              178,
+              144,
+              144
+            ]
+          },
+          {
+            "asset": "knob-ticks",
+            "frame": [
+              420,
+              162,
+              176,
+              176
+            ]
+          },
+          {
+            "asset": "knob-body-normal",
+            "frame": [
+              436,
+              178,
+              144,
+              144
+            ]
+          },
+          {
+            "asset": "knob-pointer",
+            "frame": [
+              436,
+              178,
+              144,
+              144
+            ],
+            "rotation_degrees": 70.2
+          }
+        ],
+        "text": [
+          {
+            "text": "qlm.",
+            "frame": [
+              48,
+              30,
+              78,
+              32
+            ],
+            "font": "Helvetica Neue",
+            "size": 24,
+            "weight": "bold-italic",
+            "alignment": "center",
+            "color": "badgeInk"
+          },
+          {
+            "text": "6 ONLINE",
+            "frame": [
+              529,
+              37,
+              70,
+              16
+            ],
+            "font": "Menlo",
+            "size": 10,
+            "color": "secondary"
+          },
+          {
+            "text": "LISTENING SETUP",
+            "frame": [
+              53,
+              101,
+              131,
+              18
+            ],
+            "font": "Helvetica Neue",
+            "size": 10,
+            "weight": "medium",
+            "color": "label"
+          },
+          {
+            "text": "MAIN",
+            "frame": [
+              48,
+              130,
+              174,
+              19
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "NEARFIELD",
+            "frame": [
+              234,
+              130,
+              174,
+              19
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "FULL RANGE",
+            "frame": [
+              420,
+              130,
+              174,
+              19
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "MAIN",
+            "frame": [
+              67,
+              197,
+              90,
+              16
+            ],
+            "font": "Menlo",
+            "size": 10,
+            "color": "display"
+          },
+          {
+            "text": "LEVEL",
+            "frame": [
+              346,
+              197,
+              48,
+              16
+            ],
+            "font": "Menlo",
+            "size": 10,
+            "color": "display"
+          },
+          {
+            "text": "\u221242.0",
+            "frame": [
+              67,
+              219,
+              213,
+              65
+            ],
+            "font": "Menlo",
+            "size": 45,
+            "color": "display"
+          },
+          {
+            "text": "dB",
+            "frame": [
+              216,
+              248,
+              34,
+              19
+            ],
+            "size": 12,
+            "color": "display"
+          },
+          {
+            "text": "OUTPUT \u221242.0",
+            "frame": [
+              67,
+              279,
+              140,
+              15
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "display"
+          },
+          {
+            "text": "MAX \u221230",
+            "frame": [
+              328,
+              279,
+              63,
+              15
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "display"
+          },
+          {
+            "text": "MUTE",
+            "frame": [
+              48,
+              348,
+              174,
+              18
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "DIM \u221220",
+            "frame": [
+              230,
+              348,
+              174,
+              18
+            ],
+            "size": 11,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "\u221280",
+            "frame": [
+              430,
+              325,
+              40,
+              16
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "secondary"
+          },
+          {
+            "text": "\u221230",
+            "frame": [
+              554,
+              325,
+              40,
+              16
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "secondary"
+          },
+          {
+            "text": "VOLUME",
+            "frame": [
+              474,
+              351,
+              69,
+              18
+            ],
+            "size": 10,
+            "alignment": "center",
+            "color": "secondary"
+          },
+          {
+            "text": "\u2212",
+            "frame": [
+              445,
+              348,
+              22,
+              22
+            ],
+            "size": 16,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "+",
+            "frame": [
+              550,
+              348,
+              22,
+              22
+            ],
+            "size": 16,
+            "alignment": "center",
+            "color": "label"
+          },
+          {
+            "text": "Monitors",
+            "frame": [
+              66,
+              411,
+              94,
+              21
+            ],
+            "size": 11,
+            "color": "label"
+          },
+          {
+            "text": "MAIN \u00b7 ACTIVE",
+            "frame": [
+              290,
+              414,
+              140,
+              18
+            ],
+            "font": "Menlo",
+            "size": 9,
+            "color": "secondary"
+          },
+          {
+            "text": "Standby",
+            "frame": [
+              550,
+              411,
+              64,
+              21
+            ],
+            "size": 11,
+            "color": "label"
+          }
+        ],
+        "indicator_frames": {
+          "online": [
+            514,
+            37,
+            16,
+            16
+          ],
+          "setup-main": [
+            76,
+            131,
+            16,
+            16
+          ],
+          "mute": [
+            76,
+            348,
+            16,
+            16
+          ]
+        },
+        "knob": {
+          "minimum_db": -80,
+          "maximum_db": -30,
+          "step_db": 0.5,
+          "start_degrees": -135,
+          "end_degrees": 135,
+          "reference_direction": "pointer points up at zero rotation",
+          "clockwise": true,
+          "pivot_in_asset": [
+            72,
+            72
+          ],
+          "body_must_not_rotate": true
+        },
+        "symbols": {
+          "monitors": "slider.horizontal.3",
+          "standby": "power",
+          "volume_up": "plus",
+          "volume_down": "minus"
+        },
+        "osd": {
+          "background": [
+            0,
+            0,
+            300,
+            72
+          ],
+          "level": [
+            22,
+            18,
+            116,
+            38
+          ],
+          "setup": [
+            145,
+            15,
+            136,
+            18
+          ],
+          "status": [
+            145,
+            34,
+            136,
+            15
+          ],
+          "track": [
+            145,
+            52,
+            130,
+            3
+          ]
+        }
+      },
+      "source_kind": "raster material assets with deterministic state transforms"
+    }
+  }
+}

@@ -14,10 +14,10 @@ debug=${1:?$usage}
 release=${2:?$usage}
 
 # Symbols: qlm's channel, then the pieces' functions and option classes.
-# Strings: main.m's flag, the wire, qlm's client, qlm's verbs, and the
-# standard verbs.
+# Strings: main.m's flag, the wire, qlm's client, qlm's verbs, the skin
+# preview's classes and functions, and the standard verbs.
 names='_QLMDebug _VibeDebug _VibeInstallDebug _VibeWriteDebug
-       --debug-cmd .debug.command QLM_DEBUG_TIMEOUT quit_answering dump_view_tree'
+       --debug-cmd .debug.command QLM_DEBUG_TIMEOUT quit_answering skin_preview QLMSkinPreview dump_view_tree'
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
