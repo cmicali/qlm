@@ -1485,9 +1485,8 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMSystemSettings *settings = [self.settings copy];
         settings.ceilingDecibels = ceilingDecibels;
         self.settings = settings;
-        NSNumber *capped = self->_volumeDecibels != nil ? [self underCeiling:self->_volumeDecibels.doubleValue] : nil;
-        if (capped != nil && ![capped isEqual:self->_volumeDecibels]) {
-            self->_volumeDecibels = capped;
+        if (self->_volumeDecibels != nil && self->_volumeDecibels.doubleValue > ceilingDecibels) {
+            self->_volumeDecibels = @(ceilingDecibels);
             self->_volumeFromKnob = NO;
         }
         if (self->_running && !self->_stopping && self->_volumeDecibels != nil) {

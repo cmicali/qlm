@@ -718,6 +718,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     // The top stop holds the level at the -20 dB ceiling. A turn that
     // leaves it there sets nothing.
     XCTAssertTrue([self turnKnobTo:-100].volumeFromKnob);
+    // The level is at the ceiling already, so only the flag shows the set.
     [_system setVolumeDecibels:-20];
     [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return !snapshot.volumeFromKnob && snapshot.idle;
@@ -730,10 +731,9 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertTrue([self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
                       return snapshot.ceilingDecibels == -25 && snapshot.idle;
                   }].volumeFromKnob);
+    [_system setCeilingDecibels:-35];
     QLMSnapshot *capped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.ceilingDecibels == -35 && snapshot.idle;
-    } after:^{
-        [self->_system setCeilingDecibels:-35];
     }];
     XCTAssertEqualObjects(capped.volumeDecibels, @(-35));
     XCTAssertFalse(capped.volumeFromKnob);
@@ -756,11 +756,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [_bus perform:^{
         self->_bus.knobTenths = @(-600);
     }];
-    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
-        return snapshot.running && !snapshot.levelAwaitsKnob && snapshot.allIdentified && snapshot.idle;
-    } after:^{
-        [self->_system start];
-    }];
+    QLMSnapshot *again = [self startAgainAndWait];
     XCTAssertEqualObjects(again.volumeDecibels, @(-60));
     XCTAssertEqualObjects(again.startLoweredFromDecibels, @(-30));
     XCTAssertFalse(again.volumeFromKnob);
@@ -773,14 +769,20 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     [self startWithKnob:@(-400) volume:@(-40)];
     XCTAssertTrue([self turnKnobTo:-300].volumeFromKnob);
     [self stopSystem];
-    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+    QLMSnapshot *again = [self startAgainAndWait];
+    XCTAssertEqualObjects(again.volumeDecibels, @(-30));
+    XCTAssertNil(again.startLoweredFromDecibels);
+    XCTAssertTrue(again.volumeFromKnob);
+}
+
+// Starts the stopped System again, and returns its snapshot once its level
+// is out and nothing is queued.
+- (QLMSnapshot *)startAgainAndWait {
+    return [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
         return snapshot.running && !snapshot.levelAwaitsKnob && snapshot.allIdentified && snapshot.idle;
     } after:^{
         [self->_system start];
     }];
-    XCTAssertEqualObjects(again.volumeDecibels, @(-30));
-    XCTAssertNil(again.startLoweredFromDecibels);
-    XCTAssertTrue(again.volumeFromKnob);
 }
 
 // Pulls the knob out, and waits until the snapshot shows it, with nothing
