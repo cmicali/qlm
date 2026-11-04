@@ -22,18 +22,21 @@ static NSImageRep *_Nullable QLMSkinImageRep(NSURL *url, CGFloat scale) {
 
 // The skin's own images, so a skin read again reads its files again. On the
 // main queue, as all drawing is.
-static NSMutableDictionary<NSString *, id> *QLMSkinImageCache(QLMSkin *skin) {
-    static const char key = 0;
-    NSMutableDictionary *cache = objc_getAssociatedObject(skin, &key);
+// Keys by address. Not const, so the two never share one.
+static char QLMSkinPlainImages;
+static char QLMSkinStretchedImages;
+
+static NSMutableDictionary<NSString *, id> *QLMSkinImageCache(QLMSkin *skin, const void *key) {
+    NSMutableDictionary *cache = objc_getAssociatedObject(skin, key);
     if (cache == nil) {
         cache = [NSMutableDictionary dictionary];
-        objc_setAssociatedObject(skin, &key, cache, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        objc_setAssociatedObject(skin, key, cache, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
     return cache;
 }
 
 NSImage *QLMSkinImage(QLMSkin *skin, NSString *name) {
-    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin);
+    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin, &QLMSkinPlainImages);
     id cached = cache[name];
     if (cached != nil) {
         return cached == NSNull.null ? nil : cached;
@@ -53,7 +56,7 @@ NSImage *QLMSkinImage(QLMSkin *skin, NSString *name) {
 // The image, stretched through `insets`.
 static NSImage *_Nullable QLMSkinStretchedImage(QLMSkin *skin, NSString *name, NSEdgeInsets insets) {
     NSString *key = [NSString stringWithFormat:@"%@|%g,%g,%g,%g", name, insets.top, insets.left, insets.bottom, insets.right];
-    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin);
+    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin, &QLMSkinStretchedImages);
     NSImage *image = cache[key];
     if (image == nil) {
         image = [QLMSkinImage(skin, name) copy];

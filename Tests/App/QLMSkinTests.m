@@ -445,6 +445,40 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"button"][@"led"][@"x"] = @160;
     } refusedWith:@"button.led.x puts the LED past the button's width, 174"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"button"][@"led"][@"size"] = @41;
+    } refusedWith:@"button.led.size is taller than the button, 40"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"button"][@"led"] = [@{@"size": @16, @"gap": @170} mutableCopy];
+    } refusedWith:@"button.led leaves the title no room in the button's width, 174"];
+}
+
+// The strokes' round caps, and the focus ring, count toward a radius.
+- (void)testAKnobStrokePastItsFrameIsRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"pointer"][@"outer"] = @87;
+        json[@"elements"][@"knob"][@"pointer"][@"width"] = @4;
+    } refusedWith:@"elements.knob.pointer.outer reaches past half the knob's frame, 88"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"ticks"][@"outer"] = @87.6;
+        json[@"elements"][@"knob"][@"ticks"][@"width"] = @2;
+    } refusedWith:@"elements.knob.ticks.outer reaches past half the knob's frame, 88"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"focus"][@"outset"] = @20;
+    } refusedWith:@"elements.knob.focus reaches past half the knob's frame, 88"];
+}
+
+// A scaled slot grows from its element's origin, so it must start inside.
+- (void)testAScaledSlotOutsideItsElementIsRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"display"][@"text"][@"level"][@"frame"] = @[@300, @35, @213, @65];
+    } refusedWith:@"elements.display.text.level is outside the element display, 356 by 132"];
+    // Unscaled, the same frame is fine: it stays where it is.
+    NSError *error = nil;
+    QLMSkin *skin = [self fixtureChangedBy:^(NSMutableDictionary *json) {
+        json[@"elements"][@"display"][@"text"][@"output"][@"frame"] = @[@300, @95, @213, @15];
+    } error:&error];
+    XCTAssertNotNil(skin, @"%@", error.localizedDescription);
 }
 
 // A drawn element's states are its kind's: none for one with one state.

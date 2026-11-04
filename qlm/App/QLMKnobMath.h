@@ -72,28 +72,25 @@ static inline int QLMKnobInDeadZone(double degrees) {
     return degrees > QLM_KNOB_END_DEGREES || degrees < QLM_KNOB_START_DEGREES;
 }
 
-// From one angle to the next, the short way round, in -180 to 180.
-static inline double QLMKnobAngleDelta(double from, double to) {
-    double delta = fmod(to - from, 360.0);
-    if (delta > 180) {
-        delta -= 360;
-    }
-    else if (delta <= -180) {
-        delta += 360;
-    }
-    return delta;
-}
+// The most one drag event may turn the knob. A larger turn is the mouse
+// crossing the gap below the knob, or passing over its center, in one event.
+#define QLM_KNOB_MAX_STEP_DEGREES 45.0
 
 // One step of a drag, which is relative: the level moves by the angle the
 // mouse turned about the center since the last step, at the sweep's rate,
 // and stays in the range. The listener comes first, so a click moves
-// nothing, and a step from or into the dead zone keeps the level. `level` is
-// unsnapped, so a slow drag still adds up. Snap what it returns to send it.
+// nothing, and a step from or into the dead zone, or one that turns more
+// than QLM_KNOB_MAX_STEP_DEGREES, keeps the level. Both angles are then in
+// the sweep, so the turn is their plain difference, never wrapped. `level`
+// is unsnapped, so a slow drag still adds up. Snap what it returns to send
+// it.
 static inline double QLMKnobDragStep(double level, double fromDegrees, double toDegrees, double minimum, double maximum) {
-    if (QLMKnobInDeadZone(fromDegrees) || QLMKnobInDeadZone(toDegrees) || !(maximum > minimum)) {
+    double turned = toDegrees - fromDegrees;
+    if (QLMKnobInDeadZone(fromDegrees) || QLMKnobInDeadZone(toDegrees) || !(maximum > minimum)
+        || !(fabs(turned) <= QLM_KNOB_MAX_STEP_DEGREES)) {
         return level;
     }
-    double moved = QLMKnobAngleDelta(fromDegrees, toDegrees) / QLM_KNOB_SWEEP_DEGREES * (maximum - minimum);
+    double moved = turned / QLM_KNOB_SWEEP_DEGREES * (maximum - minimum);
     return QLMKnobClamp(level + moved, minimum, maximum);
 }
 

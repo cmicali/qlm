@@ -901,12 +901,22 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     if (button.style.imageName != nil) {
         [self checkInsets:button.style.capInsets fit:least at:@"button.capInsets"];
     }
-    if (![self failed] && button.ledX >= 0 && button.ledX + button.ledSize > least.width) {
+    if ([self failed] || button.ledSize <= 0) {
+        return;
+    }
+    if (button.ledSize > least.height) {
+        [self fail:@"button.led.size is taller than the button, %g", least.height];
+    }
+    else if (button.ledX >= 0 && button.ledX + button.ledSize > least.width) {
         [self fail:@"button.led.x puts the LED past the button's width, %g", least.width];
+    }
+    else if (button.ledX < 0 && button.ledSize + button.ledGap > least.width) {
+        [self fail:@"button.led leaves the title no room in the button's width, %g", least.width];
     }
 }
 
-// Every drawn radius of the knob fits in half its frame.
+// Every drawn radius of the knob fits in half its frame, with the round
+// caps' and the strokes' half-widths.
 - (void)checkKnob:(QLMSkinKnob *)knob inFrame:(CGRect)frame {
     if ([self failed]) {
         return;
@@ -914,10 +924,11 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     CGFloat half = MIN(frame.size.width, frame.size.height) / 2;
     NSMutableArray<NSArray *> *radii = [NSMutableArray arrayWithArray:@[
         @[@"elements.knob.body.size", @(knob.bodySize / 2)],
-        @[@"elements.knob.pointer.outer", @(knob.pointerOuter)],
+        @[@"elements.knob.pointer.outer", @(knob.pointerOuter + knob.pointerWidth / 2)],
+        @[@"elements.knob.focus", @(knob.bodySize / 2 + knob.focus.outset + knob.focus.width)],
     ]];
     if (knob.tickCount > 0) {
-        [radii addObject:@[@"elements.knob.ticks.outer", @(knob.tickOuter)]];
+        [radii addObject:@[@"elements.knob.ticks.outer", @(knob.tickOuter + knob.tickWidth / 2)]];
     }
     if (knob.hasArc) {
         [radii addObject:@[@"elements.knob.arc.radius", @(knob.arcRadius + knob.arcWidth / 2)]];
@@ -1134,7 +1145,14 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     [self checkFrame:element.frame inside:size at:[path stringByAppendingString:@".frame"]];
     for (NSString *name in [element.text.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
         CGRect frame = CGRectOffset(element.text[name].frame, element.frame.origin.x, element.frame.origin.y);
-        [self checkFrame:frame inside:size at:[NSString stringWithFormat:@"%@.text.%@", path, name]];
+        NSString *slotPath = [NSString stringWithFormat:@"%@.text.%@", path, name];
+        [self checkFrame:frame inside:size at:slotPath];
+        // A scaled slot grows from its element's origin, so only one inside
+        // its element stays inside the window.
+        if (element.text[name].scales) {
+            [self checkFrame:element.text[name].frame inside:element.frame.size
+                       named:[@"element " stringByAppendingString:element.name] at:slotPath];
+        }
     }
 }
 

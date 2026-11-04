@@ -5,8 +5,9 @@
 
 // A trackpad's scroll moves a step per this many points.
 static const CGFloat QLMKnobScrollPointsPerStep = 12;
-// A drag this near the center points nowhere.
-static const CGFloat QLMKnobDeadRadius = 6;
+// A drag within this part of the body's diameter from the center points
+// nowhere: there a few points of jitter are tens of degrees.
+static const CGFloat QLMKnobDeadFraction = 0.25;
 
 @implementation QLMKnobControl {
     double _value;
@@ -42,10 +43,12 @@ static const CGFloat QLMKnobDeadRadius = 6;
     self.doubleValue = _value;
 }
 
-// A move by the user: snapped, and sent when it changes the level.
+// A move by the user: snapped, and sent when it changes the level's step.
+// A level set in code off a step, as -40.2, counts as its nearest step, so a
+// tiny turn never sends -40.0.
 - (void)moveTo:(double)decibels {
     double snapped = QLMKnobSnap(decibels, self.minValue, self.maxValue);
-    if (snapped == _value) {
+    if (snapped == QLMKnobSnap(_value, self.minValue, self.maxValue)) {
         return;
     }
     _value = snapped;
@@ -64,7 +67,7 @@ static const CGFloat QLMKnobDeadRadius = 6;
     NSPoint center = [self center];
     double dx = point.x - center.x;
     double dy = point.y - center.y;
-    return hypot(dx, dy) < QLMKnobDeadRadius ? NAN : QLMKnobAngleOfOffset(dx, dy);
+    return hypot(dx, dy) < self.skin.knob.bodySize * QLMKnobDeadFraction ? NAN : QLMKnobAngleOfOffset(dx, dy);
 }
 
 // A relative drag: the press moves nothing, and each drag after it turns
@@ -76,7 +79,7 @@ static const CGFloat QLMKnobDeadRadius = 6;
     [self.window makeFirstResponder:self];
     self.pressed = YES;
     double from = [self angleOfEvent:event];
-    double level = _value;
+    double level = QLMKnobSnap(_value, self.minValue, self.maxValue);
     while (YES) {
         NSEvent *next = [self.window nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp];
         if (next.type == NSEventTypeLeftMouseUp) {

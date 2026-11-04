@@ -100,14 +100,14 @@
     XCTAssertEqual(QLMKnobDragStep(-70, 120, 120, -80, -30), -70);
     XCTAssertEqualWithAccuracy(QLMKnobDragStep(-70, 120, 121, -80, -30), -70 + 50.0 / 270, 1e-9);
     // The ends hold.
-    XCTAssertEqual(QLMKnobDragStep(-32, 0, 90, -80, -30), -30);
-    XCTAssertEqual(QLMKnobDragStep(-78, 0, -90, -80, -30), -80);
+    XCTAssertEqual(QLMKnobDragStep(-32, 0, 45, -80, -30), -30);
+    XCTAssertEqual(QLMKnobDragStep(-78, 0, -45, -80, -30), -80);
     // In the dead zone, or into it, or out of it, the level stays.
     XCTAssertEqual(QLMKnobDragStep(-70, 170, -170, -80, -30), -70);
     XCTAssertEqual(QLMKnobDragStep(-70, 130, 140, -80, -30), -70);
     XCTAssertEqual(QLMKnobDragStep(-70, 140, 130, -80, -30), -70);
     // An empty range moves nothing.
-    XCTAssertEqual(QLMKnobDragStep(-30, 0, 90, -30, -30), -30);
+    XCTAssertEqual(QLMKnobDragStep(-30, 0, 30, -30, -30), -30);
 }
 
 // A slow drag adds up, unsnapped, before a step goes out.
@@ -124,11 +124,21 @@
     XCTAssertEqual(QLMKnobSnap(level, -80, -30), -69.5);
 }
 
-- (void)testTheAngleDeltaGoesTheShortWay {
-    XCTAssertEqual(QLMKnobAngleDelta(170, -170), 20);
-    XCTAssertEqual(QLMKnobAngleDelta(-170, 170), -20);
-    XCTAssertEqual(QLMKnobAngleDelta(10, 40), 30);
-    XCTAssertEqual(QLMKnobAngleDelta(0, 180), 180);
+// One event that crosses the gap below the knob, or passes over its center,
+// keeps the level: it is never a jump, louder or quieter.
+- (void)testAJumpInOneEventKeepsTheLevel {
+    XCTAssertEqual(QLMKnobDragStep(-40, 135, -135, -80, 0), -40);
+    XCTAssertEqual(QLMKnobDragStep(-40, -135, 135, -80, 0), -40);
+    XCTAssertEqual(QLMKnobDragStep(-40, -90, 90, -80, 0), -40);
+    XCTAssertEqual(QLMKnobDragStep(-40, 90, -90, -80, 0), -40);
+    XCTAssertEqual(QLMKnobDragStep(-40, 0, 45.5, -80, 0), -40);
+}
+
+// A large turn within the cap moves the level by its share of the sweep.
+- (void)testALargeLegalStepMoves {
+    XCTAssertEqualWithAccuracy(QLMKnobDragStep(-40, 0, 45, -80, 0), -40 + 45.0 / 270 * 80, 1e-9);
+    XCTAssertEqualWithAccuracy(QLMKnobDragStep(-40, 100, 135, -80, 0), -40 + 35.0 / 270 * 80, 1e-9);
+    XCTAssertEqualWithAccuracy(QLMKnobDragStep(-40, -100, -135, -80, 0), -40 - 35.0 / 270 * 80, 1e-9);
 }
 
 @end
