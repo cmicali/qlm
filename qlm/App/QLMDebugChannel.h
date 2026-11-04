@@ -49,6 +49,17 @@ NS_ASSUME_NONNULL_BEGIN
 // The app's Quit. quitAnyway answers the louder hand-back alert, if it would
 // show. Returns only when the quit is cancelled.
 - (void)debugQuitAnswering:(BOOL)quitAnyway;
+
+// The main window: what the popover's Window… button opens, and its close.
+// The rest are as QLMMainWindowController's.
+@property (nonatomic, readonly) BOOL debugWindowShowing;
+- (void)debugShowWindow;
+- (void)debugCloseWindow;
+- (nullable NSString *)debugClickGroupNamed:(NSString *)name;
+@property (nonatomic, readonly, copy, nullable) NSString *debugWindowApplyError;
+- (double)debugTurnKnobTo:(double)decibels;
+@property (nonatomic, readonly, copy) NSString *debugWindowSkinName;
+- (nullable NSString *)debugChooseSkin:(NSString *)name;
 @end
 
 // Installs the channel under the bundle identifier. Call it once, at launch.

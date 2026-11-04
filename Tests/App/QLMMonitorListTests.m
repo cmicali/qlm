@@ -4,22 +4,6 @@
 #import "QLMSnapshotInternal.h"
 #import "QLMTestSupport.h"
 
-static QLMMonitorState *QLMMonitorWithID(uint8_t first, uint8_t session) {
-    const uint8_t hardwareID[3] = {first, 0x4B, session};
-    QLMMonitorState *monitor = [[QLMMonitorState alloc] init];
-    monitor.hardwareID = QLMBytes(hardwareID, sizeof hardwareID);
-    monitor.session = session;
-    monitor.status = QLMMonitorStatusOn;
-    return monitor;
-}
-
-static QLMSnapshot *QLMRunningWith(NSArray<QLMMonitorState *> *monitors) {
-    QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
-    snapshot.running = YES;
-    snapshot.monitors = monitors;
-    return snapshot;
-}
-
 // The list keeps every monitor System drops, offline, until System runs on
 // another bus.
 @interface QLMMonitorListTests : XCTestCase
@@ -29,10 +13,10 @@ static QLMSnapshot *QLMRunningWith(NSArray<QLMMonitorState *> *monitors) {
 
 - (void)testADroppedMonitorStaysOffline {
     QLMMonitorList *list = [[QLMMonitorList alloc] init];
-    QLMMonitorState *left = QLMMonitorWithID(0x11, 0x02);
-    QLMMonitorState *right = QLMMonitorWithID(0x11, 0x03);
-    [list updateWithSnapshot:QLMRunningWith(@[left, right])];
-    [list updateWithSnapshot:QLMRunningWith(@[left])];
+    QLMMonitorState *left = QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusOn);
+    QLMMonitorState *right = QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusOn);
+    [list updateWithSnapshot:QLMMakeRunningSnapshot(@[left, right])];
+    [list updateWithSnapshot:QLMMakeRunningSnapshot(@[left])];
     XCTAssertEqual(list.entries.count, 2u);
     XCTAssertEqual(list.entries[1].presence, QLMMonitorPresenceOffline);
     XCTAssertEqualObjects(list.dropped, @[right]);
@@ -44,10 +28,10 @@ static QLMSnapshot *QLMRunningWith(NSArray<QLMMonitorState *> *monitors) {
 // bus's monitors.
 - (void)testAnotherBusForgetsTheMonitorsSeen {
     QLMMonitorList *list = [[QLMMonitorList alloc] init];
-    [list updateWithSnapshot:QLMRunningWith(@[QLMMonitorWithID(0x11, 0x02), QLMMonitorWithID(0x11, 0x03)])];
+    [list updateWithSnapshot:QLMMakeRunningSnapshot(@[QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusOn), QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusOn)])];
     [list forgetMonitors];
-    QLMMonitorState *real = QLMMonitorWithID(0x0F, 0x02);
-    [list updateWithSnapshot:QLMRunningWith(@[real])];
+    QLMMonitorState *real = QLMMakeMonitor(0x0F, 0x02, QLMMonitorStatusOn);
+    [list updateWithSnapshot:QLMMakeRunningSnapshot(@[real])];
     XCTAssertEqual(list.entries.count, 1u);
     XCTAssertEqualObjects(list.entries.firstObject.state, real);
     XCTAssertEqual(list.dropped.count, 0u);

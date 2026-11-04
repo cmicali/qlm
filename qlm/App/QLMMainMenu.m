@@ -22,8 +22,13 @@ NSMenu *QLMMainMenu(void) {
     [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
     [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
 
+    NSMenu *window = [[NSMenu alloc] initWithTitle:@"Window"];
+    [window addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
+    [window addItem:NSMenuItem.separatorItem];
+    [window addItemWithTitle:@"qlm" action:@selector(showMainWindow:) keyEquivalent:@"1"];
+
     NSMenu *bar = [[NSMenu alloc] init];
-    for (NSMenu *menu in @[app, file, edit]) {
+    for (NSMenu *menu in @[app, file, edit, window]) {
         [bar addItemWithTitle:menu.title action:NULL keyEquivalent:@""].submenu = menu;
     }
     return bar;

@@ -11,6 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMKnobControl : QLMSkinControl
 @property (nonatomic) double minValue;
 @property (nonatomic) double maxValue;
+// A turn by the user, to the nearest step in the range, as a drag's. It
+// sends the action when the step changes.
+- (void)moveTo:(double)decibels;
 @end
 
 NS_ASSUME_NONNULL_END

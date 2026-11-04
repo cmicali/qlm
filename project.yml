@@ -235,6 +235,7 @@ targets:
       - qlm/App/QLMAlerts.m
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
+      - qlm/App/QLMMainWindowModel.m
       - qlm/App/QLMMonitorList.m
       - qlm/App/QLMPreferences.m
       - qlm/App/QLMSkin.m

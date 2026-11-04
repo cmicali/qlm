@@ -145,6 +145,46 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertNil(QLMHandBackLine(nil));
 }
 
+#pragma mark - A level
+
+// The main window's display takes the number and the unit as two slots.
+- (void)testALevelReadsWithATrueMinusSign {
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-40, 1), @"−40.0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-20.5, 1), @"−20.5");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-20, 0), @"−20");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(3, 1), @"3.0");
+    XCTAssertEqualObjects(QLMDecibelsText(-40), @"−40.0\u00A0dB");
+}
+
+- (void)testALevelThatRoundsToZeroHasNoMinus {
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.0, 1), @"0.0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.04, 1), @"0.0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.4, 0), @"0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.5, 0), @"0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.6, 0), @"\u22121");
+    XCTAssertEqualObjects(QLMDecibelsText(-0.0), @"0.0\u00A0dB");
+}
+
+// Snapshots leave a moved level alone for half a second, in the popover and
+// the window alike.
+- (void)testAMovedLevelHoldsForHalfASecond {
+    XCTAssertEqual(QLMLevelHoldInterval, 0.5);
+    XCTAssertFalse(QLMLevelHolds(0, 1000));
+    XCTAssertTrue(QLMLevelHolds(1000, 1000));
+    XCTAssertTrue(QLMLevelHolds(1000, 1000.49));
+    XCTAssertFalse(QLMLevelHolds(1000, 1000.5));
+}
+
+// Before a volume is set, the snapshot's ceiling may not be System's yet.
+- (void)testTheShownCeilingIsTheSnapshotsOnceAVolumeIsSet {
+    QLMSnapshot *snapshot = QLMSnapshotWith(QLMHandBackUnknown, nil, nil);
+    snapshot.ceilingDecibels = -10;
+    XCTAssertEqual(QLMShownCeiling(nil, -30), -30);
+    XCTAssertEqual(QLMShownCeiling(snapshot, -30), -30);
+    snapshot.volumeDecibels = @(-40);
+    XCTAssertEqual(QLMShownCeiling(snapshot, -30), -10);
+}
+
 #pragma mark - Names
 
 // In qlm-app-first, the user couldn't tell the Left 8351B from the Right by

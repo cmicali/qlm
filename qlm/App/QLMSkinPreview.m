@@ -17,37 +17,17 @@
 
 @end
 
-// TRAP: dump_screenshot draws a window's content view with no layer into
-// an unflipped context, so a flipped content view, as the skin views are,
-// comes out upside down. So the view fills an unflipped container.
-static NSWindow *QLMSkinPreviewHost(NSWindow *window, NSView *view) {
-    NSView *container = [[NSView alloc] initWithFrame:view.frame];
-    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    [container addSubview:view];
-    window.contentView = container;
-    return window;
-}
-
 static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin, BOOL disabled) {
-    NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
-                              | NSWindowStyleMaskFullSizeContentView;
-    NSRect frame = NSMakeRect(0, 0, skin.windowSize.width, skin.windowSize.height);
-    NSWindow *window = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
+    NSWindow *window = QLMSkinHostWindow(skin, NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable);
     window.title = @"Skin preview";
-    window.titleVisibility = NSWindowTitleHidden;
-    window.titlebarAppearsTransparent = YES;
-    window.movableByWindowBackground = YES;
-    window.opaque = NO;
-    window.backgroundColor = NSColor.clearColor;
-    window.contentMinSize = skin.windowSize;
 
     QLMSkinView *view = [[QLMSkinView alloc] initWithSkin:skin];
-    view.logo = @"qlm.";
-    view.tagline = @"REFERENCE CONTROL";
-    view.groupsTitle = @"LISTENING SETUP";
+    view.logo = QLMSkinLogo;
+    view.tagline = QLMSkinTagline;
+    view.groupsTitle = QLMSkinGroupsTitle;
     view.knobMin = @"−80";
     view.knobMax = @"−30";
-    view.knobCaption = @"VOLUME";
+    view.knobCaption = QLMSkinKnobCaption;
     view.status.text = @"6 ONLINE";
     view.status.lit = YES;
     // The owner's setup file has four groups.
@@ -74,7 +54,8 @@ static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin, BOOL disabled) {
         view.status.enabled = NO;
         view.display.disabled = YES;
     }
-    return QLMSkinPreviewHost(window, view);
+    QLMSkinHost(window, view);
+    return window;
 }
 
 static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin, BOOL disabled) {
@@ -92,7 +73,8 @@ static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin, BOOL disabled) {
     view.subtitle = @"qlm · Output level";
     view.fraction = (-59.0 + 80) / 50;
     view.disabled = disabled;
-    return QLMSkinPreviewHost(window, view);
+    QLMSkinHost(window, view);
+    return window;
 }
 
 NSDictionary *QLMShowSkinPreview(NSString *name, BOOL osd, BOOL disabled) {

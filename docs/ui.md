@@ -24,7 +24,7 @@ One fixed-size panel, with no title bar of its own. The skin draws the whole thi
 
 Two things from the mockups go. The word `LEVEL` leaves the display's top right, and the `MAIN · ACTIVE` line leaves the footer's middle, since the display already names the group. The footer keeps its two buttons at the edges.
 
-The display's three numbers mean three different things. The large one is the level the user set, undimmed. `OUTPUT` is what goes out now: the level after dim, or `MUTED` while mute all is on. `MAX` is the ceiling. While the level waits for the knob's first reading, after a start or a gap, the large number shows an em dash, as the popover does.
+The display's three numbers mean three different things. The large one is the level the user set, undimmed. `OUTPUT` is what goes out now: the level after dim, or `MUTED` while mute all is on. `MAX` is the ceiling. While the level waits for the knob's first reading, after a start or a gap, the large number shows an em dash.
 
 **The listening setup buttons.** "Setup" here is what the plan calls a group: one group of the loaded `.sam` file. The buttons show as many groups as the skin's grid holds, in the file's order: modern six, in two rows of three, and vintage and retro four, in one row. A file with more shows the first ones, and Settings says so. A file with none, or no file, hides the row and shows the file's name or its error in its place. A click applies the group. While an apply runs, every button is disabled, and the chosen one blinks, in the skin's own way. The same rule as the popover's picker disables them: no System, no monitors tracked, or an apply in flight. **The refusal stands.** A group with a model whose filter design rate is unverified refuses as it does today, and the error shows under the buttons, in the display's bottom line, until the next click.
 
@@ -200,3 +200,4 @@ These are the owner's calls. Each has a default the work takes until it's made.
 | Does the window open at launch by default? | No. The menu bar item is still the app. |
 | A fourth button per group row for a group's calibration state? | No. The display's caption names the group, and that's enough. |
 | A window scale setting, 100%, 150%, or 200%, since the mockups were rendered at about twice the reference size? | Not now. The window resizes instead, and the 2x assets keep it crisp on a Retina display. |
+| Should the popover and the window show each other's apply errors? Both disable their group controls for any apply, and the window blinks its button, from the snapshot. But each keeps its own last error. | Not until the popover's redesign, which can move the error onto the shared model. |

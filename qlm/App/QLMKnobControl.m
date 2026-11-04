@@ -1,6 +1,7 @@
 #import "QLMKnobControl.h"
 
 #import "PlatformColor.h"
+#import "QLMFormat.h"
 #import "QLMKnobMath.h"
 #import "QLMSkinDrawing.h"
 
@@ -22,8 +23,33 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
         _minValue = -80;
         _maxValue = 0;
         _value = -80;
+        self.accessibilityRole = NSAccessibilitySliderRole;
     }
     return self;
+}
+
+- (id)accessibilityValue {
+    return @(_value);
+}
+
+- (NSString *)accessibilityValueDescription {
+    return QLMDecibelsText(_value);
+}
+
+- (BOOL)stepBy:(int)steps {
+    if (!self.enabled) {
+        return NO;
+    }
+    [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];
+    return YES;
+}
+
+- (BOOL)accessibilityPerformIncrement {
+    return [self stepBy:1];
+}
+
+- (BOOL)accessibilityPerformDecrement {
+    return [self stepBy:-1];
 }
 
 - (double)doubleValue {

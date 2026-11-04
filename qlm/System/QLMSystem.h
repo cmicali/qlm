@@ -21,6 +21,14 @@ typedef NS_ERROR_ENUM(QLMSystemErrorDomain, QLMSystemError) {
     QLMSystemErrorKnobUnread,          // the level waits for the knob's first reading
 };
 
+// In an apply error's userInfo, an NSNumber: YES when System sent nothing.
+extern NSErrorUserInfoKey const QLMSystemErrorRefusedKey;
+
+// System sent nothing for the error: a refusal, as the apply's checks give,
+// not a stop or a send failure, which may come after frames went out. NO
+// for an error from elsewhere.
+BOOL QLMSystemErrorRefused(NSError *_Nullable error);
+
 @interface QLMSystemSettings : NSObject <NSCopying>
 
 // The user's ceiling. Every volume frame is capped at it. The default is low.
