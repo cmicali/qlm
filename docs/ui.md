@@ -14,7 +14,7 @@ One fixed-size panel, with no title bar of its own. The skin draws the whole thi
 
 | Element | Shows | Reads | Drives |
 | --- | --- | --- | --- |
-| Logo and tagline | The skin's logo | | |
+| Logo | The skin's logo | | |
 | Status LED | "6 ONLINE", from the monitor list's counts. The LED is lit while any monitor is online, dim otherwise. A bus problem replaces the count with its title. | `QLMMonitorList.entries`, `QLMBusProblemTitle` | |
 | Listening setup | One button per group of the loaded setup file, in the file's order, lit for the active group | `QLMSetup.groups`, `snapshot.activeGroupName`, `snapshot.applying` | `applyGroup:` |
 | Display | The active group's name at the top left, the level large in the middle, and `OUTPUT` and `MAX` along the bottom | `snapshot.volumeDecibels`, `snapshot.handBack.volumeDecibels`, `snapshot.ceilingDecibels` | |
