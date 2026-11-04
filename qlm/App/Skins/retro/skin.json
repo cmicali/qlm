@@ -116,16 +116,16 @@
     ]
   },
   "osd": {
-    "size": [300, 72],
+    "size": [480, 150],
     "image": "osd-background",
     "capInsets": [12, 14, 12, 14],
     "disabledOverlay": "overlay",
-    "bar": {"frame": [145, 52, 130, 3], "track": "#ff702c40", "fill": "display", "radius": 1.5},
+    "bar": {"frame": [256, 104, 196, 5], "track": "#ff702c40", "fill": "display", "radius": 2.5},
     "text": {
-      "level": {"frame": [21, 17, 102, 38], "font": "Menlo", "mono": true, "size": 24, "color": "display"},
-      "unit": {"frame": [108, 31, 20, 18], "size": 9, "color": "display"},
-      "title": {"frame": [149, 13, 136, 18], "size": 11, "color": "label"},
-      "subtitle": {"frame": [149, 32, 136, 17], "size": 9, "color": "secondary"}
+      "level": {"frame": [28, 38, 200, 72], "font": "Menlo", "mono": true, "size": 56, "color": "display"},
+      "unit": {"frame": [202, 79, 40, 20], "size": 15, "color": "display"},
+      "title": {"frame": [256, 36, 196, 26], "size": 19, "color": "label"},
+      "subtitle": {"frame": [256, 66, 196, 22], "size": 15, "color": "secondary"}
     }
   }
 }
