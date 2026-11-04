@@ -66,6 +66,18 @@ NSString *QLMFixturePath(NSString *name) {
     return QLMRepositoryPath([@"Tests/Setups/Fixtures" stringByAppendingPathComponent:name]);
 }
 
+NSURL *QLMModernSkinURL(void) {
+    return [NSURL fileURLWithPath:QLMRepositoryPath(@"qlm/App/Skins/modern") isDirectory:YES];
+}
+
+NSURL *QLMFixtureSkinURL(void) {
+    return [NSURL fileURLWithPath:QLMRepositoryPath(@"Tests/App/Fixtures/Skins/fixture") isDirectory:YES];
+}
+
+NSString *QLMScratchPath(void) {
+    return [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+}
+
 static NSString *QLMCapturesDirectory(void) {
     return QLMRepositoryPath(@"captures");
 }

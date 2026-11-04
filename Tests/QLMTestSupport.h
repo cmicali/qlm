@@ -53,6 +53,13 @@ NSString *QLMRepositoryPath(NSString *relative);
 // A file in Tests/Setups/Fixtures/.
 NSString *QLMFixturePath(NSString *name);
 
+// The shipped modern skin, and the image fixture in Tests/App/Fixtures/.
+NSURL *QLMModernSkinURL(void);
+NSURL *QLMFixtureSkinURL(void);
+
+// A fresh path in the temporary directory, with nothing at it yet.
+NSString *QLMScratchPath(void);
+
 // Fixtures/Main.sam, parsed once and shared. Never change it.
 QLMSetup *QLMReadFixtureSetup(void);
 

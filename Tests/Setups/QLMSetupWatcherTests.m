@@ -21,7 +21,7 @@
 
 - (void)setUp {
     self.time = [[QLMVirtualClock alloc] init];
-    self.folder = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    self.folder = QLMScratchPath();
     [NSFileManager.defaultManager createDirectoryAtPath:self.folder withIntermediateDirectories:YES attributes:nil error:NULL];
     self.path = [self.folder stringByAppendingPathComponent:@"Main.sam"];
     [self write:@"first" atomically:NO];

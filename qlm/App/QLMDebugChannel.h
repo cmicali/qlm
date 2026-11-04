@@ -42,6 +42,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)debugAdapterDidChange;
 // The banner's Quit GLM button. NO while it is hidden or disabled.
 - (BOOL)debugQuitGLM;
+// Opens a look at the named skin, its window or its OSD, and makes it key.
+// The reply says which skin shows, and why it fell back, if it did.
+- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd;
 // The app's Quit. quitAnyway answers the louder hand-back alert, if it would
 // show. Returns only when the quit is cancelled.
 - (void)debugQuitAnswering:(BOOL)quitAnyway;
