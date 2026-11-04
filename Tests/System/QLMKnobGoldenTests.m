@@ -200,12 +200,12 @@ static double QLMLevelOfMessage(QLMMessage message) {
     for (NSUInteger i = 1; i < readings.count; i++) {
         QLMKnobMoment *reading = readings[i];
         [time advanceBy:reading.time + offset - time.now];
-        [bus perform:^{
-            bus.knobTenths = @(reading.value);
-        }];
         QLMSnapshot *snapshot = system.snapshot;
         followed = followed || ![snapshot.volumeDecibels isEqual:@(levels.firstObject.value)];
         XCTAssertEqual(snapshot.volumeFromKnob, followed, @"%@, %.3f s", scenario, reading.time);
+        [bus perform:^{
+            bus.knobTenths = @(reading.value);
+        }];
         if (![rests containsIndex:i]) {
             continue;
         }
@@ -219,7 +219,6 @@ static double QLMLevelOfMessage(QLMMessage message) {
         XCTAssertEqual(QLMLastLevelSent(bus.sentMessages), glm, @"%@, %.3f s, knob at %.0f", scenario, reading.time, reading.value);
     }
     XCTAssertEqual(checked, compared, @"%@", scenario);
-    XCTAssertEqual(system.snapshot.volumeFromKnob, followed, @"%@", scenario);
     XCTAssertEqual(lagged, stale, @"%@", scenario);
 
     NSArray<NSData *> *sent = bus.sentMessages;

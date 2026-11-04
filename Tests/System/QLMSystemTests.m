@@ -766,6 +766,23 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertFalse(again.volumeFromKnob);
 }
 
+// With the knob unmoved, a restart lowers nothing, so the knob's level
+// stands, and so does the flag.
+- (void)testARestartWithTheKnobUnmovedKeepsTheKnobsLevel {
+    _settings.adapterPollInterval = 0.107;
+    [self startWithKnob:@(-400) volume:@(-40)];
+    XCTAssertTrue([self turnKnobTo:-300].volumeFromKnob);
+    [self stopSystem];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && !snapshot.levelAwaitsKnob && snapshot.allIdentified && snapshot.idle;
+    } after:^{
+        [self->_system start];
+    }];
+    XCTAssertEqualObjects(again.volumeDecibels, @(-30));
+    XCTAssertNil(again.startLoweredFromDecibels);
+    XCTAssertTrue(again.volumeFromKnob);
+}
+
 // Pulls the knob out, and waits until the snapshot shows it, with nothing
 // queued.
 - (QLMSnapshot *)pullKnob {
