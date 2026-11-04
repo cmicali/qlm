@@ -196,6 +196,7 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             reply[@"windowShowing"] = @(app.debugWindowShowing);
             reply[@"windowApplyError"] = app.debugWindowApplyError ?: NSNull.null;
             reply[@"skinName"] = preferences.skinName;
+            reply[@"windowSkin"] = app.debugWindowSkinName;
             reply[@"opensWindowAtLaunch"] = @(preferences.opensWindowAtLaunch);
             return reply;
         }),

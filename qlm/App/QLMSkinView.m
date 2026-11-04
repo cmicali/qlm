@@ -2,8 +2,6 @@
 
 #import "QLMSkinDrawing.h"
 
-const NSUInteger QLMSkinViewMaxGroups = 6;
-
 static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
     return a == b || [a isEqualToString:b];
 }
@@ -17,8 +15,7 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
         _status = [[QLMSkinStatusView alloc] initWithSkin:skin];
         [self addSubview:_status];
 
-        QLMSkinElement *groups = [skin element:@"groups"];
-        NSUInteger cells = MIN((NSUInteger)(groups.columns * groups.rows), QLMSkinViewMaxGroups);
+        NSUInteger cells = QLMSkinGroupButtonCount(skin);
         NSMutableArray<QLMSkinButtonView *> *buttons = [NSMutableArray array];
         for (NSUInteger i = 0; i < cells; i++) {
             QLMSkinButtonView *button = [[QLMSkinButtonView alloc] initWithSkin:skin];

@@ -4,8 +4,9 @@
 
 #include "QLMCommands.h"
 #import "QLMFormat.h"
+#import "QLMSkinLayout.h"
+#import "QLMSystem.h"
 
-const NSUInteger QLMMainWindowMaxGroups = 6;
 const NSTimeInterval QLMKnobHoldInterval = 0.5;
 
 BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now) {
@@ -17,12 +18,34 @@ static NSString *QLMRangeEndText(double decibels) {
     return QLMDecibelsNumberText(decibels, decibels == floor(decibels) ? 0 : 1);
 }
 
+// System refused it and sent nothing. Any other error, as a failed send or
+// a stop mid-apply, may come after frames went out.
+static BOOL QLMApplyRefused(NSError *error) {
+    if (![error.domain isEqualToString:QLMSystemErrorDomain]) {
+        return NO;
+    }
+    switch ((QLMSystemError)error.code) {
+    case QLMSystemErrorUnverifiedRate:
+    case QLMSystemErrorUnknownMonitor:
+    case QLMSystemErrorBlocksFailed:
+    case QLMSystemErrorAlreadyApplying:
+    case QLMSystemErrorNoVolume:
+    case QLMSystemErrorKnobUnread:
+        return YES;
+    case QLMSystemErrorNotRunning:
+    case QLMSystemErrorSendFailed:
+        return NO;
+    }
+    return NO;
+}
+
 @implementation QLMMainWindowModel
 
 - (instancetype)init {
     self = [super init];
     if (self) {
         _entries = @[];
+        _groupCapacity = QLMSkinMaxGroups;
     }
     return self;
 }
@@ -57,7 +80,8 @@ static NSString *QLMRangeEndText(double decibels) {
 
 - (NSArray<NSString *> *)shownGroupNames {
     NSArray<NSString *> *names = self.groupNames ?: @[];
-    return names.count > QLMMainWindowMaxGroups ? [names subarrayWithRange:NSMakeRange(0, QLMMainWindowMaxGroups)] : names;
+    NSUInteger shown = MIN(MIN(self.groupCapacity, QLMSkinMaxGroups), names.count);
+    return [names subarrayWithRange:NSMakeRange(0, shown)];
 }
 
 - (NSArray<NSString *> *)groupTitles {
@@ -89,6 +113,12 @@ static NSString *QLMRangeEndText(double decibels) {
         return self.blinkOn && [names[index] isEqualToString:self.applyingGroupName];
     }
     return [names[index] isEqualToString:self.snapshot.activeGroupName];
+}
+
+- (BOOL)groupChosenAtIndex:(NSUInteger)index {
+    NSArray<NSString *> *names = self.shownGroupNames;
+    NSString *chosen = self.applyingGroupName ?: self.snapshot.activeGroupName;
+    return index < names.count && [names[index] isEqualToString:chosen];
 }
 
 - (BOOL)groupsEnabled {
@@ -137,7 +167,8 @@ static NSString *QLMRangeEndText(double decibels) {
 
 - (NSString *)outputText {
     if (self.applyError != nil) {
-        return [NSString stringWithFormat:@"%@ REFUSED", self.refusedGroupName.localizedUppercaseString ?: @"GROUP"];
+        return [NSString stringWithFormat:@"%@ %@", self.refusedGroupName.localizedUppercaseString ?: @"GROUP",
+                                          QLMApplyRefused(self.applyError) ? @"REFUSED" : @"FAILED"];
     }
     if (self.snapshot.allMuted) {
         return @"MUTED";
@@ -170,7 +201,7 @@ static NSString *QLMRangeEndText(double decibels) {
     NSNumber *level = [self shownLevel];
     [parts addObject:[@"Level " stringByAppendingString:level == nil ? @"not set" : QLMDecibelsText(level.doubleValue)]];
     if (self.applyError != nil) {
-        [parts addObject:self.applyError];
+        [parts addObject:self.applyError.localizedDescription];
     } else if (self.snapshot.allMuted) {
         [parts addObject:@"Muted"];
     } else if ([self outputDecibels] != nil) {
@@ -229,7 +260,7 @@ static NSString *QLMRangeEndText(double decibels) {
 }
 
 - (NSNumber *)knobDecibels {
-    return self.snapshot.volumeDecibels;
+    return [self shownLevel];
 }
 
 - (BOOL)knobEnabled {

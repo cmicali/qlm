@@ -26,7 +26,6 @@ NSMenu *QLMMainMenu(void) {
     [window addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
     [window addItem:NSMenuItem.separatorItem];
     [window addItemWithTitle:@"qlm" action:@selector(showMainWindow:) keyEquivalent:@"1"];
-    NSApp.windowsMenu = window;
 
     NSMenu *bar = [[NSMenu alloc] init];
     for (NSMenu *menu in @[app, file, edit, window]) {

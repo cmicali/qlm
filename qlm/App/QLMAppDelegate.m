@@ -18,7 +18,6 @@
 #if DEBUG
 #import "QLMDebugChannel.h"
 #import "QLMSkinPreview.h"
-#import "QLMSkinLibrary.h"
 #endif
 
 // How long quit and sleep wait for System to let go, well within the Mac's
@@ -77,6 +76,7 @@ static OSType QLMQuitReason(void) {
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
     NSApp.mainMenu = QLMMainMenu();
+    NSApp.windowsMenu = [NSApp.mainMenu itemWithTitle:@"Window"].submenu;
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
     self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:[[QLMNotifier alloc] init] now:^NSTimeInterval {
@@ -435,6 +435,7 @@ static OSType QLMQuitReason(void) {
 - (void)popoverControllerShowSettings:(QLMPopoverController *)controller {
     if (self.settingsController == nil) {
         self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
+        [self.settingsController showWindowGroupCount:self.mainWindowController.groupButtonCount];
         self.settingsController.delegate = self;
         [self.settingsController showSetup:self.setup error:self.setupError];
     }
@@ -566,15 +567,15 @@ static OSType QLMQuitReason(void) {
     return [self.mainWindowController turnKnobTo:decibels];
 }
 
+- (NSString *)debugWindowSkinName {
+    return self.mainWindowController.skinName;
+}
+
 // As Settings' skin picker will: a skin the library refuses is not kept.
 - (NSString *)debugChooseSkin:(NSString *)name {
-    NSString *refusal = nil;
-    [[QLMSkinLibrary standardLibrary] loadSkinNamed:name refusal:&refusal];
-    if (refusal != nil) {
-        return refusal;
-    }
-    self.preferences.skinName = name;
-    return [self.mainWindowController reloadSkin];
+    NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
+    [self.settingsController showWindowGroupCount:self.mainWindowController.groupButtonCount];
+    return refusal;
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

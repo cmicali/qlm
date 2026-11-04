@@ -128,6 +128,10 @@
     return stepped;
 }
 
+- (NSString *)debugWindowSkinName {
+    return @"modern";
+}
+
 - (NSString *)debugChooseSkin:(NSString *)name {
     if (![name isEqualToString:@"modern"]) {
         return [NSString stringWithFormat:@"There is no skin named %@.", name];
@@ -415,6 +419,7 @@
     XCTAssertEqualObjects(state[@"windowShowing"], @NO);
     XCTAssertEqualObjects(state[@"windowApplyError"], NSNull.null);
     XCTAssertEqualObjects(state[@"skinName"], @"modern");
+    XCTAssertEqualObjects(state[@"windowSkin"], @"modern");
     XCTAssertEqualObjects(state[@"opensWindowAtLaunch"], @NO);
 
     NSDictionary *snapshot = state[@"snapshot"];

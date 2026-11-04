@@ -32,12 +32,16 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)refresh;
 // Reads the volume range from the preferences again.
 - (void)reloadVolumeRange;
-// Loads the preferences' skin again. Returns why it fell back to the
-// default skin, or nil.
-- (nullable NSString *)reloadSkin;
+// Shows the named skin and keeps it in the preferences. Returns the
+// library's refusal, and keeps nothing, for a skin that does not load.
+- (nullable NSString *)chooseSkinNamed:(NSString *)name;
+// The skin that shows, which a refused preference fell back from.
+@property (nonatomic, readonly, copy) NSString *skinName;
+// The skin's group buttons: the most groups the window shows.
+@property (nonatomic, readonly) NSUInteger groupButtonCount;
 
 @property (nonatomic, readonly, getter=isShowing) BOOL showing;
-// The last apply's refusal, until the next click.
+// The last apply's error, until the next click.
 @property (nonatomic, readonly, copy, nullable) NSString *applyError;
 
 // A click on the named group's button. Returns why it takes no click, or

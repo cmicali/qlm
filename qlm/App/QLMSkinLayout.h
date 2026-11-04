@@ -13,6 +13,12 @@ NS_ASSUME_NONNULL_BEGIN
 // edge. To neither, it keeps centered.
 CGRect QLMSkinSpring(CGRect frame, QLMSkinAnchors anchors, CGSize extra);
 
+// The group buttons a window shows at most, whatever its grid holds.
+extern const NSUInteger QLMSkinMaxGroups;
+
+// The group buttons the skin's grid holds: its cells, up to QLMSkinMaxGroups.
+NSUInteger QLMSkinGroupButtonCount(QLMSkin *skin);
+
 // A grid's cells, row by row, each the same size, `gap` apart.
 NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger rows, CGSize gap);
 

@@ -61,6 +61,8 @@ NS_ASSUME_NONNULL_BEGIN
 // A turn of the window's knob to a level in its range, as a drag's. Returns
 // the level the knob points at.
 - (double)debugTurnKnobTo:(double)decibels;
+// The skin the window shows, which a refused preference fell back from.
+@property (nonatomic, readonly, copy) NSString *debugWindowSkinName;
 // Keeps the skin in the preferences and shows it in the window. Returns the
 // library's refusal, and keeps nothing, for a skin that does not load.
 - (nullable NSString *)debugChooseSkin:(NSString *)name;

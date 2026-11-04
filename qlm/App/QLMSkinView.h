@@ -7,9 +7,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// The groups a window shows at most.
-extern const NSUInteger QLMSkinViewMaxGroups;
-
 // The main window's content view, in one skin. It draws the panel, the
 // nameplate, the markings, and the panel's own text, and hosts one view per
 // element, laid out by the resize pass with no Auto Layout. A controller
@@ -36,7 +33,7 @@ extern const NSUInteger QLMSkinViewMaxGroups;
 @property (nonatomic, copy, nullable) NSString *knobCaption;
 
 @property (nonatomic, readonly) QLMSkinStatusView *status;
-// One per cell of the groups grid, up to QLMSkinViewMaxGroups. Those past
+// One per cell of the groups grid, as QLMSkinGroupButtonCount counts. Those past
 // the titles set are hidden.
 @property (nonatomic, readonly) NSArray<QLMSkinButtonView *> *groupButtons;
 @property (nonatomic, readonly) QLMSkinDisplayView *display;

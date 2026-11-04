@@ -2,7 +2,9 @@
 
 #import "QLMFormat.h"
 #import "QLMMainWindowModel.h"
+#import "QLMSkinLayout.h"
 #import "QLMSnapshotInternal.h"
+#import "QLMSystem.h"
 #import "QLMTestSupport.h"
 
 static QLMMonitorState *QLMMonitor(uint8_t session, QLMMonitorStatus status) {
@@ -97,7 +99,17 @@ static QLMSnapshot *QLMRunning(void) {
     _model.groupNames = @[@"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8"];
     XCTAssertEqualObjects(_model.shownGroupNames, (@[@"1", @"2", @"3", @"4", @"5", @"6"]));
     XCTAssertEqualObjects(_model.groupPrefixes, (@[@"A", @"B", @"C", @"D", @"E", @"F"]));
-    XCTAssertEqual(QLMMainWindowMaxGroups, 6u);
+    XCTAssertEqual(QLMSkinMaxGroups, 6u);
+}
+
+// A skin with fewer cells shows fewer groups, so no group lacks a button.
+- (void)testASmallerGridShowsFewerGroups {
+    _model.groupNames = @[@"1", @"2", @"3", @"4", @"5", @"6"];
+    _model.groupCapacity = 4;
+    XCTAssertEqualObjects(_model.shownGroupNames, (@[@"1", @"2", @"3", @"4"]));
+    XCTAssertEqual(_model.groupTitles.count, 4u);
+    _model.groupCapacity = 9;
+    XCTAssertEqual(_model.shownGroupNames.count, 6u);
 }
 
 - (void)testTheActiveGroupIsSelected {
@@ -224,6 +236,8 @@ static QLMSnapshot *QLMRunning(void) {
     [self show:waits];
     XCTAssertEqualObjects(_model.levelText, QLMEmDash);
     XCTAssertEqualObjects(_model.outputText, @"OUTPUT —");
+    // The knob points at no level the display hides.
+    XCTAssertNil(_model.knobDecibels);
 }
 
 // Before a level is set, the preferences say the ceiling, as in the popover.
@@ -245,10 +259,47 @@ static QLMSnapshot *QLMRunning(void) {
     QLMSnapshot *snapshot = QLMRunning();
     snapshot.allMuted = YES;
     [self show:snapshot];
-    _model.applyError = @"The 8351B's filter design rate is unverified.";
+    _model.applyError = [NSError errorWithDomain:QLMSystemErrorDomain code:QLMSystemErrorUnverifiedRate
+                                        userInfo:@{NSLocalizedDescriptionKey: @"The 8351B's filter design rate is unverified."}];
     _model.refusedGroupName = @"Full Range";
     XCTAssertEqualObjects(_model.outputText, @"FULL RANGE REFUSED");
     XCTAssertTrue([_model.displaySummary containsString:@"unverified"]);
+}
+
+// QLMSystem.h: a refusal sends nothing. A failed send, or a stop mid-apply,
+// may come after frames went out, so it is no refusal.
+- (void)testOnlyARefusalReadsRefused {
+    _model.refusedGroupName = @"Main";
+    NSDictionary<NSNumber *, NSString *> *cases = @{
+        @(QLMSystemErrorUnverifiedRate): @"MAIN REFUSED",
+        @(QLMSystemErrorUnknownMonitor): @"MAIN REFUSED",
+        @(QLMSystemErrorBlocksFailed): @"MAIN REFUSED",
+        @(QLMSystemErrorAlreadyApplying): @"MAIN REFUSED",
+        @(QLMSystemErrorNoVolume): @"MAIN REFUSED",
+        @(QLMSystemErrorKnobUnread): @"MAIN REFUSED",
+        @(QLMSystemErrorSendFailed): @"MAIN FAILED",
+        @(QLMSystemErrorNotRunning): @"MAIN FAILED",
+    };
+    for (NSNumber *code in cases) {
+        _model.applyError = [NSError errorWithDomain:QLMSystemErrorDomain code:code.integerValue userInfo:nil];
+        XCTAssertEqualObjects(_model.outputText, cases[code], @"%@", code);
+    }
+    _model.applyError = [NSError errorWithDomain:NSPOSIXErrorDomain code:5 userInfo:nil];
+    XCTAssertEqualObjects(_model.outputText, @"MAIN FAILED");
+}
+
+// VoiceOver reads the chosen group, not the blink.
+- (void)testTheChosenGroupIgnoresTheBlink {
+    QLMSnapshot *snapshot = QLMRunning();
+    snapshot.activeGroupName = @"Main";
+    [self show:snapshot];
+    XCTAssertTrue([_model groupChosenAtIndex:0]);
+    _model.applyingGroupName = @"Nearfield";
+    for (NSNumber *blink in @[@YES, @NO]) {
+        _model.blinkOn = blink.boolValue;
+        XCTAssertFalse([_model groupChosenAtIndex:0]);
+        XCTAssertTrue([_model groupChosenAtIndex:1]);
+    }
 }
 
 - (void)testTheDisplayDimsWhileSystemIsStopped {

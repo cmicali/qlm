@@ -32,6 +32,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 // The setup file in use, or why it did not read. Both nil: none was found.
 - (void)showSetup:(nullable QLMSetup *)setup error:(nullable NSError *)error;
+// The main window's group buttons, so the setup note can say when the file
+// has more groups than show.
+- (void)showWindowGroupCount:(NSUInteger)count;
 
 // Draws the hand-back from the monitor list's snapshot while the window is
 // open.

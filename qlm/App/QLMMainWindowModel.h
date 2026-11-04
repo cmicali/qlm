@@ -5,9 +5,6 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-// The groups the main window shows at most, in the file's order.
-extern const NSUInteger QLMMainWindowMaxGroups;
-
 // After the user turns the knob, snapshots leave it alone this long, so a
 // snapshot from before the turn cannot pull it back mid-drag. The popover's
 // slider holds as long.
@@ -30,14 +27,17 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 @property (nonatomic, copy) NSArray<QLMMonitorEntry *> *entries;
 // The loaded setup's groups, in the file's order. Nil with no setup.
 @property (nonatomic, copy, nullable) NSArray<NSString *> *groupNames;
+// The skin's group buttons. QLMSkinMaxGroups until set.
+@property (nonatomic) NSUInteger groupCapacity;
 // The setup file's name, or nil with none found.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
 // Why the setup file did not read, or nil.
 @property (nonatomic, copy, nullable) NSString *setupError;
 // The group the window's click is applying, until its completion.
 @property (nonatomic, copy, nullable) NSString *applyingGroupName;
-// The last apply's refusal, and its group, until the next click.
-@property (nonatomic, copy, nullable) NSString *applyError;
+// The last apply's error, from System, and its group, until the next
+// click.
+@property (nonatomic, nullable) NSError *applyError;
 @property (nonatomic, copy, nullable) NSString *refusedGroupName;
 // The blink's phase while the window's apply runs.
 @property (nonatomic) BOOL blinkOn;
@@ -55,7 +55,7 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 // The bus problem's title as written, or nil.
 @property (nonatomic, readonly, nullable) NSString *busProblem;
 
-// Up to QLMMainWindowMaxGroups, and each one's letter.
+// As many as the skin has buttons for, and each one's letter.
 @property (nonatomic, readonly) NSArray<NSString *> *groupTitles;
 @property (nonatomic, readonly) NSArray<NSString *> *groupPrefixes;
 // The groups as the setup names them, as many as show.
@@ -63,6 +63,9 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 // Each shown group's button is selected, by index. While the window's apply
 // runs, only the chosen one, and only in the blink's on phase.
 - (BOOL)groupSelectedAtIndex:(NSUInteger)index;
+// The group chosen, by index: the one the window's apply runs, else the
+// active one. VoiceOver reads it, with no blink.
+- (BOOL)groupChosenAtIndex:(NSUInteger)index;
 // The popover picker's rule: a setup, System tracks a monitor, and no apply
 // runs.
 @property (nonatomic, readonly) BOOL groupsEnabled;
@@ -76,9 +79,10 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 // knob.
 @property (nonatomic, readonly) NSString *levelText;
 @property (nonatomic, readonly) NSString *unitText;
-// What goes out now: the dimmed level, or MUTED under mute all. After a
-// refusal, that the group was refused: the reason is longer than the line,
-// so it goes in the tooltip and displaySummary.
+// What goes out now: the dimmed level, or MUTED under mute all. After an
+// apply's error, that the group was refused, which sent nothing, or failed,
+// which may have sent some. The reason is longer than the line, so it goes
+// in the tooltip and displaySummary.
 @property (nonatomic, readonly) NSString *outputText;
 @property (nonatomic, readonly) NSString *maxText;
 // The display dims while System is stopped.
@@ -98,7 +102,8 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 @property (nonatomic, readonly) NSString *knobMinText;
 @property (nonatomic, readonly) NSString *knobMaxText;
 @property (nonatomic, readonly) NSString *knobCaption;
-// The level the knob points at, or nil with none set.
+// The level the knob points at, or nil with none set, or while it waits for
+// the knob's reading.
 @property (nonatomic, readonly, nullable) NSNumber *knobDecibels;
 @property (nonatomic, readonly) BOOL knobEnabled;
 
