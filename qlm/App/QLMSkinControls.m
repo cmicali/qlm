@@ -249,7 +249,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 
     NSAttributedString *title = [self titleString];
     CGFloat led = self.showsLED ? button.ledSize : 0;
-    QLMSkinLabel label = QLMSkinLabelLayout(bounds.size.width, _titleWidth, led, button.ledGap, button.ledX);
+    QLMSkinLabel label = QLMSkinLabelLayout(bounds.size.width, _titleWidth, led, button.ledGap);
     if (self.showsLED) {
         QLMSkinDrawLED(self.skin.led, NSMakeRect(label.ledX, round(NSMidY(bounds) - led / 2), led, led), self.ledLit,
                        self.enabled);

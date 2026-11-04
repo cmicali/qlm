@@ -119,6 +119,7 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     NSPoint from = [self pointOfEvent:event];
     NSPoint center = [self center];
     BOOL vertical = hypot(from.x - center.x, from.y - center.y) <= self.skin.knob.bodySize / 2;
+    double fromAngle = [self angleAt:from];
     double level = QLMKnobSnap(_value, self.minValue, self.maxValue);
     while (YES) {
         NSEvent *next = [self.window nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp];
@@ -133,7 +134,9 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
                                         fine ? QLM_KNOB_FINE_DRAG_TRAVEL_POINTS : QLM_KNOB_DRAG_TRAVEL_POINTS);
         }
         else {
-            level = QLMKnobDragStep(level, [self angleAt:from], [self angleAt:to], self.minValue, self.maxValue);
+            double toAngle = [self angleAt:to];
+            level = QLMKnobDragStep(level, fromAngle, toAngle, self.minValue, self.maxValue);
+            fromAngle = toAngle;
         }
         [self moveTo:level];
         from = to;

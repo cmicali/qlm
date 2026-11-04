@@ -79,7 +79,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     window.contentMinSize = minimum;
     NSSize size = window.contentView.bounds.size;
     if (size.width < minimum.width || size.height < minimum.height) {
-        [window setContentSize:NSMakeSize(MAX(size.width, minimum.width), MAX(size.height, minimum.height))];
+        [window setContentSize:QLMSizeAtLeast(size, minimum)];
     }
 }
 
@@ -311,14 +311,11 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
         return @"the window is closed";
     }
     NSWindow *window = super.window;
-    NSSize minimum = self.skin.windowSize;
-    size = NSMakeSize(MAX(size.width, minimum.width), MAX(size.height, minimum.height));
     // Within the screen, so the frame kept on quit still shows.
     NSRect visible = (window.screen ?: NSScreen.mainScreen).visibleFrame;
-    NSRect most = [window contentRectForFrameRect:visible];
-    size = NSMakeSize(MIN(size.width, MAX(most.size.width, minimum.width)),
-                      MIN(size.height, MAX(most.size.height, minimum.height)));
-    [window setContentSize:size];
+    NSSize most = [window contentRectForFrameRect:visible].size;
+    size = NSMakeSize(MIN(size.width, most.width), MIN(size.height, most.height));
+    [window setContentSize:QLMSizeAtLeast(size, self.skin.windowSize)];
     NSRect frame = window.frame;
     if (NSMaxY(frame) > NSMaxY(visible)) {
         frame.origin.y = MAX(NSMinY(visible), NSMaxY(visible) - frame.size.height);

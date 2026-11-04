@@ -109,41 +109,63 @@ static NSRange QLMTestInkRows(NSBitmapImageRep *bitmap) {
 // Off the origin, too: the flip maps the rect onto itself.
 - (void)testAStretchedImageLandsInItsRect {
     NSImage *image = QLMTestTwoToneImage(NSEdgeInsetsMake(4, 4, 4, 4));
+    NSRect rect = NSMakeRect(10, 30, 50, 60);
     NSBitmapImageRep *bitmap = QLMTestDrawFlipped(NSMakeSize(100, 100), ^{
-        QLMSkinDrawImage(image, NSMakeRect(10, 30, 50, 60));
+        QLMSkinDrawImage(image, rect);
     });
-    XCTAssertTrue(QLMTestIsRed([bitmap colorAtX:70 y:62]));
-    XCTAssertFalse(QLMTestIsRed([bitmap colorAtX:70 y:176]));
-    XCTAssertEqual([bitmap colorAtX:70 y:58].alphaComponent, 0);
-    XCTAssertEqual([bitmap colorAtX:70 y:182].alphaComponent, 0);
+    NSInteger x = (NSInteger)(NSMidX(rect) * QLMTestScale);
+    NSInteger top = (NSInteger)(NSMinY(rect) * QLMTestScale);
+    NSInteger bottom = (NSInteger)(NSMaxY(rect) * QLMTestScale);
+    XCTAssertTrue(QLMTestIsRed([bitmap colorAtX:x y:top + 2]));
+    XCTAssertFalse(QLMTestIsRed([bitmap colorAtX:x y:bottom - 4]));
+    XCTAssertEqual([bitmap colorAtX:x y:top - 2].alphaComponent, 0);
+    XCTAssertEqual([bitmap colorAtX:x y:bottom + 2].alphaComponent, 0);
 }
 
 // The LED, the gap, and the title center as one block on the face.
 - (void)testALabelCentersAsOneBlock {
-    QLMSkinLabel label = QLMSkinLabelLayout(174, 40, 6, 8, -1);
+    QLMSkinLabel label = QLMSkinLabelLayout(174, 40, 6, 8);
     XCTAssertEqual(label.ledX, 60);
     XCTAssertEqual(label.textX, 74);
     XCTAssertEqual(label.textWidth, 40);
-    XCTAssertEqual(174 - (label.textX + label.textWidth), label.ledX);
     // No LED, the title alone.
-    label = QLMSkinLabelLayout(174, 40, 0, 8, -1);
-    XCTAssertEqual(label.textX, 67);
-    // A pinned LED stays, and the title centers alone.
-    label = QLMSkinLabelLayout(174, 40, 6, 8, 20);
-    XCTAssertEqual(label.ledX, 20);
+    label = QLMSkinLabelLayout(174, 40, 0, 8);
     XCTAssertEqual(label.textX, 67);
 }
 
 // A long title on a narrow face is cut short inside the padding, and the LED
 // stays on the face.
 - (void)testALongLabelStaysOnTheFace {
-    QLMSkinLabel label = QLMSkinLabelLayout(100, 300, 6, 8, -1);
+    QLMSkinLabel label = QLMSkinLabelLayout(100, 300, 6, 8);
     XCTAssertEqual(label.ledX, QLMSkinLabelPadding);
     XCTAssertEqual(label.textWidth, 100 - 2 * QLMSkinLabelPadding - 14);
     XCTAssertEqual(label.textX + label.textWidth, 100 - QLMSkinLabelPadding);
     // A face too narrow for the LED itself draws no title.
-    label = QLMSkinLabelLayout(20, 300, 6, 8, -1);
+    label = QLMSkinLabelLayout(20, 300, 6, 8);
     XCTAssertEqual(label.textWidth, 0);
+}
+
+// A label too long for its frame is cut short inside it.
+- (void)testALongLabelIsCutShort {
+    NSFont *font = QLMSkinFont(nil, NO, 11, QLMSkinWeightRegular, NO, NO);
+    NSAttributedString *label = [[NSAttributedString alloc]
+        initWithString:@"A  A VERY LONG LISTENING SETUP NAME"
+            attributes:QLMSkinTextAttributes(font, NSColor.blackColor, QLMSkinAlignmentLeft, 0)];
+    NSRect frame = NSMakeRect(10, 0, 60, 40);
+    NSBitmapImageRep *bitmap = QLMTestDrawFlipped(NSMakeSize(300, 40), ^{
+        QLMSkinDrawCenteredCaps(label, frame);
+    });
+    NSInteger last = -1;
+    for (NSInteger x = 0; x < bitmap.pixelsWide; x++) {
+        for (NSInteger y = 0; y < bitmap.pixelsHigh; y++) {
+            if ([bitmap colorAtX:x y:y].alphaComponent > 0.5) {
+                last = x;
+                break;
+            }
+        }
+    }
+    XCTAssertGreaterThan(last, (NSInteger)(NSMidX(frame) * QLMTestScale));
+    XCTAssertLessThanOrEqual(last, (NSInteger)(NSMaxX(frame) * QLMTestScale));
 }
 
 // A button's label: its capitals sit as far from the face's top as from its

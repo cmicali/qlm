@@ -135,16 +135,16 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
 }
 
 // TRAP: an image with cap insets ignores respectFlipped whenever it draws at
-// any size but its own, so in a flipped view it stretches upside down. Its
-// nine parts draw right side up only in a context that isn't flipped. The
-// stand-in context doesn't carry the outer one's imageInterpolation or
-// antialiasing, so set either on it too if the outer one ever sets them.
+// any size but its own, so in a flipped view it stretches upside down. So
+// it draws through a CTM flipped about the rect, unflipped by AppKit.
 void QLMSkinDrawImage(NSImage *image, NSRect rect) {
     if (image == nil || rect.size.width <= 0 || rect.size.height <= 0) {
         return;
     }
+    NSEdgeInsets insets = image.capInsets;
+    BOOL sliced = insets.top > 0 || insets.left > 0 || insets.bottom > 0 || insets.right > 0;
     NSGraphicsContext *context = NSGraphicsContext.currentContext;
-    if (!context.flipped) {
+    if (!context.flipped || !sliced) {
         [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
            respectFlipped:YES hints:nil];
         return;
@@ -154,11 +154,8 @@ void QLMSkinDrawImage(NSImage *image, NSRect rect) {
     // Maps the rect onto itself, upside down.
     CGContextTranslateCTM(cg, 0, NSMinY(rect) + NSMaxY(rect));
     CGContextScaleCTM(cg, 1, -1);
-    [NSGraphicsContext saveGraphicsState];
-    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:cg flipped:NO];
     [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
-       respectFlipped:YES hints:nil];
-    [NSGraphicsContext restoreGraphicsState];
+       respectFlipped:NO hints:nil];
     CGContextRestoreGState(cg);
 }
 
@@ -301,7 +298,7 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
     };
 }
 
-void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
+static void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
     if (text.length == 0) {
         return;
     }
@@ -314,14 +311,13 @@ void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
 // An image face's bevel, on each side.
 const CGFloat QLMSkinLabelPadding = 6;
 
-QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap, CGFloat ledX) {
-    BOOL beforeTitle = led > 0 && ledX < 0;
-    CGFloat lead = beforeTitle ? led + gap : 0;
+QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap) {
+    CGFloat lead = led > 0 ? led + gap : 0;
     CGFloat room = faceWidth - 2 * QLMSkinLabelPadding - lead;
     CGFloat width = MIN(titleWidth, MAX(room, 0));
     CGFloat x = round(faceWidth / 2 - (lead + width) / 2);
     QLMSkinLabel label;
-    label.ledX = beforeTitle ? x : ledX;
+    label.ledX = x;
     label.textX = x + lead;
     label.textWidth = width;
     return label;
@@ -334,17 +330,10 @@ void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame) {
     if (text.length == 0) {
         return;
     }
-    static NSLayoutManager *layout;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        layout = [[NSLayoutManager alloc] init];
-    });
     NSFont *font = [text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
-    // TRAP: the line's baseline sits below its top by more than the ascender.
-    CGFloat offset = [layout defaultBaselineOffsetForFont:font];
-    CGFloat baseline = NSMidY(frame) + font.capHeight / 2;
-    NSRect box = NSMakeRect(frame.origin.x, baseline - offset, frame.size.width, [layout defaultLineHeightForFont:font]);
-    [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
+    // With no line fragment origin, the rect's origin is the baseline.
+    NSRect baseline = NSMakeRect(frame.origin.x, NSMidY(frame) + font.capHeight / 2, frame.size.width, 0);
+    [text drawWithRect:baseline options:0];
 }
 
 void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits, CGFloat alpha) {

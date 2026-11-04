@@ -76,6 +76,11 @@ static inline double QLMKnobDragAngle(double dx, double dy, double deadRadius) {
     return hypot(dx, dy) < deadRadius ? NAN : QLMKnobAngleOfOffset(dx, dy);
 }
 
+// The level a turn of `degrees` moves, at the sweep's rate.
+static inline double QLMKnobDecibelsForTurn(double degrees, double minimum, double maximum) {
+    return degrees / QLM_KNOB_SWEEP_DEGREES * (maximum - minimum);
+}
+
 // One step of a relative drag. A step in or out of the dead zone, past the
 // cap, or from or to a NaN angle keeps the level. `level` is unsnapped, so a
 // slow drag adds up.
@@ -85,8 +90,7 @@ static inline double QLMKnobDragStep(double level, double fromDegrees, double to
         || !(fabs(turned) <= QLM_KNOB_MAX_STEP_DEGREES)) {
         return level;
     }
-    double moved = turned / QLM_KNOB_SWEEP_DEGREES * (maximum - minimum);
-    return QLMKnobClamp(level + moved, minimum, maximum);
+    return QLMKnobClamp(level + QLMKnobDecibelsForTurn(turned, minimum, maximum), minimum, maximum);
 }
 
 // A vertical drag's travel over the whole range, in points. Shift's finer
@@ -95,16 +99,17 @@ static inline double QLMKnobDragStep(double level, double fromDegrees, double to
 #define QLM_KNOB_FINE_DRAG_TRAVEL_POINTS 800.0
 
 // One step of a vertical drag, `dy` points down since the last event: up is
-// louder. Each step moves at most what the angular drag's cap turns, so a
-// leap of the mouse in one event can't jump the level. `level` is
+// louder: the travel is a turn of the whole sweep. Each step turns at most
+// the angular drag's cap, clamped where that drag drops it, so a leap of the
+// mouse in one event can't jump the level. `level` is
 // unsnapped, so a slow drag adds up.
 static inline double QLMKnobDragVertical(double level, double dy, double minimum, double maximum, double travel) {
     if (!(maximum > minimum) || !(travel > 0) || !isfinite(dy)) {
         return level;
     }
-    double cap = QLM_KNOB_MAX_STEP_DEGREES / QLM_KNOB_SWEEP_DEGREES * (maximum - minimum);
-    double moved = QLMKnobClamp(-dy / travel * (maximum - minimum), -cap, cap);
-    return QLMKnobClamp(level + moved, minimum, maximum);
+    double turned = QLMKnobClamp(-dy / travel * QLM_KNOB_SWEEP_DEGREES, -QLM_KNOB_MAX_STEP_DEGREES,
+                                 QLM_KNOB_MAX_STEP_DEGREES);
+    return QLMKnobClamp(level + QLMKnobDecibelsForTurn(turned, minimum, maximum), minimum, maximum);
 }
 
 // A point at `radius` from (cx, cy) along `degrees`, y down.

@@ -49,10 +49,8 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
 // ellipsis where it overflows. A slot's accent colors its trailing period.
 void QLMSkinDrawSlot(NSString *_Nullable text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits,
                      CGFloat alpha);
-void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame);
 // Where a button's label goes on a face `faceWidth` wide: the LED, `led`
-// wide, then `gap`, then the title, centered as one block. An `ledX` of 0
-// or more pins the LED there, and the title centers alone. A title too long
+// wide, then `gap`, then the title, centered as one block. A title too long
 // for the face, inside its padding, is cut short, never pushed off it.
 typedef struct {
     CGFloat ledX;
@@ -60,7 +58,7 @@ typedef struct {
     CGFloat textWidth;
 } QLMSkinLabel;
 extern const CGFloat QLMSkinLabelPadding;
-QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap, CGFloat ledX);
+QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap);
 
 // A button's label, its capitals centered on the frame's height.
 void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame);

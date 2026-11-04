@@ -222,7 +222,6 @@ static NSString *QLMSkinKey(NSString *path, NSString *key) {
 @property (nonatomic) QLMSkinTitle *title;
 @property (nonatomic) QLMSkinFocus *focus;
 @property (nonatomic) CGFloat ledSize;
-@property (nonatomic) CGFloat ledX;
 @property (nonatomic) CGFloat ledGap;
 @end
 
@@ -904,10 +903,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     if (button.ledSize > cell.height) {
         [self fail:@"button.led.size is taller than the button, %g", cell.height];
     }
-    else if (button.ledX >= 0 && button.ledX + button.ledSize > cell.width) {
-        [self fail:@"button.led.x puts the LED past the button's width, %g", cell.width];
-    }
-    else if (button.ledX < 0 && button.ledSize + button.ledGap > cell.width) {
+    else if (button.ledSize + button.ledGap > cell.width) {
         [self fail:@"button.led leaves the title no room in the button's width, %g", cell.width];
     }
 }
@@ -967,15 +963,11 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
         button.title = read;
     }
 
-    button.ledX = -1;
     if (object[@"led"]) {
         NSDictionary *led = [self object:object[@"led"] at:@"button.led"];
-        if ([self checkKeys:led at:@"button.led" allowed:@[@"size", @"gap", @"x"] required:@[@"size"]]) {
+        if ([self checkKeys:led at:@"button.led" allowed:@[@"size", @"gap"] required:@[@"size"]]) {
             button.ledSize = [self positive:led[@"size"] at:@"button.led.size"];
             button.ledGap = [self nonNegative:led[@"gap"] at:@"button.led.gap" orDefault:6];
-            if (led[@"x"]) {
-                button.ledX = [self nonNegative:led[@"x"] at:@"button.led.x" orDefault:0];
-            }
             [self checkLED:button inCell:cell];
         }
     }

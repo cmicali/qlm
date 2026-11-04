@@ -191,9 +191,7 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) QLMSkinTitle *title;
 @property (nonatomic, readonly) QLMSkinFocus *focus;
 @property (nonatomic, readonly) CGFloat ledSize;
-// Below 0, the LED sits just before the title, ledGap from it. Else it sits
-// this far from the button's left edge, and the title stays centered.
-@property (nonatomic, readonly) CGFloat ledX;
+// The LED sits ledGap before the title, and the two center together.
 @property (nonatomic, readonly) CGFloat ledGap;
 @end
 
