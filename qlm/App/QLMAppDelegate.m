@@ -18,6 +18,7 @@
 #import "QLMSystem.h"
 #if DEBUG
 #import "QLMDebugChannel.h"
+#import "QLMSkinLibrary.h"
 #import "QLMSkinPreview.h"
 #endif
 
@@ -57,6 +58,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // A debug command's answer to the louder hand-back alert, while its quit runs.
 @property (nonatomic, nullable) NSNumber *debugQuitAnswer;
 #endif
+- (nullable NSString *)chooseSkinNamed:(NSString *)name;
 @end
 
 #if DEBUG
@@ -486,6 +488,20 @@ static OSType QLMQuitReason(void) {
     [self restartSystem];
 }
 
+- (NSString *)settings:(QLMSettingsWindowController *)controller chooseSkinNamed:(NSString *)name {
+    return [self chooseSkinNamed:name];
+}
+
+// Settings' picker and the skin verb share it.
+- (nullable NSString *)chooseSkinNamed:(NSString *)name {
+    NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
+    if (refusal == nil) {
+        [self.osdController reloadPreferences];
+        [self.settingsController reloadSkin];
+    }
+    return refusal;
+}
+
 @end
 
 #if DEBUG
@@ -582,12 +598,13 @@ static OSType QLMQuitReason(void) {
     return self.mainWindowController.shownSkinName;
 }
 
-// As Settings' skin picker will: a skin the library refuses is not kept.
 - (NSString *)debugChooseSkin:(NSString *)name {
-    NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
-    if (refusal == nil) {
-        [self.osdController reloadPreferences];
-    }
+    return [self chooseSkinNamed:name];
+}
+
+- (NSString *)debugSkinRefusal {
+    NSString *refusal = nil;
+    [[QLMSkinLibrary standardLibrary] loadSkinNamed:self.preferences.skinName refusal:&refusal];
     return refusal;
 }
 

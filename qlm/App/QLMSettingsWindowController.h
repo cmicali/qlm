@@ -20,12 +20,15 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller;
 // The OSD's setting, place, or seconds changed in the preferences.
 - (void)settingsDidChangeOSD:(QLMSettingsWindowController *)controller;
+// The user picked a skin. Returns the library's refusal, and then nothing
+// changes.
+- (nullable NSString *)settings:(QLMSettingsWindowController *)controller chooseSkinNamed:(NSString *)name;
 @end
 
 // Settings: the GLM adapter or the fake bus and its hand-back, the setup
 // file, the volume range and ceiling, waking the monitors and opening the
-// main window at launch, and opening at login. Each change is saved at once.
-// On the main queue.
+// main window at launch, opening at login, the skin, and the OSD. Each
+// change is saved at once. On the main queue.
 @interface QLMSettingsWindowController : NSWindowController
 
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList;
@@ -38,6 +41,10 @@ NS_ASSUME_NONNULL_BEGIN
 // Draws the hand-back from the monitor list's snapshot while the window is
 // open.
 - (void)refresh;
+
+// Draws the skin's picker, its note, and the groups note again, after the
+// skin changed elsewhere, while the window is open.
+- (void)reloadSkin;
 
 // Saves a field still being edited, as Return would.
 - (void)endEditing;

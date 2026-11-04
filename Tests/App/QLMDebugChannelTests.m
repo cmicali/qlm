@@ -35,6 +35,7 @@
 @property (nonatomic, nullable) QLMFakeBus *debugFakeBus;
 @property (nonatomic) BOOL debugWindowShowing;
 @property (nonatomic, copy, nullable) NSString *debugWindowApplyError;
+@property (nonatomic, copy, nullable) NSString *debugSkinRefusal;
 // The window's group buttons.
 @property (nonatomic, copy) NSArray<NSString *> *groupNames;
 // The app's own actions the verbs called, in order.
@@ -454,6 +455,7 @@
     XCTAssertEqualObjects(state[@"windowApplyError"], NSNull.null);
     XCTAssertEqualObjects(state[@"skinName"], @"modern");
     XCTAssertEqualObjects(state[@"windowSkin"], @"modern");
+    XCTAssertEqualObjects(state[@"skinRefusal"], NSNull.null);
     XCTAssertEqualObjects(state[@"opensWindowAtLaunch"], @NO);
 
     NSDictionary *snapshot = state[@"snapshot"];
@@ -822,6 +824,12 @@
     XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"skinName"], @"modern");
     XCTAssertEqualObjects(_app.actions, @[@"skin modern"]);
     [self assertNothingSentSince:mark];
+}
+
+// A saved skin that no longer loads, as Settings' note says it.
+- (void)testDumpStateSaysWhyTheSavedSkinIsRefused {
+    _app.debugSkinRefusal = @"The skin broken is refused. skin.json is not an object.";
+    XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"skinRefusal"], @"The skin broken is refused. skin.json is not an object.");
 }
 
 #pragma mark - GLM and quitting

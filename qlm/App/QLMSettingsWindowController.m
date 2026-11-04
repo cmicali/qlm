@@ -36,6 +36,10 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic) NSPopUpButton *osdPlacementPicker;
 @property (nonatomic) NSTextField *osdSecondsField;
 @property (nonatomic) NSStepper *osdSecondsStepper;
+@property (nonatomic) NSPopUpButton *skinPicker;
+@property (nonatomic) NSTextField *skinNote;
+// The last pick's refusal, until the window opens again or a pick loads.
+@property (nonatomic, copy, nullable) NSString *skinPickRefusal;
 @end
 
 @implementation QLMSettingsWindowController
@@ -108,7 +112,9 @@ static const CGFloat QLMSettingsTextWidth = 360;
     NSTextField *launchTitle = [NSTextField labelWithString:@"At launch:"];
     NSTextField *setupTitle = [NSTextField labelWithString:@"Setup file:"];
     NSTextField *osdTitle = [NSTextField labelWithString:@"On-screen display:"];
+    NSTextField *skinTitle = [NSTextField labelWithString:@"Skin:"];
     [self buildOSD];
+    [self buildSkin];
     NSGridView *grid = [NSGridView gridViewWithViews:@[
         @[[NSTextField labelWithString:@"Monitors:"], self.adapterCheckbox],
         @[[NSGridCell emptyContentView], adapterNote],
@@ -125,6 +131,8 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @[[NSGridCell emptyContentView], self.loginCheckbox],
         @[[NSGridCell emptyContentView], self.loginNote],
         @[[NSGridCell emptyContentView], self.loginItemsButton],
+        @[skinTitle, [self skinRow]],
+        @[[NSGridCell emptyContentView], self.skinNote],
         @[osdTitle, self.osdCheckbox],
         @[[NSTextField labelWithString:@"Place:"], self.osdPlacementPicker],
         @[[NSTextField labelWithString:@"Keep it up for:"], [self osdSecondsRow]],
@@ -134,10 +142,10 @@ static const CGFloat QLMSettingsTextWidth = 360;
     grid.rowAlignment = NSGridRowAlignmentFirstBaseline;
     [grid columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
     // A note sits close under its control, and a new section stands apart.
-    for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, self.rangeNote, ceilingNote, self.loginNote]) {
+    for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, self.rangeNote, ceilingNote, self.loginNote, self.skinNote]) {
         [grid cellForView:note].row.topPadding = -4;
     }
-    for (NSView *title in @[setupTitle, rangeTitle, launchTitle, osdTitle]) {
+    for (NSView *title in @[setupTitle, rangeTitle, launchTitle, skinTitle, osdTitle]) {
         [grid cellForView:title].row.topPadding = 10;
     }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
@@ -197,6 +205,8 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [self renderLaunch];
     [self renderHandBack];
     [self renderOSD];
+    self.skinPickRefusal = nil;
+    [self renderSkin];
     [self fitWindow];
     [super showWindow:sender];
 }
@@ -340,6 +350,77 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 - (void)openLoginItems:(id)sender {
     [SMAppService openSystemSettingsLoginItems];
+}
+
+#pragma mark - The skin
+
+- (void)buildSkin {
+    self.skinPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    self.skinPicker.target = self;
+    self.skinPicker.action = @selector(skinChosen:);
+    self.skinNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
+    self.skinNote.selectable = YES;
+}
+
+- (NSStackView *)skinRow {
+    NSButton *reveal = [NSButton buttonWithTitle:@"Show in Finder" target:self action:@selector(revealSkins:)];
+    return [NSStackView stackViewWithViews:@[self.skinPicker, reveal]];
+}
+
+- (void)skinChosen:(NSPopUpButton *)picker {
+    NSString *name = picker.titleOfSelectedItem;
+    if (name == nil || [name isEqualToString:self.preferences.skinName]) {
+        return;
+    }
+    // On success the delegate calls reloadSkin.
+    NSString *refusal = [self.delegate settings:self chooseSkinNamed:name];
+    if (refusal != nil) {
+        self.skinPickRefusal = refusal;
+        [self renderSkin];
+        [self fitWindow];
+    }
+}
+
+// Only this button makes the user's folder.
+- (void)revealSkins:(id)sender {
+    NSURL *directory = [QLMSkinLibrary standardLibrary].userDirectory;
+    if (![NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
+        NSBeep();
+        return;
+    }
+    [NSWorkspace.sharedWorkspace openURL:directory];
+}
+
+- (void)reloadSkin {
+    self.skinPickRefusal = nil;
+    if (self.window.visible) {
+        [self renderSkin];
+        [self renderSetup];
+        [self fitWindow];
+    }
+}
+
+// Lists the user's folder again, so a skin added since shows.
+- (void)renderSkin {
+    QLMSkinLibrary *library = [QLMSkinLibrary standardLibrary];
+    NSString *chosen = self.preferences.skinName;
+    NSString *refusal = nil;
+    QLMSkin *shown = [library loadSkinNamed:chosen refusal:&refusal];
+    NSString *shownName = shown.name ?: QLMSkinDefaultName;
+
+    [self.skinPicker removeAllItems];
+    BOOL separated = NO;
+    for (NSString *name in [library skinNames]) {
+        if (!separated && ![library isBuiltIn:name]) {
+            separated = YES;
+            [self.skinPicker.menu addItem:NSMenuItem.separatorItem];
+        }
+        [self.skinPicker addItemWithTitle:name];
+    }
+    // A chosen skin whose folder is gone shows as the fallback.
+    [self.skinPicker selectItemWithTitle:[self.skinPicker itemWithTitle:chosen] != nil ? chosen : shownName];
+
+    self.skinNote.stringValue = QLMSkinNote(self.skinPickRefusal ?: refusal, shownName, library.userDirectory);
 }
 
 #pragma mark - The on-screen display

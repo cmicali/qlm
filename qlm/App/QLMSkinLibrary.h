@@ -22,11 +22,18 @@ extern NSString *const QLMSkinDefaultName;
 - (NSArray<NSString *> *)skinNames;
 - (BOOL)isBuiltIn:(NSString *)name;
 
+// Where the user's skins go. The library never creates it.
+@property (nonatomic, readonly, nullable) NSURL *userDirectory;
+
 // The named skin. A skin that is missing or refused gives the default
 // skin, with the reason in `refusal`, for Settings. Nil only when the
 // default is refused too, which a test rules out.
 - (nullable QLMSkin *)loadSkinNamed:(NSString *)name refusal:(NSString *_Nullable *_Nullable)refusal;
 
 @end
+
+// Settings' note under the skin picker. With a refusal: the reason, and
+// which skin shows instead. Without: where a user's skin goes.
+NSString *QLMSkinNote(NSString *_Nullable refusal, NSString *shownName, NSURL *_Nullable userDirectory);
 
 NS_ASSUME_NONNULL_END

@@ -175,7 +175,7 @@ Each new control gets a verb, so `.claude/skills/app-hardware-run` can drive the
 | `osd <show|hide>` | Shows the OSD at the current level, or hides it, so a screenshot can check it |
 | `skin <name>` | Switches the skin, as Settings does |
 
-`dump_state` gains the skin's name, the OSD's settings, and whether the window and the OSD are showing. `dump_screenshot -` already captures the key window, so each skin's rendering can be checked by eye from a script.
+`dump_state` gains the skin's name and why it is refused, if it is, the OSD's settings, and whether the window and the OSD are showing. `dump_screenshot -` already captures the key window, so each skin's rendering can be checked by eye from a script.
 
 ## The work, in order
 
