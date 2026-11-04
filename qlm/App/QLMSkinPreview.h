@@ -8,7 +8,8 @@ NS_ASSUME_NONNULL_BEGIN
 //
 // Opens a window with a skin view at the skin's size, or the OSD at its
 // size, filled with the mockups' sample text, and makes it key. Returns the
-// reply: the skin shown, and the refusal it fell back from, if any.
-NSDictionary *QLMShowSkinPreview(NSString *name, BOOL osd);
+// reply: the skin shown, and the refusal it fell back from, if any. A
+// disabled look shows every control, or the OSD, disabled.
+NSDictionary *QLMShowSkinPreview(NSString *name, BOOL osd, BOOL disabled);
 
 NS_ASSUME_NONNULL_END

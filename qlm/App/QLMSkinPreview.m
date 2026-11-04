@@ -28,7 +28,7 @@ static NSWindow *QLMSkinPreviewHost(NSWindow *window, NSView *view) {
     return window;
 }
 
-static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin) {
+static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin, BOOL disabled) {
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
                               | NSWindowStyleMaskFullSizeContentView;
     NSRect frame = NSMakeRect(0, 0, skin.windowSize.width, skin.windowSize.height);
@@ -50,7 +50,8 @@ static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin) {
     view.knobCaption = @"VOLUME";
     view.status.text = @"6 ONLINE";
     view.status.lit = YES;
-    [view setGroupTitles:@[@"MAIN", @"NEARFIELD", @"FULL RANGE"] prefixes:@[@"A", @"B", @"C"]];
+    // The owner's setup file has four groups.
+    [view setGroupTitles:@[@"MAIN 4X2", @"MAIN 2X2", @"MAIN 2X1", @"GROUP_4"] prefixes:@[@"A", @"B", @"C", @"D"]];
     view.groupButtons[0].selected = YES;
     view.display.caption = @"MAIN";
     view.display.level = @"−59.0";
@@ -64,10 +65,19 @@ static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin) {
     view.knob.doubleValue = -59;
     view.monitorsButton.title = @"Monitors";
     view.powerButton.title = @"Standby";
+    if (disabled) {
+        NSArray<QLMSkinControl *> *others = @[view.muteButton, view.dimButton, view.knob, view.monitorsButton,
+                                              view.powerButton];
+        for (QLMSkinControl *control in [others arrayByAddingObjectsFromArray:view.groupButtons]) {
+            control.enabled = NO;
+        }
+        view.status.enabled = NO;
+        view.display.disabled = YES;
+    }
     return QLMSkinPreviewHost(window, view);
 }
 
-static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin) {
+static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin, BOOL disabled) {
     NSRect frame = skin.osd.frame;
     NSWindow *window = [[QLMSkinPreviewWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless
                                                                  backing:NSBackingStoreBuffered defer:NO];
@@ -81,10 +91,11 @@ static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin) {
     view.title = @"Main monitors";
     view.subtitle = @"qlm · Output level";
     view.fraction = (-59.0 + 80) / 50;
+    view.disabled = disabled;
     return QLMSkinPreviewHost(window, view);
 }
 
-NSDictionary *QLMShowSkinPreview(NSString *name, BOOL osd) {
+NSDictionary *QLMShowSkinPreview(NSString *name, BOOL osd, BOOL disabled) {
     static NSWindow *shown;
     NSString *refusal = nil;
     QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:name refusal:&refusal];
@@ -92,7 +103,7 @@ NSDictionary *QLMShowSkinPreview(NSString *name, BOOL osd) {
         return @{@"error": refusal ?: @"no skin loads"};
     }
     [shown close];
-    shown = osd ? QLMSkinPreviewOSDWindow(skin) : QLMSkinPreviewMainWindow(skin);
+    shown = osd ? QLMSkinPreviewOSDWindow(skin, disabled) : QLMSkinPreviewMainWindow(skin, disabled);
     shown.releasedWhenClosed = NO;
     [shown center];
     [shown makeKeyAndOrderFront:nil];
