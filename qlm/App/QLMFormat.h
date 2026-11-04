@@ -11,6 +11,8 @@ extern NSString *const QLMEmDash;
 
 // "−30.0 dB", with a true minus sign.
 NSString *QLMDecibelsText(double decibels);
+// The same with no unit, "−30.0", for a display that sets the unit apart.
+NSString *QLMDecibelsNumberText(double decibels);
 
 // Why a level typed for the ceiling, or the range's bottom, is refused, or
 // nil. 0 dB is the monitors' full level, so a level above it is refused, not

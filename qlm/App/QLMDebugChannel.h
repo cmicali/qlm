@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 
+@class QLMFakeBus;
 @class QLMPreferences;
 @class QLMSnapshot;
 @class QLMSystem;
@@ -45,6 +46,14 @@ NS_ASSUME_NONNULL_BEGIN
 // Opens a look at the named skin, its window or its OSD, and makes it key.
 // The reply says which skin shows, and why it fell back, if it did.
 - (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd;
+// The OSD: shows the latest snapshot's level, as a turn of the adapter's
+// knob would, timer and all. NO with no level yet. The hide is at once.
+// dump_screenshot takes it while the app has no key window.
+- (BOOL)debugShowOSD;
+- (void)debugHideOSD;
+@property (nonatomic, readonly) BOOL debugOSDShowing;
+// The fake bus System drives, or nil on the real adapter.
+@property (nonatomic, readonly, nullable) QLMFakeBus *debugFakeBus;
 // The app's Quit. quitAnyway answers the louder hand-back alert, if it would
 // show. Returns only when the quit is cancelled.
 - (void)debugQuitAnswering:(BOOL)quitAnyway;

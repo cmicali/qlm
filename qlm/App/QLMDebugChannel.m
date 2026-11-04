@@ -10,6 +10,7 @@
 #import "DebugStandardVerbs.h"
 #import "DebugSyntheticInput.h"
 #import "DebugWireFormat.h"
+#import "QLMFakeBus.h"
 #import "QLMFormat.h"
 #import "QLMPreferences.h"
 #import "QLMSnapshot.h"
@@ -193,6 +194,12 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             };
             reply[@"quitGLMButton"] = app.debugQuitGLMTitle ?: NSNull.null;
             reply[@"quitAsksFirst"] = @(app.debugQuitAsksFirst);
+            reply[@"osd"] = @{
+                @"showsOSD": @(preferences.showsOSD),
+                @"placement": QLMOSDPlacementName(preferences.osdPlacement),
+                @"seconds": @(preferences.osdSeconds),
+                @"showing": @(app.debugOSDShowing),
+            };
             return reply;
         }),
         QLMDebugVerb(@"popover <show|close>", QLM_HANDLER {
@@ -222,6 +229,45 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         }),
         QLMDebugVerb(@"skin_preview_osd <name>", QLM_HANDLER {
             return [app debugShowSkinPreview:tokens[1] osd:YES];
+        }),
+        // The OSD as a turn of the knob shows it, for dump_screenshot. It
+        // refuses while Settings has it off.
+        QLMDebugVerb(@"osd <show|hide>", QLM_HANDLER {
+            if ([tokens[1] isEqualToString:@"show"]) {
+                if (!app.debugPreferences.showsOSD) {
+                    return QLMDebugError(@"the OSD is off in Settings");
+                }
+                if (![app debugShowOSD]) {
+                    return QLMDebugError(@"no level yet");
+                }
+            }
+            else if ([tokens[1] isEqualToString:@"hide"]) {
+                [app debugHideOSD];
+            }
+            else {
+                return nil;
+            }
+            return @{@"ok": @YES, @"showing": @(app.debugOSDShowing)};
+        }),
+        // The fake bus's knob, as its window's slider turns it, in tenths of
+        // a dB, from its bottom stop, -1004, to 0. Only on the fake bus.
+        QLMDebugVerb(@"fake_knob <tenths>", QLM_HANDLER {
+            NSInteger tenths = 0;
+            NSScanner *scanner = [NSScanner scannerWithString:tokens[1]];
+            if (![scanner scanInteger:&tenths] || !scanner.atEnd) {
+                return nil;
+            }
+            QLMFakeBus *bus = app.debugFakeBus;
+            if (bus == nil) {
+                return QLMDebugError(@"qlm drives the GLM adapter, not the fake bus");
+            }
+            if (tenths < -1004 || tenths > 0) {
+                return QLMDebugError(@"%ld is outside the knob's travel, -1004 to 0", (long)tenths);
+            }
+            [bus perform:^{
+                bus.knobTenths = @(tenths);
+            }];
+            return @{@"ok": @YES, @"knobTenths": @(tenths)};
         }),
         // The read lands on a utility queue, so the reply only acknowledges it.
         QLMDebugVerb(@"read_setup", QLM_HANDLER {

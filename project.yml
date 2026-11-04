@@ -179,6 +179,7 @@ targets:
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
       - qlm/App/QLMMonitorList.m
+      - qlm/App/QLMOSDRule.m
       - qlm/App/QLMPreferences.m
       - qlm/App/QLMSkin.m
       - qlm/App/QLMSkinLayout.m

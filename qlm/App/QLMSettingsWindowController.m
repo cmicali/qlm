@@ -29,6 +29,10 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic, copy, nullable) NSString *loginError;
+@property (nonatomic) NSButton *osdCheckbox;
+@property (nonatomic) NSPopUpButton *osdPlacementPicker;
+@property (nonatomic) NSTextField *osdSecondsField;
+@property (nonatomic) NSStepper *osdSecondsStepper;
 @end
 
 @implementation QLMSettingsWindowController
@@ -99,6 +103,8 @@ static const CGFloat QLMSettingsTextWidth = 360;
     NSTextField *rangeTitle = [NSTextField labelWithString:@"Volume range:"];
     NSTextField *launchTitle = [NSTextField labelWithString:@"At launch:"];
     NSTextField *setupTitle = [NSTextField labelWithString:@"Setup file:"];
+    NSTextField *osdTitle = [NSTextField labelWithString:@"On-screen display:"];
+    [self buildOSD];
     NSGridView *grid = [NSGridView gridViewWithViews:@[
         @[[NSTextField labelWithString:@"Monitors:"], self.adapterCheckbox],
         @[[NSGridCell emptyContentView], adapterNote],
@@ -114,6 +120,9 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @[[NSGridCell emptyContentView], self.loginCheckbox],
         @[[NSGridCell emptyContentView], self.loginNote],
         @[[NSGridCell emptyContentView], self.loginItemsButton],
+        @[osdTitle, self.osdCheckbox],
+        @[[NSTextField labelWithString:@"Place:"], self.osdPlacementPicker],
+        @[[NSTextField labelWithString:@"Keep it up for:"], [self osdSecondsRow]],
     ]];
     grid.rowSpacing = 8;
     grid.columnSpacing = 8;
@@ -123,7 +132,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, self.rangeNote, ceilingNote, self.loginNote]) {
         [grid cellForView:note].row.topPadding = -4;
     }
-    for (NSView *title in @[setupTitle, rangeTitle, launchTitle]) {
+    for (NSView *title in @[setupTitle, rangeTitle, launchTitle, osdTitle]) {
         [grid cellForView:title].row.topPadding = 10;
     }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
@@ -176,6 +185,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [self renderRange];
     [self renderLaunch];
     [self renderHandBack];
+    [self renderOSD];
     [self fitWindow];
     [super showWindow:sender];
 }
@@ -315,6 +325,76 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 - (void)openLoginItems:(id)sender {
     [SMAppService openSystemSettingsLoginItems];
+}
+
+#pragma mark - The on-screen display
+
+// In QLMOSDPlacement's order.
+static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
+    return @[@"Top left", @"Top center", @"Top right", @"Bottom left", @"Bottom center", @"Bottom right"];
+}
+
+- (void)buildOSD {
+    self.osdCheckbox = [NSButton checkboxWithTitle:@"Show the OSD when the knob turns" target:self action:@selector(osdClicked:)];
+    self.osdPlacementPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    [self.osdPlacementPicker addItemsWithTitles:QLMOSDPlacementTitles()];
+    self.osdPlacementPicker.target = self;
+    self.osdPlacementPicker.action = @selector(osdPlacementChosen:);
+
+    NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
+    formatter.numberStyle = NSNumberFormatterDecimalStyle;
+    formatter.minimumFractionDigits = 1;
+    formatter.maximumFractionDigits = 1;
+    self.osdSecondsField = [NSTextField textFieldWithString:@""];
+    self.osdSecondsField.formatter = formatter;
+    self.osdSecondsField.alignment = NSTextAlignmentRight;
+    self.osdSecondsField.target = self;
+    self.osdSecondsField.action = @selector(osdSecondsChanged:);
+    // TRAP: by default only Return sends the action, as with the level fields.
+    self.osdSecondsField.cell.sendsActionOnEndEditing = YES;
+    [self.osdSecondsField.widthAnchor constraintEqualToConstant:64].active = YES;
+    self.osdSecondsStepper = [[NSStepper alloc] init];
+    self.osdSecondsStepper.minValue = QLMOSDSecondsMin;
+    self.osdSecondsStepper.maxValue = QLMOSDSecondsMax;
+    self.osdSecondsStepper.increment = QLMOSDSecondsStep;
+    self.osdSecondsStepper.autorepeat = YES;
+    self.osdSecondsStepper.valueWraps = NO;
+    self.osdSecondsStepper.target = self;
+    self.osdSecondsStepper.action = @selector(osdSecondsChanged:);
+}
+
+- (NSStackView *)osdSecondsRow {
+    NSStackView *row = [NSStackView stackViewWithViews:@[self.osdSecondsField, self.osdSecondsStepper, [NSTextField labelWithString:@"s"]]];
+    row.spacing = 4;
+    return row;
+}
+
+// The OSD's controller rereads the preferences when the defaults change.
+- (void)osdClicked:(NSButton *)checkbox {
+    self.preferences.showsOSD = checkbox.state == NSControlStateValueOn;
+    [self renderOSD];
+}
+
+- (void)osdPlacementChosen:(NSPopUpButton *)picker {
+    self.preferences.osdPlacement = (QLMOSDPlacement)picker.indexOfSelectedItem;
+}
+
+// The preferences hold it to the range, on the half seconds.
+- (void)osdSecondsChanged:(NSControl *)control {
+    self.preferences.osdSeconds = control.doubleValue;
+    [self renderOSD];
+}
+
+- (void)renderOSD {
+    BOOL shows = self.preferences.showsOSD;
+    NSTimeInterval seconds = self.preferences.osdSeconds;
+    self.osdCheckbox.state = shows ? NSControlStateValueOn : NSControlStateValueOff;
+    [self.osdPlacementPicker selectItemAtIndex:self.preferences.osdPlacement];
+    self.osdSecondsField.doubleValue = seconds;
+    self.osdSecondsStepper.doubleValue = seconds;
+    self.osdPlacementPicker.enabled = shows;
+    self.osdSecondsField.enabled = shows;
+    self.osdSecondsStepper.enabled = shows;
 }
 
 #pragma mark - Drawing

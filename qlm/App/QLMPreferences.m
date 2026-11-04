@@ -7,6 +7,10 @@
 #import "QLMSystem.h"
 
 const double QLMVolumeRangeMinimumSpan = 10;
+const NSTimeInterval QLMOSDSecondsMin = 0.5;
+const NSTimeInterval QLMOSDSecondsMax = 10;
+const NSTimeInterval QLMOSDSecondsStep = 0.5;
+static const NSTimeInterval QLMDefaultOSDSeconds = 2;
 static const double QLMDefaultLowestDecibels = -60;
 static const double QLMDefaultVolumeDecibels = -40;
 
@@ -15,6 +19,11 @@ static NSString *const QLMLowestKey = @"QLMLowestDecibels";
 static NSString *const QLMWakesAtLaunchKey = @"QLMWakesAtLaunch";
 static NSString *const QLMUsesAdapterKey = @"QLMUsesAdapter";
 static NSString *const QLMSetupFileNameKey = @"QLMSetupFileName";
+static NSString *const QLMSkinNameKey = @"QLMSkinName";
+static NSString *const QLMDefaultSkinName = @"modern";
+static NSString *const QLMShowsOSDKey = @"QLMShowsOSD";
+static NSString *const QLMOSDPlacementKey = @"QLMOSDPlacement";
+static NSString *const QLMOSDSecondsKey = @"QLMOSDSeconds";
 // Each bus's keys are its prefix and a name. The real monitors' came first,
 // with no word between.
 static NSString *const QLMAdapterBusPrefix = @"QLM";
@@ -249,6 +258,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         [defaults registerDefaults:@{
             QLMWakesAtLaunchKey: @NO,
             QLMUsesAdapterKey: @NO,
+            QLMShowsOSDKey: @YES,
         }];
     }
     return self;
@@ -313,7 +323,69 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     [_defaults setObject:setupFileName forKey:QLMSetupFileNameKey];
 }
 
+- (NSString *)skinName {
+    NSString *name = [_defaults stringForKey:QLMSkinNameKey];
+    return name.length > 0 ? name : QLMDefaultSkinName;
+}
+
+- (void)setSkinName:(NSString *)skinName {
+    [_defaults setObject:skinName forKey:QLMSkinNameKey];
+}
+
+- (BOOL)showsOSD {
+    return [_defaults boolForKey:QLMShowsOSDKey];
+}
+
+- (void)setShowsOSD:(BOOL)showsOSD {
+    [_defaults setBool:showsOSD forKey:QLMShowsOSDKey];
+}
+
+- (QLMOSDPlacement)osdPlacement {
+    id kept = [_defaults objectForKey:QLMOSDPlacementKey];
+    for (QLMOSDPlacement placement = QLMOSDPlacementTopLeft; placement <= QLMOSDPlacementBottomRight; placement++) {
+        if ([kept isEqual:QLMOSDPlacementName(placement)]) {
+            return placement;
+        }
+    }
+    return QLMOSDPlacementBottomCenter;
+}
+
+- (void)setOsdPlacement:(QLMOSDPlacement)osdPlacement {
+    [_defaults setObject:QLMOSDPlacementName(osdPlacement) forKey:QLMOSDPlacementKey];
+}
+
+static NSTimeInterval QLMBoundedOSDSeconds(NSTimeInterval seconds) {
+    return fmax(QLMOSDSecondsMin, fmin(QLMOSDSecondsMax, round(seconds / QLMOSDSecondsStep) * QLMOSDSecondsStep));
+}
+
+// TRAP: doubleForKey: reads a string that is no number as 0 s, so the kept
+// object is checked.
+- (NSTimeInterval)osdSeconds {
+    id kept = [_defaults objectForKey:QLMOSDSecondsKey];
+    double seconds = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
+    return isfinite(seconds) ? QLMBoundedOSDSeconds(seconds) : QLMDefaultOSDSeconds;
+}
+
+- (void)setOsdSeconds:(NSTimeInterval)osdSeconds {
+    if (isnan(osdSeconds)) {
+        return;
+    }
+    [_defaults setDouble:QLMBoundedOSDSeconds(osdSeconds) forKey:QLMOSDSecondsKey];
+}
+
 @end
+
+NSString *QLMOSDPlacementName(QLMOSDPlacement placement) {
+    switch (placement) {
+        case QLMOSDPlacementTopLeft: return @"topLeft";
+        case QLMOSDPlacementTopCenter: return @"topCenter";
+        case QLMOSDPlacementTopRight: return @"topRight";
+        case QLMOSDPlacementBottomLeft: return @"bottomLeft";
+        case QLMOSDPlacementBottomCenter: return @"bottomCenter";
+        case QLMOSDPlacementBottomRight: return @"bottomRight";
+    }
+    return @"bottomCenter";
+}
 
 NSString *QLMSetupDirectory(void) {
     return [NSHomeDirectory() stringByAppendingPathComponent:@"Documents/Genelec/GLM5/Setup Files"];

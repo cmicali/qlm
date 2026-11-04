@@ -137,6 +137,74 @@ static NSData *QLMID(uint8_t last) {
     XCTAssertEqual(_preferences.adapterBus.volumeDecibels, -12.5);
 }
 
+#pragma mark - The skin and the OSD
+
+// docs/ui.md's OSD settings: on, at the bottom center, for 2 s. The skin
+// is modern.
+- (void)testTheOSDsDefaults {
+    XCTAssertTrue(_preferences.showsOSD);
+    XCTAssertEqual(_preferences.osdPlacement, QLMOSDPlacementBottomCenter);
+    XCTAssertEqual(_preferences.osdSeconds, 2);
+    XCTAssertEqualObjects(_preferences.skinName, @"modern");
+}
+
+- (void)testTheOSDsSettingsStay {
+    _preferences.showsOSD = NO;
+    _preferences.osdPlacement = QLMOSDPlacementTopRight;
+    _preferences.osdSeconds = 4.5;
+    _preferences.skinName = @"vintage";
+    QLMPreferences *relaunched = [[QLMPreferences alloc] initWithDefaults:_defaults];
+    XCTAssertFalse(relaunched.showsOSD);
+    XCTAssertEqual(relaunched.osdPlacement, QLMOSDPlacementTopRight);
+    XCTAssertEqual(relaunched.osdSeconds, 4.5);
+    XCTAssertEqualObjects(relaunched.skinName, @"vintage");
+    XCTAssertEqualObjects([_defaults stringForKey:@"QLMOSDPlacement"], @"topRight");
+}
+
+// Each place keeps its own name.
+- (void)testEachPlaceStays {
+    for (QLMOSDPlacement placement = QLMOSDPlacementTopLeft; placement <= QLMOSDPlacementBottomRight; placement++) {
+        _preferences.osdPlacement = placement;
+        XCTAssertEqual(_preferences.osdPlacement, placement);
+    }
+}
+
+// 0.5 to 10 s, on the nearest half second. No number keeps the old one.
+- (void)testTheOSDsSecondsHoldToTheRange {
+    NSDictionary<NSNumber *, NSNumber *> *saves = @{
+        @(0): @(0.5), @(-3): @(0.5), @(0.7): @(0.5), @(0.8): @(1), @(3.3): @(3.5), @(10): @(10), @(11): @(10), @(INFINITY): @(10),
+    };
+    for (NSNumber *saved in saves) {
+        _preferences.osdSeconds = saved.doubleValue;
+        XCTAssertEqual(_preferences.osdSeconds, saves[saved].doubleValue, @"%@", saved);
+    }
+    _preferences.osdSeconds = 3;
+    _preferences.osdSeconds = NAN;
+    XCTAssertEqual(_preferences.osdSeconds, 3);
+}
+
+// A hand edit that is no number, or no place qlm knows, reads as the
+// default. A number out of range is held to it. doubleForKey: reads "long"
+// as 0 s.
+- (void)testAHandEditedOSDSettingReadsAsTheDefault {
+    for (id kept in @[@"long", @"4", @(NAN), @(INFINITY), @[@4]]) {
+        [_defaults setObject:kept forKey:@"QLMOSDSeconds"];
+        XCTAssertEqual(_preferences.osdSeconds, 2, @"%@", kept);
+    }
+    [_defaults setObject:@(60) forKey:@"QLMOSDSeconds"];
+    XCTAssertEqual(_preferences.osdSeconds, 10);
+    [_defaults setObject:@(0.1) forKey:@"QLMOSDSeconds"];
+    XCTAssertEqual(_preferences.osdSeconds, 0.5);
+    for (id kept in @[@"middle", @"BottomCenter", @(2), @[@"topLeft"]]) {
+        [_defaults setObject:kept forKey:@"QLMOSDPlacement"];
+        XCTAssertEqual(_preferences.osdPlacement, QLMOSDPlacementBottomCenter, @"%@", kept);
+    }
+    for (id kept in @[@"", @[@"vintage"]]) {
+        [_defaults setObject:kept forKey:@"QLMSkinName"];
+        XCTAssertEqualObjects(_preferences.skinName, @"modern", @"%@", kept);
+    }
+}
+
 #pragma mark - Each bus keeps its own
 
 // A level set on the fake bus never reaches the real monitors, nor theirs
