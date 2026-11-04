@@ -199,6 +199,7 @@
 
 @implementation QLMSkinTextButton {
     QLMSkinTextSlot *_slot;
+    NSMutableDictionary<NSNumber *, NSImage *> *_symbols;  // by alpha
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin slot:(QLMSkinTextSlot *)slot symbol:(NSString *)symbol {
@@ -207,6 +208,7 @@
         _slot = slot;
         _symbolName = [symbol copy];
         _title = @"";
+        _symbols = [NSMutableDictionary dictionary];
     }
     return self;
 }
@@ -218,7 +220,23 @@
 
 - (void)setSymbolName:(NSString *)symbolName {
     _symbolName = [symbolName copy];
+    [_symbols removeAllObjects];
     self.needsDisplay = YES;
+}
+
+- (nullable NSImage *)symbolInColor:(NSColor *)color alpha:(CGFloat)alpha {
+    NSImage *symbol = _symbols[@(alpha)];
+    if (symbol == nil) {
+        NSImageSymbolConfiguration *configuration =
+            [[NSImageSymbolConfiguration configurationWithPointSize:round(_slot.size * 1.25) weight:NSFontWeightRegular]
+                configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:color]];
+        symbol = [[NSImage imageWithSystemSymbolName:self.symbolName accessibilityDescription:nil]
+            imageWithSymbolConfiguration:configuration];
+        if (symbol != nil) {
+            _symbols[@(alpha)] = symbol;
+        }
+    }
+    return symbol;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
@@ -229,11 +247,7 @@
         initWithString:self.title
             attributes:QLMSkinTextAttributes(font, color, QLMSkinAlignmentLeft, _slot.tracking)];
 
-    NSImageSymbolConfiguration *configuration =
-        [[NSImageSymbolConfiguration configurationWithPointSize:round(_slot.size * 1.25) weight:NSFontWeightRegular]
-            configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:color]];
-    NSImage *symbol = [[NSImage imageWithSystemSymbolName:self.symbolName accessibilityDescription:nil]
-        imageWithSymbolConfiguration:configuration];
+    NSImage *symbol = [self symbolInColor:color alpha:alpha];
 
     NSRect bounds = self.bounds;
     CGFloat gap = symbol ? round(_slot.size * 0.7) : 0;
@@ -317,6 +331,7 @@
     self = [super initWithFrame:NSZeroRect];
     if (self) {
         _skin = skin;
+        self.clipsToBounds = YES;  // nothing draws over the knob column
     }
     return self;
 }
@@ -362,8 +377,11 @@
 
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinElement *element = [_skin element:@"display"];
-    QLMSkinDrawStyle(_skin, element.style, QLMSkinStateNormal, self.bounds, NO);
-    if (self.skinLayout != nil) {
+    QLMSkinDrawDimmed(self.disabled, element.disabledOverlay, self.bounds, ^{
+        QLMSkinDrawStyle(self->_skin, element.style, QLMSkinStateNormal, self.bounds, NO);
+        if (self.skinLayout == nil) {
+            return;
+        }
         NSDictionary<NSString *, NSString *> *texts = @{
             @"caption": self.caption ?: @"", @"level": self.level ?: @"", @"unit": self.unit ?: @"",
             @"output": self.output ?: @"", @"max": self.max ?: @"",
@@ -372,12 +390,7 @@
             QLMSkinDrawSlot(texts[name], element.text[name], [self.skinLayout frameOfSlot:name inElement:@"display"],
                             [self.skinLayout scaleOfSlot:name inElement:@"display"], YES, 1);
         }
-    }
-    if (self.disabled && !QLMSkinColorIsClear(element.disabledOverlay)) {
-        CGFloat radius = [element.style drawForState:QLMSkinStateNormal].radius;
-        [QLMSkinNSColor(element.disabledOverlay) setFill];
-        [[NSBezierPath bezierPathWithRoundedRect:self.bounds xRadius:radius yRadius:radius] fill];
-    }
+    });
 }
 
 @end
@@ -392,6 +405,7 @@
     self = [super initWithFrame:NSMakeRect(0, 0, skin.osdSize.width, skin.osdSize.height)];
     if (self) {
         _skin = skin;
+        self.clipsToBounds = YES;
     }
     return self;
 }
@@ -437,34 +451,30 @@
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinElement *osd = _skin.osd;
     NSRect bounds = NSMakeRect(0, 0, _skin.osdSize.width, _skin.osdSize.height);
-    QLMSkinDrawStyle(_skin, osd.style, QLMSkinStateNormal, bounds, NO);
-    NSDictionary<NSString *, NSString *> *texts = @{
-        @"level": self.level ?: @"", @"unit": self.unit ?: @"", @"title": self.title ?: @"",
-        @"subtitle": self.subtitle ?: @"",
-    };
-    for (NSString *name in texts) {
-        QLMSkinDrawSlot(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
-    }
+    QLMSkinDrawDimmed(self.disabled, osd.disabledOverlay, bounds, ^{
+        QLMSkinDrawStyle(self->_skin, osd.style, QLMSkinStateNormal, bounds, NO);
+        NSDictionary<NSString *, NSString *> *texts = @{
+            @"level": self.level ?: @"", @"unit": self.unit ?: @"", @"title": self.title ?: @"",
+            @"subtitle": self.subtitle ?: @"",
+        };
+        for (NSString *name in texts) {
+            QLMSkinDrawSlot(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
+        }
 
-    QLMSkinBar *bar = osd.bar;
-    CGFloat radius = MIN(bar.radius, bar.frame.size.height / 2);
-    [QLMSkinNSColor(bar.track) setFill];
-    [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
-    if (self.fraction > 0) {
-        NSRect fill = bar.frame;
-        fill.size.width = round(fill.size.width * self.fraction);
-        [NSGraphicsContext saveGraphicsState];
-        NSRectClip(fill);
-        [QLMSkinNSColor(bar.fill) setFill];
+        QLMSkinBar *bar = osd.bar;
+        CGFloat radius = MIN(bar.radius, bar.frame.size.height / 2);
+        [QLMSkinNSColor(bar.track) setFill];
         [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
-        [NSGraphicsContext restoreGraphicsState];
-    }
-
-    if (self.disabled && !QLMSkinColorIsClear(osd.disabledOverlay)) {
-        CGFloat overlayRadius = [osd.style drawForState:QLMSkinStateNormal].radius;
-        [QLMSkinNSColor(osd.disabledOverlay) setFill];
-        [[NSBezierPath bezierPathWithRoundedRect:bounds xRadius:overlayRadius yRadius:overlayRadius] fill];
-    }
+        if (self.fraction > 0) {
+            NSRect fill = bar.frame;
+            fill.size.width = round(fill.size.width * self.fraction);
+            [NSGraphicsContext saveGraphicsState];
+            NSRectClip(fill);
+            [QLMSkinNSColor(bar.fill) setFill];
+            [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
+            [NSGraphicsContext restoreGraphicsState];
+        }
+    });
 }
 
 @end

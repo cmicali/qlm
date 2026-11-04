@@ -359,6 +359,94 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     } refusedWith:@"elements.panel.image is not a name"];
 }
 
+// A user's skin is read at launch, so no shape may crash the reader.
+- (void)testAnElementThatIsNotAnObjectIsRefused {
+    NSArray *names = @[@"panel", @"nameplate", @"status", @"groups", @"display", @"toggles", @"knob", @"footer"];
+    for (NSString *name in names) {
+        for (id value in @[@1, @[], @"display", [NSNull null]]) {
+            [self assertChange:^(NSMutableDictionary *json) {
+                json[@"elements"][name] = value;
+            } refusedWith:[NSString stringWithFormat:@"elements.%@ is not an object", name]];
+        }
+    }
+    for (NSString *key in @[@"palette", @"elements", @"button", @"led", @"markings", @"osd"]) {
+        [self assertChange:^(NSMutableDictionary *json) {
+            json[key] = @[];
+        } refusedWith:[key stringByAppendingString:@" is not an object"]];
+    }
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"display"][@"text"][@"level"] = @7;
+    } refusedWith:@"elements.display.text.level is not an object"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"body"] = @"round";
+    } refusedWith:@"elements.knob.body is not an object"];
+}
+
+- (void)testAnImageNameOutsidePngIsRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"panel"][@"image"] = @"../panel-background";
+    } refusedWith:@"elements.panel.image is ../panel-background, which is not a file name in png/"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"panel"][@"image"] = @".hidden";
+    } refusedWith:@"elements.panel.image is .hidden, which is not a file name in png/"];
+}
+
+- (void)testBadCapInsetsAreRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"panel"][@"capInsets"] = @[@22, @-1, @30, @24];
+    } refusedWith:@"elements.panel.capInsets has an inset below 0"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"nameplate"][@"capInsets"] = @[@6, @40, @6, @40];
+    } refusedWith:@"elements.nameplate.capInsets is larger than its frame, 78 by 38"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"button"][@"capInsets"] = @[@8, @100, @9, @100];
+    } refusedWith:@"button.capInsets is larger than its frame, 174 by 40"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"osd"][@"capInsets"] = @40;
+    } refusedWith:@"osd.capInsets is larger than its frame, 300 by 72"];
+}
+
+// The fixture's knob frame is 176 points, so 88 from its center.
+- (void)testAKnobRadiusPastItsFrameIsRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"body"][@"size"] = @180;
+    } refusedWith:@"elements.knob.body.size reaches past half the knob's frame, 88"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"pointer"][@"outer"] = @90;
+    } refusedWith:@"elements.knob.pointer.outer reaches past half the knob's frame"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"ticks"][@"outer"] = @89;
+    } refusedWith:@"elements.knob.ticks.outer reaches past half the knob's frame"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"arc"] = [@{@"radius": @87, @"width": @4, @"track": @"label", @"fill": @"display"} mutableCopy];
+    } refusedWith:@"elements.knob.arc.radius reaches past half the knob's frame"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"knob"][@"body"] = [@{
+            @"size": @144,
+            @"draw": @{@"fill": @"label", @"rings": @[@{@"inset": @-20, @"color": @"label"}]},
+        } mutableCopy];
+    } refusedWith:@"elements.knob.body.draw.rings[0] reaches past half the knob's frame"];
+}
+
+- (void)testAGapThatLeavesNoCellIsRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"groups"][@"gap"] = @[@273, @0];
+    } refusedWith:@"elements.groups's gap leaves its cells no room"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"toggles"][@"rows"] = @2;
+        json[@"elements"][@"toggles"][@"gap"] = @[@8, @40];
+    } refusedWith:@"elements.toggles's gap leaves its cells no room"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"elements"][@"groups"][@"gap"] = @[@-4, @0];
+    } refusedWith:@"elements.groups.gap is below 0"];
+}
+
+- (void)testAnLEDPastTheButtonIsRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"button"][@"led"][@"x"] = @160;
+    } refusedWith:@"button.led.x puts the LED past the button's width, 174"];
+}
+
 // A drawn element's states are its kind's: none for one with one state.
 - (void)testStatesOnAOneStateElementAreRefused {
     NSError *error = nil;

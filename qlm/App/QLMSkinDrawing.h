@@ -11,13 +11,18 @@ NSColor *QLMSkinNSColor(QLMSkinColor color);
 BOOL QLMSkinColorIsClear(QLMSkinColor color);
 
 // png/<name>.png with its @2x beside it, sized in points, with no cap
-// insets. Nil when either file won't load. Cached.
+// insets. Nil when either file won't load. Cached on the skin, so a skin
+// read again loads its files again.
 NSImage *_Nullable QLMSkinImage(QLMSkin *skin, NSString *name);
 
 // An element's material in `rect`: its image for the state, stretched
 // through its cap insets, or its draw block. A circle draws the block as
 // the rect's inscribed circle, as a knob's body.
 void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NSRect rect, BOOL circle);
+
+// Draws `content`. Dimmed, it lays `overlay` over what `content` drew, in
+// its shape, so an image's corners stay round.
+void QLMSkinDrawDimmed(BOOL dimmed, QLMSkinColor overlay, NSRect bounds, void (^content)(void));
 
 // An LED in `rect`: lit with its glow, unlit, or dim when disabled.
 void QLMSkinDrawLED(QLMSkinLED *led, NSRect rect, BOOL lit, BOOL enabled);

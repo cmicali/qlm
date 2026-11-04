@@ -30,7 +30,7 @@ NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger 
 // In the element's laid-out frame.
 - (CGRect)frameOfSlot:(NSString *)slot inElement:(NSString *)element;
 // What the slot's font size is multiplied by: 1, or for a slot that scales,
-// its element's height over its height in the skin.
+// the smaller of its element's height and width over the skin's.
 - (CGFloat)scaleOfSlot:(NSString *)slot inElement:(NSString *)element;
 // A grid element's cells, in the window.
 - (NSArray<NSValue *> *)cellsOfElement:(NSString *)name;

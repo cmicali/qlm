@@ -59,7 +59,9 @@ NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger 
     if (!element.text[slot].scales) {
         return 1;
     }
-    return [self frameOfElement:name].size.height / element.frame.size.height;
+    // The smaller ratio, so a scaled slot never outgrows its element.
+    CGSize laid = [self frameOfElement:name].size;
+    return MIN(laid.height / element.frame.size.height, laid.width / element.frame.size.width);
 }
 
 - (CGRect)frameOfSlot:(NSString *)slot inElement:(NSString *)name {

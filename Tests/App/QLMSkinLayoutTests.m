@@ -101,13 +101,11 @@ static NSArray<NSString *> *QLMElementNames(void) {
     QLMAssertRect([layout frameOfElement:@"nameplate"], 48, 27, 78, 38);
     QLMAssertRect([layout frameOfElement:@"status"], 514, 37, 85, 16);
     QLMAssertRect([layout frameOfElement:@"groups"], 48, 120, 546, 40);
-    // The display row takes the height. The level scales with it, from the
-    // display's origin.
+    // The display row takes the height. The display is no wider, so the
+    // level keeps its size.
     QLMAssertRect([layout frameOfElement:@"display"], 48, 184, 356, 198);
-    XCTAssertEqual([layout scaleOfSlot:@"level" inElement:@"display"], 1.5);
-    XCTAssertEqual([layout scaleOfSlot:@"unit" inElement:@"display"], 1.5);
-    XCTAssertEqual([layout scaleOfSlot:@"caption" inElement:@"display"], 1);
-    QLMAssertRect([layout frameOfSlot:@"level" inElement:@"display"], 28.5, 52.5, 319.5, 97.5);
+    XCTAssertEqual([layout scaleOfSlot:@"level" inElement:@"display"], 1);
+    QLMAssertRect([layout frameOfSlot:@"level" inElement:@"display"], 19, 35, 213, 65);
     QLMAssertRect([layout frameOfSlot:@"caption" inElement:@"display"], 19, 13, 90, 16);
     QLMAssertRect([layout frameOfSlot:@"output" inElement:@"display"], 19, 161, 140, 15);
     // The pair below it and the footer move down.
@@ -117,6 +115,44 @@ static NSArray<NSString *> *QLMElementNames(void) {
     QLMAssertRect([layout frameOfElement:@"knob"], 420, 195, 176, 176);
     CGRect display = [layout frameOfElement:@"display"];
     XCTAssertEqual(CGRectGetMidY([layout frameOfElement:@"knob"]), CGRectGetMidY(display));
+}
+
+// The level scales with the display, by the smaller of its growths, from
+// the display's origin.
+- (void)testAWiderAndTallerWindowScalesTheLevel {
+    QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:_skin size:CGSizeMake(1000, 546)];
+    QLMAssertRect([layout frameOfElement:@"display"], 48, 184, 716, 198);
+    XCTAssertEqual([layout scaleOfSlot:@"level" inElement:@"display"], 1.5);
+    XCTAssertEqual([layout scaleOfSlot:@"unit" inElement:@"display"], 1.5);
+    XCTAssertEqual([layout scaleOfSlot:@"caption" inElement:@"display"], 1);
+    QLMAssertRect([layout frameOfSlot:@"level" inElement:@"display"], 28.5, 52.5, 319.5, 97.5);
+
+    layout = [[QLMSkinLayout alloc] initWithSkin:_skin size:CGSizeMake(760, 546)];
+    XCTAssertEqual([layout scaleOfSlot:@"level" inElement:@"display"], 476.0 / 356);
+}
+
+// A tall, narrow window can't push a scaled slot out of its element, in
+// the fixture or in modern.
+- (void)testAScaledSlotStaysInsideItsElement {
+    QLMSkin *modern = [QLMSkin skinAtURL:[NSURL fileURLWithPath:QLMRepositoryPath(@"qlm/App/Skins/modern")] error:NULL];
+    XCTAssertNotNil(modern);
+    for (QLMSkin *skin in @[_skin, modern]) {
+        for (NSValue *size in @[[NSValue valueWithSize:NSMakeSize(640, 600)], [NSValue valueWithSize:NSMakeSize(640, 1200)],
+                                [NSValue valueWithSize:NSMakeSize(700, 1200)], [NSValue valueWithSize:NSMakeSize(2000, 500)]]) {
+            QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:skin size:size.sizeValue];
+            for (NSString *name in QLMElementNames()) {
+                CGRect bounds = {CGPointZero, [layout frameOfElement:name].size};
+                for (NSString *slot in [skin element:name].text) {
+                    if (![skin element:name].text[slot].scales) {
+                        continue;
+                    }
+                    CGRect frame = [layout frameOfSlot:slot inElement:name];
+                    XCTAssertTrue(CGRectContainsRect(CGRectInset(bounds, -0.001, -0.001), frame), @"%@ %@.%@ at %@: %@",
+                                  skin.name, name, slot, NSStringFromSize(size.sizeValue), NSStringFromRect(frame));
+                }
+            }
+        }
+    }
 }
 
 - (void)testTheSpring {

@@ -57,31 +57,38 @@ static const CGFloat QLMKnobDeadRadius = 6;
     return NSMakePoint(NSMidX(self.bounds), NSMidY(self.bounds));
 }
 
-- (void)dragTo:(NSEvent *)event {
+// The mouse's angle about the center, or NAN this near the center, where
+// it points nowhere.
+- (double)angleOfEvent:(NSEvent *)event {
     NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     NSPoint center = [self center];
     double dx = point.x - center.x;
     double dy = point.y - center.y;
-    if (hypot(dx, dy) < QLMKnobDeadRadius) {
-        return;
-    }
-    [self moveTo:QLMKnobDecibelsForDrag(dx, dy, _value, self.minValue, self.maxValue)];
+    return hypot(dx, dy) < QLMKnobDeadRadius ? NAN : QLMKnobAngleOfOffset(dx, dy);
 }
 
+// A relative drag: the press moves nothing, and each drag after it turns
+// the level by the angle the mouse turned.
 - (void)mouseDown:(NSEvent *)event {
     if (!self.enabled) {
         return;
     }
     [self.window makeFirstResponder:self];
     self.pressed = YES;
-    [self dragTo:event];
+    double from = [self angleOfEvent:event];
+    double level = _value;
     while (YES) {
         NSEvent *next = [self.window nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp];
         if (next.type == NSEventTypeLeftMouseUp) {
             self.pressed = NO;
             return;
         }
-        [self dragTo:next];
+        double to = [self angleOfEvent:next];
+        if (isfinite(from) && isfinite(to)) {
+            level = QLMKnobDragStep(level, from, to, self.minValue, self.maxValue);
+            [self moveTo:level];
+        }
+        from = to;
     }
 }
 
@@ -109,8 +116,10 @@ static const CGFloat QLMKnobDeadRadius = 6;
     unichar key = event.charactersIgnoringModifiers.length > 0 ? [event.charactersIgnoringModifiers characterAtIndex:0] : 0;
     int steps = key == NSUpArrowFunctionKey || key == NSRightArrowFunctionKey ? 1
                 : key == NSDownArrowFunctionKey || key == NSLeftArrowFunctionKey ? -1 : 0;
+    // Not QLMSkinControl's, whose Space and Return send the action with no
+    // change.
     if (steps == 0 || !self.enabled) {
-        [super keyDown:event];
+        [self.nextResponder keyDown:event];
         return;
     }
     [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];

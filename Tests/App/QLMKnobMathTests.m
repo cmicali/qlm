@@ -88,14 +88,47 @@
     XCTAssertEqualWithAccuracy(QLMKnobAngleOfOffset(-10, 10), -135, 1e-9);
 }
 
-// A drag points the knob at the mouse, snapped. Below the knob it holds the
-// nearer end, so the pointer never jumps across.
+// A drag is relative: the level moves by the angle the mouse turned, at
+// the sweep's rate, wherever the drag began. The listener comes first, so
+// no turn moves nothing, and nothing in the dead zone moves it.
 - (void)testADrag {
-    XCTAssertEqual(QLMKnobDecibelsForDrag(0, -50, -70, -80, -30), -55);
-    XCTAssertEqual(QLMKnobDecibelsForDrag(50, 0, -70, -80, -30), QLMKnobSnap(-80 + 225.0 / 270 * 50, -80, -30));
-    XCTAssertEqual(QLMKnobDecibelsForDrag(1, 50, -35, -80, -30), -30);
-    XCTAssertEqual(QLMKnobDecibelsForDrag(-1, 50, -35, -80, -30), -30);
-    XCTAssertEqual(QLMKnobDecibelsForDrag(1, 50, -75, -80, -30), -80);
+    // 270 degrees is the whole range, 50 dB here.
+    XCTAssertEqualWithAccuracy(QLMKnobDragStep(-70, 0, 27, -80, -30), -65, 1e-9);
+    XCTAssertEqualWithAccuracy(QLMKnobDragStep(-70, 90, 63, -80, -30), -75, 1e-9);
+    XCTAssertEqual(QLMKnobDragStep(-70, -100, -100, -80, -30), -70);
+    // From anywhere: a press far from the pointer jumps nothing.
+    XCTAssertEqual(QLMKnobDragStep(-70, 120, 120, -80, -30), -70);
+    XCTAssertEqualWithAccuracy(QLMKnobDragStep(-70, 120, 121, -80, -30), -70 + 50.0 / 270, 1e-9);
+    // The ends hold.
+    XCTAssertEqual(QLMKnobDragStep(-32, 0, 90, -80, -30), -30);
+    XCTAssertEqual(QLMKnobDragStep(-78, 0, -90, -80, -30), -80);
+    // In the dead zone, or into it, or out of it, the level stays.
+    XCTAssertEqual(QLMKnobDragStep(-70, 170, -170, -80, -30), -70);
+    XCTAssertEqual(QLMKnobDragStep(-70, 130, 140, -80, -30), -70);
+    XCTAssertEqual(QLMKnobDragStep(-70, 140, 130, -80, -30), -70);
+    // An empty range moves nothing.
+    XCTAssertEqual(QLMKnobDragStep(-30, 0, 90, -30, -30), -30);
+}
+
+// A slow drag adds up, unsnapped, before a step goes out.
+- (void)testASlowDragAddsUp {
+    // 0.27 degrees is 0.05 dB.
+    double level = -70;
+    for (int i = 0; i < 10; i++) {
+        level = QLMKnobDragStep(level, i * 0.27, (i + 1) * 0.27, -80, -30);
+        if (i == 2) {
+            XCTAssertEqual(QLMKnobSnap(level, -80, -30), -70);
+        }
+    }
+    XCTAssertEqualWithAccuracy(level, -69.5, 1e-9);
+    XCTAssertEqual(QLMKnobSnap(level, -80, -30), -69.5);
+}
+
+- (void)testTheAngleDeltaGoesTheShortWay {
+    XCTAssertEqual(QLMKnobAngleDelta(170, -170), 20);
+    XCTAssertEqual(QLMKnobAngleDelta(-170, 170), -20);
+    XCTAssertEqual(QLMKnobAngleDelta(10, 40), 30);
+    XCTAssertEqual(QLMKnobAngleDelta(0, 180), 180);
 }
 
 @end

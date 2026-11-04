@@ -40,7 +40,9 @@
       "rows": 1,
       "gap": [12, 0],
       "text": {
-        "groupsTitle": {"frame": [5, -19, 131, 18], "font": "Helvetica Neue", "size": 10, "weight": "medium", "color": "label"}
+        "groupsTitle": {"frame": [5, -19, 131, 18], "font": "Helvetica Neue", "size": 10, "weight": "medium", "color": "label"},
+        "message": {"frame": [0, 0, 546, 40], "anchors": ["left", "right", "top"], "size": 11, "alignment": "center",
+                    "color": "secondary"}
       }
     },
     "display": {

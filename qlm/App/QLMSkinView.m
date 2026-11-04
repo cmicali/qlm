@@ -63,11 +63,7 @@ const NSUInteger QLMSkinViewMaxGroups = 6;
     return YES;
 }
 
-- (void)setFrameSize:(NSSize)size {
-    [super setFrameSize:size];
-    [self applyLayout];
-}
-
+// A frame change calls this, once.
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
     [self applyLayout];
 }
@@ -129,6 +125,11 @@ static NSRect QLMSkinRect(NSValue *value) {
 
 - (void)setTagline:(NSString *)tagline {
     _tagline = [tagline copy];
+    self.needsDisplay = YES;
+}
+
+- (void)setGroupsMessage:(NSString *)groupsMessage {
+    _groupsMessage = [groupsMessage copy];
     self.needsDisplay = YES;
 }
 
@@ -218,6 +219,7 @@ static NSRect QLMSkinRect(NSValue *value) {
     [self drawSlot:@"logo" inElement:@"nameplate" text:self.logo];
     [self drawSlot:@"tagline" inElement:@"nameplate" text:self.tagline];
     [self drawSlot:@"groupsTitle" inElement:@"groups" text:self.groupsTitle];
+    [self drawSlot:@"message" inElement:@"groups" text:self.groupsMessage];
     [self drawSlot:@"min" inElement:@"knob" text:self.knobMin];
     [self drawSlot:@"max" inElement:@"knob" text:self.knobMax];
     [self drawSlot:@"caption" inElement:@"knob" text:self.knobCaption];

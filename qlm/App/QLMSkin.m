@@ -459,6 +459,24 @@ static NSValue *QLMSkinColorValue(QLMSkinColor color) {
                             [numbers[2] doubleValue], [numbers[3] doubleValue]);
 }
 
+- (NSEdgeInsets)capInsets:(id)value at:(NSString *)path {
+    NSEdgeInsets insets = [self insets:value at:path];
+    if (![self failed] && (insets.top < 0 || insets.left < 0 || insets.bottom < 0 || insets.right < 0)) {
+        [self fail:@"%@ has an inset below 0", path];
+    }
+    return insets;
+}
+
+// Cap insets that leave no middle to stretch.
+- (void)checkInsets:(NSEdgeInsets)insets fit:(CGSize)size at:(NSString *)path {
+    if ([self failed]) {
+        return;
+    }
+    if (insets.left + insets.right > size.width || insets.top + insets.bottom > size.height) {
+        [self fail:@"%@ is larger than its frame, %g by %g", path, size.width, size.height];
+    }
+}
+
 - (QLMSkinAnchors)anchors:(id)value at:(NSString *)path {
     if (value == nil) {
         return QLMSkinAnchorLeft | QLMSkinAnchorTop;
@@ -691,7 +709,11 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
     style.hasStates = states > 1;
     if (image) {
         style.imageName = [self string:image at:[path stringByAppendingString:@".image"]];
-        style.capInsets = [self insets:object[@"capInsets"] at:[path stringByAppendingString:@".capInsets"]];
+        if (style.imageName && ([style.imageName containsString:@"/"] || [style.imageName hasPrefix:@"."])) {
+            [self fail:@"%@.image is %@, which is not a file name in png/", path, style.imageName];
+            return nil;
+        }
+        style.capInsets = [self capInsets:object[@"capInsets"] at:[path stringByAppendingString:@".capInsets"]];
         for (NSUInteger state = 0; state < states && ![self failed]; state++) {
             [self checkImage:[style imageNameForState:(QLMSkinState)state] at:path];
         }
@@ -843,6 +865,12 @@ static NSArray<NSString *> *QLMSkinElementKeys(NSArray<NSString *> *own) {
     return slots;
 }
 
+// A grid's cell, at the skin's size.
+static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
+    return CGSizeMake((grid.frame.size.width - grid.gap.width * (grid.columns - 1)) / grid.columns,
+                      (grid.frame.size.height - grid.gap.height * (grid.rows - 1)) / grid.rows);
+}
+
 - (void)readGrid:(QLMSkinElement *)element from:(NSDictionary *)object cells:(NSInteger)least {
     NSString *path = [@"elements." stringByAppendingString:element.name];
     element.columns = [self integer:object[@"columns"] at:[path stringByAppendingString:@".columns"]];
@@ -852,6 +880,58 @@ static NSArray<NSString *> *QLMSkinElementKeys(NSArray<NSString *> *own) {
     }
     if (![self failed] && element.columns * element.rows < least) {
         [self fail:@"%@ has %ld cells, fewer than its %ld buttons", path, (long)(element.columns * element.rows), (long)least];
+    }
+    if (![self failed] && (element.gap.width < 0 || element.gap.height < 0)) {
+        [self fail:@"%@.gap is below 0", path];
+    }
+    CGSize cell = QLMSkinCellSize(element);
+    if (![self failed] && (cell.width <= 0 || cell.height <= 0)) {
+        [self fail:@"%@'s gap leaves its cells no room", path];
+    }
+}
+
+// The button's face fits the smaller grid's cells: its cap insets and its
+// LED.
+- (void)checkButton:(QLMSkinButton *)button inGrids:(NSArray<QLMSkinElement *> *)grids {
+    CGSize least = CGSizeMake(CGFLOAT_MAX, CGFLOAT_MAX);
+    for (QLMSkinElement *grid in grids) {
+        CGSize cell = QLMSkinCellSize(grid);
+        least = CGSizeMake(MIN(least.width, cell.width), MIN(least.height, cell.height));
+    }
+    if (button.style.imageName != nil) {
+        [self checkInsets:button.style.capInsets fit:least at:@"button.capInsets"];
+    }
+    if (![self failed] && button.ledX >= 0 && button.ledX + button.ledSize > least.width) {
+        [self fail:@"button.led.x puts the LED past the button's width, %g", least.width];
+    }
+}
+
+// Every drawn radius of the knob fits in half its frame.
+- (void)checkKnob:(QLMSkinKnob *)knob inFrame:(CGRect)frame {
+    if ([self failed]) {
+        return;
+    }
+    CGFloat half = MIN(frame.size.width, frame.size.height) / 2;
+    NSMutableArray<NSArray *> *radii = [NSMutableArray arrayWithArray:@[
+        @[@"elements.knob.body.size", @(knob.bodySize / 2)],
+        @[@"elements.knob.pointer.outer", @(knob.pointerOuter)],
+    ]];
+    if (knob.tickCount > 0) {
+        [radii addObject:@[@"elements.knob.ticks.outer", @(knob.tickOuter)]];
+    }
+    if (knob.hasArc) {
+        [radii addObject:@[@"elements.knob.arc.radius", @(knob.arcRadius + knob.arcWidth / 2)]];
+    }
+    QLMSkinDraw *draw = [knob.body drawForState:QLMSkinStateNormal];
+    for (NSUInteger i = 0; i < draw.rings.count; i++) {
+        NSString *ring = [NSString stringWithFormat:@"elements.knob.body.draw.rings[%lu]", (unsigned long)i];
+        [radii addObject:@[ring, @(knob.bodySize / 2 - draw.inset - draw.rings[i].inset)]];
+    }
+    for (NSArray *radius in radii) {
+        if ([radius[1] doubleValue] > half + 0.001) {
+            [self fail:@"%@ reaches past half the knob's frame, %g", radius[0], half];
+            return;
+        }
     }
 }
 
@@ -1125,7 +1205,8 @@ static NSArray<NSString *> *QLMSkinElementKeys(NSArray<NSString *> *own) {
     read[@"status"] = status;
 
     QLMSkinElement *groups = [self element:@"groups" from:elements keys:@[@"columns", @"rows", @"gap"]
-                                  required:@[@"columns", @"rows"] slots:@[@"groupsTitle"] optionalSlots:@[]];
+                                  required:@[@"columns", @"rows"] slots:@[@"groupsTitle", @"message"]
+                             optionalSlots:@[]];
     if (![self failed]) {
         [self readGrid:groups from:elements[@"groups"] cells:1];
     }
@@ -1135,8 +1216,10 @@ static NSArray<NSString *> *QLMSkinElementKeys(NSArray<NSString *> *own) {
                                        keys:[styled arrayByAddingObject:@"disabledOverlay"] required:@[]
                                       slots:@[@"caption", @"level", @"unit", @"output", @"max"] optionalSlots:@[]];
     display.style = [self style:elements[@"display"] states:1 at:@"elements.display"];
-    display.disabledOverlay = [self color:elements[@"display"][@"disabledOverlay"] at:@"elements.display.disabledOverlay"
-                                orDefault:QLMSkinColorClear];
+    if (![self failed]) {
+        display.disabledOverlay = [self color:elements[@"display"][@"disabledOverlay"]
+                                           at:@"elements.display.disabledOverlay" orDefault:QLMSkinColorClear];
+    }
     read[@"display"] = display;
 
     QLMSkinElement *toggles = [self element:@"toggles" from:elements keys:@[@"columns", @"rows", @"gap"]
@@ -1152,6 +1235,11 @@ static NSArray<NSString *> *QLMSkinElementKeys(NSArray<NSString *> *own) {
                            optionalSlots:@[]];
     if (![self failed]) {
         skin.knob = [self knob:elements[@"knob"]];
+        [self checkKnob:skin.knob inFrame:knob.frame];
+        if (skin.knob.body.imageName != nil) {
+            [self checkInsets:skin.knob.body.capInsets fit:CGSizeMake(skin.knob.bodySize, skin.knob.bodySize)
+                           at:@"elements.knob.body.capInsets"];
+        }
     }
     read[@"knob"] = knob;
 
@@ -1170,12 +1258,18 @@ static NSArray<NSString *> *QLMSkinElementKeys(NSArray<NSString *> *own) {
     read[@"footer"] = footer;
 
     for (NSString *name in names) {
-        [self checkElement:read[name] inside:skin.windowSize at:[@"elements." stringByAppendingString:name]];
+        QLMSkinElement *element = read[name];
+        NSString *path = [@"elements." stringByAppendingString:name];
+        [self checkElement:element inside:skin.windowSize at:path];
+        if (element.style.imageName != nil) {
+            [self checkInsets:element.style.capInsets fit:element.frame.size at:[path stringByAppendingString:@".capInsets"]];
+        }
     }
     skin.elements = read;
 
     if (![self failed]) {
         skin.button = [self button:root[@"button"]];
+        [self checkButton:skin.button inGrids:@[groups, toggles]];
     }
     if (![self failed]) {
         skin.led = [self led:root[@"led"]];
@@ -1208,6 +1302,9 @@ static NSArray<NSString *> *QLMSkinElementKeys(NSArray<NSString *> *own) {
     osd.frame = CGRectMake(0, 0, skin.osdSize.width, skin.osdSize.height);
     osd.anchors = QLMSkinAnchorLeft | QLMSkinAnchorTop;
     osd.style = [self style:object states:1 at:@"osd"];
+    if (osd.style.imageName != nil) {
+        [self checkInsets:osd.style.capInsets fit:skin.osdSize at:@"osd.capInsets"];
+    }
     osd.disabledOverlay = [self color:object[@"disabledOverlay"] at:@"osd.disabledOverlay" orDefault:QLMSkinColorClear];
     osd.text = [self slots:object[@"text"] at:@"osd.text" required:@[@"level", @"unit", @"title", @"subtitle"] optional:@[]];
 

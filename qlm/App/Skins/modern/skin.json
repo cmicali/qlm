@@ -40,7 +40,8 @@
       "rows": 2,
       "gap": [8, 6],
       "text": {
-        "groupsTitle": {"frame": [0, -24, 220, 14], "size": 11, "weight": "medium", "tracking": 2.6, "color": "secondary"}
+        "groupsTitle": {"frame": [0, -24, 220, 14], "size": 11, "weight": "medium", "tracking": 2.6, "color": "secondary"},
+        "message": {"frame": [0, 0, 584, 32], "anchors": ["left", "right", "top"], "size": 13, "color": "secondary"}
       }
     },
     "display": {

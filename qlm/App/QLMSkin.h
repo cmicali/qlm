@@ -122,8 +122,9 @@ NSString *QLMSkinStateName(QLMSkinState state);
 @property (nonatomic, readonly, copy) NSString *name;
 @property (nonatomic, readonly) CGRect frame;  // in its element
 @property (nonatomic, readonly) QLMSkinAnchors anchors;
-// Scales its frame and its size with its element's height, from the
-// element's origin. Its anchors then don't apply.
+// Scales its frame and its size with its element, from the element's
+// origin, by the smaller of its height's and its width's growth. Its anchors
+// then don't apply.
 @property (nonatomic, readonly) BOOL scales;
 // Nil, or a face the Mac lacks: the system font, or the system monospaced
 // font for a mono slot.

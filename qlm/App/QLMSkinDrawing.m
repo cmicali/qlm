@@ -1,6 +1,7 @@
 #import "QLMSkinDrawing.h"
 
 #import <CoreText/CoreText.h>
+#import <objc/runtime.h>
 
 NSColor *QLMSkinNSColor(QLMSkinColor color) {
     return [NSColor colorWithSRGBRed:color.red green:color.green blue:color.blue alpha:color.alpha];
@@ -19,26 +20,50 @@ static NSImageRep *_Nullable QLMSkinImageRep(NSURL *url, CGFloat scale) {
     return rep;
 }
 
+// The skin's own images, so a skin read again reads its files again. On the
+// main queue, as all drawing is.
+static NSMutableDictionary<NSString *, id> *QLMSkinImageCache(QLMSkin *skin) {
+    static const char key = 0;
+    NSMutableDictionary *cache = objc_getAssociatedObject(skin, &key);
+    if (cache == nil) {
+        cache = [NSMutableDictionary dictionary];
+        objc_setAssociatedObject(skin, &key, cache, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    }
+    return cache;
+}
+
 NSImage *QLMSkinImage(QLMSkin *skin, NSString *name) {
-    static NSCache<NSString *, NSImage *> *cache;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        cache = [[NSCache alloc] init];
-    });
-    NSString *key = [skin imageURLForName:name scale:1].path;
-    NSImage *image = [cache objectForKey:key];
-    if (image != nil) {
-        return image;
+    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin);
+    id cached = cache[name];
+    if (cached != nil) {
+        return cached == NSNull.null ? nil : cached;
     }
     NSImageRep *one = QLMSkinImageRep([skin imageURLForName:name scale:1], 1);
     NSImageRep *two = QLMSkinImageRep([skin imageURLForName:name scale:2], 2);
-    if (one == nil || two == nil) {
-        return nil;
+    NSImage *image = nil;
+    if (one != nil && two != nil) {
+        image = [[NSImage alloc] initWithSize:one.size];
+        [image addRepresentation:one];
+        [image addRepresentation:two];
     }
-    image = [[NSImage alloc] initWithSize:one.size];
-    [image addRepresentation:one];
-    [image addRepresentation:two];
-    [cache setObject:image forKey:key];
+    cache[name] = image ?: NSNull.null;
+    return image;
+}
+
+// The image, stretched through `insets`.
+static NSImage *_Nullable QLMSkinStretchedImage(QLMSkin *skin, NSString *name, NSEdgeInsets insets) {
+    NSString *key = [NSString stringWithFormat:@"%@|%g,%g,%g,%g", name, insets.top, insets.left, insets.bottom, insets.right];
+    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin);
+    NSImage *image = cache[key];
+    if (image == nil) {
+        image = [QLMSkinImage(skin, name) copy];
+        if (image == nil) {
+            return nil;
+        }
+        image.capInsets = insets;
+        image.resizingMode = NSImageResizingModeStretch;
+        cache[key] = image;
+    }
     return image;
 }
 
@@ -105,14 +130,22 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
         QLMSkinDrawBlock(draw, rect, circle);
         return;
     }
-    NSImage *image = [QLMSkinImage(skin, [style imageNameForState:state]) copy];
-    if (image == nil) {
-        return;
-    }
-    image.capInsets = style.capInsets;
-    image.resizingMode = NSImageResizingModeStretch;
+    NSImage *image = QLMSkinStretchedImage(skin, [style imageNameForState:state], style.capInsets);
     [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
        respectFlipped:YES hints:nil];
+}
+
+void QLMSkinDrawDimmed(BOOL dimmed, QLMSkinColor overlay, NSRect bounds, void (^content)(void)) {
+    if (!dimmed || QLMSkinColorIsClear(overlay)) {
+        content();
+        return;
+    }
+    CGContextRef context = NSGraphicsContext.currentContext.CGContext;
+    CGContextBeginTransparencyLayer(context, NULL);
+    content();
+    [QLMSkinNSColor(overlay) setFill];
+    NSRectFillUsingOperation(bounds, NSCompositingOperationSourceAtop);
+    CGContextEndTransparencyLayer(context);
 }
 
 void QLMSkinDrawLED(QLMSkinLED *led, NSRect rect, BOOL lit, BOOL enabled) {
@@ -175,7 +208,8 @@ static NSFont *_Nullable QLMSkinNamedFont(NSString *name, CGFloat size, QLMSkinW
     return exact;
 }
 
-NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weight, BOOL italic, BOOL monoDigits) {
+static NSFont *QLMSkinMakeFont(NSString *_Nullable name, BOOL mono, CGFloat size, QLMSkinWeight weight, BOOL italic,
+                               BOOL monoDigits) {
     NSFont *font = name ? QLMSkinNamedFont(name, size, weight) : nil;
     if (font == nil) {
         NSFontWeight systemWeight = QLMSkinFontWeight(weight);
@@ -197,20 +231,44 @@ NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weigh
     return font;
 }
 
+// Each face, once: building one through descriptors costs more than a draw.
+NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weight, BOOL italic, BOOL monoDigits) {
+    static NSCache<NSString *, NSFont *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [[NSCache alloc] init];
+    });
+    NSString *key = [NSString stringWithFormat:@"%@|%d|%g|%ld|%d|%d", name ?: @"", mono, size, (long)weight, italic, monoDigits];
+    NSFont *font = [cache objectForKey:key];
+    if (font == nil) {
+        font = QLMSkinMakeFont(name, mono, size, weight, italic, monoDigits);
+        [cache setObject:font forKey:key];
+    }
+    return font;
+}
+
 NSFont *QLMSkinSlotFont(QLMSkinTextSlot *slot, CGFloat scale, BOOL monoDigits) {
     return QLMSkinFont(slot.fontName, slot.mono, slot.size * scale, slot.weight, slot.italic, monoDigits);
 }
 
 NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSColor *color, QLMSkinAlignment alignment,
                                                                CGFloat tracking) {
-    NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
-    paragraph.alignment = alignment == QLMSkinAlignmentCenter ? NSTextAlignmentCenter
-                          : alignment == QLMSkinAlignmentRight ? NSTextAlignmentRight : NSTextAlignmentLeft;
-    paragraph.lineBreakMode = NSLineBreakByTruncatingTail;
+    static NSArray<NSParagraphStyle *> *paragraphs;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        NSMutableArray<NSParagraphStyle *> *made = [NSMutableArray array];
+        for (NSNumber *textAlignment in @[@(NSTextAlignmentLeft), @(NSTextAlignmentCenter), @(NSTextAlignmentRight)]) {
+            NSMutableParagraphStyle *paragraph = [[NSMutableParagraphStyle alloc] init];
+            paragraph.alignment = (NSTextAlignment)textAlignment.integerValue;
+            paragraph.lineBreakMode = NSLineBreakByTruncatingTail;
+            [made addObject:[paragraph copy]];
+        }
+        paragraphs = made;
+    });
     return @{
         NSFontAttributeName: font,
         NSForegroundColorAttributeName: color,
-        NSParagraphStyleAttributeName: paragraph,
+        NSParagraphStyleAttributeName: paragraphs[(NSUInteger)alignment],
         NSKernAttributeName: @(tracking),
     };
 }

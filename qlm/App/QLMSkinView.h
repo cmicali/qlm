@@ -32,6 +32,9 @@ extern const NSUInteger QLMSkinViewMaxGroups;
 @property (nonatomic, copy, nullable) NSString *logo;
 @property (nonatomic, copy, nullable) NSString *tagline;
 @property (nonatomic, copy, nullable) NSString *groupsTitle;
+// In the groups' place while none show: the setup file's name, or its
+// error.
+@property (nonatomic, copy, nullable) NSString *groupsMessage;
 @property (nonatomic, copy, nullable) NSString *knobMin;
 @property (nonatomic, copy, nullable) NSString *knobMax;
 @property (nonatomic, copy, nullable) NSString *knobCaption;

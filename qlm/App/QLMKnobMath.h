@@ -67,16 +67,34 @@ static inline double QLMKnobAngleOfOffset(double dx, double dy) {
     return atan2(dx, -dy) * 180.0 / M_PI;
 }
 
-// The level a drag points at. In the dead zone below the knob, between the
-// sweep's ends, it holds the end nearer the previous level, so the pointer
-// never jumps from one end to the other.
-static inline double QLMKnobDecibelsForDrag(double dx, double dy, double previous, double minimum, double maximum) {
-    double degrees = QLMKnobAngleOfOffset(dx, dy);
-    if (degrees > QLM_KNOB_END_DEGREES || degrees < QLM_KNOB_START_DEGREES) {
-        return QLMKnobFraction(previous, minimum, maximum) >= 0.5 ? QLMKnobSnap(maximum, minimum, maximum)
-                                                                  : QLMKnobSnap(minimum, minimum, maximum);
+// Below the knob, between the sweep's ends.
+static inline int QLMKnobInDeadZone(double degrees) {
+    return degrees > QLM_KNOB_END_DEGREES || degrees < QLM_KNOB_START_DEGREES;
+}
+
+// From one angle to the next, the short way round, in -180 to 180.
+static inline double QLMKnobAngleDelta(double from, double to) {
+    double delta = fmod(to - from, 360.0);
+    if (delta > 180) {
+        delta -= 360;
     }
-    return QLMKnobSnap(QLMKnobDecibelsForAngle(degrees, minimum, maximum), minimum, maximum);
+    else if (delta <= -180) {
+        delta += 360;
+    }
+    return delta;
+}
+
+// One step of a drag, which is relative: the level moves by the angle the
+// mouse turned about the center since the last step, at the sweep's rate,
+// and stays in the range. The listener comes first, so a click moves
+// nothing, and a step from or into the dead zone keeps the level. `level` is
+// unsnapped, so a slow drag still adds up. Snap what it returns to send it.
+static inline double QLMKnobDragStep(double level, double fromDegrees, double toDegrees, double minimum, double maximum) {
+    if (QLMKnobInDeadZone(fromDegrees) || QLMKnobInDeadZone(toDegrees) || !(maximum > minimum)) {
+        return level;
+    }
+    double moved = QLMKnobAngleDelta(fromDegrees, toDegrees) / QLM_KNOB_SWEEP_DEGREES * (maximum - minimum);
+    return QLMKnobClamp(level + moved, minimum, maximum);
 }
 
 // A point at `radius` from (cx, cy) along `degrees`, y down.
