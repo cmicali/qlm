@@ -13,11 +13,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)mainWindowControllerShowMonitors:(QLMMainWindowController *)controller;
 @end
 
-// The main window: the skin's panel, with the status, the group buttons,
-// the display, mute and dim, the knob, and the footer. It reads the monitor
-// list's snapshots and drives System, by the popover's rules for what is
-// enabled when. QLMMainWindowModel makes every text and state. On the main
-// queue.
+// The main window, in the chosen skin. It reads the monitor list's snapshots
+// and drives System, never the adapter, by the popover's rules for what is
+// enabled when. On the main queue.
 @interface QLMMainWindowController : NSWindowController
 
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList;
@@ -35,10 +33,8 @@ NS_ASSUME_NONNULL_BEGIN
 // Shows the named skin and keeps it in the preferences. Returns the
 // library's refusal, and keeps nothing, for a skin that does not load.
 - (nullable NSString *)chooseSkinNamed:(NSString *)name;
-// The skin that shows, which a refused preference fell back from.
-@property (nonatomic, readonly, copy) NSString *skinName;
-// The skin's group buttons: the most groups the window shows.
-@property (nonatomic, readonly) NSUInteger groupButtonCount;
+// The skin that shows: the preference's, or the default for a refused one.
+@property (nonatomic, readonly, copy) NSString *shownSkinName;
 
 @property (nonatomic, readonly, getter=isShowing) BOOL showing;
 // The last apply's error, until the next click.

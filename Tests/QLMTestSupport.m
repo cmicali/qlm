@@ -20,6 +20,22 @@ QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *knob, NSNumber *vol
     return handBack;
 }
 
+QLMMonitorState *QLMMakeMonitor(uint8_t first, uint8_t session, QLMMonitorStatus status) {
+    const uint8_t hardwareID[3] = {first, 0x4B, session};
+    QLMMonitorState *monitor = [[QLMMonitorState alloc] init];
+    monitor.hardwareID = QLMBytes(hardwareID, sizeof hardwareID);
+    monitor.session = session;
+    monitor.status = status;
+    return monitor;
+}
+
+QLMSnapshot *QLMMakeRunningSnapshot(NSArray<QLMMonitorState *> *monitors) {
+    QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
+    snapshot.running = YES;
+    snapshot.monitors = monitors;
+    return snapshot;
+}
+
 QLMMonitorState *QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID) {
     for (QLMMonitorState *monitor in snapshot.monitors) {
         if ([monitor.hardwareID isEqualToData:hardwareID]) {

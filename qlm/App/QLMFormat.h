@@ -16,6 +16,20 @@ NSString *QLMDecibelsNumberText(double decibels, int decimals);
 // "−30.0 dB": the number to one place, and the unit.
 NSString *QLMDecibelsText(double decibels);
 
+// After the user moves a level, by the popover's slider or the window's
+// knob, snapshots leave it alone this long, so one from before the move
+// cannot pull it back mid-drag.
+extern const NSTimeInterval QLMLevelHoldInterval;
+
+// Whether the level still holds at `now`, after a move at `movedAt`, both in
+// seconds of system uptime. 0 is never moved.
+BOOL QLMLevelHolds(NSTimeInterval movedAt, NSTimeInterval now);
+
+// The ceiling a UI shows. With a volume set, the snapshot is a published
+// one, so its ceiling is the one System caps at. Before that, the
+// preferences say it.
+double QLMShownCeiling(QLMSnapshot *_Nullable snapshot, double preferredCeiling);
+
 // Why a level typed for the ceiling, or the range's bottom, is refused, or
 // nil. 0 dB is the monitors' full level, so a level above it is refused, not
 // clamped: a clamp would make 35, typed for −35, the loudest ceiling. It

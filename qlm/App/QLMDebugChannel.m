@@ -76,6 +76,23 @@ static BOOL QLMDebugParseDecibels(NSString *token, double *decibels) {
     return VibeParseDouble(token, decibels) && isfinite(*decibels);
 }
 
+// A control over the volume range. A level outside it is refused, not moved
+// into it. `move` takes the level on GLM's steps and returns where it went.
+static NSDictionary *QLMDebugLevel(NSString *usage, NSString *control, double (^move)(id<QLMDebugApp> app, double stepped)) {
+    return QLMDebugControl(usage, NO, QLM_HANDLER {
+        double decibels = 0;
+        if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
+            return nil;
+        }
+        double lowest = app.debugPreferences.lowestDecibels;
+        double ceiling = app.debugPreferences.ceilingDecibels;
+        if (decibels < lowest || decibels > ceiling) {
+            return QLMDebugError(@"%.1f dB is outside the %@'s range, %.1f to %.1f dB", decibels, control, lowest, ceiling);
+        }
+        return @{@"ok": @YES, @"volumeDecibels": @(move(app, QLMNearestStepDecibels(decibels)))};
+    });
+}
+
 // One decimal, as the app shows it. A knob's tenths over ten would print as
 // a binary fraction.
 static id QLMDebugDecibels(NSNumber *_Nullable decibels) {
@@ -157,6 +174,7 @@ static NSDictionary *QLMDebugSnapshot(QLMSnapshot *snapshot) {
         @"ceilingDecibels": @(snapshot.ceilingDecibels),
         @"dimmed": @(snapshot.dimmed),
         @"applying": @(snapshot.applying),
+        @"applyingGroupName": snapshot.applyingGroupName ?: NSNull.null,
         @"activeGroupName": snapshot.activeGroupName ?: NSNull.null,
         @"wokeWithoutGroup": @(snapshot.wokeWithoutGroup),
         @"mutingAll": @(snapshot.mutingAll),
@@ -267,35 +285,14 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             [app debugReadSetup];
             return @{@"ok": @YES, @"reading": @YES};
         }),
-        // The slider: GLM's 0.5 dB steps, from the range's bottom to the
-        // ceiling. A level outside it is refused, not moved into it.
-        QLMDebugControl(@"volume <dB>", NO, QLM_HANDLER {
-            double decibels = 0;
-            if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
-                return nil;
-            }
-            double lowest = app.debugPreferences.lowestDecibels;
-            double ceiling = app.debugPreferences.ceilingDecibels;
-            if (decibels < lowest || decibels > ceiling) {
-                return QLMDebugError(@"%.1f dB is outside the slider's range, %.1f to %.1f dB", decibels, lowest, ceiling);
-            }
-            double stepped = QLMNearestStepDecibels(decibels);
+        // The popover's slider and the window's knob: GLM's 0.5 dB steps, from
+        // the range's bottom to the ceiling.
+        QLMDebugLevel(@"volume <dB>", @"slider", ^double(id<QLMDebugApp> app, double stepped) {
             [app.debugSystem setVolumeDecibels:stepped];
-            return @{@"ok": @YES, @"volumeDecibels": @(stepped)};
+            return stepped;
         }),
-        // The window's knob, over the slider's range. A level outside it is
-        // refused, not moved into it.
-        QLMDebugControl(@"knob <dB>", NO, QLM_HANDLER {
-            double decibels = 0;
-            if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
-                return nil;
-            }
-            double lowest = app.debugPreferences.lowestDecibels;
-            double ceiling = app.debugPreferences.ceilingDecibels;
-            if (decibels < lowest || decibels > ceiling) {
-                return QLMDebugError(@"%.1f dB is outside the knob's range, %.1f to %.1f dB", decibels, lowest, ceiling);
-            }
-            return @{@"ok": @YES, @"volumeDecibels": @([app debugTurnKnobTo:decibels])};
+        QLMDebugLevel(@"knob <dB>", @"knob", ^double(id<QLMDebugApp> app, double stepped) {
+            return [app debugTurnKnobTo:stepped];
         }),
         // Settings' ceiling. It refuses what the field refuses, and the
         // preferences bound the rest, as they do a typed one.

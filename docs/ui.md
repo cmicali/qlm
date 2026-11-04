@@ -200,3 +200,4 @@ These are the owner's calls. Each has a default the work takes until it's made.
 | Does the window open at launch by default? | No. The menu bar item is still the app. |
 | A fourth button per group row for a group's calibration state? | No. The display's caption names the group, and that's enough. |
 | A window scale setting, 100%, 150%, or 200%, since the mockups were rendered at about twice the reference size? | Not now. The window resizes instead, and the 2x assets keep it crisp on a Retina display. |
+| Should the popover and the window show each other's apply errors? Both disable their group controls for any apply, and the window blinks its button, from the snapshot. But each keeps its own last error. | Not until the popover's redesign, which can move the error onto the shared model. |

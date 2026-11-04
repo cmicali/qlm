@@ -1,30 +1,19 @@
 #import <Foundation/Foundation.h>
 
-#import "QLMMonitorList.h"
 #import "QLMSnapshot.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
-// After the user turns the knob, snapshots leave it alone this long, so a
-// snapshot from before the turn cannot pull it back mid-drag. The popover's
-// slider holds as long.
-extern const NSTimeInterval QLMKnobHoldInterval;
-
-// Whether the knob still holds at `now`, after a turn at `turnedAt`, both in
-// seconds of system uptime. 0 is never turned.
-BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
-
-// What the main window shows: its texts and its controls' states, from the
-// latest snapshot, the monitor list's entries, the setup's groups, the
-// volume range, and the window's own apply. It mirrors the popover's rules
-// for what is enabled when. Set the inputs, then read. Foundation only, so
-// the hostless tests cover every rule. On the main queue.
+// The main window's changing texts and states, from the latest snapshot, the
+// setup's groups, the volume range, and the window's own click. It mirrors
+// the popover's rules for what is enabled when. Set the inputs, then read.
+// Foundation only, so the hostless tests cover every rule. On the main
+// queue.
 @interface QLMMainWindowModel : NSObject
 
 #pragma mark Inputs
 
 @property (nonatomic, nullable) QLMSnapshot *snapshot;
-@property (nonatomic, copy) NSArray<QLMMonitorEntry *> *entries;
 // The loaded setup's groups, in the file's order. Nil with no setup.
 @property (nonatomic, copy, nullable) NSArray<NSString *> *groupNames;
 // The skin's group buttons. QLMSkinMaxGroups until set.
@@ -33,13 +22,13 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 @property (nonatomic, copy, nullable) NSString *setupFileName;
 // Why the setup file did not read, or nil.
 @property (nonatomic, copy, nullable) NSString *setupError;
-// The group the window's click is applying, until its completion.
-@property (nonatomic, copy, nullable) NSString *applyingGroupName;
-// The last apply's error, from System, and its group, until the next
-// click.
+// The group the window's last click chose.
+@property (nonatomic, copy, nullable) NSString *clickedGroupName;
+// From the click until its completion, before the snapshot may say so.
+@property (nonatomic) BOOL applyPending;
+// The last apply's error, from System, until the next click.
 @property (nonatomic, nullable) NSError *applyError;
-@property (nonatomic, copy, nullable) NSString *refusedGroupName;
-// The blink's phase while the window's apply runs.
+// The blink's phase while an apply runs.
 @property (nonatomic) BOOL blinkOn;
 // The preferences' range. Before a volume is set, the ceiling shown is
 // this one, as the popover's is.
@@ -55,17 +44,21 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 // The bus problem's title as written, or nil.
 @property (nonatomic, readonly, nullable) NSString *busProblem;
 
-// As many as the skin has buttons for, and each one's letter.
+// As many as the skin has buttons for, in the file's order, and each one's
+// title and letter.
+@property (nonatomic, readonly) NSArray<NSString *> *shownGroupNames;
 @property (nonatomic, readonly) NSArray<NSString *> *groupTitles;
 @property (nonatomic, readonly) NSArray<NSString *> *groupPrefixes;
-// The groups as the setup names them, as many as show.
-@property (nonatomic, readonly) NSArray<NSString *> *shownGroupNames;
-// Each shown group's button is selected, by index. While the window's apply
-// runs, only the chosen one, and only in the blink's on phase.
-- (BOOL)groupSelectedAtIndex:(NSUInteger)index;
-// The group chosen, by index: the one the window's apply runs, else the
-// active one. VoiceOver reads it, with no blink.
-- (BOOL)groupChosenAtIndex:(NSUInteger)index;
+// The group an apply sends, by the snapshot or the window's pending click,
+// else nil.
+@property (nonatomic, readonly, nullable) NSString *applyingGroupName;
+// The button that shows selected: while an apply runs, the applying group's
+// in the blink's on phase only, else the active group's. NSNotFound for
+// none.
+@property (nonatomic, readonly) NSUInteger selectedGroupIndex;
+// The applying group's, else the active group's, with no blink, for
+// VoiceOver. NSNotFound for none.
+@property (nonatomic, readonly) NSUInteger chosenGroupIndex;
 // The popover picker's rule: a setup, System tracks a monitor, and no apply
 // runs.
 @property (nonatomic, readonly) BOOL groupsEnabled;
@@ -78,36 +71,28 @@ BOOL QLMKnobHolds(NSTimeInterval turnedAt, NSTimeInterval now);
 // The undimmed level, or an em dash while none is set or it waits for the
 // knob.
 @property (nonatomic, readonly) NSString *levelText;
-@property (nonatomic, readonly) NSString *unitText;
 // What goes out now: the dimmed level, or MUTED under mute all. After an
-// apply's error, that the group was refused, which sent nothing, or failed,
-// which may have sent some. The reason is longer than the line, so it goes
-// in the tooltip and displaySummary.
+// apply's error, that the clicked group was refused, which sent nothing, or
+// failed, which may have sent some. The reason is longer than the line, so
+// the display's tooltip gives it.
 @property (nonatomic, readonly) NSString *outputText;
 @property (nonatomic, readonly) NSString *maxText;
 // The display dims while System is stopped.
 @property (nonatomic, readonly) BOOL displayDisabled;
-// The display's line for VoiceOver.
-@property (nonatomic, readonly) NSString *displaySummary;
 
-@property (nonatomic, readonly) NSString *muteTitle;
 @property (nonatomic, readonly) BOOL muteOn;
 @property (nonatomic, readonly) BOOL muteEnabled;
-@property (nonatomic, readonly) NSString *dimTitle;
 @property (nonatomic, readonly) BOOL dimOn;
 @property (nonatomic, readonly) BOOL dimEnabled;
 
-@property (nonatomic, readonly) double knobMinimum;
-@property (nonatomic, readonly) double knobMaximum;
+// The range's ends, whole when they are.
 @property (nonatomic, readonly) NSString *knobMinText;
 @property (nonatomic, readonly) NSString *knobMaxText;
-@property (nonatomic, readonly) NSString *knobCaption;
 // The level the knob points at, or nil with none set, or while it waits for
 // the knob's reading.
 @property (nonatomic, readonly, nullable) NSNumber *knobDecibels;
 @property (nonatomic, readonly) BOOL knobEnabled;
 
-@property (nonatomic, readonly) NSString *monitorsTitle;
 // Standby while a monitor is on, Wake while none is.
 @property (nonatomic, readonly) NSString *powerTitle;
 @property (nonatomic, readonly) BOOL powerWakes;

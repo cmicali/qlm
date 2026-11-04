@@ -4,6 +4,8 @@
 
 #include "QLMCommands.h"
 #import "QLMFormat.h"
+#import "QLMSkinLayout.h"
+#import "QLMSkinLibrary.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMSettingsTextWidth = 360;
@@ -30,7 +32,6 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic, copy, nullable) NSString *loginError;
-@property (nonatomic) NSUInteger windowGroupCount;
 @end
 
 @implementation QLMSettingsWindowController
@@ -253,14 +254,6 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [NSWorkspace.sharedWorkspace openURL:directory];
 }
 
-- (void)showWindowGroupCount:(NSUInteger)count {
-    self.windowGroupCount = count;
-    if (self.window.visible) {
-        [self renderSetup];
-        [self fitWindow];
-    }
-}
-
 // While the window is closed, showWindow: draws it.
 - (void)showSetup:(QLMSetup *)setup error:(NSError *)error {
     self.setup = setup;
@@ -356,9 +349,12 @@ static const CGFloat QLMSettingsTextWidth = 360;
         }
         NSString *count = self.setup.groups.count == 1 ? @"1 group" : [NSString stringWithFormat:@"%lu groups", (unsigned long)self.setup.groups.count];
         self.setupNote.stringValue = [NSString stringWithFormat:@"%@: %@.", count, [names componentsJoinedByString:@", "]];
-        if (self.windowGroupCount > 0 && names.count > self.windowGroupCount) {
+        // The library's fallback gives the skin the window shows.
+        QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:self.preferences.skinName refusal:NULL];
+        NSUInteger buttons = skin != nil ? QLMSkinGroupButtonCount(skin) : QLMSkinMaxGroups;
+        if (names.count > buttons) {
             self.setupNote.stringValue = [self.setupNote.stringValue
-                stringByAppendingFormat:@" The window shows the first %lu.", (unsigned long)self.windowGroupCount];
+                stringByAppendingFormat:@" The window shows the first %lu.", (unsigned long)buttons];
         }
     } else if (self.setupError != nil) {
         self.setupNote.stringValue = [NSString stringWithFormat:@"It does not read: %@", self.setupError.localizedDescription];

@@ -7,26 +7,9 @@
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
 
-static QLMMonitorState *QLMMonitor(uint8_t session, QLMMonitorStatus status) {
-    const uint8_t hardwareID[3] = {0x11, 0x4B, session};
-    QLMMonitorState *monitor = [[QLMMonitorState alloc] init];
-    monitor.hardwareID = QLMBytes(hardwareID, sizeof hardwareID);
-    monitor.session = session;
-    monitor.status = status;
-    return monitor;
-}
-
-// A running System that tracks two monitors, both on, at -40 dB under a
-// -30 dB ceiling, sending -40 dB.
-static QLMSnapshot *QLMRunning(void) {
-    QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
-    snapshot.running = YES;
-    snapshot.monitors = @[QLMMonitor(0x02, QLMMonitorStatusOn), QLMMonitor(0x03, QLMMonitorStatusOn)];
-    snapshot.anyOn = YES;
-    snapshot.volumeDecibels = @(-40);
-    snapshot.ceilingDecibels = -30;
-    snapshot.handBack = QLMMakeHandBack(QLMHandBackKnobLevel, @(-60), @(-40));
-    return snapshot;
+static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
+    return [NSError errorWithDomain:QLMSystemErrorDomain code:code
+                           userInfo:@{NSLocalizedDescriptionKey: @"The reason.", QLMSystemErrorRefusedKey: @(refused)}];
 }
 
 // What the main window shows and enables. Sources: docs/ui.md's "The main
@@ -36,24 +19,43 @@ static QLMSnapshot *QLMRunning(void) {
 
 @implementation QLMMainWindowModelTests {
     QLMMainWindowModel *_model;
-    QLMMonitorList *_list;
 }
 
 - (void)setUp {
     [super setUp];
-    _list = [[QLMMonitorList alloc] init];
     _model = [[QLMMainWindowModel alloc] init];
     _model.lowestDecibels = -60;
     _model.ceilingDecibels = -30;
     _model.setupFileName = @"Main.sam";
     _model.groupNames = @[@"Main", @"Nearfield", @"Full Range"];
-    [self show:QLMRunning()];
+    [self showRunningWith:nil];
 }
 
-- (void)show:(QLMSnapshot *)snapshot {
-    [_list updateWithSnapshot:snapshot];
+// A running System that tracks two monitors, both on, at -40 dB under a
+// -30 dB ceiling, sending -40 dB, as `change` then leaves it.
+- (void)showRunningWith:(nullable void (^)(QLMSnapshot *snapshot))change {
+    QLMSnapshot *snapshot = QLMMakeRunningSnapshot(@[QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusOn),
+                                                     QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusOn)]);
+    snapshot.anyOn = YES;
+    snapshot.volumeDecibels = @(-40);
+    snapshot.ceilingDecibels = -30;
+    snapshot.handBack = QLMMakeHandBack(QLMHandBackKnobLevel, @(-60), @(-40));
+    if (change != nil) {
+        change(snapshot);
+    }
     _model.snapshot = snapshot;
-    _model.entries = _list.entries;
+}
+
+- (void)showStopped {
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.running = NO;
+    }];
+}
+
+- (void)showNoMonitors {
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.monitors = @[];
+    }];
 }
 
 #pragma mark - The status
@@ -61,26 +63,28 @@ static QLMSnapshot *QLMRunning(void) {
 - (void)testTheStatusCountsTheMonitorsOnline {
     XCTAssertEqualObjects(_model.statusText, @"2 ONLINE");
     XCTAssertTrue(_model.statusLit);
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.monitors = @[QLMMonitor(0x02, QLMMonitorStatusOn), QLMMonitor(0x03, QLMMonitorStatusStandby)];
-    [self show:snapshot];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.monitors = @[QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusOn), QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusStandby)];
+    }];
     XCTAssertEqualObjects(_model.statusText, @"1 ONLINE");
     XCTAssertTrue(_model.statusLit);
 }
 
-// The list keeps a dropped monitor, offline, so it no longer counts.
+// A monitor System calls offline is not online, though its last poll said on.
 - (void)testTheLEDIsDimWithNoneOnline {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.monitors = @[QLMMonitor(0x02, QLMMonitorStatusStandby)];
-    [self show:snapshot];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        QLMMonitorState *offline = QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusOn);
+        offline.offline = YES;
+        snapshot.monitors = @[QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusStandby), offline];
+    }];
     XCTAssertEqualObjects(_model.statusText, @"0 ONLINE");
     XCTAssertFalse(_model.statusLit);
 }
 
 - (void)testABusProblemReplacesTheCount {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.busProblem = QLMBusProblemGLM;
-    [self show:snapshot];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.busProblem = QLMBusProblemGLM;
+    }];
     XCTAssertEqualObjects(_model.busProblem, @"GLM has the adapter");
     XCTAssertEqualObjects(_model.statusText, @"GLM HAS THE ADAPTER");
 }
@@ -99,7 +103,6 @@ static QLMSnapshot *QLMRunning(void) {
     _model.groupNames = @[@"1", @"2", @"3", @"4", @"5", @"6", @"7", @"8"];
     XCTAssertEqualObjects(_model.shownGroupNames, (@[@"1", @"2", @"3", @"4", @"5", @"6"]));
     XCTAssertEqualObjects(_model.groupPrefixes, (@[@"A", @"B", @"C", @"D", @"E", @"F"]));
-    XCTAssertEqual(QLMSkinMaxGroups, 6u);
 }
 
 // A skin with fewer cells shows fewer groups, so no group lacks a button.
@@ -108,63 +111,70 @@ static QLMSnapshot *QLMRunning(void) {
     _model.groupCapacity = 4;
     XCTAssertEqualObjects(_model.shownGroupNames, (@[@"1", @"2", @"3", @"4"]));
     XCTAssertEqual(_model.groupTitles.count, 4u);
-    _model.groupCapacity = 9;
-    XCTAssertEqual(_model.shownGroupNames.count, 6u);
 }
 
 - (void)testTheActiveGroupIsSelected {
-    XCTAssertFalse([_model groupSelectedAtIndex:0]);
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.activeGroupName = @"Nearfield";
-    [self show:snapshot];
-    XCTAssertFalse([_model groupSelectedAtIndex:0]);
-    XCTAssertTrue([_model groupSelectedAtIndex:1]);
-    XCTAssertFalse([_model groupSelectedAtIndex:2]);
-    XCTAssertFalse([_model groupSelectedAtIndex:6]);
+    XCTAssertEqual(_model.selectedGroupIndex, (NSUInteger)NSNotFound);
+    XCTAssertEqual(_model.chosenGroupIndex, (NSUInteger)NSNotFound);
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.activeGroupName = @"Nearfield";
+    }];
+    XCTAssertEqual(_model.selectedGroupIndex, 1u);
+    XCTAssertEqual(_model.chosenGroupIndex, 1u);
 }
 
 // The popover picker's rule: no System, no monitors tracked, or an apply in
 // flight.
 - (void)testTheButtonsFollowThePickersRule {
-    QLMSnapshot *stopped = QLMRunning();
-    stopped.running = NO;
-    [self show:stopped];
+    [self showStopped];
     XCTAssertFalse(_model.groupsEnabled);
-
-    QLMSnapshot *none = QLMRunning();
-    none.monitors = @[];
-    [self show:none];
+    [self showNoMonitors];
     XCTAssertFalse(_model.groupsEnabled);
-
-    QLMSnapshot *applying = QLMRunning();
-    applying.applying = YES;
-    [self show:applying];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.applying = YES;
+    }];
     XCTAssertTrue(_model.applying);
     XCTAssertFalse(_model.groupsEnabled);
-
-    [self show:QLMRunning()];
+    [self showRunningWith:nil];
     XCTAssertTrue(_model.groupsEnabled);
+    _model.applyPending = YES;
+    XCTAssertFalse(_model.groupsEnabled);
+    _model.applyPending = NO;
     _model.snapshot = nil;
     XCTAssertFalse(_model.groupsEnabled);
 }
 
-// While the window's own apply runs, every button is disabled and only the
-// chosen one shows, in the blink's on phase.
-- (void)testTheChosenGroupBlinksWhileItApplies {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.activeGroupName = @"Main";
-    [self show:snapshot];
-    _model.applyingGroupName = @"Full Range";
-    XCTAssertFalse(_model.groupsEnabled);
-    _model.blinkOn = YES;
-    XCTAssertFalse([_model groupSelectedAtIndex:0]);
-    XCTAssertTrue([_model groupSelectedAtIndex:2]);
-    _model.blinkOn = NO;
-    XCTAssertFalse([_model groupSelectedAtIndex:0]);
-    XCTAssertFalse([_model groupSelectedAtIndex:2]);
-    _model.applyingGroupName = nil;
-    XCTAssertTrue([_model groupSelectedAtIndex:0]);
+// While an apply runs, whoever started it, the applying group's button
+// blinks. VoiceOver reads it as chosen throughout.
+- (void)testTheApplyingGroupBlinks {
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.activeGroupName = @"Main";
+        snapshot.applying = YES;
+        snapshot.applyingGroupName = @"Full Range";
+    }];
+    XCTAssertEqualObjects(_model.applyingGroupName, @"Full Range");
+    for (NSNumber *blink in @[@YES, @NO]) {
+        _model.blinkOn = blink.boolValue;
+        XCTAssertEqual(_model.selectedGroupIndex, blink.boolValue ? 2u : (NSUInteger)NSNotFound);
+        XCTAssertEqual(_model.chosenGroupIndex, 2u);
+    }
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.activeGroupName = @"Main";
+    }];
+    XCTAssertNil(_model.applyingGroupName);
+    XCTAssertEqual(_model.selectedGroupIndex, 0u);
     XCTAssertTrue(_model.groupsEnabled);
+}
+
+// Between the click and System's first snapshot of the apply, the click's
+// group blinks.
+- (void)testAPendingClickBlinksItsGroup {
+    _model.clickedGroupName = @"Nearfield";
+    XCTAssertNil(_model.applyingGroupName);
+    _model.applyPending = YES;
+    _model.blinkOn = YES;
+    XCTAssertEqualObjects(_model.applyingGroupName, @"Nearfield");
+    XCTAssertEqual(_model.selectedGroupIndex, 1u);
 }
 
 // With no groups, the grid's place names the file, or its error.
@@ -186,16 +196,14 @@ static QLMSnapshot *QLMRunning(void) {
 #pragma mark - The display
 
 - (void)testTheDisplayShowsTheThreeLevels {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.activeGroupName = @"Main";
-    [self show:snapshot];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.activeGroupName = @"Main";
+    }];
     XCTAssertEqualObjects(_model.caption, @"MAIN");
     XCTAssertEqualObjects(_model.levelText, @"−40.0");
-    XCTAssertEqualObjects(_model.unitText, @"dB");
     XCTAssertEqualObjects(_model.outputText, @"OUTPUT −40.0");
     XCTAssertEqualObjects(_model.maxText, @"MAX −30");
     XCTAssertFalse(_model.displayDisabled);
-    XCTAssertEqualObjects(_model.displaySummary, @"Main. Level −40.0 dB. Output −40.0 dB. Ceiling −30.0 dB");
 }
 
 - (void)testNoGroupLeavesTheCaptionEmpty {
@@ -204,36 +212,36 @@ static QLMSnapshot *QLMRunning(void) {
 
 // The large number stays undimmed. OUTPUT is what goes out.
 - (void)testDimLowersOnlyTheOutput {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.dimmed = YES;
-    snapshot.handBack = QLMMakeHandBack(QLMHandBackKnobLevel, @(-70), @(-60));
-    [self show:snapshot];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.dimmed = YES;
+        snapshot.handBack = QLMMakeHandBack(QLMHandBackKnobLevel, @(-70), @(-60));
+    }];
     XCTAssertEqualObjects(_model.levelText, @"−40.0");
     XCTAssertEqualObjects(_model.outputText, @"OUTPUT −60.0");
     XCTAssertTrue(_model.dimOn);
 }
 
 - (void)testMuteAllShowsMuted {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.allMuted = YES;
-    [self show:snapshot];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.allMuted = YES;
+    }];
     XCTAssertEqualObjects(_model.levelText, @"−40.0");
     XCTAssertEqualObjects(_model.outputText, @"MUTED");
     XCTAssertTrue(_model.muteOn);
 }
 
 - (void)testAnEmDashWhileNoLevelIsSetOrItWaitsForTheKnob {
-    QLMSnapshot *unset = QLMRunning();
-    unset.volumeDecibels = nil;
-    unset.handBack = QLMMakeHandBack(QLMHandBackUnknown, nil, nil);
-    [self show:unset];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.volumeDecibels = nil;
+        snapshot.handBack = QLMMakeHandBack(QLMHandBackUnknown, nil, nil);
+    }];
     XCTAssertEqualObjects(_model.levelText, QLMEmDash);
     XCTAssertEqualObjects(_model.outputText, @"OUTPUT —");
     XCTAssertNil(_model.knobDecibels);
 
-    QLMSnapshot *waits = QLMRunning();
-    waits.levelAwaitsKnob = YES;
-    [self show:waits];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.levelAwaitsKnob = YES;
+    }];
     XCTAssertEqualObjects(_model.levelText, QLMEmDash);
     XCTAssertEqualObjects(_model.outputText, @"OUTPUT —");
     // The knob points at no level the display hides.
@@ -242,70 +250,39 @@ static QLMSnapshot *QLMRunning(void) {
 
 // Before a level is set, the preferences say the ceiling, as in the popover.
 - (void)testMaxIsTheCeiling {
-    QLMSnapshot *unset = QLMRunning();
-    unset.volumeDecibels = nil;
-    unset.ceilingDecibels = -10;
-    [self show:unset];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.volumeDecibels = nil;
+        snapshot.ceilingDecibels = -10;
+    }];
     XCTAssertEqualObjects(_model.maxText, @"MAX −30");
-    QLMSnapshot *set = QLMRunning();
-    set.ceilingDecibels = -20.5;
-    [self show:set];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.ceilingDecibels = -20.5;
+    }];
     XCTAssertEqualObjects(_model.maxText, @"MAX −20.5");
 }
 
-// The refusal stands until the next click. The bottom line names the group,
-// and the summary, which the tooltip and VoiceOver read, says why.
-- (void)testARefusalShowsInTheBottomLine {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.allMuted = YES;
-    [self show:snapshot];
-    _model.applyError = [NSError errorWithDomain:QLMSystemErrorDomain code:QLMSystemErrorUnverifiedRate
-                                        userInfo:@{NSLocalizedDescriptionKey: @"The 8351B's filter design rate is unverified."}];
-    _model.refusedGroupName = @"Full Range";
+// The error stands until the next click. The bottom line names the clicked
+// group, and says whether System sent anything, by QLMSystemErrorRefused.
+// The tooltip says why.
+- (void)testAnApplyErrorSaysRefusedOrFailed {
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.allMuted = YES;
+    }];
+    _model.clickedGroupName = @"Full Range";
+    _model.applyError = QLMApplyError(QLMSystemErrorUnverifiedRate, YES);
     XCTAssertEqualObjects(_model.outputText, @"FULL RANGE REFUSED");
-    XCTAssertTrue([_model.displaySummary containsString:@"unverified"]);
-}
-
-// QLMSystem.h: a refusal sends nothing. A failed send, or a stop mid-apply,
-// may come after frames went out, so it is no refusal.
-- (void)testOnlyARefusalReadsRefused {
-    _model.refusedGroupName = @"Main";
-    NSDictionary<NSNumber *, NSString *> *cases = @{
-        @(QLMSystemErrorUnverifiedRate): @"MAIN REFUSED",
-        @(QLMSystemErrorUnknownMonitor): @"MAIN REFUSED",
-        @(QLMSystemErrorBlocksFailed): @"MAIN REFUSED",
-        @(QLMSystemErrorAlreadyApplying): @"MAIN REFUSED",
-        @(QLMSystemErrorNoVolume): @"MAIN REFUSED",
-        @(QLMSystemErrorKnobUnread): @"MAIN REFUSED",
-        @(QLMSystemErrorSendFailed): @"MAIN FAILED",
-        @(QLMSystemErrorNotRunning): @"MAIN FAILED",
-    };
-    for (NSNumber *code in cases) {
-        _model.applyError = [NSError errorWithDomain:QLMSystemErrorDomain code:code.integerValue userInfo:nil];
-        XCTAssertEqualObjects(_model.outputText, cases[code], @"%@", code);
-    }
-    _model.applyError = [NSError errorWithDomain:NSPOSIXErrorDomain code:5 userInfo:nil];
-    XCTAssertEqualObjects(_model.outputText, @"MAIN FAILED");
-}
-
-// VoiceOver reads the chosen group, not the blink.
-- (void)testTheChosenGroupIgnoresTheBlink {
-    QLMSnapshot *snapshot = QLMRunning();
-    snapshot.activeGroupName = @"Main";
-    [self show:snapshot];
-    XCTAssertTrue([_model groupChosenAtIndex:0]);
-    _model.applyingGroupName = @"Nearfield";
-    for (NSNumber *blink in @[@YES, @NO]) {
-        _model.blinkOn = blink.boolValue;
-        XCTAssertFalse([_model groupChosenAtIndex:0]);
-        XCTAssertTrue([_model groupChosenAtIndex:1]);
-    }
+    _model.applyError = QLMApplyError(QLMSystemErrorNotRunning, YES);
+    XCTAssertEqualObjects(_model.outputText, @"FULL RANGE REFUSED");
+    _model.applyError = QLMApplyError(QLMSystemErrorNotRunning, NO);
+    XCTAssertEqualObjects(_model.outputText, @"FULL RANGE FAILED");
+    _model.applyError = QLMApplyError(QLMSystemErrorSendFailed, NO);
+    XCTAssertEqualObjects(_model.outputText, @"FULL RANGE FAILED");
+    _model.applyError = nil;
+    XCTAssertEqualObjects(_model.outputText, @"MUTED");
 }
 
 - (void)testTheDisplayDimsWhileSystemIsStopped {
-    QLMSnapshot *stopped = QLMRunning();
-    stopped.running = NO;
-    [self show:stopped];
+    [self showStopped];
     XCTAssertTrue(_model.displayDisabled);
     _model.snapshot = nil;
     XCTAssertTrue(_model.displayDisabled);
@@ -313,63 +290,40 @@ static QLMSnapshot *QLMRunning(void) {
 
 #pragma mark - Mute, dim, the knob, and power
 
+// As the popover's: Mute needs a monitor, Dim a running System.
 - (void)testMuteAndDimAreTheirToggles {
-    XCTAssertEqualObjects(_model.muteTitle, @"MUTE");
-    XCTAssertEqualObjects(_model.dimTitle, @"DIM −20");
     XCTAssertFalse(_model.muteOn);
     XCTAssertFalse(_model.dimOn);
     XCTAssertTrue(_model.muteEnabled);
     XCTAssertTrue(_model.dimEnabled);
-
-    // As the popover's: Mute needs a monitor, Dim a running System.
-    QLMSnapshot *none = QLMRunning();
-    none.monitors = @[];
-    [self show:none];
+    [self showNoMonitors];
     XCTAssertFalse(_model.muteEnabled);
     XCTAssertTrue(_model.dimEnabled);
-    QLMSnapshot *stopped = QLMRunning();
-    stopped.running = NO;
-    [self show:stopped];
+    [self showStopped];
     XCTAssertFalse(_model.dimEnabled);
 }
 
 - (void)testTheKnobSpansTheSlidersRange {
-    XCTAssertEqual(_model.knobMinimum, -60);
-    XCTAssertEqual(_model.knobMaximum, -30);
     XCTAssertEqualObjects(_model.knobMinText, @"−60");
     XCTAssertEqualObjects(_model.knobMaxText, @"−30");
     _model.lowestDecibels = -70.5;
     XCTAssertEqualObjects(_model.knobMinText, @"−70.5");
-    XCTAssertEqualObjects(_model.knobCaption, @"VOLUME");
     XCTAssertEqualObjects(_model.knobDecibels, @(-40));
     XCTAssertTrue(_model.knobEnabled);
-    QLMSnapshot *stopped = QLMRunning();
-    stopped.running = NO;
-    [self show:stopped];
+    [self showStopped];
     XCTAssertFalse(_model.knobEnabled);
 }
 
-// Snapshots leave the knob alone for half a second after a turn.
-- (void)testTheKnobHoldsAfterATurn {
-    XCTAssertFalse(QLMKnobHolds(0, 1000));
-    XCTAssertTrue(QLMKnobHolds(1000, 1000));
-    XCTAssertTrue(QLMKnobHolds(1000, 1000.49));
-    XCTAssertFalse(QLMKnobHolds(1000, 1000.5));
-}
-
 - (void)testThePowerButtonFollowsAnyOn {
-    XCTAssertEqualObjects(_model.monitorsTitle, @"Monitors");
     XCTAssertEqualObjects(_model.powerTitle, @"Standby");
     XCTAssertFalse(_model.powerWakes);
     XCTAssertTrue(_model.powerEnabled);
-    QLMSnapshot *asleep = QLMRunning();
-    asleep.anyOn = NO;
-    [self show:asleep];
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.anyOn = NO;
+    }];
     XCTAssertEqualObjects(_model.powerTitle, @"Wake");
     XCTAssertTrue(_model.powerWakes);
-    QLMSnapshot *none = QLMRunning();
-    none.monitors = @[];
-    [self show:none];
+    [self showNoMonitors];
     XCTAssertFalse(_model.powerEnabled);
 }
 

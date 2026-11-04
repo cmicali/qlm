@@ -49,4 +49,23 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+// The panel's own words, the same in every skin.
+extern NSString *const QLMSkinLogo;
+extern NSString *const QLMSkinTagline;
+extern NSString *const QLMSkinGroupsTitle;
+extern NSString *const QLMSkinKnobCaption;
+
+// A window in the main window's chrome: its title bar transparent and its
+// title hidden, with the content under it, dragged by its background, and
+// no smaller than the skin. Its content view is an empty container at the
+// skin's size, for QLMSkinHost.
+NSWindow *QLMSkinHostWindow(QLMSkin *skin, NSWindowStyleMask style);
+
+// Puts `view` in the window's content view, in place of what was there, and
+// keeps it filling the window. TRAP: dump_screenshot draws a content view
+// with no layer into an unflipped context, so a flipped content view, as
+// the skin views are, comes out upside down. So the window's content view
+// is an unflipped container.
+void QLMSkinHost(NSWindow *window, NSView *view);
+
 NS_ASSUME_NONNULL_END

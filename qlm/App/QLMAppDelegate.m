@@ -422,10 +422,14 @@ static OSType QLMQuitReason(void) {
 }
 
 - (void)mainWindowControllerShowMonitors:(QLMMainWindowController *)controller {
-    [self popoverControllerShowMonitors:self.popoverController];
+    [self showMonitors];
 }
 
 - (void)popoverControllerShowMonitors:(QLMPopoverController *)controller {
+    [self showMonitors];
+}
+
+- (void)showMonitors {
     if (self.monitorsController == nil) {
         self.monitorsController = [[QLMMonitorsWindowController alloc] initWithMonitorList:self.monitorList];
     }
@@ -435,7 +439,6 @@ static OSType QLMQuitReason(void) {
 - (void)popoverControllerShowSettings:(QLMPopoverController *)controller {
     if (self.settingsController == nil) {
         self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
-        [self.settingsController showWindowGroupCount:self.mainWindowController.groupButtonCount];
         self.settingsController.delegate = self;
         [self.settingsController showSetup:self.setup error:self.setupError];
     }
@@ -496,7 +499,7 @@ static OSType QLMQuitReason(void) {
 }
 
 - (void)debugShowMonitors {
-    [self popoverControllerShowMonitors:self.popoverController];
+    [self showMonitors];
 }
 
 - (void)debugShowSettings {
@@ -568,14 +571,12 @@ static OSType QLMQuitReason(void) {
 }
 
 - (NSString *)debugWindowSkinName {
-    return self.mainWindowController.skinName;
+    return self.mainWindowController.shownSkinName;
 }
 
 // As Settings' skin picker will: a skin the library refuses is not kept.
 - (NSString *)debugChooseSkin:(NSString *)name {
-    NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
-    [self.settingsController showWindowGroupCount:self.mainWindowController.groupButtonCount];
-    return refusal;
+    return [self.mainWindowController chooseSkinNamed:name];
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

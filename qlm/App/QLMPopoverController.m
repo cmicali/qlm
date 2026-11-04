@@ -9,10 +9,6 @@
 
 static const CGFloat QLMPopoverWidth = 320;
 static const CGFloat QLMPopoverInset = 14;
-// After the user moves the slider, snapshots leave it alone this long, so a
-// snapshot from before the move cannot pull it back mid-drag.
-static const NSTimeInterval QLMSliderHoldInterval = 0.5;
-
 static NSTextField *QLMSmallLabel(NSString *text) {
     NSTextField *label = [NSTextField labelWithString:text];
     label.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
@@ -484,11 +480,9 @@ static NSView *QLMSpacer(void) {
     }
 }
 
-// With a volume set, the snapshot is a published one, so its ceiling is the
-// one System caps at. Before that, the preferences say it.
 - (void)renderVolume:(nullable QLMSnapshot *)snapshot {
     NSNumber *volume = snapshot.volumeDecibels;
-    double ceiling = volume != nil ? snapshot.ceilingDecibels : self.preferences.ceilingDecibels;
+    double ceiling = QLMShownCeiling(snapshot, self.preferences.ceilingDecibels);
     NSString *ceilingText = [NSString stringWithFormat:@"Ceiling %@", QLMDecibelsText(ceiling)];
     self.volumeSlider.enabled = snapshot.running;
     if (volume == nil) {
@@ -498,8 +492,7 @@ static NSView *QLMSpacer(void) {
     }
     double decibels = volume.doubleValue;
     self.volumeLabel.stringValue = QLMDecibelsText(decibels);
-    BOOL held = NSProcessInfo.processInfo.systemUptime - self.sliderMovedAt < QLMSliderHoldInterval;
-    if (!held) {
+    if (!QLMLevelHolds(self.sliderMovedAt, NSProcessInfo.processInfo.systemUptime)) {
         self.volumeSlider.doubleValue = fmax(self.volumeSlider.minValue, decibels);
     }
     NSMutableArray<NSString *> *parts = [NSMutableArray arrayWithObject:ceilingText];

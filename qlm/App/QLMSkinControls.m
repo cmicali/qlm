@@ -389,6 +389,10 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
                     self.enabled ? 1 : QLMSkinDisabledAlpha);
 }
 
+- (id)accessibilityValue {
+    return self.toolTip ?: self.text;
+}
+
 @end
 
 #pragma mark - The display
@@ -473,6 +477,18 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
                             YES, 1);
         }
     });
+}
+
+// The slots, as they read, then the tooltip's reason, if any.
+- (id)accessibilityValue {
+    NSString *level = self.level.length > 0 ? [NSString stringWithFormat:@"%@ %@", self.level, self.unit ?: @""] : nil;
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSString *part in @[self.caption ?: @"", level ?: @"", self.output ?: @"", self.max ?: @"", self.toolTip ?: @""]) {
+        if (part.length > 0) {
+            [parts addObject:part];
+        }
+    }
+    return [parts componentsJoinedByString:@". "];
 }
 
 @end

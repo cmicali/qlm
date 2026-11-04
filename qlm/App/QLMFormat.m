@@ -10,13 +10,23 @@
 NSString *const QLMEmDash = @"—";
 static NSString *const QLMNoLevelRefusal = @"Type a level in dB.";
 
+// rint rounds half to even, as printf does, so it zeroes what would print −0.
 NSString *QLMDecibelsNumberText(double decibels, int decimals) {
-    NSString *number = [NSString stringWithFormat:@"%.*f", decimals, decibels];
-    NSString *zero = [NSString stringWithFormat:@"%.*f", decimals, 0.0];
-    if ([number isEqualToString:[@"-" stringByAppendingString:zero]]) {
-        number = zero;
+    if (rint(decibels * pow(10, decimals)) == 0) {
+        decibels = 0;
     }
+    NSString *number = [NSString stringWithFormat:@"%.*f", decimals, decibels];
     return [number stringByReplacingOccurrencesOfString:@"-" withString:@"−"];
+}
+
+const NSTimeInterval QLMLevelHoldInterval = 0.5;
+
+BOOL QLMLevelHolds(NSTimeInterval movedAt, NSTimeInterval now) {
+    return movedAt > 0 && now - movedAt < QLMLevelHoldInterval;
+}
+
+double QLMShownCeiling(QLMSnapshot *snapshot, double preferredCeiling) {
+    return snapshot.volumeDecibels != nil ? snapshot.ceilingDecibels : preferredCeiling;
 }
 
 // A no-break space keeps the unit on the number's line.

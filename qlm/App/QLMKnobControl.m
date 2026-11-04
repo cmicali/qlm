@@ -36,20 +36,20 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     return QLMDecibelsText(_value);
 }
 
-- (BOOL)accessibilityPerformIncrement {
+- (BOOL)stepBy:(int)steps {
     if (!self.enabled) {
         return NO;
     }
-    [self moveTo:QLMKnobStep(_value, 1, self.minValue, self.maxValue)];
+    [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];
     return YES;
 }
 
+- (BOOL)accessibilityPerformIncrement {
+    return [self stepBy:1];
+}
+
 - (BOOL)accessibilityPerformDecrement {
-    if (!self.enabled) {
-        return NO;
-    }
-    [self moveTo:QLMKnobStep(_value, -1, self.minValue, self.maxValue)];
-    return YES;
+    return [self stepBy:-1];
 }
 
 - (double)doubleValue {

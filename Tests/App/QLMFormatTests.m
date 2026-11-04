@@ -160,7 +160,29 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertEqualObjects(QLMDecibelsNumberText(-0.0, 1), @"0.0");
     XCTAssertEqualObjects(QLMDecibelsNumberText(-0.04, 1), @"0.0");
     XCTAssertEqualObjects(QLMDecibelsNumberText(-0.4, 0), @"0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.5, 0), @"0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.6, 0), @"\u22121");
     XCTAssertEqualObjects(QLMDecibelsText(-0.0), @"0.0\u00A0dB");
+}
+
+// Snapshots leave a moved level alone for half a second, in the popover and
+// the window alike.
+- (void)testAMovedLevelHoldsForHalfASecond {
+    XCTAssertEqual(QLMLevelHoldInterval, 0.5);
+    XCTAssertFalse(QLMLevelHolds(0, 1000));
+    XCTAssertTrue(QLMLevelHolds(1000, 1000));
+    XCTAssertTrue(QLMLevelHolds(1000, 1000.49));
+    XCTAssertFalse(QLMLevelHolds(1000, 1000.5));
+}
+
+// Before a volume is set, the snapshot's ceiling may not be System's yet.
+- (void)testTheShownCeilingIsTheSnapshotsOnceAVolumeIsSet {
+    QLMSnapshot *snapshot = QLMSnapshotWith(QLMHandBackUnknown, nil, nil);
+    snapshot.ceilingDecibels = -10;
+    XCTAssertEqual(QLMShownCeiling(nil, -30), -30);
+    XCTAssertEqual(QLMShownCeiling(snapshot, -30), -30);
+    snapshot.volumeDecibels = @(-40);
+    XCTAssertEqual(QLMShownCeiling(snapshot, -30), -10);
 }
 
 #pragma mark - Names

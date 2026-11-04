@@ -65,7 +65,7 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
 - `snapshot`, or null before System's first one:
   - `running`, `idle`, `busProblem` (`none`, `noAdapter`, `glm`, or `otherHost`), `adapterProblem`, `reconnects`, and `adapterError`. `reconnects` counts System's tries to reopen the adapter since its link gave up. `adapterProblem` is `none`, `unresponsive`, `lostTrack`, or `notTaking`.
   - `adapter`: the device, model, and serial, and the knob: `knobPresent` and `knobTenths`.
-  - `volumeDecibels` as set, before dim. `ceilingDecibels`, the one System caps at. `dimmed`, `allMuted`, `mutingAll`, `anyOn`, `applying`, `activeGroupName`, and `wokeWithoutGroup`: a wake went out with no group active, so the woken monitors play without their group's settings.
+  - `volumeDecibels` as set, before dim. `ceilingDecibels`, the one System caps at. `dimmed`, `allMuted`, `mutingAll`, `anyOn`, `applying`, `applyingGroupName` (the group the running apply sends), `activeGroupName`, and `wokeWithoutGroup`: a wake went out with no group active, so the woken monitors play without their group's settings.
   - `handBack`: `kind` (`knobLevel`, `louder`, or `unknown`), `knobDecibels`, `volumeDecibels` (the level sent, dimmed and under the ceiling), and the app's `line` about it.
   - `monitors`: each one's `serialNumber`, model, class, hardware ID, session, status, `muted`, `lifted`, and `offline`, with its missed polls and temperature.
 

@@ -36,6 +36,12 @@ NSData *QLMBytes(const uint8_t *bytes, size_t length);
 // A hand-back as System would give it.
 QLMHandBack *QLMMakeHandBack(QLMHandBackKind kind, NSNumber *_Nullable knob, NSNumber *_Nullable volume);
 
+// A monitor as System tracks it, with the hardware ID {first, 4B, session}.
+QLMMonitorState *QLMMakeMonitor(uint8_t first, uint8_t session, QLMMonitorStatus status);
+
+// A running System's snapshot with these monitors and nothing else set.
+QLMSnapshot *QLMMakeRunningSnapshot(NSArray<QLMMonitorState *> *monitors);
+
 // The snapshot's monitor with this hardware ID, or nil.
 QLMMonitorState *_Nullable QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID);
 

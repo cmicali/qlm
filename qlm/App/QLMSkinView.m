@@ -233,3 +233,33 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
 }
 
 @end
+
+NSString *const QLMSkinLogo = @"qlm.";
+NSString *const QLMSkinTagline = @"REFERENCE CONTROL";
+NSString *const QLMSkinGroupsTitle = @"LISTENING SETUP";
+NSString *const QLMSkinKnobCaption = @"VOLUME";
+
+NSWindow *QLMSkinHostWindow(QLMSkin *skin, NSWindowStyleMask style) {
+    NSRect frame = NSMakeRect(0, 0, skin.windowSize.width, skin.windowSize.height);
+    NSWindow *window = [[NSWindow alloc] initWithContentRect:frame styleMask:style | NSWindowStyleMaskFullSizeContentView
+                                                     backing:NSBackingStoreBuffered defer:YES];
+    window.titleVisibility = NSWindowTitleHidden;
+    window.titlebarAppearsTransparent = YES;
+    window.movableByWindowBackground = YES;
+    window.opaque = NO;
+    window.backgroundColor = NSColor.clearColor;
+    window.releasedWhenClosed = NO;
+    window.contentMinSize = skin.windowSize;
+    window.contentView = [[NSView alloc] initWithFrame:frame];
+    return window;
+}
+
+void QLMSkinHost(NSWindow *window, NSView *view) {
+    NSView *container = window.contentView;
+    for (NSView *old in [container.subviews copy]) {
+        [old removeFromSuperview];
+    }
+    view.frame = container.bounds;
+    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [container addSubview:view];
+}

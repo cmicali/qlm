@@ -9,41 +9,21 @@
 static NSString *const QLMMainWindowAutosaveName = @"QLMMainWindow";
 // A blink's half: about two a second.
 static const NSTimeInterval QLMBlinkInterval = 0.25;
-static const unsigned short QLMEscapeKeyCode = 53;
-
-// Escape closes it, as Cmd-W does.
-@interface QLMMainWindow : NSWindow
-@end
-
-@implementation QLMMainWindow
-
-- (void)cancelOperation:(id)sender {
-    [self performClose:sender];
-}
-
-- (void)keyDown:(NSEvent *)event {
-    NSEventModifierFlags modifiers = event.modifierFlags & NSEventModifierFlagDeviceIndependentFlagsMask;
-    if (event.keyCode == QLMEscapeKeyCode && (modifiers & ~NSEventModifierFlagFunction) == 0) {
-        [self cancelOperation:self];
-        return;
-    }
-    [super keyDown:event];
-}
-
-@end
 
 @interface QLMMainWindowController () <NSWindowDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMMainWindowModel *model;
 @property (nonatomic, nullable) QLMSetup *setup;
-@property (nonatomic, nullable) QLMSkin *skin;
+@property (nonatomic) QLMSkin *skin;
 @property (nonatomic, nullable) QLMSkinView *skinView;
 @property (nonatomic, nullable) NSTimer *blinkTimer;
 @property (nonatomic) NSTimeInterval knobTurnedAt;
 @end
 
-@implementation QLMMainWindowController
+@implementation QLMMainWindowController {
+    BOOL _windowMade;
+}
 
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList {
     self = [super initWithWindow:nil];
@@ -51,33 +31,33 @@ static const unsigned short QLMEscapeKeyCode = 53;
         _preferences = preferences;
         _monitorList = monitorList;
         _model = [[QLMMainWindowModel alloc] init];
-        [self makeWindow];
+        _skin = [self loadSkinNamed:preferences.skinName refusal:NULL];
+        _model.groupCapacity = QLMSkinGroupButtonCount(_skin);
+        [self reloadVolumeRange];
     }
     return self;
 }
 
+// Built at the first use, since the window is closed at most launches.
+- (NSWindow *)window {
+    if (!_windowMade) {
+        _windowMade = YES;
+        [self makeWindow];
+    }
+    return super.window;
+}
+
 - (void)makeWindow {
+    NSAssert(self.skin != nil, @"the default skin is refused");
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
-                              | NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView;
-    QLMSkin *skin = [self loadSkinNamed:self.preferences.skinName refusal:NULL];
-    NSRect frame = NSMakeRect(0, 0, skin.windowSize.width, skin.windowSize.height);
-    NSWindow *window = [[QLMMainWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:YES];
+                              | NSWindowStyleMaskResizable;
+    NSWindow *window = QLMSkinHostWindow(self.skin, style);
     window.title = @"qlm";
-    window.titleVisibility = NSWindowTitleHidden;
-    window.titlebarAppearsTransparent = YES;
-    window.movableByWindowBackground = YES;
-    window.opaque = NO;
-    window.backgroundColor = NSColor.clearColor;
-    window.releasedWhenClosed = NO;
     // The Window menu names it itself.
     window.excludedFromWindowsMenu = YES;
     window.delegate = self;
-    // TRAP: dump_screenshot draws a content view with no layer into an
-    // unflipped context, so the flipped skin view comes out upside down.
-    // So it fills an unflipped container, as QLMSkinPreview's does.
-    window.contentView = [[NSView alloc] initWithFrame:frame];
-    self.window = window;
-    [self showSkin:skin];
+    super.window = window;
+    [self showSkin:self.skin];
     if ([window setFrameUsingName:QLMMainWindowAutosaveName]) {
         [self growToSkin];
     } else {
@@ -86,16 +66,15 @@ static const unsigned short QLMEscapeKeyCode = 53;
     window.frameAutosaveName = QLMMainWindowAutosaveName;
 }
 
+// With the library's fallback: a refused name gives the default skin.
 - (QLMSkin *)loadSkinNamed:(NSString *)name refusal:(NSString *_Nullable *_Nullable)refusal {
-    QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:name refusal:refusal];
-    NSAssert(skin != nil, @"the default skin is refused");
-    return skin;
+    return [[QLMSkinLibrary standardLibrary] loadSkinNamed:name refusal:refusal];
 }
 
 // A frame kept under a skin with a smaller size could be too small for this
 // one.
 - (void)growToSkin {
-    NSWindow *window = self.window;
+    NSWindow *window = super.window;
     NSSize minimum = self.skin.windowSize;
     window.contentMinSize = minimum;
     NSSize size = window.contentView.bounds.size;
@@ -105,20 +84,25 @@ static const unsigned short QLMEscapeKeyCode = 53;
 }
 
 - (void)showSkin:(QLMSkin *)skin {
-    NSView *container = self.window.contentView;
-    [self.skinView removeFromSuperview];
     self.skin = skin;
+    self.model.groupCapacity = QLMSkinGroupButtonCount(skin);
+    if (!_windowMade) {
+        return;
+    }
     [self growToSkin];
-
     QLMSkinView *view = [[QLMSkinView alloc] initWithSkin:skin];
-    view.frame = container.bounds;
-    view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-    [container addSubview:view];
+    QLMSkinHost(super.window, view);
     self.skinView = view;
 
-    view.logo = @"qlm.";
-    view.tagline = @"REFERENCE CONTROL";
-    view.groupsTitle = @"LISTENING SETUP";
+    view.logo = QLMSkinLogo;
+    view.tagline = QLMSkinTagline;
+    view.groupsTitle = QLMSkinGroupsTitle;
+    view.knobCaption = QLMSkinKnobCaption;
+    view.display.unit = @"dB";
+    view.muteButton.title = @"MUTE";
+    view.dimButton.title = [@"DIM " stringByAppendingString:QLMDecibelsNumberText(-QLMDimDecibels, 0)];
+    view.monitorsButton.title = @"Monitors";
+
     view.display.accessibilityElement = YES;
     view.display.accessibilityRole = NSAccessibilityStaticTextRole;
     view.display.accessibilityLabel = @"Level";
@@ -150,6 +134,8 @@ static const unsigned short QLMEscapeKeyCode = 53;
     view.powerButton.target = self;
     view.powerButton.action = @selector(powerClicked:);
     self.knobTurnedAt = 0;
+    [self renderGroups];
+    [self renderRange];
     [self render];
 }
 
@@ -164,16 +150,12 @@ static const unsigned short QLMEscapeKeyCode = 53;
     return nil;
 }
 
-- (NSString *)skinName {
+- (NSString *)shownSkinName {
     return self.skin.name;
 }
 
-- (NSUInteger)groupButtonCount {
-    return self.skinView.groupButtons.count;
-}
-
 - (BOOL)isShowing {
-    return self.window.visible;
+    return _windowMade && super.window.visible;
 }
 
 - (NSString *)applyError {
@@ -181,26 +163,41 @@ static const unsigned short QLMEscapeKeyCode = 53;
 }
 
 - (void)showWindow:(id)sender {
-    if (self.model.applyingGroupName != nil) {
-        [self startBlink];
-    }
-    [self render];
     [super showWindow:sender];
+    [self render];
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
     [self stopBlink];
 }
 
+// Escape closes it, as Cmd-W does. The window sends it here as Escape's
+// default action.
+- (void)cancelOperation:(id)sender {
+    [super.window performClose:sender];
+}
+
 - (void)showSetup:(QLMSetup *)setup fileName:(NSString *)fileName error:(NSError *)error {
     self.setup = setup;
+    NSMutableArray<NSString *> *names = nil;
+    if (setup != nil) {
+        names = [NSMutableArray array];
+        for (QLMSetupGroup *group in setup.groups) {
+            [names addObject:group.name];
+        }
+    }
+    self.model.groupNames = names;
     self.model.setupFileName = fileName;
     self.model.setupError = error.localizedDescription;
+    [self renderGroups];
     [self refresh];
 }
 
 - (void)reloadVolumeRange {
+    self.model.lowestDecibels = self.preferences.lowestDecibels;
+    self.model.ceilingDecibels = self.preferences.ceilingDecibels;
     self.knobTurnedAt = 0;
+    [self renderRange];
     [self refresh];
 }
 
@@ -217,7 +214,7 @@ static const unsigned short QLMEscapeKeyCode = 53;
 }
 
 - (NSString *)clickGroupNamed:(NSString *)name {
-    [self updateModel];
+    self.model.snapshot = self.monitorList.snapshot;
     NSArray<NSString *> *names = self.model.shownGroupNames;
     NSUInteger index = [names indexOfObject:name];
     if (index == NSNotFound) {
@@ -231,31 +228,29 @@ static const unsigned short QLMEscapeKeyCode = 53;
 // As the popover's picker: the error shows until the next click. Returns
 // why the button takes no click, or nil once the apply starts.
 - (nullable NSString *)applyGroupAtIndex:(NSUInteger)index {
-    [self updateModel];
+    QLMMainWindowModel *model = self.model;
+    model.snapshot = self.monitorList.snapshot;
     QLMSystem *system = self.system;
     if (system == nil) {
         return @"System is not running";
     }
-    if (!self.model.groupsEnabled) {
-        return self.model.applying ? @"the group buttons are disabled while an apply runs"
-                                   : @"the group buttons are disabled until System tracks a monitor";
+    if (!model.groupsEnabled) {
+        return model.applying ? @"the group buttons are disabled while an apply runs"
+                              : @"the group buttons are disabled until System tracks a monitor";
     }
-    if (index >= self.model.shownGroupNames.count) {
+    if (index >= model.shownGroupNames.count) {
         return @"no group button there";
     }
     QLMSetupGroup *group = self.setup.groups[index];
-    self.model.applyingGroupName = group.name;
-    self.model.applyError = nil;
-    self.model.refusedGroupName = nil;
-    [self startBlink];
+    model.clickedGroupName = group.name;
+    model.applyPending = YES;
+    model.applyError = nil;
     [self refresh];
     __weak QLMMainWindowController *weakSelf = self;
     [system applyGroup:group completion:^(NSError *error) {
         QLMMainWindowController *strongSelf = weakSelf;
-        [strongSelf stopBlink];
-        strongSelf.model.applyingGroupName = nil;
+        strongSelf.model.applyPending = NO;
         strongSelf.model.applyError = error;
-        strongSelf.model.refusedGroupName = error != nil ? group.name : nil;
         [strongSelf refresh];
     }];
     return nil;
@@ -263,7 +258,9 @@ static const unsigned short QLMEscapeKeyCode = 53;
 
 // In the common modes, so it blinks on through a live resize.
 - (void)startBlink {
-    [self.blinkTimer invalidate];
+    if (self.blinkTimer != nil || !self.showing) {
+        return;
+    }
     self.model.blinkOn = YES;
     self.blinkTimer = [NSTimer timerWithTimeInterval:QLMBlinkInterval target:self selector:@selector(blink:) userInfo:nil
                                              repeats:YES];
@@ -277,7 +274,10 @@ static const unsigned short QLMEscapeKeyCode = 53;
 
 - (void)blink:(NSTimer *)timer {
     self.model.blinkOn = !self.model.blinkOn;
-    [self refresh];
+    NSUInteger chosen = self.model.chosenGroupIndex;
+    if (chosen < self.skinView.groupButtons.count) {
+        self.skinView.groupButtons[chosen].selected = self.model.blinkOn;
+    }
 }
 
 - (void)muteClicked:(id)sender {
@@ -294,11 +294,12 @@ static const unsigned short QLMEscapeKeyCode = 53;
     self.skinView.display.level = QLMDecibelsNumberText(decibels, 1);
     // Once the hold lapses, the display catches up with no new snapshot.
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(refresh) object:nil];
-    [self performSelector:@selector(refresh) withObject:nil afterDelay:QLMKnobHoldInterval inModes:@[NSRunLoopCommonModes]];
+    [self performSelector:@selector(refresh) withObject:nil afterDelay:QLMLevelHoldInterval inModes:@[NSRunLoopCommonModes]];
     [self.system setVolumeDecibels:decibels];
 }
 
 - (double)turnKnobTo:(double)decibels {
+    (void)self.window;
     [self render];
     QLMKnobControl *knob = self.skinView.knob;
     [knob moveTo:decibels];
@@ -319,45 +320,53 @@ static const unsigned short QLMEscapeKeyCode = 53;
 
 #pragma mark - Drawing
 
-- (void)updateModel {
+// What changes only with the setup or the skin.
+- (void)renderGroups {
+    QLMSkinView *view = self.skinView;
     QLMMainWindowModel *model = self.model;
-    model.snapshot = self.monitorList.snapshot;
-    model.entries = self.monitorList.entries;
-    model.lowestDecibels = self.preferences.lowestDecibels;
-    model.ceilingDecibels = self.preferences.ceilingDecibels;
-    model.groupCapacity = self.groupButtonCount;
-    NSMutableArray<NSString *> *names = nil;
-    if (self.setup != nil) {
-        names = [NSMutableArray array];
-        for (QLMSetupGroup *group in self.setup.groups) {
-            [names addObject:group.name];
-        }
+    [view setGroupTitles:model.groupTitles prefixes:model.groupPrefixes];
+    NSArray<NSString *> *names = model.shownGroupNames;
+    for (NSUInteger i = 0; i < names.count && i < view.groupButtons.count; i++) {
+        view.groupButtons[i].accessibilityLabel = names[i];
     }
-    model.groupNames = names;
+}
+
+// What changes only with the range.
+- (void)renderRange {
+    QLMSkinView *view = self.skinView;
+    view.knob.minValue = self.model.lowestDecibels;
+    view.knob.maxValue = self.model.ceilingDecibels;
+    view.knobMin = self.model.knobMinText;
+    view.knobMax = self.model.knobMaxText;
 }
 
 - (void)render {
-    [self updateModel];
     QLMSkinView *view = self.skinView;
     if (view == nil) {
         return;
     }
     QLMMainWindowModel *model = self.model;
-    BOOL held = QLMKnobHolds(self.knobTurnedAt, NSProcessInfo.processInfo.systemUptime);
+    model.snapshot = self.monitorList.snapshot;
+    BOOL held = QLMLevelHolds(self.knobTurnedAt, NSProcessInfo.processInfo.systemUptime);
 
     view.status.text = model.statusText;
     view.status.lit = model.statusLit;
     view.status.toolTip = model.busProblem;
-    view.status.accessibilityValue = model.busProblem ?: model.statusText;
 
-    [view setGroupTitles:model.groupTitles prefixes:model.groupPrefixes];
-    NSArray<NSString *> *names = model.shownGroupNames;
-    for (NSUInteger i = 0; i < names.count && i < view.groupButtons.count; i++) {
+    if (model.applyingGroupName != nil) {
+        [self startBlink];
+    } else {
+        [self stopBlink];
+    }
+    NSUInteger selected = model.selectedGroupIndex;
+    NSUInteger chosen = model.chosenGroupIndex;
+    BOOL enabled = model.groupsEnabled;
+    NSUInteger shown = model.shownGroupNames.count;
+    for (NSUInteger i = 0; i < shown && i < view.groupButtons.count; i++) {
         QLMSkinButtonView *button = view.groupButtons[i];
-        button.selected = [model groupSelectedAtIndex:i];
-        button.enabled = model.groupsEnabled;
-        button.accessibilityLabel = names[i];
-        button.accessibilityValue = @([model groupChosenAtIndex:i]);
+        button.selected = i == selected;
+        button.enabled = enabled;
+        button.accessibilityValue = @(i == chosen);
     }
     view.groupsMessage = model.groupsMessage;
 
@@ -366,37 +375,27 @@ static const unsigned short QLMEscapeKeyCode = 53;
     if (!held) {
         display.level = model.levelText;
     }
-    display.unit = model.unitText;
     display.output = model.outputText;
     display.max = model.maxText;
     display.disabled = model.displayDisabled;
     display.toolTip = model.applyError.localizedDescription;
-    display.accessibilityValue = model.displaySummary;
 
-    view.muteButton.title = model.muteTitle;
     view.muteButton.selected = model.muteOn;
     view.muteButton.ledLit = model.muteOn;
     view.muteButton.enabled = model.muteEnabled;
     view.muteButton.accessibilityValue = @(model.muteOn);
-    view.dimButton.title = model.dimTitle;
     view.dimButton.selected = model.dimOn;
     view.dimButton.enabled = model.dimEnabled;
     view.dimButton.accessibilityValue = @(model.dimOn);
 
     QLMKnobControl *knob = view.knob;
-    knob.minValue = model.knobMinimum;
-    knob.maxValue = model.knobMaximum;
     knob.enabled = model.knobEnabled;
     // With no level to show, the knob stays where it is.
     NSNumber *level = model.knobDecibels;
     if (level != nil && !held) {
         knob.doubleValue = level.doubleValue;
     }
-    view.knobMin = model.knobMinText;
-    view.knobMax = model.knobMaxText;
-    view.knobCaption = model.knobCaption;
 
-    view.monitorsButton.title = model.monitorsTitle;
     view.powerButton.title = model.powerTitle;
     view.powerButton.enabled = model.powerEnabled;
     view.powerButton.accessibilityLabel = model.powerWakes ? @"Wake the monitors" : @"Put the monitors in standby";
