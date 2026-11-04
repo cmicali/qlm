@@ -306,6 +306,19 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     return knob.doubleValue;
 }
 
+- (NSString *)resizeTo:(NSSize)size {
+    if (!self.showing) {
+        return @"the window is closed";
+    }
+    NSSize minimum = self.skin.windowSize;
+    [super.window setContentSize:NSMakeSize(MAX(size.width, minimum.width), MAX(size.height, minimum.height))];
+    return nil;
+}
+
+- (NSSize)contentSize {
+    return _windowMade ? super.window.contentView.bounds.size : NSZeroSize;
+}
+
 - (void)monitorsClicked:(id)sender {
     [self.delegate mainWindowControllerShowMonitors:self];
 }

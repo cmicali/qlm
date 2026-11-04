@@ -241,6 +241,8 @@ targets:
       - qlm/App/QLMOSDRule.m
       - qlm/App/QLMPreferences.m
       - qlm/App/QLMSkin.m
+      # It draws into a bitmap, which needs no NSApplication.
+      - qlm/App/QLMSkinDrawing.m
       - qlm/App/QLMSkinLayout.m
       - qlm/App/QLMSkinLibrary.m
       - qlm/App/QLMViews.m

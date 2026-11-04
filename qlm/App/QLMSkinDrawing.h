@@ -19,6 +19,10 @@ BOOL QLMSkinColorIsClear(QLMSkinColor color);
 // skin, so a skin read again loads its files again.
 void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NSRect rect, BOOL circle);
 
+// An image in `rect`, right side up in a flipped view, whatever its size
+// and cap insets. Every image the skin draws goes through here.
+void QLMSkinDrawImage(NSImage *_Nullable image, NSRect rect);
+
 // The shadow `path` casts, filled with `fill`.
 void QLMSkinDrawShadow(QLMSkinShadow *shadow, NSBezierPath *path, NSColor *fill);
 
@@ -46,5 +50,7 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
 void QLMSkinDrawSlot(NSString *_Nullable text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits,
                      CGFloat alpha);
 void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame);
+// A button's label, its capitals centered on the frame's height.
+void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame);
 
 NS_ASSUME_NONNULL_END

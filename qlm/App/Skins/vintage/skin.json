@@ -100,7 +100,7 @@
       "prefixColor": "secondary"
     },
     "focus": {"color": "focus", "width": 1.5, "radius": 4.8, "outset": -1.55},
-    "led": {"size": 6, "x": 33}
+    "led": {"size": 6, "gap": 8}
   },
   "led": {"on": "#f5916a", "off": "#665848", "glow": 5},
   "markings": {

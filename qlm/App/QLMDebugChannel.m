@@ -270,6 +270,22 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             reply[@"windowShowing"] = @(app.debugWindowShowing);
             return reply;
         }),
+        // The window's content size in points, as a drag of its corner sets
+        // it, for dump_screenshot past the skin's size.
+        QLMDebugVerb(@"window_size <width> <height>", QLM_HANDLER {
+            double width = 0;
+            double height = 0;
+            if (!VibeParseDouble(tokens[1], &width) || !VibeParseDouble(tokens[2], &height) || !isfinite(width)
+                || !isfinite(height)) {
+                return nil;
+            }
+            NSString *refusal = [app debugResizeWindowTo:NSMakeSize(width, height)];
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
+            }
+            NSSize size = app.debugWindowSize;
+            return @{@"ok": @YES, @"width": @(size.width), @"height": @(size.height)};
+        }),
         // The window's group button. The apply's own refusal comes later, in
         // dump_state's windowApplyError.
         QLMDebugVerb(@"group <name>", QLM_HANDLER {

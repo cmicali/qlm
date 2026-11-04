@@ -99,20 +99,26 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     return NSMakePoint(NSMidX(self.bounds), NSMidY(self.bounds));
 }
 
-- (double)angleOfEvent:(NSEvent *)event {
-    NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
+- (NSPoint)pointOfEvent:(NSEvent *)event {
+    return [self convertPoint:event.locationInWindow fromView:nil];
+}
+
+- (double)angleAt:(NSPoint)point {
     NSPoint center = [self center];
     return QLMKnobDragAngle(point.x - center.x, point.y - center.y, self.skin.knob.bodySize * QLMKnobDeadFraction);
 }
 
-// A relative drag: the press moves nothing.
+// A relative drag: the press moves nothing. A press on the body drags up and
+// down. A press outside it, on the ring, turns the knob about its center.
 - (void)mouseDown:(NSEvent *)event {
     if (!self.enabled) {
         return;
     }
     [self.window makeFirstResponder:self];
     self.pressed = YES;
-    double from = [self angleOfEvent:event];
+    NSPoint from = [self pointOfEvent:event];
+    NSPoint center = [self center];
+    BOOL vertical = hypot(from.x - center.x, from.y - center.y) <= self.skin.knob.bodySize / 2;
     double level = QLMKnobSnap(_value, self.minValue, self.maxValue);
     while (YES) {
         NSEvent *next = [self.window nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp];
@@ -120,8 +126,15 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
             self.pressed = NO;
             return;
         }
-        double to = [self angleOfEvent:next];
-        level = QLMKnobDragStep(level, from, to, self.minValue, self.maxValue);
+        NSPoint to = [self pointOfEvent:next];
+        if (vertical) {
+            BOOL fine = (next.modifierFlags & NSEventModifierFlagShift) != 0;
+            level = QLMKnobDragVertical(level, to.y - from.y, self.minValue, self.maxValue,
+                                        fine ? QLM_KNOB_FINE_DRAG_TRAVEL_POINTS : QLM_KNOB_DRAG_TRAVEL_POINTS);
+        }
+        else {
+            level = QLMKnobDragStep(level, [self angleAt:from], [self angleAt:to], self.minValue, self.maxValue);
+        }
         [self moveTo:level];
         from = to;
     }
@@ -234,8 +247,7 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     NSRect body = [self rectAround:knob.bodySize / 2];
     double angle = QLMKnobAngleForDecibels(_value, self.minValue, self.maxValue);
 
-    [[self still] drawInRect:self.bounds fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
-              respectFlipped:YES hints:nil];
+    QLMSkinDrawImage([self still], self.bounds);
 
     if (knob.hasArc && angle > QLM_KNOB_START_DEGREES) {
         NSColor *fill = QLMSkinNSColor(knob.arcFill);

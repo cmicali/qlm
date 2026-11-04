@@ -34,6 +34,7 @@
 // The bus the app delegate has, or nil on the adapter.
 @property (nonatomic, nullable) QLMFakeBus *debugFakeBus;
 @property (nonatomic) BOOL debugWindowShowing;
+@property (nonatomic) NSSize debugWindowSize;
 @property (nonatomic, copy, nullable) NSString *debugWindowApplyError;
 @property (nonatomic, copy, nullable) NSString *debugSkinRefusal;
 // The window's group buttons.
@@ -136,6 +137,16 @@
 - (void)debugCloseWindow {
     self.debugWindowShowing = NO;
     [self.actions addObject:@"close window"];
+}
+
+// As the window: never below the skin's size.
+- (NSString *)debugResizeWindowTo:(NSSize)size {
+    if (!self.debugWindowShowing) {
+        return @"the window is closed";
+    }
+    self.debugWindowSize = NSMakeSize(MAX(size.width, 640), MAX(size.height, 480));
+    [self.actions addObject:@"resize window"];
+    return nil;
 }
 
 // As the window's buttons: one per group, disabled by the popover picker's
@@ -389,6 +400,8 @@
         @"osd <show|hide>": @[@[@"osd"], @[@"osd", @"on"], @[@"osd", @"show", @"now"]],
         @"fake_knob <tenths>": @[@[@"fake_knob"], @[@"fake_knob", @"-40dB"], @[@"fake_knob", @"-40.5"], @[@"fake_knob", @"x"]],
         @"window <show|close>": @[@[@"window"], @[@"window", @"open"]],
+        @"window_size <width> <height>": @[@[@"window_size"], @[@"window_size", @"900"], @[@"window_size", @"wide", @"640"],
+                                           @[@"window_size", @"900", @"inf"], @[@"window_size", @"900", @"640", @"now"]],
         @"group <name>": @[@[@"group"], @[@"group", @"Main", @"now"]],
         @"knob <dB>": @[@[@"knob"], @[@"knob", @"loud"], @[@"knob", @"nan"], @[@"knob", @"-40", @"-41"]],
         @"skin <name>": @[@[@"skin"], @[@"skin", @"modern", @"now"]],
@@ -775,6 +788,19 @@
     XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"windowShowing"], @YES);
     XCTAssertEqualObjects(([self runOK:@[@"window", @"close"]][@"windowShowing"]), @NO);
     XCTAssertEqualObjects(_app.actions, (@[@"show window", @"close window"]));
+}
+
+// The window's size, kept at least the skin's, and refused while it's closed.
+- (void)testWindowSizeResizesTheWindow {
+    XCTAssertEqualObjects(([self errorOf:@[@"window_size", @"900", @"640"]]), @"the window is closed");
+    [self runOK:@[@"window", @"show"]];
+    NSDictionary *reply = [self runOK:@[@"window_size", @"900", @"640"]];
+    XCTAssertEqualObjects(reply[@"width"], @900);
+    XCTAssertEqualObjects(reply[@"height"], @640);
+    reply = [self runOK:@[@"window_size", @"300", @"200"]];
+    XCTAssertEqualObjects(reply[@"width"], @640);
+    XCTAssertEqualObjects(reply[@"height"], @480);
+    XCTAssertEqualObjects(_app.actions, (@[@"show window", @"resize window", @"resize window"]));
 }
 
 - (void)testDumpStateCarriesTheWindowsApplyError {

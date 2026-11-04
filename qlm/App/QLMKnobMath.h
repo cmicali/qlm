@@ -89,6 +89,24 @@ static inline double QLMKnobDragStep(double level, double fromDegrees, double to
     return QLMKnobClamp(level + moved, minimum, maximum);
 }
 
+// A vertical drag's travel over the whole range, in points. Shift's finer
+// drag takes four times as far.
+#define QLM_KNOB_DRAG_TRAVEL_POINTS 200.0
+#define QLM_KNOB_FINE_DRAG_TRAVEL_POINTS 800.0
+
+// One step of a vertical drag, `dy` points down since the last event: up is
+// louder. Each step moves at most what the angular drag's cap turns, so a
+// leap of the mouse in one event can't jump the level. `level` is
+// unsnapped, so a slow drag adds up.
+static inline double QLMKnobDragVertical(double level, double dy, double minimum, double maximum, double travel) {
+    if (!(maximum > minimum) || !(travel > 0) || !isfinite(dy)) {
+        return level;
+    }
+    double cap = QLM_KNOB_MAX_STEP_DEGREES / QLM_KNOB_SWEEP_DEGREES * (maximum - minimum);
+    double moved = QLMKnobClamp(-dy / travel * (maximum - minimum), -cap, cap);
+    return QLMKnobClamp(level + moved, minimum, maximum);
+}
+
 // A point at `radius` from (cx, cy) along `degrees`, y down.
 static inline void QLMKnobPointAt(double cx, double cy, double radius, double degrees, double *x, double *y) {
     double radians = degrees * M_PI / 180.0;

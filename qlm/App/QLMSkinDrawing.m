@@ -131,9 +131,33 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
         QLMSkinDrawBlock(draw, rect, circle);
         return;
     }
-    NSImage *image = QLMSkinStretchedImage(skin, [style imageNameForState:state], style.capInsets);
+    QLMSkinDrawImage(QLMSkinStretchedImage(skin, [style imageNameForState:state], style.capInsets), rect);
+}
+
+// TRAP: an image with cap insets ignores respectFlipped whenever it draws at
+// any size but its own, so in a flipped view it stretches upside down. Its
+// nine parts draw right side up only in a context that isn't flipped.
+void QLMSkinDrawImage(NSImage *image, NSRect rect) {
+    if (image == nil || rect.size.width <= 0 || rect.size.height <= 0) {
+        return;
+    }
+    NSGraphicsContext *context = NSGraphicsContext.currentContext;
+    if (!context.flipped) {
+        [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
+           respectFlipped:YES hints:nil];
+        return;
+    }
+    CGContextRef cg = context.CGContext;
+    CGContextSaveGState(cg);
+    // Maps the rect onto itself, upside down.
+    CGContextTranslateCTM(cg, 0, NSMinY(rect) + NSMaxY(rect));
+    CGContextScaleCTM(cg, 1, -1);
+    [NSGraphicsContext saveGraphicsState];
+    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:cg flipped:NO];
     [image drawInRect:rect fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
        respectFlipped:YES hints:nil];
+    [NSGraphicsContext restoreGraphicsState];
+    CGContextRestoreGState(cg);
 }
 
 
@@ -282,6 +306,26 @@ void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
     NSFont *font = [text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
     CGFloat line = ceil(font.ascender - font.descender);
     NSRect box = NSMakeRect(frame.origin.x, frame.origin.y + (frame.size.height - line) / 2, frame.size.width, line);
+    [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
+}
+
+// The caps' middle on the frame's: a label with no descenders, as most are,
+// looks centered only so. The line's box puts it a little high or low,
+// with the font's leading and descent.
+void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame) {
+    if (text.length == 0) {
+        return;
+    }
+    static NSLayoutManager *layout;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        layout = [[NSLayoutManager alloc] init];
+    });
+    NSFont *font = [text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
+    // TRAP: the line's baseline sits below its top by more than the ascender.
+    CGFloat offset = [layout defaultBaselineOffsetForFont:font];
+    CGFloat baseline = NSMidY(frame) + font.capHeight / 2;
+    NSRect box = NSMakeRect(frame.origin.x, baseline - offset, frame.size.width, [layout defaultLineHeightForFont:font]);
     [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
 }
 

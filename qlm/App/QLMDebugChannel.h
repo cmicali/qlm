@@ -67,6 +67,8 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly, copy, nullable) NSString *debugWindowApplyError;
 - (double)debugTurnKnobTo:(double)decibels;
 @property (nonatomic, readonly, copy) NSString *debugWindowSkinName;
+- (nullable NSString *)debugResizeWindowTo:(NSSize)size;
+@property (nonatomic, readonly) NSSize debugWindowSize;
 - (nullable NSString *)debugChooseSkin:(NSString *)name;
 // Why the saved skin does not load.
 @property (nonatomic, readonly, copy, nullable) NSString *debugSkinRefusal;

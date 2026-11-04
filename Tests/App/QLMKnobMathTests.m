@@ -140,4 +140,49 @@
     XCTAssertEqualWithAccuracy(QLMKnobDragStep(-40, -100, -135, -80, 0), -40 - 35.0 / 270 * 80, 1e-9);
 }
 
+// A vertical drag: up is louder, and 200 points is the whole range, 50 dB
+// here. The press moves nothing.
+- (void)testAVerticalDrag {
+    XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-70, -20, -80, -30, 200), -65, 1e-9);
+    XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-70, 20, -80, -30, 200), -75, 1e-9);
+    XCTAssertEqual(QLMKnobDragVertical(-70, 0, -80, -30, 200), -70);
+    // Sideways moves nothing, and Shift's travel is four times as far.
+    XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-70, -20, -80, -30, 800), -68.75, 1e-9);
+    // No step, no range, or no travel keeps the level.
+    XCTAssertEqual(QLMKnobDragVertical(-70, NAN, -80, -30, 200), -70);
+    XCTAssertEqual(QLMKnobDragVertical(-30, -20, -30, -30, 200), -30);
+    XCTAssertEqual(QLMKnobDragVertical(-70, -20, -80, -30, 0), -70);
+}
+
+// The ends hold: no drag goes past the ceiling, or below the range.
+- (void)testAVerticalDragClamps {
+    XCTAssertEqual(QLMKnobDragVertical(-32, -30, -80, -30, 200), -30);
+    XCTAssertEqual(QLMKnobDragVertical(-78, 30, -80, -30, 200), -80);
+    XCTAssertEqual(QLMKnobSnap(QLMKnobDragVertical(-31, -30, -80, -30.2, 200), -80, -30.2), -30.5);
+}
+
+// A leap of the mouse in one event moves at most the angular cap's share,
+// 45 of 270 degrees, about 33 points of the travel.
+- (void)testAVerticalLeapIsCapped {
+    double cap = 45.0 / 270 * 80;
+    XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-60, -500, -80, 0, 200), -60 + cap, 1e-9);
+    XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-20, 500, -80, 0, 200), -20 - cap, 1e-9);
+    XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-60, -200.0 / 6, -80, 0, 200), -60 + cap, 1e-9);
+    XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-60, -500, -80, 0, 800), -60 + cap, 1e-9);
+}
+
+// A slow vertical drag adds up, unsnapped, before a step goes out.
+- (void)testASlowVerticalDragAddsUp {
+    // 0.2 points is 0.05 dB.
+    double level = -70;
+    for (int i = 0; i < 10; i++) {
+        level = QLMKnobDragVertical(level, -0.2, -80, -30, 200);
+        if (i == 2) {
+            XCTAssertEqual(QLMKnobSnap(level, -80, -30), -70);
+        }
+    }
+    XCTAssertEqualWithAccuracy(level, -69.5, 1e-9);
+    XCTAssertEqual(QLMKnobSnap(level, -80, -30), -69.5);
+}
+
 @end
