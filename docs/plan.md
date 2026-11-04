@@ -1,12 +1,12 @@
 # qlm: the plan
 
-**Status, 2026-10-31.** Phases 0 and 1 are done. Phase 2's controls have run on all six monitors, with every frame matching GLM's, and the app has run on all six too. The group apply has run only on the fake bus. Next we capture GLM applying setups with varied settings, until qlm's apply matches GLM's byte for byte. Then comes the week of daily use.
+**Status, 2026-11-04.** Phases 0 and 1 are done. Phase 2's controls have run on all six monitors, with every frame matching GLM's, and the app has run on all six too. The group apply has run only on the fake bus. The UI pass is built: a skinnable, resizable main window, an on-screen display for the knob, and three skins, all run on the fake bus only ([ui.md](ui.md)). Next we capture GLM applying setups with varied settings, until qlm's apply matches GLM's byte for byte. Then comes the week of daily use, which is also the window's first run on the monitors.
 
 ## Where things stand
 
 This section is a snapshot of main: what has run on the real adapter, what each layer holds, what we decided and learned on the way, and what comes next. [protocol.md](protocol.md) holds the protocol itself, with a source for every fact, so this section links to it rather than restate it.
 
-Main passes 489 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
+Main passes 606 tests. Every protocol fact in them names its source: a capture in this repo, or a section of hlm's spec.
 
 ### What has run where
 
@@ -21,6 +21,7 @@ Main passes 489 tests. Every protocol fact in them names its source: a capture i
 | The hand-back at a stop | All six, through the app, both ways. Both of `qlmctl`'s control runs were built before #32, so `qlmctl` hasn't run it. | `qlm-app-first` |
 | The fixes since the app's run: System's, GLMAdapter's, and the app's | The fake bus | #49, #52, #53, #71, #73, #74 |
 | The debug channel | The fake bus | #50, #51 |
+| The UI pass: the main window, the OSD, and the three skins | The fake bus, through the debug channel | #75 to #82 |
 | The group apply | Its dry run, and the fake bus. `qlmctl apply-group` can send it over USB behind `--unverified-rate`, but it hasn't. | #32 |
 | Phase 3's measurement | Not yet. It's an optional final check now. | [measurement.md](measurement.md) |
 
@@ -63,6 +64,7 @@ Each layer has grown since the first control run. Here's what each holds now, wi
   - A logout, restart, or shutdown no longer waits on the louder hand-back's alert, which hung a Mac left to restart overnight. Where the user's quit asks, it mutes every monitor first, so the take-over can't make them louder. The record keeps mute all, so the next launch restates the mutes (#70).
   - Its notifications play no sound, since the Mac's sound likely plays through the monitors. Each fires once until its cause clears: a dropped monitor back and on, or a hot one cooled. A sleep while dimmed, whose take-over is louder every time, alerts at most once a day. The alerts' rules have tests now (#70).
   - The Mac's sleep mutes every monitor where the take-over may be louder, as a logout does, and the wake lifts the mute once qlm's level is out. It alerts only where the mute can't go out. Where the bus takes no frames, it alerts too, and the record still keeps mute all. It keeps the knob's last reading per bus, and a fresh fake bus starts its knob there. A launch or a wake starts at the app's level, or at the knob's when the knob was turned since the last run and sits lower. A knob left at the bottom changes nothing (#73).
+  - It has a main window, in a skin. The window shows the setup file's groups as buttons, the level in a display with the output and the ceiling, mute and dim, a knob, and the footer's Monitors and Standby. It opens from the popover, the Window menu, or at launch by a setting, and resizes from the skin's reference size up. Every control goes through System as the popover's does, and the knob moves only by a drag, never by a click, so a click can't jump the level ([ui.md](ui.md), #77, #79). An on-screen display shows the level when the adapter's knob turns, and only then, since the snapshot says when the knob set the level (#76), in one of six places for a settable time (#80). A skin is a folder of images and one `skin.json`; modern draws itself, and vintage and retro use the asset pack's sixteen images, with the geometry drawn (#78, #81). Settings picks the skin, and lists the user's own skins from `~/Library/Application Support/qlm/Skins` (#82). The debug channel drives all of it: `window`, `group`, `knob`, `skin`, `osd`, `fake_knob`, and the skin previews.
 
 ### The captures, the kits, and the docs
 
@@ -105,7 +107,7 @@ What's left, in the order we'll do it. Most of it needs the monitors and the use
    - Done: qlm builds `43` and `4B` from the 8351B's two fields, so its apply matches GLM's byte for byte on every captured apply, but for the generator stop and GLM's races. Every field held 2 and 1 in every capture, so the mapping is still a guess (#68).
    - Open: Parts C to I. Part G, the 8351B's own fields, needs the file-edit route or a recalibration, since GLM 5.2.1 shows no control for either field outside the group definition. It's what would test the guess.
 2. Lifting the 8351B's refusal. qlm's apply now matches GLM's byte for byte on every captured apply. The refusal still stands, pending the owner's call and Part G. Then the app can apply the active group at a wake, as GLM does, and switch groups. Today a wake leaves the monitors on their stored settings, until GLM applies the group (#53). The REW measurement in [measurement.md](measurement.md) becomes an optional final check, not the gate.
-3. The week of daily use without GLM, Phase 4's Done when. `make install` installs the app (#46). The fixes from its first run (#52, #53), and System's (#49), have run only on the fake bus, so the week is their first test on the monitors. The debug channel can check them one step at a time first, following `.claude/skills/app-hardware-run`.
+3. The week of daily use without GLM, Phase 4's Done when. `make install` installs the app (#46). The fixes from its first run (#52, #53), System's (#49), and the whole UI pass (#75 to #82) have run only on the fake bus, so the week is their first test on the monitors. The debug channel can check them one step at a time first, following `.claude/skills/app-hardware-run`.
 4. The experiments session. [experiments.md](experiments.md) is the script, and it settles the [open questions in protocol.md](protocol.md#open-questions) that a person at the desk can, such as what level the adapter applies with no knob in. Its Part A also hears `qlmctl`'s own hand-back, which neither control run had. Part B uses `qlmctl volume --adapter-poll` (#57).
 5. The analog routing frame, still marked unverified in code. No group in the user's setup uses input 4, so no capture shows it. Part G of the experiments captures GLM switching to a copy of the setup with an analog group.
 6. A bump of usb-proxy's pin in `tools/pi/setup.sh`, dropping `tools/pi/usb-proxy.patch`, once upstream [AristoChen/usb-proxy#37](https://github.com/AristoChen/usb-proxy/pull/37) merges. That PR carries the patch's three fixes, and it's still open.
@@ -383,7 +385,7 @@ Each item is built, and the app has run once on the real adapter, on all six mon
 
 | Item | Where it stands |
 | --- | --- |
-| The menu bar item and the window | Built: the popover, the monitors window, and a panel that plays the fake bus |
+| The menu bar item and the window | Built: the popover, the monitors window, a panel that plays the fake bus, and since the UI pass a skinnable main window and an on-screen display ([ui.md](ui.md)) |
 | Settings, and detection of a running GLM | Built. A setting, off by default, drives the real adapter, and Settings explains the hand-back. When GLM holds the adapter, the banner offers to quit it (#28). Turning the setting off asks first when the take-over may be louder (#52). |
 | Sleep, wake, and hot plug | Built. System stops at sleep and starts again at wake, and the HID adapter follows hot plug (#28). |
 | Notifications | Built: when a monitor drops off, or reaches 70 °C, at most one of each kind every 10 minutes per monitor (#28) |
