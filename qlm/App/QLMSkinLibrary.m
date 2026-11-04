@@ -7,6 +7,10 @@ NSString *const QLMSkinDefaultName = @"modern";
     NSURL *_user;
 }
 
+- (NSURL *)userDirectory {
+    return _user;
+}
+
 + (instancetype)standardLibrary {
     NSURL *builtIn = [NSBundle.mainBundle.resourceURL URLByAppendingPathComponent:@"Skins" isDirectory:YES];
     NSURL *support = [NSFileManager.defaultManager URLsForDirectory:NSApplicationSupportDirectory
@@ -81,3 +85,12 @@ static NSArray<NSString *> *QLMSkinNamesIn(NSURL *_Nullable directory) {
 }
 
 @end
+
+NSString *QLMSkinNote(NSString *refusal, NSString *shownName, NSURL *userDirectory) {
+    if (refusal != nil) {
+        return [NSString stringWithFormat:@"%@ %@ shows instead.", refusal, shownName];
+    }
+    NSString *folder = userDirectory.path.stringByAbbreviatingWithTildeInPath ?: @"qlm's skins folder";
+    return [NSString stringWithFormat:@"A skin is a folder with skin.json and png/ in %@. "
+                                      @"qlm/App/Skins/README.md gives the format.", folder];
+}

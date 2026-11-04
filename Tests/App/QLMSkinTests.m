@@ -584,4 +584,29 @@
     XCTAssertEqualObjects(refusal, @"There is no skin named ../app/modern.");
 }
 
+// Only Settings' Show in Finder makes the user's folder.
+- (void)testTheLibraryMakesNoFolder {
+    NSURL *builtIn = [_work URLByAppendingPathComponent:@"app"];
+    NSURL *user = [_work URLByAppendingPathComponent:@"user"];
+    NSFileManager *files = NSFileManager.defaultManager;
+    [files createDirectoryAtURL:builtIn withIntermediateDirectories:YES attributes:nil error:NULL];
+    XCTAssertTrue([files copyItemAtURL:QLMModernSkinURL() toURL:[builtIn URLByAppendingPathComponent:@"modern"] error:NULL]);
+
+    QLMSkinLibrary *library = [[QLMSkinLibrary alloc] initWithBuiltIn:builtIn user:user];
+    XCTAssertEqualObjects([library skinNames], @[@"modern"]);
+    NSString *refusal = nil;
+    XCTAssertEqualObjects([library loadSkinNamed:@"fixture" refusal:&refusal].name, @"modern");
+    XCTAssertEqualObjects(library.userDirectory, user);
+    XCTAssertFalse([files fileExistsAtPath:user.path]);
+}
+
+- (void)testSettingsNoteSaysWhyOrWhereSkinsGo {
+    XCTAssertEqualObjects(QLMSkinNote(@"The skin broken is refused. skin.json is not an object.", @"modern", nil),
+                          @"The skin broken is refused. skin.json is not an object. modern shows instead.");
+    NSURL *user = [NSURL fileURLWithPath:[NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/qlm/Skins"]];
+    XCTAssertEqualObjects(QLMSkinNote(nil, @"retro", user),
+                          @"A skin is a folder with skin.json and png/ in ~/Library/Application Support/qlm/Skins. "
+                          @"qlm/App/Skins/README.md gives the format.");
+}
+
 @end
