@@ -26,7 +26,7 @@ Two things from the mockups go. The word `LEVEL` leaves the display's top right,
 
 The display's three numbers mean three different things. The large one is the level the user set, undimmed. `OUTPUT` is what goes out now: the level after dim, or `MUTED` while mute all is on. `MAX` is the ceiling. While the level waits for the knob's first reading, after a start or a gap, the large number shows an em dash.
 
-**The listening setup buttons.** "Setup" here is what the plan calls a group: one group of the loaded `.sam` file. The buttons show up to six groups, in two rows of three, in the file's order. A file with more than six shows the first six, and Settings says so. A file with none, or no file, hides the row and shows the file's name or its error in its place. A click applies the group. While an apply runs, every button is disabled, and the chosen one blinks, in the skin's own way. The same rule as the popover's picker disables them: no System, no monitors tracked, or an apply in flight. **The refusal stands.** A group with a model whose filter design rate is unverified refuses as it does today, and the error shows under the buttons, in the display's bottom line, until the next click.
+**The listening setup buttons.** "Setup" here is what the plan calls a group: one group of the loaded `.sam` file. The buttons show as many groups as the skin's grid holds, in the file's order: modern six, in two rows of three, and vintage and retro four, in one row. A file with more shows the first ones, and Settings says so. A file with none, or no file, hides the row and shows the file's name or its error in its place. A click applies the group. While an apply runs, every button is disabled, and the chosen one blinks, in the skin's own way. The same rule as the popover's picker disables them: no System, no monitors tracked, or an apply in flight. **The refusal stands.** A group with a model whose filter design rate is unverified refuses as it does today, and the error shows under the buttons, in the display's bottom line, until the next click.
 
 **The knob.** A drag turns it, as a real knob turns: the pointer follows the angle from the knob's center to the mouse. A scroll wheel over it moves one step per tick. The arrow keys move one step while the window is key. Every move snaps to GLM's 0.5 dB steps and goes to System at once, which coalesces to one frame per 50 ms. The knob never goes above the ceiling, since its top is the ceiling. Like the popover's slider, it ignores snapshots for half a second after a move, so a stale snapshot can't pull it back mid-drag. Its sweep is 270°, from 225° to −45°, the convention every mockup draws.
 
@@ -94,7 +94,7 @@ What a skin supplies as images, at 1x and 2x, or as a `draw` block where it has 
 | `knobBody` | The body alone, with its highlight and no pointer | 4: normal, hover, pressed, disabled |
 | `osd` | The empty housing and glass | 1 |
 
-That's sixteen images for retro, whose every surface is a photoreal material, and the same sixteen for vintage, since its gradients and bevels are easier to keep exact as the pack's rendered SVGs than to rebuild in code. Modern supplies none: each element's `draw` gives a fill, a border, a radius, and, for a button, the selected border's color. The reader takes an image or a `draw` for each element, never both, so one code path serves all three skins. The pack's other fourteen assets stay in each skin's `masters/` as the record of what the drawing should look like, and the bundle leaves them out.
+That's sixteen images for retro, whose every surface is a photoreal material, and the same sixteen for vintage, since its gradients and bevels are easier to keep exact as the pack's rendered SVGs than to rebuild in code. Modern supplies none: each element's `draw` gives a fill, a border, a radius, and, for a button, the selected border's color. The reader takes an image or a `draw` for each element, never both, so one code path serves all three skins. The pack's other fourteen assets stay in each skin's `masters/`, and their PNGs in its `png/`, as the record of what the drawing should look like. The bundle leaves them out.
 
 The split pays twice. Retro's larger knob needs one re-export, its body, since the ring, pointer, and shadow draw at whatever size the layout gives. And a user's skin needs sixteen pictures and a palette, not thirty cutouts.
 
@@ -110,7 +110,7 @@ So a qlm skin is one self-contained directory:
 
 1. **The sizes and the palette.** The window's and the OSD's sizes in points, with the origin at the top left, and the colors the drawn geometry and the text use.
 2. **The elements.** Each with its frame at the reference size, its anchors and whether it stretches, and an image name or a `draw` block. The images' cap insets sit with the element, so a user's skin edits nothing outside its directory. The pack's `asset_catalog_name` goes, with the asset catalog.
-3. **A grid for the groups, not three buttons.** The pack places three setup buttons by role. The skin gives one `groups` element: a frame, the columns and rows, and the gap. The app lays up to six buttons in it, in the file's order, and leaves the rest of the grid empty. A skin that wants two rows of three says so there.
+3. **A grid for the groups, not three buttons.** The pack places three setup buttons by role. The skin gives one `groups` element: a frame, the columns and rows, and the gap. The app lays as many buttons in it as it has cells, up to six, in the file's order, and leaves the rest of the grid empty. A file with more groups shows the first ones. Modern's grid is two rows of three. Vintage's and retro's is one row of four, since their setup box has room for one row of 40-point buttons.
 4. **The knob's metrics.** Its frame, the ticks, the pointer, the shadow, and the sweep, −135° to +135° clockwise from straight up, as the pack has it. Only the pointer rotates. The body's highlight stays where the light is.
 5. **Text slots, not sample text.** The pack's layout lists sample strings at sample frames, `LEVEL` and `MAIN · ACTIVE` among them. The skin instead names each slot the app fills, with its frame, font, size, weight, alignment, and color: `online`, `groupsTitle`, the display's `caption`, `level`, `unit`, `output`, and `max`, the knob's `min`, `max`, and `caption`, the footer's `monitors` and `power`, and the OSD's `level`, `unit`, `title`, and `subtitle`. The strings are the app's. A skin can't put words on the panel, and the app can't put text where the skin left no slot. Fonts name a face the Mac has, and a face it lacks falls back to the system font, or the system monospaced font for a slot marked `mono`. The display's digits are monospaced in every skin.
 
@@ -139,13 +139,14 @@ The OSD is a bezel, not a window, and stays at its size.
 
 ### What the assets don't settle yet
 
-The pack delivers both skins at the reference sizes, and three things go past them:
+The pack delivers both skins at the reference sizes, and four things go past them:
 
-- **Retro's knob should be larger.** Both skins' knob bodies are 144 points. The retro body comes from a 1254 pixel component master, so it can be re-exported at about 200 points. The ring, pointer, and shadow draw at any size, and the layout reflows around the knob's frame.
+- **Retro's knob should be larger.** The pack draws both skins' knob bodies on 144 point canvases. The retro body comes from a 1254 pixel component master, so it can be re-exported at about 200 points. The ring, pointer, and shadow draw at any size, and the layout reflows around the knob's frame.
 - **Retro's display glass must stretch.** See [Resizing](#resizing).
+- **The shipped knob bodies are cropped.** Each body's `png/` images are cut from the pack's 144 point canvas to the body itself, 98 points for vintage and 112 for retro, so `body.size` is the knob's diameter and the shadow, the focus ring, and the drag follow it. The masters keep the canvas. A re-export from them must crop again, or `tools/build_assets.py` learns to.
 - **The OSD should be larger than 300 by 72.** The plan wants about 480 by 150 points, so it reads from across the room. Vintage's housing is vector and re-renders at that size. Retro's was normalized from a 556 by 172 pixel crop, so at that size it needs a fresh render from its master, not a scale-up.
 
-Both are asset work with `tools/build_assets.py`, after the engine lands. The engine takes any size the layout gives.
+Each is asset work with `tools/build_assets.py`, after the engine lands. The engine takes any size the layout gives.
 
 ### What draws it
 
@@ -193,7 +194,7 @@ These are the owner's calls. Each has a default the work takes until it's made.
 
 | Question | Default |
 | --- | --- |
-| More than six groups: show six, or scroll, or a popup for the rest? | Show six, and say so in Settings |
+| More groups than the skin's grid holds: show the first ones, or scroll, or a popup for the rest? | Show the first ones, and say so in Settings |
 | Should the OSD also show on the window's knob, or on `qlmctl volume`? | No. The adapter's knob only. |
 | Should the OSD say `MUTED` or `DIM` when the knob turns under them? | Yes, in the subtitle's place, since the number alone would mislead |
 | Does the window open at launch by default? | No. The menu bar item is still the app. |

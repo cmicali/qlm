@@ -53,7 +53,9 @@ NSString *QLMRepositoryPath(NSString *relative);
 // A file in Tests/Setups/Fixtures/.
 NSString *QLMFixturePath(NSString *name);
 
-// The shipped modern skin, and the image fixture in Tests/App/Fixtures/.
+// The shipped skins' directory, the modern skin in it, and the image
+// fixture in Tests/App/Fixtures/.
+NSURL *QLMBuiltInSkinsURL(void);
 NSURL *QLMModernSkinURL(void);
 NSURL *QLMFixtureSkinURL(void);
 

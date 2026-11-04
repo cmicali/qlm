@@ -223,10 +223,13 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // A look at a skin, with the mockups' sample text, for
         // dump_screenshot. It drives nothing.
         QLMDebugVerb(@"skin_preview <name>", QLM_HANDLER {
-            return [app debugShowSkinPreview:tokens[1] osd:NO];
+            return [app debugShowSkinPreview:tokens[1] osd:NO disabled:NO];
+        }),
+        QLMDebugVerb(@"skin_preview_disabled <name>", QLM_HANDLER {
+            return [app debugShowSkinPreview:tokens[1] osd:NO disabled:YES];
         }),
         QLMDebugVerb(@"skin_preview_osd <name>", QLM_HANDLER {
-            return [app debugShowSkinPreview:tokens[1] osd:YES];
+            return [app debugShowSkinPreview:tokens[1] osd:YES disabled:NO];
         }),
         QLMDebugVerb(@"window <show|close>", QLM_HANDLER {
             if ([tokens[1] isEqualToString:@"show"]) {

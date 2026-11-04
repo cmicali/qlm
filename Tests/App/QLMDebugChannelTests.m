@@ -88,8 +88,9 @@
     return YES;
 }
 
-- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd {
-    [self.actions addObject:[NSString stringWithFormat:@"%@ preview %@", osd ? @"osd" : @"skin", name]];
+- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd disabled:(BOOL)disabled {
+    NSString *kind = osd ? @"osd" : disabled ? @"disabled skin" : @"skin";
+    [self.actions addObject:[NSString stringWithFormat:@"%@ preview %@", kind, name]];
     return @{@"ok": @YES, @"skin": name};
 }
 
@@ -352,6 +353,7 @@
         @"quit_glm": @[@[@"quit_glm", @"now"]],
         @"quit_answering <cancel|anyway>": @[@[@"quit_answering"], @[@"quit_answering", @"yes"]],
         @"skin_preview <name>": @[@[@"skin_preview"], @[@"skin_preview", @"modern", @"big"]],
+        @"skin_preview_disabled <name>": @[@[@"skin_preview_disabled"]],
         @"skin_preview_osd <name>": @[@[@"skin_preview_osd"]],
         @"window <show|close>": @[@[@"window"], @[@"window", @"open"]],
         @"group <name>": @[@[@"group"], @[@"group", @"Main", @"now"]],
@@ -486,8 +488,10 @@
     NSUInteger mark = _bus.sentMessages.count;
     NSDictionary *reply = [self runOK:@[@"skin_preview", @"modern"]];
     XCTAssertEqualObjects(reply[@"skin"], @"modern");
+    [self runOK:@[@"skin_preview_disabled", @"modern"]];
     [self runOK:@[@"skin_preview_osd", @"modern"]];
-    XCTAssertEqualObjects(_app.actions, (@[@"skin preview modern", @"osd preview modern"]));
+    XCTAssertEqualObjects(_app.actions,
+                          (@[@"skin preview modern", @"disabled skin preview modern", @"osd preview modern"]));
     [self assertNothingSentSince:mark];
 }
 

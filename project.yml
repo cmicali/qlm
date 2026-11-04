@@ -111,15 +111,72 @@ targets:
           - "Skins/**"                      # the skins and the pack's record; copied below
       # Each skin ships its skin.json and png/ alone, in Resources/Skins/<name>/.
       # The pack's masters, sources, tools, previews, and layouts ship in
-      # nothing. A skin with images adds its png/ the same way, with
-      # `type: folder`, which keeps the directory. TRAP: a plain resources
-      # phase flattens every file into Resources/, where two skins' images
-      # of one name collide.
+      # nothing. Each file goes by a copy phase into its skin's subpath,
+      # which keeps the directory. TRAP: a plain resources phase flattens
+      # every file into Resources/, where two skins' images of one name
+      # collide.
       - path: qlm/App/Skins/modern/skin.json
         buildPhase:
           copyFiles:
             destination: resources
             subpath: Skins/modern
+      - path: qlm/App/Skins/vintage/skin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/vintage
+      - path: qlm/App/Skins/retro/skin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/retro
+      # Only the sixteen images a skin names, by name, so a re-export that
+      # adds a file ships nothing new. The pack's png/ also holds its drawn
+      # parts, which qlm draws from the skin's colors instead.
+      - path: qlm/App/Skins/vintage/png
+        includes: &QLMSkinImages
+          - "panel-background.png"
+          - "panel-background@2x.png"
+          - "nameplate.png"
+          - "nameplate@2x.png"
+          - "display-glass.png"
+          - "display-glass@2x.png"
+          - "osd-background.png"
+          - "osd-background@2x.png"
+          - "button-normal.png"
+          - "button-normal@2x.png"
+          - "button-hover.png"
+          - "button-hover@2x.png"
+          - "button-pressed.png"
+          - "button-pressed@2x.png"
+          - "button-disabled.png"
+          - "button-disabled@2x.png"
+          - "button-selected.png"
+          - "button-selected@2x.png"
+          - "button-selected-hover.png"
+          - "button-selected-hover@2x.png"
+          - "button-selected-pressed.png"
+          - "button-selected-pressed@2x.png"
+          - "button-selected-disabled.png"
+          - "button-selected-disabled@2x.png"
+          - "knob-body-normal.png"
+          - "knob-body-normal@2x.png"
+          - "knob-body-hover.png"
+          - "knob-body-hover@2x.png"
+          - "knob-body-pressed.png"
+          - "knob-body-pressed@2x.png"
+          - "knob-body-disabled.png"
+          - "knob-body-disabled@2x.png"
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/vintage/png
+      - path: qlm/App/Skins/retro/png
+        includes: *QLMSkinImages
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/retro/png
     info:
       path: qlm/App/Info.plist
       properties:

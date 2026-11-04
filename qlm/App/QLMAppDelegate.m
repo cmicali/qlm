@@ -537,10 +537,10 @@ static OSType QLMQuitReason(void) {
     return [self stopMayRaiseLevel:[self snapshotNow]];
 }
 
-- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd {
+- (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd disabled:(BOOL)disabled {
     [self.popover close];
     [self activateApp];
-    return QLMShowSkinPreview(name, osd);
+    return QLMShowSkinPreview(name, osd, disabled);
 }
 
 - (BOOL)debugWindowShowing {

@@ -126,6 +126,56 @@
     XCTAssertLessThan(knob.pointerOuter, knob.bodySize / 2);
 }
 
+#pragma mark - The built-in skins
+
+// Each skin the app ships loads with no refusal. The reader checks that each
+// image it names is there at 1x and 2x, so loading is the test.
+- (void)testEveryBuiltInSkinLoads {
+    QLMSkinLibrary *library = [[QLMSkinLibrary alloc] initWithBuiltIn:QLMBuiltInSkinsURL() user:nil];
+    NSArray<NSString *> *names = [library skinNames];
+    XCTAssertEqualObjects(names, (@[@"modern", @"retro", @"vintage"]));
+    for (NSString *name in names) {
+        NSString *refusal = nil;
+        QLMSkin *skin = [library loadSkinNamed:name refusal:&refusal];
+        XCTAssertNil(refusal, @"%@", refusal);
+        XCTAssertEqualObjects(skin.name, name);
+    }
+}
+
+// Vintage and retro draw from the pack's sixteen images, and every other
+// part from colors and metrics. The repository's png/ holds the pack's
+// thirty, and the app ships the sixteen, so a skin that named a drawn part
+// would load here and be refused in the app.
+- (void)testVintageAndRetroUseTheSixteenImages {
+    NSSet<NSString *> *sixteen = [NSSet setWithArray:@[
+        @"panel-background", @"nameplate", @"display-glass", @"osd-background",
+        @"button-normal", @"button-hover", @"button-pressed", @"button-disabled",
+        @"button-selected", @"button-selected-hover", @"button-selected-pressed", @"button-selected-disabled",
+        @"knob-body-normal", @"knob-body-hover", @"knob-body-pressed", @"knob-body-disabled",
+    ]];
+    NSURL *skins = QLMBuiltInSkinsURL();
+    for (NSString *name in @[@"vintage", @"retro"]) {
+        NSError *error = nil;
+        QLMSkin *skin = [QLMSkin skinAtURL:[skins URLByAppendingPathComponent:name isDirectory:YES] error:&error];
+        XCTAssertNotNil(skin, @"%@", error.localizedDescription);
+        NSMutableSet<NSString *> *used = [NSMutableSet set];
+        for (QLMSkinStyle *style in @[[skin element:@"panel"].style, [skin element:@"nameplate"].style,
+                                      [skin element:@"display"].style, skin.osd.style]) {
+            [used addObject:[style imageNameForState:QLMSkinStateNormal]];
+        }
+        for (NSInteger state = QLMSkinStateNormal; state <= QLMSkinStateSelectedDisabled; state++) {
+            [used addObject:[skin.button.style imageNameForState:(QLMSkinState)state]];
+        }
+        for (NSInteger state = QLMSkinStateNormal; state <= QLMSkinStateDisabled; state++) {
+            [used addObject:[skin.knob.body imageNameForState:(QLMSkinState)state]];
+        }
+        XCTAssertEqualObjects(used, sixteen, @"%@", name);
+        XCTAssertEqual(skin.knob.tickCount, 11);
+        XCTAssertEqual(skin.markings.boxes.count, 2u);
+        XCTAssertNotNil([skin element:@"groups"].text[@"message"]);
+    }
+}
+
 #pragma mark - The image fixture
 
 - (void)testTheFixtureLoadsWithEveryImage {

@@ -66,8 +66,12 @@ NSString *QLMFixturePath(NSString *name) {
     return QLMRepositoryPath([@"Tests/Setups/Fixtures" stringByAppendingPathComponent:name]);
 }
 
+NSURL *QLMBuiltInSkinsURL(void) {
+    return [NSURL fileURLWithPath:QLMRepositoryPath(@"qlm/App/Skins") isDirectory:YES];
+}
+
 NSURL *QLMModernSkinURL(void) {
-    return [NSURL fileURLWithPath:QLMRepositoryPath(@"qlm/App/Skins/modern") isDirectory:YES];
+    return [QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"modern" isDirectory:YES];
 }
 
 NSURL *QLMFixtureSkinURL(void) {
