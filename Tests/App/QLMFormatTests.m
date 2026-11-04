@@ -145,6 +145,24 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
     XCTAssertNil(QLMHandBackLine(nil));
 }
 
+#pragma mark - A level
+
+// The main window's display takes the number and the unit as two slots.
+- (void)testALevelReadsWithATrueMinusSign {
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-40, 1), @"−40.0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-20.5, 1), @"−20.5");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-20, 0), @"−20");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(3, 1), @"3.0");
+    XCTAssertEqualObjects(QLMDecibelsText(-40), @"−40.0\u00A0dB");
+}
+
+- (void)testALevelThatRoundsToZeroHasNoMinus {
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.0, 1), @"0.0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.04, 1), @"0.0");
+    XCTAssertEqualObjects(QLMDecibelsNumberText(-0.4, 0), @"0");
+    XCTAssertEqualObjects(QLMDecibelsText(-0.0), @"0.0\u00A0dB");
+}
+
 #pragma mark - Names
 
 // In qlm-app-first, the user couldn't tell the Left 8351B from the Right by

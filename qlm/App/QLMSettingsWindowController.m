@@ -22,6 +22,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic) NSStepper *ceilingStepper;
 @property (nonatomic) NSTextField *rangeNote;
 @property (nonatomic) NSButton *wakeCheckbox;
+@property (nonatomic) NSButton *windowCheckbox;
 @property (nonatomic) NSButton *loginCheckbox;
 @property (nonatomic) NSTextField *loginNote;
 @property (nonatomic) NSButton *loginItemsButton;
@@ -91,6 +92,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
         QLMSettingsTextWidth);
 
     self.wakeCheckbox = [NSButton checkboxWithTitle:@"Wake the monitors" target:self action:@selector(wakeClicked:)];
+    self.windowCheckbox = [NSButton checkboxWithTitle:@"Open the window" target:self action:@selector(windowClicked:)];
     self.loginCheckbox = [NSButton checkboxWithTitle:@"Open qlm at login" target:self action:@selector(loginClicked:)];
     self.loginNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
     self.loginItemsButton = [NSButton buttonWithTitle:@"Open Login Items" target:self action:@selector(openLoginItems:)];
@@ -111,6 +113,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @[[NSGridCell emptyContentView], self.rangeNote],
         @[[NSGridCell emptyContentView], ceilingNote],
         @[launchTitle, self.wakeCheckbox],
+        @[[NSGridCell emptyContentView], self.windowCheckbox],
         @[[NSGridCell emptyContentView], self.loginCheckbox],
         @[[NSGridCell emptyContentView], self.loginNote],
         @[[NSGridCell emptyContentView], self.loginItemsButton],
@@ -304,6 +307,10 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.preferences.wakesAtLaunch = checkbox.state == NSControlStateValueOn;
 }
 
+- (void)windowClicked:(NSButton *)checkbox {
+    self.preferences.opensWindowAtLaunch = checkbox.state == NSControlStateValueOn;
+}
+
 - (void)loginClicked:(NSButton *)checkbox {
     SMAppService *service = SMAppService.mainAppService;
     NSError *error = nil;
@@ -364,6 +371,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 // Asks macOS for the login item's status, so only when the window shows.
 - (void)renderLaunch {
     self.wakeCheckbox.state = self.preferences.wakesAtLaunch ? NSControlStateValueOn : NSControlStateValueOff;
+    self.windowCheckbox.state = self.preferences.opensWindowAtLaunch ? NSControlStateValueOn : NSControlStateValueOff;
 
     SMAppServiceStatus status = SMAppService.mainAppService.status;
     self.loginCheckbox.state = status == SMAppServiceStatusEnabled || status == SMAppServiceStatusRequiresApproval

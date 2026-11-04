@@ -10,6 +10,7 @@ NS_ASSUME_NONNULL_BEGIN
 @class QLMPopoverController;
 
 @protocol QLMPopoverControllerDelegate <NSObject>
+- (void)popoverControllerShowWindow:(QLMPopoverController *)controller;
 - (void)popoverControllerShowMonitors:(QLMPopoverController *)controller;
 - (void)popoverControllerShowSettings:(QLMPopoverController *)controller;
 - (void)popoverControllerShowFakeBus:(QLMPopoverController *)controller;

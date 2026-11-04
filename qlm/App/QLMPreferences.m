@@ -4,6 +4,7 @@
 
 #include "QLMCommands.h"
 #import "QLMFakeBus.h"
+#import "QLMSkinLibrary.h"
 #import "QLMSystem.h"
 
 const double QLMVolumeRangeMinimumSpan = 10;
@@ -15,6 +16,8 @@ static NSString *const QLMLowestKey = @"QLMLowestDecibels";
 static NSString *const QLMWakesAtLaunchKey = @"QLMWakesAtLaunch";
 static NSString *const QLMUsesAdapterKey = @"QLMUsesAdapter";
 static NSString *const QLMSetupFileNameKey = @"QLMSetupFileName";
+static NSString *const QLMOpensWindowAtLaunchKey = @"QLMOpensWindowAtLaunch";
+static NSString *const QLMSkinNameKey = @"QLMSkinName";
 // Each bus's keys are its prefix and a name. The real monitors' came first,
 // with no word between.
 static NSString *const QLMAdapterBusPrefix = @"QLM";
@@ -249,6 +252,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         [defaults registerDefaults:@{
             QLMWakesAtLaunchKey: @NO,
             QLMUsesAdapterKey: @NO,
+            QLMOpensWindowAtLaunchKey: @NO,
         }];
     }
     return self;
@@ -311,6 +315,23 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 
 - (void)setSetupFileName:(NSString *)setupFileName {
     [_defaults setObject:setupFileName forKey:QLMSetupFileNameKey];
+}
+
+- (BOOL)opensWindowAtLaunch {
+    return [_defaults boolForKey:QLMOpensWindowAtLaunchKey];
+}
+
+- (void)setOpensWindowAtLaunch:(BOOL)opensWindowAtLaunch {
+    [_defaults setBool:opensWindowAtLaunch forKey:QLMOpensWindowAtLaunchKey];
+}
+
+- (NSString *)skinName {
+    NSString *name = [_defaults stringForKey:QLMSkinNameKey];
+    return name.length > 0 ? name : QLMSkinDefaultName;
+}
+
+- (void)setSkinName:(NSString *)skinName {
+    [_defaults setObject:skinName forKey:QLMSkinNameKey];
 }
 
 @end

@@ -54,10 +54,14 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
 | `wake` | Power, while it reads Wake | System is stopped or tracks no monitor, or a monitor is on |
 | `quit_glm` | The banner's Quit GLM. GLM may ask to save | the banner offers no Quit GLM, or GLM was asked already |
 | `quit_answering <cancel\|anyway>` | Quit. The argument answers the louder hand-back alert, if it would show | never |
+| `window <show\|close>` | The popover's Window… button, or the window's close | never |
+| `group <name>` | The window's button for that group. System's own refusal comes later, in `windowApplyError` | no button reads the name, System is stopped or tracks no monitor, or an apply runs |
+| `knob <dB>` | The window's knob, as a drag, on GLM's 0.5 dB steps | System is stopped, or the level is outside the slider's range |
+| `skin <name>` | The window's skin, kept in the settings | the skin library refuses the skin |
 
 `dump_state` gives:
 
-- `usesAdapter`, `sliderRange` (`lowestDecibels` and `ceilingDecibels`), `quitGLMButton` (its title, or null while hidden), `quitAsksFirst`, `popoverShown`, and `windows`.
+- `usesAdapter`, `sliderRange` (`lowestDecibels` and `ceilingDecibels`), `quitGLMButton` (its title, or null while hidden), `quitAsksFirst`, `popoverShown`, and `windows`. The main window's `windowShowing`, `windowApplyError` (the last refusal of its group buttons, until the next click), `skinName`, and `opensWindowAtLaunch`.
 - `snapshot`, or null before System's first one:
   - `running`, `idle`, `busProblem` (`none`, `noAdapter`, `glm`, or `otherHost`), `adapterProblem`, `reconnects`, and `adapterError`. `reconnects` counts System's tries to reopen the adapter since its link gave up. `adapterProblem` is `none`, `unresponsive`, `lostTrack`, or `notTaking`.
   - `adapter`: the device, model, and serial, and the knob: `knobPresent` and `knobTenths`.

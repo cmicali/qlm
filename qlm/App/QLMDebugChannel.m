@@ -192,6 +192,10 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             };
             reply[@"quitGLMButton"] = app.debugQuitGLMTitle ?: NSNull.null;
             reply[@"quitAsksFirst"] = @(app.debugQuitAsksFirst);
+            reply[@"windowShowing"] = @(app.debugWindowShowing);
+            reply[@"windowApplyError"] = app.debugWindowApplyError ?: NSNull.null;
+            reply[@"skinName"] = preferences.skinName;
+            reply[@"opensWindowAtLaunch"] = @(preferences.opensWindowAtLaunch);
             return reply;
         }),
         QLMDebugVerb(@"popover <show|close>", QLM_HANDLER {
@@ -222,6 +226,37 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         QLMDebugVerb(@"skin_preview_osd <name>", QLM_HANDLER {
             return [app debugShowSkinPreview:tokens[1] osd:YES];
         }),
+        QLMDebugVerb(@"window <show|close>", QLM_HANDLER {
+            if ([tokens[1] isEqualToString:@"show"]) {
+                [app debugShowWindow];
+            }
+            else if ([tokens[1] isEqualToString:@"close"]) {
+                [app debugCloseWindow];
+            }
+            else {
+                return nil;
+            }
+            NSMutableDictionary *reply = [QLMDebugWindows(app) mutableCopy];
+            reply[@"windowShowing"] = @(app.debugWindowShowing);
+            return reply;
+        }),
+        // The window's group button. The apply's own refusal comes later, in
+        // dump_state's windowApplyError.
+        QLMDebugVerb(@"group <name>", QLM_HANDLER {
+            NSString *refusal = [app debugClickGroupNamed:tokens[1]];
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
+            }
+            return @{@"ok": @YES, @"group": tokens[1]};
+        }),
+        // The window's skin, kept in the preferences.
+        QLMDebugVerb(@"skin <name>", QLM_HANDLER {
+            NSString *refusal = [app debugChooseSkin:tokens[1]];
+            if (refusal != nil) {
+                return QLMDebugError(@"%@", refusal);
+            }
+            return @{@"ok": @YES, @"skinName": app.debugPreferences.skinName};
+        }),
         // The read lands on a utility queue, so the reply only acknowledges it.
         QLMDebugVerb(@"read_setup", QLM_HANDLER {
             [app debugReadSetup];
@@ -242,6 +277,20 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             double stepped = QLMNearestStepDecibels(decibels);
             [app.debugSystem setVolumeDecibels:stepped];
             return @{@"ok": @YES, @"volumeDecibels": @(stepped)};
+        }),
+        // The window's knob, over the slider's range. A level outside it is
+        // refused, not moved into it.
+        QLMDebugControl(@"knob <dB>", NO, QLM_HANDLER {
+            double decibels = 0;
+            if (!QLMDebugParseDecibels(tokens[1], &decibels)) {
+                return nil;
+            }
+            double lowest = app.debugPreferences.lowestDecibels;
+            double ceiling = app.debugPreferences.ceilingDecibels;
+            if (decibels < lowest || decibels > ceiling) {
+                return QLMDebugError(@"%.1f dB is outside the knob's range, %.1f to %.1f dB", decibels, lowest, ceiling);
+            }
+            return @{@"ok": @YES, @"volumeDecibels": @([app debugTurnKnobTo:decibels])};
         }),
         // Settings' ceiling. It refuses what the field refuses, and the
         // preferences bound the rest, as they do a typed one.

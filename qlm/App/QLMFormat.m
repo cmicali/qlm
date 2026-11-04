@@ -10,13 +10,18 @@
 NSString *const QLMEmDash = @"—";
 static NSString *const QLMNoLevelRefusal = @"Type a level in dB.";
 
+NSString *QLMDecibelsNumberText(double decibels, int decimals) {
+    NSString *number = [NSString stringWithFormat:@"%.*f", decimals, decibels];
+    NSString *zero = [NSString stringWithFormat:@"%.*f", decimals, 0.0];
+    if ([number isEqualToString:[@"-" stringByAppendingString:zero]]) {
+        number = zero;
+    }
+    return [number stringByReplacingOccurrencesOfString:@"-" withString:@"−"];
+}
+
 // A no-break space keeps the unit on the number's line.
 NSString *QLMDecibelsText(double decibels) {
-    NSString *number = [NSString stringWithFormat:@"%.1f", decibels];
-    if ([number isEqualToString:@"-0.0"]) {
-        number = @"0.0";
-    }
-    return [[number stringByReplacingOccurrencesOfString:@"-" withString:@"−"] stringByAppendingString:@"\u00A0dB"];
+    return [QLMDecibelsNumberText(decibels, 1) stringByAppendingString:@"\u00A0dB"];
 }
 
 NSString *QLMTypedLevelRefusal(double decibels) {

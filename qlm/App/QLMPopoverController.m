@@ -63,7 +63,7 @@ static NSView *QLMSpacer(void) {
 @property (nonatomic) NSButton *muteButton;
 @property (nonatomic) NSButton *dimButton;
 @property (nonatomic) NSButton *powerButton;
-@property (nonatomic) NSButton *fakeBusButton;
+@property (nonatomic) NSStackView *fakeBusRow;
 @property (nonatomic) NSPopUpButton *groupPicker;
 @property (nonatomic) NSTextField *summaryLabel;
 @property (nonatomic) NSStackView *monitorsStack;
@@ -146,7 +146,7 @@ static NSView *QLMSpacer(void) {
 
 - (void)setShowsFakeBus:(BOOL)showsFakeBus {
     _showsFakeBus = showsFakeBus;
-    self.fakeBusButton.hidden = !showsFakeBus;
+    self.fakeBusRow.hidden = !showsFakeBus;
 }
 
 - (void)setChangedSetupName:(NSString *)changedSetupName {
@@ -243,18 +243,21 @@ static NSView *QLMSpacer(void) {
     self.monitorsStack.alignment = NSLayoutAttributeLeading;
     self.monitorsStack.spacing = 5;
 
+    NSButton *windowButton = QLMSmallButton(@"Window…", self, @selector(showWindowClicked:));
     NSButton *monitorsButton = QLMSmallButton(@"Monitors…", self, @selector(showMonitorsClicked:));
     NSButton *settingsButton = QLMSmallButton(@"Settings…", self, @selector(showSettingsClicked:));
-    self.fakeBusButton = QLMSmallButton(@"Fake Bus…", self, @selector(showFakeBusClicked:));
-    self.fakeBusButton.hidden = !self.showsFakeBus;
+    // Its own row: with Window…, one footer is too narrow for it.
+    self.fakeBusRow = [NSStackView stackViewWithViews:@[QLMSmallButton(@"Fake Bus…", self, @selector(showFakeBusClicked:)), QLMSpacer()]];
+    self.fakeBusRow.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+    self.fakeBusRow.hidden = !self.showsFakeBus;
     NSButton *quit = QLMSmallButton(@"Quit", NSApp, @selector(terminate:));
-    NSStackView *footer = [NSStackView stackViewWithViews:@[monitorsButton, settingsButton, self.fakeBusButton, QLMSpacer(), quit]];
+    NSStackView *footer = [NSStackView stackViewWithViews:@[windowButton, monitorsButton, settingsButton, QLMSpacer(), quit]];
     footer.orientation = NSUserInterfaceLayoutOrientationHorizontal;
     footer.spacing = 6;
 
     NSArray<NSView *> *fullWidth = @[
         self.banner, self.setupBanner, self.groupBanner, header, self.messageLabel, volume, self.ceilingLabel, buttons, group,
-        [self separator], monitorsHeader, self.monitorsStack, [self separator], footer,
+        [self separator], monitorsHeader, self.monitorsStack, [self separator], footer, self.fakeBusRow,
     ];
     NSStackView *stack = [NSStackView stackViewWithViews:fullWidth];
     stack.orientation = NSUserInterfaceLayoutOrientationVertical;
@@ -382,6 +385,10 @@ static NSView *QLMSpacer(void) {
 // A method, so a check can stand in for GLM.
 - (nullable NSRunningApplication *)runningGLM {
     return QLMRunningGLM();
+}
+
+- (void)showWindowClicked:(id)sender {
+    [self.delegate popoverControllerShowWindow:self];
 }
 
 - (void)showMonitorsClicked:(id)sender {

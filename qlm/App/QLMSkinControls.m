@@ -23,6 +23,8 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
     if (self) {
         _skin = skin;
         self.focusRingType = NSFocusRingTypeNone;
+        // A button unless its controller says otherwise.
+        self.accessibilityRole = NSAccessibilityButtonRole;
     }
     return self;
 }
@@ -122,6 +124,22 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
         return;
     }
     [super keyDown:event];
+}
+
+- (BOOL)isAccessibilityElement {
+    return YES;
+}
+
+- (BOOL)isAccessibilityEnabled {
+    return self.enabled;
+}
+
+- (BOOL)accessibilityPerformPress {
+    if (!self.enabled) {
+        return NO;
+    }
+    [self sendAction:self.action to:self.target];
+    return YES;
 }
 
 @end

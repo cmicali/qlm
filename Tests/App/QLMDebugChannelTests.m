@@ -29,6 +29,10 @@
 @property (nonatomic) NSPopover *debugPopover;
 @property (nonatomic, copy, nullable) NSString *debugQuitGLMTitle;
 @property (nonatomic) BOOL debugQuitAsksFirst;
+@property (nonatomic) BOOL debugWindowShowing;
+@property (nonatomic, copy, nullable) NSString *debugWindowApplyError;
+// The window's group buttons.
+@property (nonatomic, copy) NSArray<NSString *> *groupNames;
 // The app's own actions the verbs called, in order.
 @property (nonatomic) NSMutableArray<NSString *> *actions;
 @end
@@ -39,6 +43,7 @@
     self = [super init];
     if (self) {
         _debugPopover = [[NSPopover alloc] init];
+        _groupNames = @[@"Main", @"Nearfield"];
         _actions = [NSMutableArray array];
     }
     return self;
@@ -90,6 +95,46 @@
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {
     [self.actions addObject:quitAnyway ? @"quit anyway" : @"quit, cancel"];
+}
+
+- (void)debugShowWindow {
+    self.debugWindowShowing = YES;
+    [self.actions addObject:@"show window"];
+}
+
+- (void)debugCloseWindow {
+    self.debugWindowShowing = NO;
+    [self.actions addObject:@"close window"];
+}
+
+// As the window's buttons: one per group, disabled by the popover picker's
+// rule.
+- (NSString *)debugClickGroupNamed:(NSString *)name {
+    if (![self.groupNames containsObject:name]) {
+        return [NSString stringWithFormat:@"no group button reads %@", name];
+    }
+    if (!QLMSnapshotTracksMonitors(self.debugSnapshot)) {
+        return @"the group buttons are disabled until System tracks a monitor";
+    }
+    [self.actions addObject:[@"group " stringByAppendingString:name]];
+    return nil;
+}
+
+// As the window's knob: GLM's steps, straight to System.
+- (double)debugTurnKnobTo:(double)decibels {
+    double stepped = QLMNearestStepDecibels(decibels);
+    [self.actions addObject:@"knob"];
+    [self.debugSystem setVolumeDecibels:stepped];
+    return stepped;
+}
+
+- (NSString *)debugChooseSkin:(NSString *)name {
+    if (![name isEqualToString:@"modern"]) {
+        return [NSString stringWithFormat:@"There is no skin named %@.", name];
+    }
+    self.debugPreferences.skinName = name;
+    [self.actions addObject:[@"skin " stringByAppendingString:name]];
+    return nil;
 }
 
 @end
@@ -304,6 +349,10 @@
         @"quit_answering <cancel|anyway>": @[@[@"quit_answering"], @[@"quit_answering", @"yes"]],
         @"skin_preview <name>": @[@[@"skin_preview"], @[@"skin_preview", @"modern", @"big"]],
         @"skin_preview_osd <name>": @[@[@"skin_preview_osd"]],
+        @"window <show|close>": @[@[@"window"], @[@"window", @"open"]],
+        @"group <name>": @[@[@"group"], @[@"group", @"Main", @"now"]],
+        @"knob <dB>": @[@[@"knob"], @[@"knob", @"loud"], @[@"knob", @"nan"], @[@"knob", @"-40", @"-41"]],
+        @"skin <name>": @[@[@"skin"], @[@"skin", @"modern", @"now"]],
     };
     for (NSString *usage in cases) {
         for (NSArray<NSString *> *args in cases[usage]) {
@@ -363,6 +412,10 @@
     XCTAssertEqualObjects(state[@"sliderRange"], (@{@"lowestDecibels": @(-60), @"ceilingDecibels": @(-30)}));
     XCTAssertEqualObjects(state[@"quitGLMButton"], NSNull.null);
     XCTAssertEqualObjects(state[@"quitAsksFirst"], @NO);
+    XCTAssertEqualObjects(state[@"windowShowing"], @NO);
+    XCTAssertEqualObjects(state[@"windowApplyError"], NSNull.null);
+    XCTAssertEqualObjects(state[@"skinName"], @"modern");
+    XCTAssertEqualObjects(state[@"opensWindowAtLaunch"], @NO);
 
     NSDictionary *snapshot = state[@"snapshot"];
     XCTAssertEqualObjects(snapshot[@"running"], @YES);
@@ -615,6 +668,64 @@
         return snapshot.dimmed && snapshot.volumeDecibels != nil && snapshot.idle;
     }];
     [self assertEveryFrameSafeUnder:-30];
+}
+
+#pragma mark - The main window
+
+- (void)testTheWindowVerbOpensAndClosesIt {
+    XCTAssertEqualObjects(([self runOK:@[@"window", @"show"]][@"windowShowing"]), @YES);
+    XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"windowShowing"], @YES);
+    XCTAssertEqualObjects(([self runOK:@[@"window", @"close"]][@"windowShowing"]), @NO);
+    XCTAssertEqualObjects(_app.actions, (@[@"show window", @"close window"]));
+}
+
+- (void)testDumpStateCarriesTheWindowsApplyError {
+    _app.debugWindowApplyError = @"The 8351B's filter design rate is unverified.";
+    XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"windowApplyError"], @"The 8351B's filter design rate is unverified.");
+}
+
+// The button's refusals: a name no button reads, and the picker's rule.
+- (void)testGroupClicksTheWindowsButton {
+    XCTAssertEqualObjects(([self runOK:@[@"group", @"Nearfield"]][@"group"]), @"Nearfield");
+    XCTAssertEqualObjects(([self errorOf:@[@"group", @"Cinema"]]), @"no group button reads Cinema");
+    [self stopSystem];
+    XCTAssertEqualObjects(([self errorOf:@[@"group", @"Main"]]), @"the group buttons are disabled until System tracks a monitor");
+    XCTAssertEqualObjects(_app.actions, @[@"group Nearfield"]);
+}
+
+// As a drag: GLM's 0.5 dB steps, up to the ceiling.
+- (void)testKnobGoesToSystemOnTheSteps {
+    XCTAssertEqualObjects(([self runOK:@[@"knob", @"-40.3"]][@"volumeDecibels"]), @(-40.5));
+    QLMSystem *system = _app.debugSystem;
+    XCTAssertTrue([_time runUntil:^BOOL {
+        return [system.snapshot.volumeDecibels isEqual:@(-40.5)];
+    } within:1]);
+    XCTAssertEqualObjects(([self runOK:@[@"knob", @"-30"]][@"volumeDecibels"]), @(-30));
+    [self assertEveryFrameSafeUnder:-30];
+}
+
+// The knob's range is the slider's. A level outside it is refused, not
+// moved into it, and so is any turn while System is stopped.
+- (void)testKnobOutsideItsRangeIsRefused {
+    NSUInteger mark = _bus.sentMessages.count;
+    XCTAssertEqualObjects(([self errorOf:@[@"knob", @"-29.5"]]), @"-29.5 dB is outside the knob's range, -60.0 to -30.0 dB");
+    XCTAssertEqualObjects(([self errorOf:@[@"knob", @"-61"]]), @"-61.0 dB is outside the knob's range, -60.0 to -30.0 dB");
+    XCTAssertEqualObjects(_app.actions, @[]);
+    [self assertNothingSentSince:mark];
+    [self stopSystem];
+    XCTAssertEqualObjects(([self errorOf:@[@"knob", @"-40"]]), @"System is not running");
+    XCTAssertEqualObjects(_app.actions, @[]);
+}
+
+// A skin the library refuses is not kept. A skin sends nothing.
+- (void)testSkinKeepsOnlyASkinThatLoads {
+    NSUInteger mark = _bus.sentMessages.count;
+    XCTAssertEqualObjects(([self errorOf:@[@"skin", @"chrome"]]), @"There is no skin named chrome.");
+    XCTAssertEqualObjects(_app.debugPreferences.skinName, @"modern");
+    XCTAssertEqualObjects(([self runOK:@[@"skin", @"modern"]][@"skinName"]), @"modern");
+    XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"skinName"], @"modern");
+    XCTAssertEqualObjects(_app.actions, @[@"skin modern"]);
+    [self assertNothingSentSince:mark];
 }
 
 #pragma mark - GLM and quitting
