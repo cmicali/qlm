@@ -1,0 +1,481 @@
+{
+  "palette": {
+    "label": "#efe1bd",
+    "secondary": "#cabd9e",
+    "display": "#ff702c",
+    "badgeInk": "#34352b",
+    "focus": "#f4c57b",
+    "panel": "#332d26"
+  },
+  "panel_size": [
+    640,
+    480
+  ],
+  "osd_size": [
+    300,
+    72
+  ],
+  "layers": [
+    {
+      "asset": "panel-background",
+      "frame": [
+        0,
+        0,
+        640,
+        480
+      ]
+    },
+    {
+      "asset": "panel-markings",
+      "frame": [
+        0,
+        0,
+        640,
+        480
+      ]
+    },
+    {
+      "asset": "nameplate",
+      "frame": [
+        48,
+        27,
+        78,
+        38
+      ]
+    },
+    {
+      "asset": "button-normal",
+      "frame": [
+        48,
+        120,
+        174,
+        40
+      ],
+      "role": "setup-main"
+    },
+    {
+      "asset": "button-normal",
+      "frame": [
+        234,
+        120,
+        174,
+        40
+      ],
+      "role": "setup-nearfield"
+    },
+    {
+      "asset": "button-normal",
+      "frame": [
+        420,
+        120,
+        174,
+        40
+      ],
+      "role": "setup-full-range"
+    },
+    {
+      "asset": "display-glass",
+      "frame": [
+        48,
+        184,
+        356,
+        132
+      ]
+    },
+    {
+      "asset": "button-normal",
+      "frame": [
+        48,
+        338,
+        174,
+        40
+      ],
+      "role": "mute"
+    },
+    {
+      "asset": "button-normal",
+      "frame": [
+        230,
+        338,
+        174,
+        40
+      ],
+      "role": "dim"
+    },
+    {
+      "asset": "knob-shadow",
+      "frame": [
+        436,
+        178,
+        144,
+        144
+      ]
+    },
+    {
+      "asset": "knob-ticks",
+      "frame": [
+        420,
+        162,
+        176,
+        176
+      ]
+    },
+    {
+      "asset": "knob-body-normal",
+      "frame": [
+        436,
+        178,
+        144,
+        144
+      ]
+    },
+    {
+      "asset": "knob-pointer",
+      "frame": [
+        436,
+        178,
+        144,
+        144
+      ],
+      "rotation_degrees": 70.2
+    }
+  ],
+  "text": [
+    {
+      "text": "qlm.",
+      "frame": [
+        48,
+        30,
+        78,
+        32
+      ],
+      "font": "Helvetica Neue",
+      "size": 24,
+      "weight": "bold-italic",
+      "alignment": "center",
+      "color": "badgeInk"
+    },
+    {
+      "text": "6 ONLINE",
+      "frame": [
+        529,
+        37,
+        70,
+        16
+      ],
+      "font": "Menlo",
+      "size": 10,
+      "color": "secondary"
+    },
+    {
+      "text": "LISTENING SETUP",
+      "frame": [
+        53,
+        101,
+        131,
+        18
+      ],
+      "font": "Helvetica Neue",
+      "size": 10,
+      "weight": "medium",
+      "color": "label"
+    },
+    {
+      "text": "MAIN",
+      "frame": [
+        48,
+        130,
+        174,
+        19
+      ],
+      "size": 11,
+      "alignment": "center",
+      "color": "label"
+    },
+    {
+      "text": "NEARFIELD",
+      "frame": [
+        234,
+        130,
+        174,
+        19
+      ],
+      "size": 11,
+      "alignment": "center",
+      "color": "label"
+    },
+    {
+      "text": "FULL RANGE",
+      "frame": [
+        420,
+        130,
+        174,
+        19
+      ],
+      "size": 11,
+      "alignment": "center",
+      "color": "label"
+    },
+    {
+      "text": "MAIN",
+      "frame": [
+        67,
+        197,
+        90,
+        16
+      ],
+      "font": "Menlo",
+      "size": 10,
+      "color": "display"
+    },
+    {
+      "text": "LEVEL",
+      "frame": [
+        346,
+        197,
+        48,
+        16
+      ],
+      "font": "Menlo",
+      "size": 10,
+      "color": "display"
+    },
+    {
+      "text": "\u221242.0",
+      "frame": [
+        67,
+        219,
+        213,
+        65
+      ],
+      "font": "Menlo",
+      "size": 45,
+      "color": "display"
+    },
+    {
+      "text": "dB",
+      "frame": [
+        216,
+        248,
+        34,
+        19
+      ],
+      "size": 12,
+      "color": "display"
+    },
+    {
+      "text": "OUTPUT \u221242.0",
+      "frame": [
+        67,
+        279,
+        140,
+        15
+      ],
+      "font": "Menlo",
+      "size": 9,
+      "color": "display"
+    },
+    {
+      "text": "MAX \u221230",
+      "frame": [
+        328,
+        279,
+        63,
+        15
+      ],
+      "font": "Menlo",
+      "size": 9,
+      "color": "display"
+    },
+    {
+      "text": "MUTE",
+      "frame": [
+        48,
+        348,
+        174,
+        18
+      ],
+      "size": 11,
+      "alignment": "center",
+      "color": "label"
+    },
+    {
+      "text": "DIM \u221220",
+      "frame": [
+        230,
+        348,
+        174,
+        18
+      ],
+      "size": 11,
+      "alignment": "center",
+      "color": "label"
+    },
+    {
+      "text": "\u221280",
+      "frame": [
+        430,
+        325,
+        40,
+        16
+      ],
+      "font": "Menlo",
+      "size": 9,
+      "color": "secondary"
+    },
+    {
+      "text": "\u221230",
+      "frame": [
+        554,
+        325,
+        40,
+        16
+      ],
+      "font": "Menlo",
+      "size": 9,
+      "color": "secondary"
+    },
+    {
+      "text": "VOLUME",
+      "frame": [
+        474,
+        351,
+        69,
+        18
+      ],
+      "size": 10,
+      "alignment": "center",
+      "color": "secondary"
+    },
+    {
+      "text": "\u2212",
+      "frame": [
+        445,
+        348,
+        22,
+        22
+      ],
+      "size": 16,
+      "alignment": "center",
+      "color": "label"
+    },
+    {
+      "text": "+",
+      "frame": [
+        550,
+        348,
+        22,
+        22
+      ],
+      "size": 16,
+      "alignment": "center",
+      "color": "label"
+    },
+    {
+      "text": "Monitors",
+      "frame": [
+        66,
+        411,
+        94,
+        21
+      ],
+      "size": 11,
+      "color": "label"
+    },
+    {
+      "text": "MAIN \u00b7 ACTIVE",
+      "frame": [
+        290,
+        414,
+        140,
+        18
+      ],
+      "font": "Menlo",
+      "size": 9,
+      "color": "secondary"
+    },
+    {
+      "text": "Standby",
+      "frame": [
+        550,
+        411,
+        64,
+        21
+      ],
+      "size": 11,
+      "color": "label"
+    }
+  ],
+  "indicator_frames": {
+    "online": [
+      514,
+      37,
+      16,
+      16
+    ],
+    "setup-main": [
+      76,
+      131,
+      16,
+      16
+    ],
+    "mute": [
+      76,
+      348,
+      16,
+      16
+    ]
+  },
+  "knob": {
+    "minimum_db": -80,
+    "maximum_db": -30,
+    "step_db": 0.5,
+    "start_degrees": -135,
+    "end_degrees": 135,
+    "reference_direction": "pointer points up at zero rotation",
+    "clockwise": true,
+    "pivot_in_asset": [
+      72,
+      72
+    ],
+    "body_must_not_rotate": true
+  },
+  "symbols": {
+    "monitors": "slider.horizontal.3",
+    "standby": "power",
+    "volume_up": "plus",
+    "volume_down": "minus"
+  },
+  "osd": {
+    "background": [
+      0,
+      0,
+      300,
+      72
+    ],
+    "level": [
+      22,
+      18,
+      116,
+      38
+    ],
+    "setup": [
+      145,
+      15,
+      136,
+      18
+    ],
+    "status": [
+      145,
+      34,
+      136,
+      15
+    ],
+    "track": [
+      145,
+      52,
+      130,
+      3
+    ]
+  }
+}
