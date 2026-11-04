@@ -17,9 +17,12 @@ typedef NS_ENUM(NSInteger, QLMSkinError) {
     QLMSkinErrorInvalid,         // anything else the reader refuses
 };
 
-// The smallest window and OSD a skin may declare: the image skins' sizes.
-extern const CGSize QLMSkinReferenceWindowSize;
-extern const CGSize QLMSkinReferenceOSDSize;
+// The window's elements, in the order the reader reads them.
+NSArray<NSString *> *QLMSkinElementNames(void);
+
+// A skin's or an image's name: a plain file name, with no / and no leading
+// dot, so it names nothing outside its directory.
+BOOL QLMSkinIsPlainName(NSString *name);
 
 // sRGB components, 0 to 1. A clear color draws nothing.
 typedef struct {
@@ -58,7 +61,7 @@ typedef NS_ENUM(NSInteger, QLMSkinWeight) {
 
 // The pack's states. A button takes all eight, a knob's body the first
 // four but selected, and every other element normal alone. The rule that
-// picks one is QLMSkinButtonState and QLMSkinKnobState.
+// picks one is QLMSkinButtonState.
 typedef NS_ENUM(NSInteger, QLMSkinState) {
     QLMSkinStateNormal,
     QLMSkinStateHover,
@@ -71,13 +74,8 @@ typedef NS_ENUM(NSInteger, QLMSkinState) {
 };
 
 // Disabled first, then pressed, then hover, then normal. Selection is
-// independent.
+// independent. A knob's body is never selected.
 QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL hovered);
-QLMSkinState QLMSkinKnobState(BOOL enabled, BOOL pressed, BOOL hovered);
-
-// The suffix of a state's image file, as the pack names it: "normal",
-// "selected-hover", and so on.
-NSString *QLMSkinStateName(QLMSkinState state);
 
 @interface QLMSkinShadow : NSObject
 @property (nonatomic, readonly) QLMSkinColor color;
@@ -257,11 +255,11 @@ NSString *QLMSkinStateName(QLMSkinState state);
 @property (nonatomic, readonly, copy) NSString *name;  // the directory's
 @property (nonatomic, readonly) NSURL *directory;
 @property (nonatomic, readonly) CGSize windowSize;  // the reference, and the least
-@property (nonatomic, readonly) CGSize osdSize;
-@property (nonatomic, readonly) NSDictionary<NSString *, NSValue *> *palette;  // QLMSkinColor values
-// panel, nameplate, status, groups, display, toggles, knob, and footer.
+// By QLMSkinElementNames.
 @property (nonatomic, readonly) NSDictionary<NSString *, QLMSkinElement *> *elements;
-@property (nonatomic, readonly) QLMSkinElement *osd;  // its frame is the OSD's
+// Its frame is the OSD's size, at the origin. The OSD has no layout, so its
+// slots have neither anchors nor scales.
+@property (nonatomic, readonly) QLMSkinElement *osd;
 @property (nonatomic, readonly) QLMSkinButton *button;
 @property (nonatomic, readonly) QLMSkinKnob *knob;
 @property (nonatomic, readonly) QLMSkinLED *led;

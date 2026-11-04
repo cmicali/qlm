@@ -17,7 +17,9 @@
 
 @end
 
-// The view fills an unflipped container, as QLMSkinView's TRAP says.
+// TRAP: dump_screenshot draws a window's content view with no layer into
+// an unflipped context, so a flipped content view, as the skin views are,
+// comes out upside down. So the view fills an unflipped container.
 static NSWindow *QLMSkinPreviewHost(NSWindow *window, NSView *view) {
     NSView *container = [[NSView alloc] initWithFrame:view.frame];
     view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
@@ -66,7 +68,7 @@ static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin) {
 }
 
 static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin) {
-    NSRect frame = NSMakeRect(0, 0, skin.osdSize.width, skin.osdSize.height);
+    NSRect frame = skin.osd.frame;
     NSWindow *window = [[QLMSkinPreviewWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless
                                                                  backing:NSBackingStoreBuffered defer:NO];
     window.title = @"Skin preview OSD";

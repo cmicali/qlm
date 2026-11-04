@@ -23,12 +23,9 @@ extern NSString *const QLMSkinDefaultName;
 - (BOOL)isBuiltIn:(NSString *)name;
 
 // The named skin. A skin that is missing or refused gives the default
-// skin, with the reason in refusal. Nil only when the default is refused
-// too, which a test rules out.
+// skin, with the reason in `refusal`, for Settings. Nil only when the
+// default is refused too, which a test rules out.
 - (nullable QLMSkin *)loadSkinNamed:(NSString *)name refusal:(NSString *_Nullable *_Nullable)refusal;
-
-// The reason the last load fell back, or nil. For Settings.
-@property (nonatomic, readonly, copy, nullable) NSString *lastRefusal;
 
 @end
 

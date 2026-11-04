@@ -24,6 +24,11 @@ NSString *const QLMSkinDefaultName = @"modern";
     return self;
 }
 
+static BOOL QLMSkinHasFile(NSURL *_Nullable directory, NSString *name) {
+    NSURL *file = [[directory URLByAppendingPathComponent:name isDirectory:YES] URLByAppendingPathComponent:@"skin.json"];
+    return directory != nil && [NSFileManager.defaultManager fileExistsAtPath:file.path];
+}
+
 // The directories in `directory` that hold a skin.json, sorted.
 static NSArray<NSString *> *QLMSkinNamesIn(NSURL *_Nullable directory) {
     if (directory == nil) {
@@ -35,7 +40,7 @@ static NSArray<NSString *> *QLMSkinNamesIn(NSURL *_Nullable directory) {
                                                                                  error:NULL];
     NSMutableArray<NSString *> *names = [NSMutableArray array];
     for (NSURL *entry in entries) {
-        if ([NSFileManager.defaultManager fileExistsAtPath:[entry URLByAppendingPathComponent:@"skin.json"].path]) {
+        if (QLMSkinHasFile(directory, entry.lastPathComponent)) {
             [names addObject:entry.lastPathComponent];
         }
     }
@@ -54,26 +59,21 @@ static NSArray<NSString *> *QLMSkinNamesIn(NSURL *_Nullable directory) {
 }
 
 - (BOOL)isBuiltIn:(NSString *)name {
-    return [QLMSkinNamesIn(_builtIn) containsObject:name];
-}
-
-- (NSURL *)directoryOfSkin:(NSString *)name {
-    BOOL builtIn = [self isBuiltIn:name] || _user == nil;
-    return [(builtIn ? _builtIn : _user) URLByAppendingPathComponent:name isDirectory:YES];
+    return QLMSkinIsPlainName(name) && QLMSkinHasFile(_builtIn, name);
 }
 
 - (QLMSkin *)loadSkinNamed:(NSString *)name refusal:(NSString **)refusal {
     NSError *error = nil;
     QLMSkin *skin = nil;
-    if (name.length > 0 && ![name containsString:@"/"] && ![name hasPrefix:@"."]) {
-        skin = [QLMSkin skinAtURL:[self directoryOfSkin:name] error:&error];
+    if (QLMSkinIsPlainName(name)) {
+        NSURL *directory = [self isBuiltIn:name] || _user == nil ? _builtIn : _user;
+        skin = [QLMSkin skinAtURL:[directory URLByAppendingPathComponent:name isDirectory:YES] error:&error];
     }
     NSString *reason = nil;
     if (skin == nil) {
         reason = error.localizedDescription ?: [NSString stringWithFormat:@"There is no skin named %@.", name];
         skin = [QLMSkin skinAtURL:[_builtIn URLByAppendingPathComponent:QLMSkinDefaultName isDirectory:YES] error:NULL];
     }
-    _lastRefusal = [reason copy];
     if (refusal != NULL) {
         *refusal = reason;
     }

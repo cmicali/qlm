@@ -2,13 +2,12 @@
 
 #import "QLMSkin.h"
 
-@class QLMSkinLayout;
-
 NS_ASSUME_NONNULL_BEGIN
 
 // The skin's element views. Each draws its element from the skin and the
 // state its controller hands it, by the pack's state rules. None reads a
-// snapshot or drives System.
+// snapshot or drives System. A setter given the value it has redraws
+// nothing.
 
 // A control that tracks hover, a press, and keyboard focus, and draws its
 // own focus ring. A click inside sends the action. Space and Return click
@@ -40,13 +39,13 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithSkin:(QLMSkin *)skin slot:(QLMSkinTextSlot *)slot symbol:(NSString *)symbol;
 - (instancetype)initWithSkin:(QLMSkin *)skin NS_UNAVAILABLE;
 @property (nonatomic, copy) NSString *title;
-@property (nonatomic, copy) NSString *symbolName;
+// The skin's symbol, or a stand-in where this macOS lacks it.
+@property (nonatomic, readonly, copy) NSString *symbolName;
 @end
 
 // The status: an LED and the online count, or a bus problem's title.
 @interface QLMSkinStatusView : NSView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
-@property (nonatomic, nullable) QLMSkinLayout *skinLayout;
 @property (nonatomic, copy, nullable) NSString *text;
 @property (nonatomic) BOOL lit;
 @property (nonatomic) BOOL enabled;
@@ -55,7 +54,6 @@ NS_ASSUME_NONNULL_BEGIN
 // The display: the group's caption, the level and its unit, OUTPUT, and MAX.
 @interface QLMSkinDisplayView : NSView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
-@property (nonatomic, nullable) QLMSkinLayout *skinLayout;
 @property (nonatomic, copy, nullable) NSString *caption;
 @property (nonatomic, copy, nullable) NSString *level;
 @property (nonatomic, copy, nullable) NSString *unit;

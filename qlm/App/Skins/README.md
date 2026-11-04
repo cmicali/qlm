@@ -72,6 +72,6 @@ Every element has `frame`, and may have `anchors` and `text`. Its other keys are
 
 **Markings.** Each of `lines` is `element` and `y`: a line across the element's width, `y` from its top. Each of `boxes` is `element`, and may have `outset` (insets), `radius`, and `gap`, a slot of the element that the box's top edge breaks around.
 
-**The OSD.** `osd` has `size`, at least 300 by 72, an image or draw, `bar`, and `text`, and may have `capInsets` and `disabledOverlay`. `bar` has `frame`, `track`, and `fill`, and may have `radius`. `text` has `level`, `unit`, `title`, and `subtitle`. Its frames are in the OSD.
+**The OSD.** `osd` has `size`, at least 300 by 72, an image or draw, `bar`, and `text`, and may have `capInsets` and `disabledOverlay`. `bar` has `frame`, `track`, and `fill`, and may have `radius`. `text` has `level`, `unit`, `title`, and `subtitle`. Its frames are in the OSD. The OSD keeps its size, so its slots take no `anchors` or `scales`.
 
 A `disabledOverlay` is a color laid over the display or the OSD while it is disabled, in the shape of what it covers.

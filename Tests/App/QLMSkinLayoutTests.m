@@ -19,13 +19,7 @@
     } while (0)
 
 static CGRect QLMCell(NSArray<NSValue *> *cells, NSUInteger index) {
-    CGRect rect = CGRectZero;
-    [cells[index] getValue:&rect size:sizeof rect];
-    return rect;
-}
-
-static NSArray<NSString *> *QLMElementNames(void) {
-    return @[@"panel", @"nameplate", @"status", @"groups", @"display", @"toggles", @"knob", @"footer"];
+    return cells[index].rectValue;
 }
 
 @implementation QLMSkinLayoutTests {
@@ -35,13 +29,13 @@ static NSArray<NSString *> *QLMElementNames(void) {
 - (void)setUp {
     [super setUp];
     NSError *error = nil;
-    _skin = [QLMSkin skinAtURL:[NSURL fileURLWithPath:QLMRepositoryPath(@"Tests/App/Fixtures/Skins/fixture")] error:&error];
+    _skin = [QLMSkin skinAtURL:QLMFixtureSkinURL() error:&error];
     XCTAssertNotNil(_skin, @"%@", error.localizedDescription);
 }
 
 - (void)testTheReferenceSizeGivesTheDeclaredFrames {
     QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:_skin size:CGSizeMake(640, 480)];
-    for (NSString *name in QLMElementNames()) {
+    for (NSString *name in QLMSkinElementNames()) {
         XCTAssertTrue(CGRectEqualToRect([layout frameOfElement:name], [_skin element:name].frame), @"%@", name);
         for (NSString *slot in [_skin element:name].text) {
             XCTAssertTrue(CGRectEqualToRect([layout frameOfSlot:slot inElement:name], [_skin element:name].text[slot].frame),
@@ -134,13 +128,13 @@ static NSArray<NSString *> *QLMElementNames(void) {
 // A tall, narrow window can't push a scaled slot out of its element, in
 // the fixture or in modern.
 - (void)testAScaledSlotStaysInsideItsElement {
-    QLMSkin *modern = [QLMSkin skinAtURL:[NSURL fileURLWithPath:QLMRepositoryPath(@"qlm/App/Skins/modern")] error:NULL];
+    QLMSkin *modern = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
     XCTAssertNotNil(modern);
     for (QLMSkin *skin in @[_skin, modern]) {
         for (NSValue *size in @[[NSValue valueWithSize:NSMakeSize(640, 600)], [NSValue valueWithSize:NSMakeSize(640, 1200)],
                                 [NSValue valueWithSize:NSMakeSize(700, 1200)], [NSValue valueWithSize:NSMakeSize(2000, 500)]]) {
             QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:skin size:size.sizeValue];
-            for (NSString *name in QLMElementNames()) {
+            for (NSString *name in QLMSkinElementNames()) {
                 CGRect bounds = {CGPointZero, [layout frameOfElement:name].size};
                 for (NSString *slot in [skin element:name].text) {
                     if (![skin element:name].text[slot].scales) {

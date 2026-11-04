@@ -29,12 +29,29 @@ NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger 
     CGFloat height = (frame.size.height - gap.height * (rows - 1)) / rows;
     for (NSInteger row = 0; row < rows; row++) {
         for (NSInteger column = 0; column < columns; column++) {
-            CGRect cell = CGRectMake(frame.origin.x + column * (width + gap.width),
-                                     frame.origin.y + row * (height + gap.height), width, height);
-            [cells addObject:[NSValue valueWithBytes:&cell objCType:@encode(CGRect)]];
+            [cells addObject:[NSValue valueWithRect:CGRectMake(frame.origin.x + column * (width + gap.width),
+                                                               frame.origin.y + row * (height + gap.height), width, height)]];
         }
     }
     return cells;
+}
+
+CGFloat QLMSkinSlotScale(QLMSkinElement *element, QLMSkinTextSlot *slot, CGSize size) {
+    if (!slot.scales) {
+        return 1;
+    }
+    // The smaller ratio, so a scaled slot never outgrows its element.
+    return MIN(size.height / element.frame.size.height, size.width / element.frame.size.width);
+}
+
+CGRect QLMSkinSlotFrame(QLMSkinElement *element, QLMSkinTextSlot *slot, CGSize size) {
+    CGRect frame = slot.frame;
+    if (slot.scales) {
+        CGFloat scale = QLMSkinSlotScale(element, slot, size);
+        return CGRectMake(frame.origin.x * scale, frame.origin.y * scale, frame.size.width * scale, frame.size.height * scale);
+    }
+    CGSize extra = CGSizeMake(size.width - element.frame.size.width, size.height - element.frame.size.height);
+    return QLMSkinSpring(frame, slot.anchors, extra);
 }
 
 @implementation QLMSkinLayout
@@ -56,26 +73,13 @@ NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger 
 
 - (CGFloat)scaleOfSlot:(NSString *)slot inElement:(NSString *)name {
     QLMSkinElement *element = [self.skin element:name];
-    if (!element.text[slot].scales) {
-        return 1;
-    }
-    // The smaller ratio, so a scaled slot never outgrows its element.
-    CGSize laid = [self frameOfElement:name].size;
-    return MIN(laid.height / element.frame.size.height, laid.width / element.frame.size.width);
+    return QLMSkinSlotScale(element, element.text[slot], [self frameOfElement:name].size);
 }
 
 - (CGRect)frameOfSlot:(NSString *)slot inElement:(NSString *)name {
     QLMSkinElement *element = [self.skin element:name];
-    QLMSkinTextSlot *text = element.text[slot];
-    NSAssert(text != nil, @"no slot %@ in %@", slot, name);
-    CGRect frame = text.frame;
-    if (text.scales) {
-        CGFloat scale = [self scaleOfSlot:slot inElement:name];
-        return CGRectMake(frame.origin.x * scale, frame.origin.y * scale, frame.size.width * scale, frame.size.height * scale);
-    }
-    CGRect laid = [self frameOfElement:name];
-    CGSize extra = CGSizeMake(laid.size.width - element.frame.size.width, laid.size.height - element.frame.size.height);
-    return QLMSkinSpring(frame, text.anchors, extra);
+    NSAssert(element.text[slot] != nil, @"no slot %@ in %@", slot, name);
+    return QLMSkinSlotFrame(element, element.text[slot], [self frameOfElement:name].size);
 }
 
 - (NSArray<NSValue *> *)cellsOfElement:(NSString *)name {

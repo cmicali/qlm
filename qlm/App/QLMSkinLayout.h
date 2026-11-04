@@ -16,6 +16,14 @@ CGRect QLMSkinSpring(CGRect frame, QLMSkinAnchors anchors, CGSize extra);
 // A grid's cells, row by row, each the same size, `gap` apart.
 NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger rows, CGSize gap);
 
+// What a slot's font size is multiplied by in its element laid out at
+// `size`: 1, or for a slot that scales, the smaller of the element's height
+// and width over the skin's.
+CGFloat QLMSkinSlotScale(QLMSkinElement *element, QLMSkinTextSlot *slot, CGSize size);
+
+// A slot's frame in its element laid out at `size`.
+CGRect QLMSkinSlotFrame(QLMSkinElement *element, QLMSkinTextSlot *slot, CGSize size);
+
 @interface QLMSkinLayout : NSObject
 
 // A size below the skin's is taken as the skin's.
@@ -29,8 +37,6 @@ NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger 
 - (CGRect)frameOfElement:(NSString *)name;
 // In the element's laid-out frame.
 - (CGRect)frameOfSlot:(NSString *)slot inElement:(NSString *)element;
-// What the slot's font size is multiplied by: 1, or for a slot that scales,
-// the smaller of its element's height and width over the skin's.
 - (CGFloat)scaleOfSlot:(NSString *)slot inElement:(NSString *)element;
 // A grid element's cells, in the window.
 - (NSArray<NSValue *> *)cellsOfElement:(NSString *)name;

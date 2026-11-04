@@ -3,6 +3,8 @@
 
 #include <math.h>
 
+#include "QLMCommands.h"
+
 // The knob's angle math. Angles are in degrees, clockwise from straight up,
 // in a view whose y grows down. The sweep is the pack's: -135 at the range's
 // bottom to +135 at its top. Only the pointer turns.
@@ -10,8 +12,7 @@
 #define QLM_KNOB_START_DEGREES (-135.0)
 #define QLM_KNOB_END_DEGREES 135.0
 #define QLM_KNOB_SWEEP_DEGREES 270.0
-// GLM's volume step.
-#define QLM_KNOB_STEP_DECIBELS 0.5
+#define QLM_KNOB_STEP_DECIBELS QLMVolumeDecibelsStep
 
 static inline double QLMKnobClamp(double value, double low, double high) {
     return value < low ? low : value > high ? high : value;
@@ -27,13 +28,6 @@ static inline double QLMKnobFraction(double decibels, double minimum, double max
 
 static inline double QLMKnobAngleForDecibels(double decibels, double minimum, double maximum) {
     return QLM_KNOB_START_DEGREES + QLMKnobFraction(decibels, minimum, maximum) * QLM_KNOB_SWEEP_DEGREES;
-}
-
-// An angle outside the sweep is its nearer end.
-static inline double QLMKnobDecibelsForAngle(double degrees, double minimum, double maximum) {
-    double fraction = (QLMKnobClamp(degrees, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES) - QLM_KNOB_START_DEGREES)
-                      / QLM_KNOB_SWEEP_DEGREES;
-    return minimum + fraction * (maximum - minimum);
 }
 
 // The nearest 0.5 dB step in the range. A range end off the steps gives
@@ -76,14 +70,15 @@ static inline int QLMKnobInDeadZone(double degrees) {
 // crossing the gap below the knob, or passing over its center, in one event.
 #define QLM_KNOB_MAX_STEP_DEGREES 45.0
 
-// One step of a drag, which is relative: the level moves by the angle the
-// mouse turned about the center since the last step, at the sweep's rate,
-// and stays in the range. The listener comes first, so a click moves
-// nothing, and a step from or into the dead zone, or one that turns more
-// than QLM_KNOB_MAX_STEP_DEGREES, keeps the level. Both angles are then in
-// the sweep, so the turn is their plain difference, never wrapped. `level`
-// is unsnapped, so a slow drag still adds up. Snap what it returns to send
-// it.
+// The mouse's angle for a drag, or NaN within `deadRadius` of the center,
+// where a few points of jitter are tens of degrees.
+static inline double QLMKnobDragAngle(double dx, double dy, double deadRadius) {
+    return hypot(dx, dy) < deadRadius ? NAN : QLMKnobAngleOfOffset(dx, dy);
+}
+
+// One step of a relative drag. A step in or out of the dead zone, past the
+// cap, or from or to a NaN angle keeps the level. `level` is unsnapped, so a
+// slow drag adds up.
 static inline double QLMKnobDragStep(double level, double fromDegrees, double toDegrees, double minimum, double maximum) {
     double turned = toDegrees - fromDegrees;
     if (QLMKnobInDeadZone(fromDegrees) || QLMKnobInDeadZone(toDegrees) || !(maximum > minimum)

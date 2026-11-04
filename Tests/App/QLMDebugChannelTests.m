@@ -322,7 +322,7 @@
 // while main drains, under the test runner's channel.
 - (void)testAClientReachesTheVerbsThroughTheWire {
     QLMDebugInstallChannel(_app);
-    NSString *outPath = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSString *outPath = QLMScratchPath();
     [NSData.data writeToFile:outPath atomically:NO];
     fflush(stdout);
     int saved = dup(STDOUT_FILENO);

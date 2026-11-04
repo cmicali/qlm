@@ -1,7 +1,16 @@
 #import "QLMSkinControls.h"
 
+#import "NSImage+Util.h"
+#import "PlatformColor.h"
 #import "QLMSkinDrawing.h"
 #import "QLMSkinLayout.h"
+
+static BOOL QLMSkinSame(NSString *_Nullable a, NSString *_Nullable b) {
+    return a == b || [a isEqualToString:b];
+}
+
+// The symbol a footer button draws where this macOS lacks the skin's.
+static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 
 #pragma mark - The control
 
@@ -37,16 +46,25 @@
 }
 
 - (void)setHovered:(BOOL)hovered {
+    if (hovered == _hovered) {
+        return;
+    }
     _hovered = hovered;
     self.needsDisplay = YES;
 }
 
 - (void)setPressed:(BOOL)pressed {
+    if (pressed == _pressed) {
+        return;
+    }
     _pressed = pressed;
     self.needsDisplay = YES;
 }
 
 - (void)setEnabled:(BOOL)enabled {
+    if (enabled == self.enabled) {
+        return;
+    }
     super.enabled = enabled;
     self.needsDisplay = YES;
 }
@@ -110,7 +128,10 @@
 
 #pragma mark - A button
 
-@implementation QLMSkinButtonView
+@implementation QLMSkinButtonView {
+    NSAttributedString *_titleString;  // nil until drawn, and after a change
+    CGFloat _titleWidth;
+}
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
     self = [super initWithSkin:skin];
@@ -120,32 +141,63 @@
     return self;
 }
 
-- (void)setTitle:(NSString *)title {
-    _title = [title copy];
+- (void)titleDidChange {
+    _titleString = nil;
     self.needsDisplay = YES;
+}
+
+- (void)setTitle:(NSString *)title {
+    if (QLMSkinSame(title, _title)) {
+        return;
+    }
+    _title = [title copy];
+    [self titleDidChange];
 }
 
 - (void)setPrefix:(NSString *)prefix {
+    if (QLMSkinSame(prefix, _prefix)) {
+        return;
+    }
     _prefix = [prefix copy];
-    self.needsDisplay = YES;
+    [self titleDidChange];
 }
 
 - (void)setSelected:(BOOL)selected {
+    if (selected == _selected) {
+        return;
+    }
     _selected = selected;
-    self.needsDisplay = YES;
+    [self titleDidChange];
+}
+
+- (void)setEnabled:(BOOL)enabled {
+    if (enabled == self.enabled) {
+        return;
+    }
+    super.enabled = enabled;
+    [self titleDidChange];
 }
 
 - (void)setShowsLED:(BOOL)showsLED {
+    if (showsLED == _showsLED) {
+        return;
+    }
     _showsLED = showsLED;
     self.needsDisplay = YES;
 }
 
 - (void)setLedLit:(BOOL)ledLit {
+    if (ledLit == _ledLit) {
+        return;
+    }
     _ledLit = ledLit;
     self.needsDisplay = YES;
 }
 
 - (NSAttributedString *)titleString {
+    if (_titleString != nil) {
+        return _titleString;
+    }
     QLMSkinTitle *style = self.skin.button.title;
     QLMSkinColor color = !self.enabled ? style.disabledColor : self.selected ? style.selectedColor : style.color;
     QLMSkinColor prefixColor = self.enabled ? style.prefixColor : style.disabledColor;
@@ -166,6 +218,8 @@
     if (string.length > 0) {
         [string removeAttribute:NSKernAttributeName range:NSMakeRange(string.length - 1, 1)];
     }
+    _titleString = string;
+    _titleWidth = ceil(string.size.width) + 1;
     return string;
 }
 
@@ -176,7 +230,7 @@
     QLMSkinDrawStyle(self.skin, button.style, state, bounds, NO);
 
     NSAttributedString *title = [self titleString];
-    CGFloat width = MIN(ceil(title.size.width) + 1, bounds.size.width);
+    CGFloat width = MIN(_titleWidth, bounds.size.width);
     CGFloat led = self.showsLED ? button.ledSize : 0;
     BOOL beforeTitle = self.showsLED && button.ledX < 0;
     CGFloat total = beforeTitle ? led + button.ledGap + width : width;
@@ -199,61 +253,56 @@
 
 @implementation QLMSkinTextButton {
     QLMSkinTextSlot *_slot;
-    NSMutableDictionary<NSNumber *, NSImage *> *_symbols;  // by alpha
+    NSAttributedString *_titleString;  // nil until drawn, and after a change
+    CGFloat _titleAlpha;
+    CGFloat _titleWidth;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin slot:(QLMSkinTextSlot *)slot symbol:(NSString *)symbol {
     self = [super initWithSkin:skin];
     if (self) {
         _slot = slot;
-        _symbolName = [symbol copy];
+        _symbolName = [[NSImage availableSymbolName:symbol fallback:QLMSkinFallbackSymbol] copy];
         _title = @"";
-        _symbols = [NSMutableDictionary dictionary];
     }
     return self;
 }
 
 - (void)setTitle:(NSString *)title {
-    _title = [title copy];
-    self.needsDisplay = YES;
-}
-
-- (void)setSymbolName:(NSString *)symbolName {
-    _symbolName = [symbolName copy];
-    [_symbols removeAllObjects];
-    self.needsDisplay = YES;
-}
-
-- (nullable NSImage *)symbolInColor:(NSColor *)color alpha:(CGFloat)alpha {
-    NSImage *symbol = _symbols[@(alpha)];
-    if (symbol == nil) {
-        NSImageSymbolConfiguration *configuration =
-            [[NSImageSymbolConfiguration configurationWithPointSize:round(_slot.size * 1.25) weight:NSFontWeightRegular]
-                configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:color]];
-        symbol = [[NSImage imageWithSystemSymbolName:self.symbolName accessibilityDescription:nil]
-            imageWithSymbolConfiguration:configuration];
-        if (symbol != nil) {
-            _symbols[@(alpha)] = symbol;
-        }
+    if (QLMSkinSame(title, _title)) {
+        return;
     }
-    return symbol;
+    _title = [title copy];
+    _titleString = nil;
+    self.needsDisplay = YES;
+}
+
+- (NSAttributedString *)titleStringAtAlpha:(CGFloat)alpha color:(NSColor *)color {
+    if (_titleString == nil || _titleAlpha != alpha) {
+        _titleString = [[NSAttributedString alloc]
+            initWithString:self.title
+                attributes:QLMSkinTextAttributes(QLMSkinSlotFont(_slot, 1, NO), color, QLMSkinAlignmentLeft, _slot.tracking)];
+        _titleAlpha = alpha;
+        _titleWidth = ceil(_titleString.size.width) + 1;
+    }
+    return _titleString;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
-    CGFloat alpha = !self.enabled ? 0.4 : self.pressed ? 0.6 : 1;
-    NSColor *color = [QLMSkinNSColor(_slot.color) colorWithAlphaComponent:_slot.color.alpha * alpha];
-    NSFont *font = QLMSkinSlotFont(_slot, 1, NO);
-    NSAttributedString *title = [[NSAttributedString alloc]
-        initWithString:self.title
-            attributes:QLMSkinTextAttributes(font, color, QLMSkinAlignmentLeft, _slot.tracking)];
+    CGFloat alpha = !self.enabled ? QLMSkinDisabledAlpha : self.pressed ? 0.6 : 1;
+    NSColor *color = VibeColorWithScaledAlpha(QLMSkinNSColor(_slot.color), alpha);
+    NSAttributedString *title = [self titleStringAtAlpha:alpha color:color];
 
-    NSImage *symbol = [self symbolInColor:color alpha:alpha];
+    NSImageSymbolConfiguration *configuration =
+        [[NSImageSymbolConfiguration configurationWithPointSize:round(_slot.size * 1.25) weight:NSFontWeightRegular]
+            configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:color]];
+    NSImage *symbol = [[NSImage imageWithSystemSymbolName:self.symbolName accessibilityDescription:nil]
+        imageWithSymbolConfiguration:configuration];
 
     NSRect bounds = self.bounds;
     CGFloat gap = symbol ? round(_slot.size * 0.7) : 0;
     NSSize symbolSize = symbol ? symbol.size : NSZeroSize;
-    CGFloat textWidth = ceil(title.size.width) + 1;
-    CGFloat total = MIN(symbolSize.width + gap + textWidth, bounds.size.width);
+    CGFloat total = MIN(symbolSize.width + gap + _titleWidth, bounds.size.width);
     CGFloat x = _slot.alignment == QLMSkinAlignmentLeft ? 0
                 : _slot.alignment == QLMSkinAlignmentRight ? bounds.size.width - total
                 : round((bounds.size.width - total) / 2);
@@ -291,32 +340,35 @@
 }
 
 - (void)setText:(NSString *)text {
+    if (QLMSkinSame(text, _text)) {
+        return;
+    }
     _text = [text copy];
     self.needsDisplay = YES;
 }
 
 - (void)setLit:(BOOL)lit {
+    if (lit == _lit) {
+        return;
+    }
     _lit = lit;
     self.needsDisplay = YES;
 }
 
 - (void)setEnabled:(BOOL)enabled {
+    if (enabled == _enabled) {
+        return;
+    }
     _enabled = enabled;
-    self.needsDisplay = YES;
-}
-
-- (void)setSkinLayout:(QLMSkinLayout *)skinLayout {
-    _skinLayout = skinLayout;
     self.needsDisplay = YES;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinElement *element = [_skin element:@"status"];
+    QLMSkinTextSlot *online = element.text[@"online"];
     QLMSkinDrawLED(_skin.led, element.ledFrame, self.lit, self.enabled);
-    if (self.skinLayout != nil) {
-        QLMSkinDrawSlot(self.text, element.text[@"online"], [self.skinLayout frameOfSlot:@"online" inElement:@"status"], 1, YES,
-                        self.enabled ? 1 : 0.5);
-    }
+    QLMSkinDrawSlot(self.text, online, QLMSkinSlotFrame(element, online, self.bounds.size), 1, YES,
+                    self.enabled ? 1 : QLMSkinDisabledAlpha);
 }
 
 @end
@@ -340,55 +392,67 @@
     return YES;
 }
 
-- (void)setSkinLayout:(QLMSkinLayout *)skinLayout {
-    _skinLayout = skinLayout;
-    self.needsDisplay = YES;
-}
-
 - (void)setCaption:(NSString *)caption {
+    if (QLMSkinSame(caption, _caption)) {
+        return;
+    }
     _caption = [caption copy];
     self.needsDisplay = YES;
 }
 
 - (void)setLevel:(NSString *)level {
+    if (QLMSkinSame(level, _level)) {
+        return;
+    }
     _level = [level copy];
     self.needsDisplay = YES;
 }
 
 - (void)setUnit:(NSString *)unit {
+    if (QLMSkinSame(unit, _unit)) {
+        return;
+    }
     _unit = [unit copy];
     self.needsDisplay = YES;
 }
 
 - (void)setOutput:(NSString *)output {
+    if (QLMSkinSame(output, _output)) {
+        return;
+    }
     _output = [output copy];
     self.needsDisplay = YES;
 }
 
 - (void)setMax:(NSString *)max {
+    if (QLMSkinSame(max, _max)) {
+        return;
+    }
     _max = [max copy];
     self.needsDisplay = YES;
 }
 
 - (void)setDisabled:(BOOL)disabled {
+    if (disabled == _disabled) {
+        return;
+    }
     _disabled = disabled;
     self.needsDisplay = YES;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinElement *element = [_skin element:@"display"];
+    CGSize size = self.bounds.size;
     QLMSkinDrawDimmed(self.disabled, element.disabledOverlay, self.bounds, ^{
         QLMSkinDrawStyle(self->_skin, element.style, QLMSkinStateNormal, self.bounds, NO);
-        if (self.skinLayout == nil) {
-            return;
-        }
         NSDictionary<NSString *, NSString *> *texts = @{
             @"caption": self.caption ?: @"", @"level": self.level ?: @"", @"unit": self.unit ?: @"",
             @"output": self.output ?: @"", @"max": self.max ?: @"",
         };
         for (NSString *name in texts) {
-            QLMSkinDrawSlot(texts[name], element.text[name], [self.skinLayout frameOfSlot:name inElement:@"display"],
-                            [self.skinLayout scaleOfSlot:name inElement:@"display"], YES, 1);
+            QLMSkinTextSlot *slot = element.text[name];
+            QLMSkinDrawSlot(texts[name], slot, QLMSkinSlotFrame(element, slot, size), QLMSkinSlotScale(element, slot, size),
+                            YES, 1);
         }
     });
 }
@@ -402,7 +466,7 @@
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
-    self = [super initWithFrame:NSMakeRect(0, 0, skin.osdSize.width, skin.osdSize.height)];
+    self = [super initWithFrame:skin.osd.frame];
     if (self) {
         _skin = skin;
         self.clipsToBounds = YES;
@@ -419,38 +483,57 @@
 }
 
 - (void)setLevel:(NSString *)level {
+    if (QLMSkinSame(level, _level)) {
+        return;
+    }
     _level = [level copy];
     self.needsDisplay = YES;
 }
 
 - (void)setUnit:(NSString *)unit {
+    if (QLMSkinSame(unit, _unit)) {
+        return;
+    }
     _unit = [unit copy];
     self.needsDisplay = YES;
 }
 
 - (void)setTitle:(NSString *)title {
+    if (QLMSkinSame(title, _title)) {
+        return;
+    }
     _title = [title copy];
     self.needsDisplay = YES;
 }
 
 - (void)setSubtitle:(NSString *)subtitle {
+    if (QLMSkinSame(subtitle, _subtitle)) {
+        return;
+    }
     _subtitle = [subtitle copy];
     self.needsDisplay = YES;
 }
 
 - (void)setFraction:(double)fraction {
-    _fraction = isfinite(fraction) ? MAX(0, MIN(1, fraction)) : 0;
+    fraction = isfinite(fraction) ? MAX(0, MIN(1, fraction)) : 0;
+    if (fraction == _fraction) {
+        return;
+    }
+    _fraction = fraction;
     self.needsDisplay = YES;
 }
 
 - (void)setDisabled:(BOOL)disabled {
+    if (disabled == _disabled) {
+        return;
+    }
     _disabled = disabled;
     self.needsDisplay = YES;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinElement *osd = _skin.osd;
-    NSRect bounds = NSMakeRect(0, 0, _skin.osdSize.width, _skin.osdSize.height);
+    NSRect bounds = osd.frame;
     QLMSkinDrawDimmed(self.disabled, osd.disabledOverlay, bounds, ^{
         QLMSkinDrawStyle(self->_skin, osd.style, QLMSkinStateNormal, bounds, NO);
         NSDictionary<NSString *, NSString *> *texts = @{

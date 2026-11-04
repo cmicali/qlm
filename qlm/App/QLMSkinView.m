@@ -4,13 +4,16 @@
 
 const NSUInteger QLMSkinViewMaxGroups = 6;
 
+static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
+    return a == b || [a isEqualToString:b];
+}
+
 @implementation QLMSkinView
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
     self = [super initWithFrame:NSMakeRect(0, 0, skin.windowSize.width, skin.windowSize.height)];
     if (self) {
         _skin = skin;
-        _skinLayout = [[QLMSkinLayout alloc] initWithSkin:skin size:skin.windowSize];
         _status = [[QLMSkinStatusView alloc] initWithSkin:skin];
         [self addSubview:_status];
 
@@ -19,7 +22,6 @@ const NSUInteger QLMSkinViewMaxGroups = 6;
         NSMutableArray<QLMSkinButtonView *> *buttons = [NSMutableArray array];
         for (NSUInteger i = 0; i < cells; i++) {
             QLMSkinButtonView *button = [[QLMSkinButtonView alloc] initWithSkin:skin];
-            button.tag = (NSInteger)i;
             button.hidden = YES;
             [self addSubview:button];
             [buttons addObject:button];
@@ -63,15 +65,8 @@ const NSUInteger QLMSkinViewMaxGroups = 6;
     return YES;
 }
 
-// A frame change calls this, once.
 - (void)resizeSubviewsWithOldSize:(NSSize)oldSize {
     [self applyLayout];
-}
-
-static NSRect QLMSkinRect(NSValue *value) {
-    CGRect rect = CGRectZero;
-    [value getValue:&rect size:sizeof rect];
-    return rect;
 }
 
 // TRAP: NSView's init sets the frame, before the subviews exist.
@@ -82,19 +77,17 @@ static NSRect QLMSkinRect(NSValue *value) {
     QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:self.skin size:self.bounds.size];
     _skinLayout = layout;
     self.status.frame = [layout frameOfElement:@"status"];
-    self.status.skinLayout = layout;
 
     NSArray<NSValue *> *cells = [layout cellsOfElement:@"groups"];
     for (NSUInteger i = 0; i < self.groupButtons.count; i++) {
-        self.groupButtons[i].frame = QLMSkinRect(cells[i]);
+        self.groupButtons[i].frame = cells[i].rectValue;
     }
 
     self.display.frame = [layout frameOfElement:@"display"];
-    self.display.skinLayout = layout;
 
     NSArray<NSValue *> *toggles = [layout cellsOfElement:@"toggles"];
-    self.muteButton.frame = QLMSkinRect(toggles[0]);
-    self.dimButton.frame = QLMSkinRect(toggles[1]);
+    self.muteButton.frame = toggles[0].rectValue;
+    self.dimButton.frame = toggles[1].rectValue;
 
     self.knob.frame = [layout frameOfElement:@"knob"];
 
@@ -118,39 +111,43 @@ static NSRect QLMSkinRect(NSValue *value) {
 
 #pragma mark - The panel's text
 
+// Redraws only the slot's frame, and only on a change.
+- (void)setText:(NSString *)text of:(NSString *__strong *)ivar slot:(NSString *)slot inElement:(NSString *)element {
+    if (QLMSkinSameText(text, *ivar)) {
+        return;
+    }
+    *ivar = [text copy];
+    if ([self.skin element:element].text[slot] != nil) {
+        [self setNeedsDisplayInRect:[self frameOfSlot:slot inElement:element]];
+    }
+}
+
 - (void)setLogo:(NSString *)logo {
-    _logo = [logo copy];
-    self.needsDisplay = YES;
+    [self setText:logo of:&_logo slot:@"logo" inElement:@"nameplate"];
 }
 
 - (void)setTagline:(NSString *)tagline {
-    _tagline = [tagline copy];
-    self.needsDisplay = YES;
-}
-
-- (void)setGroupsMessage:(NSString *)groupsMessage {
-    _groupsMessage = [groupsMessage copy];
-    self.needsDisplay = YES;
+    [self setText:tagline of:&_tagline slot:@"tagline" inElement:@"nameplate"];
 }
 
 - (void)setGroupsTitle:(NSString *)groupsTitle {
-    _groupsTitle = [groupsTitle copy];
-    self.needsDisplay = YES;
+    [self setText:groupsTitle of:&_groupsTitle slot:@"groupsTitle" inElement:@"groups"];
+}
+
+- (void)setGroupsMessage:(NSString *)groupsMessage {
+    [self setText:groupsMessage of:&_groupsMessage slot:@"message" inElement:@"groups"];
 }
 
 - (void)setKnobMin:(NSString *)knobMin {
-    _knobMin = [knobMin copy];
-    self.needsDisplay = YES;
+    [self setText:knobMin of:&_knobMin slot:@"min" inElement:@"knob"];
 }
 
 - (void)setKnobMax:(NSString *)knobMax {
-    _knobMax = [knobMax copy];
-    self.needsDisplay = YES;
+    [self setText:knobMax of:&_knobMax slot:@"max" inElement:@"knob"];
 }
 
 - (void)setKnobCaption:(NSString *)knobCaption {
-    _knobCaption = [knobCaption copy];
-    self.needsDisplay = YES;
+    [self setText:knobCaption of:&_knobCaption slot:@"caption" inElement:@"knob"];
 }
 
 #pragma mark - Drawing
@@ -161,16 +158,19 @@ static NSRect QLMSkinRect(NSValue *value) {
     return NSOffsetRect([self.skinLayout frameOfSlot:slot inElement:element], frame.origin.x, frame.origin.y);
 }
 
-- (void)drawSlot:(NSString *)slot inElement:(NSString *)element text:(nullable NSString *)text {
+- (void)drawSlot:(NSString *)slot inElement:(NSString *)element text:(nullable NSString *)text dirty:(NSRect)dirty {
     QLMSkinTextSlot *style = [self.skin element:element].text[slot];
-    if (style == nil) {
+    if (style == nil || text.length == 0) {
         return;
     }
-    QLMSkinDrawSlot(text, style, [self frameOfSlot:slot inElement:element],
-                    [self.skinLayout scaleOfSlot:slot inElement:element], NO, 1);
+    NSRect frame = [self frameOfSlot:slot inElement:element];
+    if (!NSIntersectsRect(frame, dirty)) {
+        return;
+    }
+    QLMSkinDrawSlot(text, style, frame, [self.skinLayout scaleOfSlot:slot inElement:element], NO, 1);
 }
 
-- (void)drawMarkings {
+- (void)drawMarkingsIn:(NSRect)dirty {
     QLMSkinMarkings *markings = self.skin.markings;
     if (markings.width <= 0) {
         return;
@@ -180,6 +180,9 @@ static NSRect QLMSkinRect(NSValue *value) {
     for (QLMSkinLine *line in markings.lines) {
         NSRect frame = [self.skinLayout frameOfElement:line.element];
         CGFloat y = round(frame.origin.y + line.y) + half;
+        if (!NSIntersectsRect(NSMakeRect(NSMinX(frame), y - half, frame.size.width, markings.width), dirty)) {
+            continue;
+        }
         NSBezierPath *path = [NSBezierPath bezierPath];
         [path moveToPoint:NSMakePoint(NSMinX(frame), y)];
         [path lineToPoint:NSMakePoint(NSMaxX(frame), y)];
@@ -192,6 +195,9 @@ static NSRect QLMSkinRect(NSValue *value) {
         NSRect outer = NSMakeRect(frame.origin.x - outset.left, frame.origin.y - outset.top,
                                   frame.size.width + outset.left + outset.right,
                                   frame.size.height + outset.top + outset.bottom);
+        if (!NSIntersectsRect(outer, dirty)) {
+            continue;
+        }
         outer = NSInsetRect(outer, half, half);
         [NSGraphicsContext saveGraphicsState];
         if (box.gap != nil) {
@@ -210,19 +216,23 @@ static NSRect QLMSkinRect(NSValue *value) {
     }
 }
 
+// Only what the dirty rect touches, so a turn of the knob redraws little of
+// the panel.
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinDrawStyle(self.skin, [self.skin element:@"panel"].style, QLMSkinStateNormal,
                      [self.skinLayout frameOfElement:@"panel"], NO);
-    QLMSkinDrawStyle(self.skin, [self.skin element:@"nameplate"].style, QLMSkinStateNormal,
-                     [self.skinLayout frameOfElement:@"nameplate"], NO);
-    [self drawMarkings];
-    [self drawSlot:@"logo" inElement:@"nameplate" text:self.logo];
-    [self drawSlot:@"tagline" inElement:@"nameplate" text:self.tagline];
-    [self drawSlot:@"groupsTitle" inElement:@"groups" text:self.groupsTitle];
-    [self drawSlot:@"message" inElement:@"groups" text:self.groupsMessage];
-    [self drawSlot:@"min" inElement:@"knob" text:self.knobMin];
-    [self drawSlot:@"max" inElement:@"knob" text:self.knobMax];
-    [self drawSlot:@"caption" inElement:@"knob" text:self.knobCaption];
+    NSRect nameplate = [self.skinLayout frameOfElement:@"nameplate"];
+    if (NSIntersectsRect(nameplate, dirtyRect)) {
+        QLMSkinDrawStyle(self.skin, [self.skin element:@"nameplate"].style, QLMSkinStateNormal, nameplate, NO);
+    }
+    [self drawMarkingsIn:dirtyRect];
+    [self drawSlot:@"logo" inElement:@"nameplate" text:self.logo dirty:dirtyRect];
+    [self drawSlot:@"tagline" inElement:@"nameplate" text:self.tagline dirty:dirtyRect];
+    [self drawSlot:@"groupsTitle" inElement:@"groups" text:self.groupsTitle dirty:dirtyRect];
+    [self drawSlot:@"message" inElement:@"groups" text:self.groupsMessage dirty:dirtyRect];
+    [self drawSlot:@"min" inElement:@"knob" text:self.knobMin dirty:dirtyRect];
+    [self drawSlot:@"max" inElement:@"knob" text:self.knobMax dirty:dirtyRect];
+    [self drawSlot:@"caption" inElement:@"knob" text:self.knobCaption dirty:dirtyRect];
 }
 
 @end

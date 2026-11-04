@@ -9,20 +9,6 @@
 @interface QLMSkinTests : XCTestCase
 @end
 
-static NSURL *QLMModernURL(void) {
-    return [NSURL fileURLWithPath:QLMRepositoryPath(@"qlm/App/Skins/modern") isDirectory:YES];
-}
-
-static NSURL *QLMFixtureSkinURL(void) {
-    return [NSURL fileURLWithPath:QLMRepositoryPath(@"Tests/App/Fixtures/Skins/fixture") isDirectory:YES];
-}
-
-static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
-    QLMSkinColor color = QLMSkinColorClear;
-    [skin.palette[name] getValue:&color size:sizeof color];
-    return color;
-}
-
 #define QLMAssertColor(color, r, g, b, a)                       \
     do {                                                        \
         QLMSkinColor c_ = (color);                              \
@@ -38,8 +24,7 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
 
 - (void)setUp {
     [super setUp];
-    _work = [NSURL fileURLWithPath:[NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString]
-                       isDirectory:YES];
+    _work = [NSURL fileURLWithPath:QLMScratchPath() isDirectory:YES];
 }
 
 - (void)tearDown {
@@ -47,18 +32,21 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     [super tearDown];
 }
 
-// A copy of the fixture, its JSON changed by `change`, read. The skin's
-// directory is named "changed".
-- (nullable QLMSkin *)fixtureChangedBy:(void (^_Nullable)(NSMutableDictionary *json))change
-                                 error:(NSError **)error {
+// A copy of the skin at `source`, its JSON changed by `change`, read. The
+// copy's directory is named "changed".
+- (nullable QLMSkin *)skin:(NSURL *)source
+                 changedBy:(void (^_Nullable)(NSMutableDictionary *json))change
+                     error:(NSError **)error {
     NSURL *directory = [_work URLByAppendingPathComponent:@"changed" isDirectory:YES];
     [NSFileManager.defaultManager removeItemAtURL:directory error:NULL];
     XCTAssertTrue([NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES
                                                           attributes:nil error:NULL]);
-    XCTAssertTrue([NSFileManager.defaultManager copyItemAtURL:[QLMFixtureSkinURL() URLByAppendingPathComponent:@"png"]
-                                                        toURL:[directory URLByAppendingPathComponent:@"png"]
-                                                        error:NULL]);
-    NSData *data = [NSData dataWithContentsOfURL:[QLMFixtureSkinURL() URLByAppendingPathComponent:@"skin.json"]];
+    NSURL *png = [source URLByAppendingPathComponent:@"png"];
+    if ([NSFileManager.defaultManager fileExistsAtPath:png.path]) {
+        XCTAssertTrue([NSFileManager.defaultManager copyItemAtURL:png toURL:[directory URLByAppendingPathComponent:@"png"]
+                                                            error:NULL]);
+    }
+    NSData *data = [NSData dataWithContentsOfURL:[source URLByAppendingPathComponent:@"skin.json"]];
     NSMutableDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:NULL];
     if (change) {
         change(json);
@@ -68,10 +56,15 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     return [QLMSkin skinAtURL:directory error:error];
 }
 
-// The fixture, changed, is refused, and the reason contains `reason`.
-- (void)assertChange:(void (^)(NSMutableDictionary *json))change refusedWith:(NSString *)reason {
+- (nullable QLMSkin *)fixtureChangedBy:(void (^_Nullable)(NSMutableDictionary *json))change error:(NSError **)error {
+    return [self skin:QLMFixtureSkinURL() changedBy:change error:error];
+}
+
+// The skin at `source`, changed, is refused, and the reason contains
+// `reason`.
+- (void)assertChangeTo:(NSURL *)source change:(void (^)(NSMutableDictionary *json))change refusedWith:(NSString *)reason {
     NSError *error = nil;
-    QLMSkin *skin = [self fixtureChangedBy:change error:&error];
+    QLMSkin *skin = [self skin:source changedBy:change error:&error];
     XCTAssertNil(skin);
     XCTAssertEqualObjects(error.domain, QLMSkinErrorDomain);
     XCTAssertEqual(error.code, QLMSkinErrorInvalid);
@@ -79,33 +72,38 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     XCTAssertTrue([error.localizedDescription containsString:reason], @"%@ lacks %@", error.localizedDescription, reason);
 }
 
+- (void)assertChange:(void (^)(NSMutableDictionary *json))change refusedWith:(NSString *)reason {
+    [self assertChangeTo:QLMFixtureSkinURL() change:change refusedWith:reason];
+}
+
 #pragma mark - The shipped skin
 
 - (void)testModernLoads {
     NSError *error = nil;
-    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernURL() error:&error];
+    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernSkinURL() error:&error];
     XCTAssertNotNil(skin, @"%@", error.localizedDescription);
     XCTAssertEqualObjects(skin.name, @"modern");
     XCTAssertTrue(CGSizeEqualToSize(skin.windowSize, CGSizeMake(640, 480)));
-    XCTAssertTrue(CGSizeEqualToSize(skin.osdSize, CGSizeMake(480, 150)));
-    QLMAssertColor(QLMPaletteColor(skin, @"accent"), 0xfd, 0xa0, 0x6c, 0xff);
+    XCTAssertTrue(CGRectEqualToRect(skin.osd.frame, CGRectMake(0, 0, 480, 150)));
+    // The palette's accent, through the LED that names it.
+    QLMAssertColor(skin.led.on, 0xfd, 0xa0, 0x6c, 0xff);
 }
 
 // Modern ships no image: every element draws.
 - (void)testModernDrawsEveryElement {
-    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernURL() error:NULL];
+    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
     for (QLMSkinStyle *style in @[[skin element:@"panel"].style, [skin element:@"nameplate"].style,
                                   [skin element:@"display"].style, skin.osd.style, skin.button.style, skin.knob.body]) {
         XCTAssertNil(style.imageName);
         XCTAssertNotNil([style drawForState:QLMSkinStateNormal]);
     }
-    XCTAssertFalse([NSFileManager.defaultManager fileExistsAtPath:[QLMModernURL() URLByAppendingPathComponent:@"png"].path]);
+    XCTAssertFalse([NSFileManager.defaultManager fileExistsAtPath:[QLMModernSkinURL() URLByAppendingPathComponent:@"png"].path]);
 }
 
 // A selected state takes selected's overrides, then its own. Modern's
 // selected border is the accent, and stays so on hover.
 - (void)testModernsButtonStatesMergeOverSelected {
-    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernURL() error:NULL];
+    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
     QLMSkinStyle *style = skin.button.style;
     QLMAssertColor([style drawForState:QLMSkinStateNormal].fill, 0x3e, 0x3f, 0x3a, 0xff);
     QLMAssertColor([style drawForState:QLMSkinStateNormal].border, 0x56, 0x58, 0x4f, 0xff);
@@ -120,7 +118,7 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
 }
 
 - (void)testModernsKnobHasAnArcAndNoTicks {
-    QLMSkinKnob *knob = [QLMSkin skinAtURL:QLMModernURL() error:NULL].knob;
+    QLMSkinKnob *knob = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL].knob;
     XCTAssertTrue(knob.hasArc);
     XCTAssertEqual(knob.tickCount, 0);
     XCTAssertEqual(knob.bodySize, 136);
@@ -206,8 +204,7 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     XCTAssertEqual(QLMSkinButtonState(YES, YES, YES, YES), QLMSkinStateSelectedPressed);
     XCTAssertEqual(QLMSkinButtonState(NO, YES, NO, YES), QLMSkinStateHover);
     XCTAssertEqual(QLMSkinButtonState(YES, YES, NO, NO), QLMSkinStateSelected);
-    XCTAssertEqual(QLMSkinKnobState(YES, NO, NO), QLMSkinStateNormal);
-    XCTAssertEqual(QLMSkinKnobState(NO, YES, YES), QLMSkinStateDisabled);
+    XCTAssertEqual(QLMSkinButtonState(NO, YES, NO, NO), QLMSkinStateNormal);
 }
 
 #pragma mark - Refusals
@@ -361,13 +358,16 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
 
 // A user's skin is read at launch, so no shape may crash the reader.
 - (void)testAnElementThatIsNotAnObjectIsRefused {
-    NSArray *names = @[@"panel", @"nameplate", @"status", @"groups", @"display", @"toggles", @"knob", @"footer"];
-    for (NSString *name in names) {
-        for (id value in @[@1, @[], @"display", [NSNull null]]) {
-            [self assertChange:^(NSMutableDictionary *json) {
-                json[@"elements"][name] = value;
-            } refusedWith:[NSString stringWithFormat:@"elements.%@ is not an object", name]];
-        }
+    // Each element by one shape, then each shape on one element.
+    for (NSString *name in QLMSkinElementNames()) {
+        [self assertChange:^(NSMutableDictionary *json) {
+            json[@"elements"][name] = @1;
+        } refusedWith:[NSString stringWithFormat:@"elements.%@ is not an object", name]];
+    }
+    for (id value in @[@[], @"display", [NSNull null]]) {
+        [self assertChange:^(NSMutableDictionary *json) {
+            json[@"elements"][@"display"] = value;
+        } refusedWith:@"elements.display is not an object"];
     }
     for (NSString *key in @[@"palette", @"elements", @"button", @"led", @"markings", @"osd"]) {
         [self assertChange:^(NSMutableDictionary *json) {
@@ -483,17 +483,19 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
 
 // A drawn element's states are its kind's: none for one with one state.
 - (void)testStatesOnAOneStateElementAreRefused {
-    NSError *error = nil;
-    NSData *data = [NSData dataWithContentsOfURL:[QLMModernURL() URLByAppendingPathComponent:@"skin.json"]];
-    NSMutableDictionary *json = [NSJSONSerialization JSONObjectWithData:data options:NSJSONReadingMutableContainers error:NULL];
-    json[@"elements"][@"display"][@"draw"][@"states"] = [@{@"hover": @{}} mutableCopy];
-    NSURL *directory = [_work URLByAppendingPathComponent:@"states"];
-    [NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];
-    [[NSJSONSerialization dataWithJSONObject:json options:0 error:NULL]
-        writeToURL:[directory URLByAppendingPathComponent:@"skin.json"] atomically:NO];
-    XCTAssertNil([QLMSkin skinAtURL:directory error:&error]);
-    XCTAssertTrue([error.localizedDescription containsString:@"elements.display.draw has states, but its element takes one"],
-                  @"%@", error.localizedDescription);
+    [self assertChangeTo:QLMModernSkinURL() change:^(NSMutableDictionary *json) {
+        json[@"elements"][@"display"][@"draw"][@"states"] = [@{@"hover": @{}} mutableCopy];
+    } refusedWith:@"elements.display.draw has states, but its element takes one"];
+}
+
+// The OSD keeps its size, so its slots have nothing to place them by.
+- (void)testAnOSDSlotThatWouldMoveIsRefused {
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"osd"][@"text"][@"level"][@"scales"] = @YES;
+    } refusedWith:@"osd.text.level has scales, but the OSD keeps its size"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"osd"][@"text"][@"title"][@"anchors"] = @[@"right"];
+    } refusedWith:@"osd.text.title has anchors, but the OSD keeps its size"];
 }
 
 #pragma mark - The library
@@ -504,9 +506,9 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     NSFileManager *files = NSFileManager.defaultManager;
     [files createDirectoryAtURL:builtIn withIntermediateDirectories:YES attributes:nil error:NULL];
     [files createDirectoryAtURL:user withIntermediateDirectories:YES attributes:nil error:NULL];
-    XCTAssertTrue([files copyItemAtURL:QLMModernURL() toURL:[builtIn URLByAppendingPathComponent:@"modern"] error:NULL]);
+    XCTAssertTrue([files copyItemAtURL:QLMModernSkinURL() toURL:[builtIn URLByAppendingPathComponent:@"modern"] error:NULL]);
     XCTAssertTrue([files copyItemAtURL:QLMFixtureSkinURL() toURL:[user URLByAppendingPathComponent:@"fixture"] error:NULL]);
-    XCTAssertTrue([files copyItemAtURL:QLMModernURL() toURL:[user URLByAppendingPathComponent:@"modern"] error:NULL]);
+    XCTAssertTrue([files copyItemAtURL:QLMModernSkinURL() toURL:[user URLByAppendingPathComponent:@"modern"] error:NULL]);
     [files createDirectoryAtURL:[user URLByAppendingPathComponent:@"broken"] withIntermediateDirectories:YES attributes:nil error:NULL];
     [[@"[]" dataUsingEncoding:NSUTF8StringEncoding] writeToURL:[user URLByAppendingPathComponent:@"broken/skin.json"] atomically:NO];
     [files createDirectoryAtURL:[user URLByAppendingPathComponent:@"empty"] withIntermediateDirectories:YES attributes:nil error:NULL];
@@ -520,13 +522,11 @@ static QLMSkinColor QLMPaletteColor(QLMSkin *skin, NSString *name) {
     QLMSkin *fixture = [library loadSkinNamed:@"fixture" refusal:&refusal];
     XCTAssertEqualObjects(fixture.name, @"fixture");
     XCTAssertNil(refusal);
-    XCTAssertNil(library.lastRefusal);
 
     QLMSkin *fallback = [library loadSkinNamed:@"broken" refusal:&refusal];
     XCTAssertEqualObjects(fallback.name, @"modern");
     XCTAssertEqualObjects(fallback.directory.URLByDeletingLastPathComponent.lastPathComponent, @"app");
     XCTAssertTrue([refusal hasPrefix:@"The skin broken is refused. skin.json is not an object"], @"%@", refusal);
-    XCTAssertEqualObjects(library.lastRefusal, refusal);
 
     XCTAssertEqualObjects([library loadSkinNamed:@"vintage" refusal:&refusal].name, @"modern");
     XCTAssertTrue([refusal containsString:@"There is no skin.json"], @"%@", refusal);

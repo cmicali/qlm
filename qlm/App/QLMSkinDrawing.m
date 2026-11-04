@@ -3,6 +3,8 @@
 #import <CoreText/CoreText.h>
 #import <objc/runtime.h>
 
+const CGFloat QLMSkinDisabledAlpha = 0.4;
+
 NSColor *QLMSkinNSColor(QLMSkinColor color) {
     return [NSColor colorWithSRGBRed:color.red green:color.green blue:color.blue alpha:color.alpha];
 }
@@ -20,24 +22,29 @@ static NSImageRep *_Nullable QLMSkinImageRep(NSURL *url, CGFloat scale) {
     return rep;
 }
 
-// The skin's own images, so a skin read again reads its files again. On the
-// main queue, as all drawing is.
-// Keys by address. Not const, so the two never share one.
-static char QLMSkinPlainImages;
-static char QLMSkinStretchedImages;
-
-static NSMutableDictionary<NSString *, id> *QLMSkinImageCache(QLMSkin *skin, const void *key) {
-    NSMutableDictionary *cache = objc_getAssociatedObject(skin, key);
-    if (cache == nil) {
-        cache = [NSMutableDictionary dictionary];
-        objc_setAssociatedObject(skin, key, cache, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+// A value kept on an object, made the first time it's asked for. Keys are
+// by address. On the main queue, as all drawing is.
+static id QLMSkinAttached(id owner, const void *key, id (^make)(void)) {
+    id value = objc_getAssociatedObject(owner, key);
+    if (value == nil) {
+        value = make();
+        objc_setAssociatedObject(owner, key, value, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     }
-    return cache;
+    return value;
 }
 
-NSImage *QLMSkinImage(QLMSkin *skin, NSString *name) {
-    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin, &QLMSkinPlainImages);
-    id cached = cache[name];
+static char QLMSkinImagesKey;
+static char QLMSkinGradientKey;
+
+// png/<name>.png with its @2x beside it, sized in points and stretched
+// through `insets`, or nil when either file won't load. Kept on the skin,
+// so a skin read again reads its files again.
+static NSImage *_Nullable QLMSkinStretchedImage(QLMSkin *skin, NSString *name, NSEdgeInsets insets) {
+    NSMutableDictionary<NSString *, id> *cache = QLMSkinAttached(skin, &QLMSkinImagesKey, ^id {
+        return [NSMutableDictionary dictionary];
+    });
+    NSString *key = [NSString stringWithFormat:@"%@|%g,%g,%g,%g", name, insets.top, insets.left, insets.bottom, insets.right];
+    id cached = cache[key];
     if (cached != nil) {
         return cached == NSNull.null ? nil : cached;
     }
@@ -48,25 +55,10 @@ NSImage *QLMSkinImage(QLMSkin *skin, NSString *name) {
         image = [[NSImage alloc] initWithSize:one.size];
         [image addRepresentation:one];
         [image addRepresentation:two];
-    }
-    cache[name] = image ?: NSNull.null;
-    return image;
-}
-
-// The image, stretched through `insets`.
-static NSImage *_Nullable QLMSkinStretchedImage(QLMSkin *skin, NSString *name, NSEdgeInsets insets) {
-    NSString *key = [NSString stringWithFormat:@"%@|%g,%g,%g,%g", name, insets.top, insets.left, insets.bottom, insets.right];
-    NSMutableDictionary<NSString *, id> *cache = QLMSkinImageCache(skin, &QLMSkinStretchedImages);
-    NSImage *image = cache[key];
-    if (image == nil) {
-        image = [QLMSkinImage(skin, name) copy];
-        if (image == nil) {
-            return nil;
-        }
         image.capInsets = insets;
         image.resizingMode = NSImageResizingModeStretch;
-        cache[key] = image;
     }
+    cache[key] = image ?: NSNull.null;
     return image;
 }
 
@@ -81,12 +73,20 @@ static NSBezierPath *QLMSkinShape(NSRect rect, CGFloat radius, BOOL circle) {
 
 // TRAP: a shadow's offset is in the base space, whose y grows up, so a
 // flipped view's y-down offset changes sign.
-static NSShadow *QLMSkinNSShadow(QLMSkinColor color, CGFloat blur, CGSize offset) {
+static void QLMSkinSetShadow(QLMSkinColor color, CGFloat blur, CGSize offset) {
     NSShadow *shadow = [[NSShadow alloc] init];
     shadow.shadowColor = QLMSkinNSColor(color);
     shadow.shadowBlurRadius = blur;
     shadow.shadowOffset = NSMakeSize(offset.width, -offset.height);
-    return shadow;
+    [shadow set];
+}
+
+void QLMSkinDrawShadow(QLMSkinShadow *shadow, NSBezierPath *path, NSColor *fill) {
+    [NSGraphicsContext saveGraphicsState];
+    QLMSkinSetShadow(shadow.color, shadow.blur, shadow.offset);
+    [fill setFill];
+    [path fill];
+    [NSGraphicsContext restoreGraphicsState];
 }
 
 static void QLMSkinDrawBlock(QLMSkinDraw *draw, NSRect rect, BOOL circle) {
@@ -96,15 +96,13 @@ static void QLMSkinDrawBlock(QLMSkinDraw *draw, NSRect rect, BOOL circle) {
     }
     NSBezierPath *shape = QLMSkinShape(rect, draw.radius, circle);
     if (draw.shadow != nil) {
-        [NSGraphicsContext saveGraphicsState];
-        [QLMSkinNSShadow(draw.shadow.color, draw.shadow.blur, draw.shadow.offset) set];
-        [(draw.hasGradient ? QLMSkinNSColor(draw.gradientBottom) : QLMSkinNSColor(draw.fill)) setFill];
-        [shape fill];
-        [NSGraphicsContext restoreGraphicsState];
+        QLMSkinDrawShadow(draw.shadow, shape, QLMSkinNSColor(draw.hasGradient ? draw.gradientBottom : draw.fill));
     }
     if (draw.hasGradient) {
-        NSGradient *gradient = [[NSGradient alloc] initWithStartingColor:QLMSkinNSColor(draw.gradientTop)
-                                                             endingColor:QLMSkinNSColor(draw.gradientBottom)];
+        NSGradient *gradient = QLMSkinAttached(draw, &QLMSkinGradientKey, ^id {
+            return [[NSGradient alloc] initWithStartingColor:QLMSkinNSColor(draw.gradientTop)
+                                                 endingColor:QLMSkinNSColor(draw.gradientBottom)];
+        });
         [gradient drawInBezierPath:shape angle:90];
     }
     else if (!QLMSkinColorIsClear(draw.fill)) {
@@ -138,6 +136,7 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
        respectFlipped:YES hints:nil];
 }
 
+
 void QLMSkinDrawDimmed(BOOL dimmed, QLMSkinColor overlay, NSRect bounds, void (^content)(void)) {
     if (!dimmed || QLMSkinColorIsClear(overlay)) {
         content();
@@ -156,12 +155,12 @@ void QLMSkinDrawLED(QLMSkinLED *led, NSRect rect, BOOL lit, BOOL enabled) {
     [NSGraphicsContext saveGraphicsState];
     if (!enabled) {
         QLMSkinColor off = led.off;
-        off.alpha *= 0.4;
+        off.alpha *= QLMSkinDisabledAlpha;
         [QLMSkinNSColor(off) setFill];
     }
     else if (lit) {
         if (led.glow > 0) {
-            [QLMSkinNSShadow(led.on, led.glow, CGSizeZero) set];
+            QLMSkinSetShadow(led.on, led.glow, CGSizeZero);
         }
         [QLMSkinNSColor(led.on) setFill];
     }

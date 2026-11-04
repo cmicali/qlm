@@ -15,10 +15,6 @@ extern const NSUInteger QLMSkinViewMaxGroups;
 // element, laid out by the resize pass with no Auto Layout. A controller
 // hands each its state and text. It reads no snapshot and drives nothing:
 // each control sends its action to the target the controller sets.
-//
-// TRAP: it is flipped, and dump_screenshot draws a window's content view
-// into an unflipped context, so as the content view it comes out upside
-// down. Put it in a plain container that fills the window.
 @interface QLMSkinView : NSView
 
 - (instancetype)initWithSkin:(QLMSkin *)skin NS_DESIGNATED_INITIALIZER;

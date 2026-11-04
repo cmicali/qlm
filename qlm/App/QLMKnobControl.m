@@ -1,17 +1,19 @@
 #import "QLMKnobControl.h"
 
+#import "PlatformColor.h"
 #import "QLMKnobMath.h"
 #import "QLMSkinDrawing.h"
 
 // A trackpad's scroll moves a step per this many points.
 static const CGFloat QLMKnobScrollPointsPerStep = 12;
 // A drag within this part of the body's diameter from the center points
-// nowhere: there a few points of jitter are tens of degrees.
+// nowhere.
 static const CGFloat QLMKnobDeadFraction = 0.25;
 
 @implementation QLMKnobControl {
     double _value;
     CGFloat _scrolled;
+    NSImage *_still;  // the shadow, ticks, and arc track, at the view's size
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -29,7 +31,11 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
 }
 
 - (void)setDoubleValue:(double)value {
-    _value = isfinite(value) ? QLMKnobClamp(value, self.minValue, MAX(self.minValue, self.maxValue)) : self.minValue;
+    value = isfinite(value) ? QLMKnobClamp(value, self.minValue, MAX(self.minValue, self.maxValue)) : self.minValue;
+    if (value == _value) {
+        return;
+    }
+    _value = value;
     self.needsDisplay = YES;
 }
 
@@ -41,6 +47,13 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
 - (void)setMaxValue:(double)maxValue {
     _maxValue = maxValue;
     self.doubleValue = _value;
+}
+
+- (void)setFrameSize:(NSSize)size {
+    if (!NSEqualSizes(size, self.frame.size)) {
+        _still = nil;
+    }
+    [super setFrameSize:size];
 }
 
 // A move by the user: snapped, and sent when it changes the level's step.
@@ -60,18 +73,13 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     return NSMakePoint(NSMidX(self.bounds), NSMidY(self.bounds));
 }
 
-// The mouse's angle about the center, or NAN this near the center, where
-// it points nowhere.
 - (double)angleOfEvent:(NSEvent *)event {
     NSPoint point = [self convertPoint:event.locationInWindow fromView:nil];
     NSPoint center = [self center];
-    double dx = point.x - center.x;
-    double dy = point.y - center.y;
-    return hypot(dx, dy) < self.skin.knob.bodySize * QLMKnobDeadFraction ? NAN : QLMKnobAngleOfOffset(dx, dy);
+    return QLMKnobDragAngle(point.x - center.x, point.y - center.y, self.skin.knob.bodySize * QLMKnobDeadFraction);
 }
 
-// A relative drag: the press moves nothing, and each drag after it turns
-// the level by the angle the mouse turned.
+// A relative drag: the press moves nothing.
 - (void)mouseDown:(NSEvent *)event {
     if (!self.enabled) {
         return;
@@ -87,10 +95,8 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
             return;
         }
         double to = [self angleOfEvent:next];
-        if (isfinite(from) && isfinite(to)) {
-            level = QLMKnobDragStep(level, from, to, self.minValue, self.maxValue);
-            [self moveTo:level];
-        }
+        level = QLMKnobDragStep(level, from, to, self.minValue, self.maxValue);
+        [self moveTo:level];
         from = to;
     }
 }
@@ -128,71 +134,84 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];
 }
 
-static void QLMKnobStrokeRadial(NSPoint center, CGFloat inner, CGFloat outer, double degrees, CGFloat width, NSColor *color) {
+static void QLMKnobAppendRadial(NSBezierPath *path, NSPoint center, CGFloat inner, CGFloat outer, double degrees) {
     double x0, y0, x1, y1;
     QLMKnobPointAt(center.x, center.y, inner, degrees, &x0, &y0);
     QLMKnobPointAt(center.x, center.y, outer, degrees, &x1, &y1);
-    NSBezierPath *line = [NSBezierPath bezierPath];
-    [line moveToPoint:NSMakePoint(x0, y0)];
-    [line lineToPoint:NSMakePoint(x1, y1)];
-    line.lineWidth = width;
-    line.lineCapStyle = NSLineCapStyleRound;
+    [path moveToPoint:NSMakePoint(x0, y0)];
+    [path lineToPoint:NSMakePoint(x1, y1)];
+}
+
+static void QLMKnobStroke(NSBezierPath *path, CGFloat width, NSColor *color) {
+    path.lineWidth = width;
+    path.lineCapStyle = NSLineCapStyleRound;
     [color setStroke];
-    [line stroke];
+    [path stroke];
 }
 
 // From `from` to `to`, in the knob's degrees. The path's angles run from
 // +x toward +y, which in a flipped view is clockwise, so up is -90.
-static void QLMKnobStrokeArc(NSPoint center, CGFloat radius, double from, double to, CGFloat width, NSColor *color) {
-    if (to <= from) {
-        return;
-    }
+static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, double to) {
     NSBezierPath *arc = [NSBezierPath bezierPath];
     [arc appendBezierPathWithArcWithCenter:center radius:radius startAngle:from - 90 endAngle:to - 90 clockwise:NO];
-    arc.lineWidth = width;
-    arc.lineCapStyle = NSLineCapStyleRound;
-    [color setStroke];
-    [arc stroke];
+    return arc;
+}
+
+- (NSRect)bodyRect {
+    NSPoint center = [self center];
+    CGFloat side = self.skin.knob.bodySize;
+    return NSMakeRect(center.x - side / 2, center.y - side / 2, side, side);
+}
+
+// What no turn changes, drawn once per size.
+- (NSImage *)still {
+    if (_still != nil) {
+        return _still;
+    }
+    QLMSkinKnob *knob = self.skin.knob;
+    NSPoint center = [self center];
+    NSRect body = [self bodyRect];
+    _still = [NSImage imageWithSize:self.bounds.size flipped:YES drawingHandler:^BOOL(NSRect rect) {
+        if (knob.shadow != nil) {
+            QLMSkinDrawShadow(knob.shadow, [NSBezierPath bezierPathWithOvalInRect:NSInsetRect(body, 1, 1)],
+                              QLMSkinNSColor(knob.shadow.color));
+        }
+        if (knob.tickCount > 0) {
+            NSBezierPath *ticks = [NSBezierPath bezierPath];
+            for (int i = 0; i < knob.tickCount; i++) {
+                QLMKnobAppendRadial(ticks, center, knob.tickInner, knob.tickOuter, QLMKnobTickAngle(i, (int)knob.tickCount));
+            }
+            QLMKnobStroke(ticks, knob.tickWidth, QLMSkinNSColor(knob.tickColor));
+        }
+        if (knob.hasArc) {
+            QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES), knob.arcWidth,
+                          QLMSkinNSColor(knob.arcTrack));
+        }
+        return YES;
+    }];
+    return _still;
 }
 
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinKnob *knob = self.skin.knob;
     NSPoint center = [self center];
-    CGFloat side = knob.bodySize;
-    NSRect body = NSMakeRect(center.x - side / 2, center.y - side / 2, side, side);
+    NSRect body = [self bodyRect];
     double angle = QLMKnobAngleForDecibels(_value, self.minValue, self.maxValue);
 
-    if (knob.shadow != nil) {
-        [NSGraphicsContext saveGraphicsState];
-        NSShadow *shadow = [[NSShadow alloc] init];
-        shadow.shadowColor = QLMSkinNSColor(knob.shadow.color);
-        shadow.shadowBlurRadius = knob.shadow.blur;
-        shadow.shadowOffset = NSMakeSize(knob.shadow.offset.width, -knob.shadow.offset.height);  // y up
-        [shadow set];
-        [QLMSkinNSColor(knob.shadow.color) setFill];
-        [[NSBezierPath bezierPathWithOvalInRect:NSInsetRect(body, 1, 1)] fill];
-        [NSGraphicsContext restoreGraphicsState];
+    [[self still] drawInRect:self.bounds fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1
+              respectFlipped:YES hints:nil];
+
+    if (knob.hasArc && angle > QLM_KNOB_START_DEGREES) {
+        NSColor *fill = QLMSkinNSColor(knob.arcFill);
+        QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, angle), knob.arcWidth,
+                      self.enabled ? fill : VibeColorWithScaledAlpha(fill, QLMSkinDisabledAlpha));
     }
 
-    for (int i = 0; i < knob.tickCount; i++) {
-        QLMKnobStrokeRadial(center, knob.tickInner, knob.tickOuter, QLMKnobTickAngle(i, (int)knob.tickCount), knob.tickWidth,
-                            QLMSkinNSColor(knob.tickColor));
-    }
+    QLMSkinDrawStyle(self.skin, knob.body, QLMSkinButtonState(NO, self.enabled, self.pressed, self.hovered), body, YES);
 
-    if (knob.hasArc) {
-        QLMKnobStrokeArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES, knob.arcWidth,
-                         QLMSkinNSColor(knob.arcTrack));
-        QLMSkinColor fill = knob.arcFill;
-        if (!self.enabled) {
-            fill.alpha *= 0.4;
-        }
-        QLMKnobStrokeArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, angle, knob.arcWidth, QLMSkinNSColor(fill));
-    }
-
-    QLMSkinDrawStyle(self.skin, knob.body, QLMSkinKnobState(self.enabled, self.pressed, self.hovered), body, YES);
-
-    QLMSkinColor pointer = self.enabled ? knob.pointerColor : knob.pointerDisabledColor;
-    QLMKnobStrokeRadial(center, knob.pointerInner, knob.pointerOuter, angle, knob.pointerWidth, QLMSkinNSColor(pointer));
+    NSBezierPath *pointer = [NSBezierPath bezierPath];
+    QLMKnobAppendRadial(pointer, center, knob.pointerInner, knob.pointerOuter, angle);
+    QLMKnobStroke(pointer, knob.pointerWidth, QLMSkinNSColor(self.enabled ? knob.pointerColor : knob.pointerDisabledColor));
 
     if (self.focused && self.enabled) {
         QLMSkinDrawFocus(knob.focus, body, YES);

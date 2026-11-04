@@ -28,16 +28,15 @@
     XCTAssertEqualWithAccuracy(QLMKnobAngleForDecibels(-42, -80, -30), 70.2, 1e-9);
 }
 
-- (void)testAngleBackToDecibels {
-    XCTAssertEqual(QLMKnobDecibelsForAngle(-135, -80, -30), -80);
-    XCTAssertEqual(QLMKnobDecibelsForAngle(135, -80, -30), -30);
-    XCTAssertEqual(QLMKnobDecibelsForAngle(0, -80, -30), -55);
-    XCTAssertEqual(QLMKnobDecibelsForAngle(170, -80, -30), -30);
-    XCTAssertEqual(QLMKnobDecibelsForAngle(-170, -80, -30), -80);
-    for (double decibels = -80; decibels <= -30; decibels += 0.5) {
-        double angle = QLMKnobAngleForDecibels(decibels, -80, -30);
-        XCTAssertEqualWithAccuracy(QLMKnobDecibelsForAngle(angle, -80, -30), decibels, 1e-9);
-    }
+// Near the center a drag points nowhere, and a step to or from nowhere keeps
+// the level.
+- (void)testTheDeadDiscKeepsTheLevel {
+    XCTAssertTrue(isnan(QLMKnobDragAngle(10, -20, 34)));
+    XCTAssertTrue(isnan(QLMKnobDragAngle(0, 0, 34)));
+    XCTAssertEqual(QLMKnobDragAngle(0, -34, 34), 0);
+    XCTAssertEqual(QLMKnobDragAngle(40, 0, 34), 90);
+    XCTAssertEqual(QLMKnobDragStep(-40, NAN, 10, -80, 0), -40);
+    XCTAssertEqual(QLMKnobDragStep(-40, 10, NAN, -80, 0), -40);
 }
 
 - (void)testTheStepSnap {

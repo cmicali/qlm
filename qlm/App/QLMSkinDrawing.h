@@ -7,18 +7,20 @@ NS_ASSUME_NONNULL_BEGIN
 // The skin's drawing in AppKit: its colors, images, fonts, and the geometry
 // the app draws itself. Every function draws in a flipped view.
 
+// What a disabled control's drawn geometry and text keep of their alpha.
+extern const CGFloat QLMSkinDisabledAlpha;
+
 NSColor *QLMSkinNSColor(QLMSkinColor color);
 BOOL QLMSkinColorIsClear(QLMSkinColor color);
 
-// png/<name>.png with its @2x beside it, sized in points, with no cap
-// insets. Nil when either file won't load. Cached on the skin, so a skin
-// read again loads its files again.
-NSImage *_Nullable QLMSkinImage(QLMSkin *skin, NSString *name);
-
 // An element's material in `rect`: its image for the state, stretched
 // through its cap insets, or its draw block. A circle draws the block as
-// the rect's inscribed circle, as a knob's body.
+// the rect's inscribed circle, as a knob's body. Images are kept on the
+// skin, so a skin read again loads its files again.
 void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NSRect rect, BOOL circle);
+
+// The shadow `path` casts, filled with `fill`.
+void QLMSkinDrawShadow(QLMSkinShadow *shadow, NSBezierPath *path, NSColor *fill);
 
 // Draws `content`. Dimmed, it lays `overlay` over what `content` drew, in
 // its shape, so an image's corners stay round.
