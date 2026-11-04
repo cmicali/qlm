@@ -170,11 +170,11 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     }
     QLMSkinKnob *knob = self.skin.knob;
     NSPoint center = [self center];
-    NSRect body = [self bodyRect];
+    CGFloat shadow = knob.shadowRadius;
     _still = [NSImage imageWithSize:self.bounds.size flipped:YES drawingHandler:^BOOL(NSRect rect) {
         if (knob.shadow != nil) {
-            QLMSkinDrawShadow(knob.shadow, [NSBezierPath bezierPathWithOvalInRect:NSInsetRect(body, 1, 1)],
-                              QLMSkinNSColor(knob.shadow.color));
+            NSRect disc = NSMakeRect(center.x - shadow, center.y - shadow, shadow * 2, shadow * 2);
+            QLMSkinDrawShadow(knob.shadow, [NSBezierPath bezierPathWithOvalInRect:disc], QLMSkinNSColor(knob.shadow.color));
         }
         if (knob.tickCount > 0) {
             NSBezierPath *ticks = [NSBezierPath bezierPath];

@@ -111,15 +111,50 @@ targets:
           - "Skins/**"                      # the skins and the pack's record; copied below
       # Each skin ships its skin.json and png/ alone, in Resources/Skins/<name>/.
       # The pack's masters, sources, tools, previews, and layouts ship in
-      # nothing. A skin with images adds its png/ the same way, with
-      # `type: folder`, which keeps the directory. TRAP: a plain resources
-      # phase flattens every file into Resources/, where two skins' images
-      # of one name collide.
+      # nothing. Each file goes by a copy phase into its skin's subpath,
+      # which keeps the directory. TRAP: a plain resources phase flattens
+      # every file into Resources/, where two skins' images of one name
+      # collide.
       - path: qlm/App/Skins/modern/skin.json
         buildPhase:
           copyFiles:
             destination: resources
             subpath: Skins/modern
+      - path: qlm/App/Skins/vintage/skin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/vintage
+      - path: qlm/App/Skins/retro/skin.json
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/retro
+      # Only the sixteen images a skin names. The pack's png/ also holds its
+      # drawn parts, which qlm draws from the skin's colors instead.
+      - path: qlm/App/Skins/vintage/png
+        excludes: &QLMDrawnParts
+          - "panel-markings*"
+          - "display-disabled-overlay*"
+          - "osd-disabled-overlay*"
+          - "osd-track*"
+          - "osd-fill*"
+          - "button-focus-ring*"
+          - "knob-shadow*"
+          - "knob-pointer*"
+          - "knob-ticks*"
+          - "knob-focus-ring*"
+          - "led-*"
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/vintage/png
+      - path: qlm/App/Skins/retro/png
+        excludes: *QLMDrawnParts
+        buildPhase:
+          copyFiles:
+            destination: resources
+            subpath: Skins/retro/png
     info:
       path: qlm/App/Info.plist
       properties:

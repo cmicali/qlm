@@ -243,6 +243,7 @@ static NSString *QLMSkinKey(NSString *path, NSString *key) {
 @property (nonatomic) QLMSkinColor pointerColor;
 @property (nonatomic) QLMSkinColor pointerDisabledColor;
 @property (nonatomic, nullable) QLMSkinShadow *shadow;
+@property (nonatomic) CGFloat shadowRadius;
 @property (nonatomic) QLMSkinFocus *focus;
 @property (nonatomic) BOOL hasArc;
 @property (nonatomic) CGFloat arcRadius;
@@ -927,6 +928,9 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     if (knob.hasArc) {
         [radii addObject:@[@"elements.knob.arc.radius", @(knob.arcRadius + knob.arcWidth / 2)]];
     }
+    if (knob.shadow != nil) {
+        [radii addObject:@[@"elements.knob.shadow.radius", @(knob.shadowRadius)]];
+    }
     QLMSkinDraw *draw = [knob.body drawForState:QLMSkinStateNormal];
     for (NSUInteger i = 0; i < draw.rings.count; i++) {
         NSString *ring = [NSString stringWithFormat:@"elements.knob.body.draw.rings[%lu]", (unsigned long)i];
@@ -1018,7 +1022,17 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
                                       orDefault:knob.pointerColor];
     }
 
-    knob.shadow = [self shadow:object[@"shadow"] at:QLMSkinKey(path, @"shadow")];
+    // The knob's shadow takes a radius, which a draw block's shadow doesn't.
+    NSString *shadowPath = QLMSkinKey(path, @"shadow");
+    id shadow = object[@"shadow"];
+    knob.shadowRadius = knob.bodySize / 2 - 1;
+    if ([shadow isKindOfClass:NSDictionary.class] && shadow[@"radius"] != nil) {
+        knob.shadowRadius = [self positive:shadow[@"radius"] at:QLMSkinKey(shadowPath, @"radius")];
+        NSMutableDictionary *rest = [shadow mutableCopy];
+        [rest removeObjectForKey:@"radius"];
+        shadow = rest;
+    }
+    knob.shadow = [self shadow:shadow at:shadowPath];
     knob.focus = [self focus:object[@"focus"] at:QLMSkinKey(path, @"focus")];
 
     if (object[@"arc"]) {
