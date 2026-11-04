@@ -20,13 +20,21 @@ NSErrorDomain const QLMSystemErrorDomain = @"com.commonwealthrecordings.qlm.syst
 // answer.
 const NSTimeInterval QLMPowerOnMargin = 10;
 
-static NSError *QLMSystemErrorMake(QLMSystemError code, NSString *description, NSError *_Nullable underlying) {
+NSErrorUserInfoKey const QLMSystemErrorRefusedKey = @"QLMSystemErrorRefused";
+
+// `refused`: System sent nothing for it. Each site knows.
+static NSError *QLMSystemErrorMake(QLMSystemError code, BOOL refused, NSString *description, NSError *_Nullable underlying) {
     NSMutableDictionary<NSErrorUserInfoKey, id> *info = [NSMutableDictionary dictionary];
     info[NSLocalizedDescriptionKey] = description;
+    info[QLMSystemErrorRefusedKey] = @(refused);
     if (underlying != nil) {
         info[NSUnderlyingErrorKey] = underlying;
     }
     return [NSError errorWithDomain:QLMSystemErrorDomain code:code userInfo:info];
+}
+
+BOOL QLMSystemErrorRefused(NSError *error) {
+    return [error.domain isEqualToString:QLMSystemErrorDomain] && [error.userInfo[QLMSystemErrorRefusedKey] boolValue];
 }
 
 @implementation QLMSystemSettings
@@ -339,6 +347,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSDictionary<NSData *, QLMDSPBlock *> *_activeBlocks;  // its blocks, by hardware ID
     BOOL _wokeWithoutGroup;  // see QLMSnapshot
     void (^_applyFinish)(NSError *_Nullable error);  // set while an apply runs
+    NSString *_applyingGroupName;  // the group it sends
     QLMSnapshotHandler _snapshotHandler;
     dispatch_queue_t _snapshotQueue;
     os_unfair_lock _callLock;
@@ -568,7 +577,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _adapterRecord = [[QLMTrackedAdapter alloc] init];
     _adapterError = nil;
     if (_applyFinish != nil) {
-        [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System stopped during the apply.", nil)];
+        [self finishApplyOfGroup:nil error:QLMSystemErrorMake(QLMSystemErrorNotRunning, NO, @"System stopped during the apply.", nil)];
     }
     [self publish];
     [self callStopCompletions];
@@ -663,7 +672,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             } else {
                 strongSelf->_muteHeld = YES;
             }
-            NSError *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, @"The frame waits for the knob's first reading.", nil);
+            NSError *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, YES, @"The frame waits for the knob's first reading.", nil);
             [strongSelf->_clock async:strongSelf->_queue run:^{
                 handler(NULL, error);
             }];
@@ -672,7 +681,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         if (QLMNamesSession(&sent) && (strongSelf->_adapterError != nil || strongSelf->_leaseEpoch != epoch)) {
             reopens = strongSelf->_adapterErrorReopens;
             NSError *error = strongSelf->_adapterError
-                                 ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, @"The frame was queued before System checked the leases again.", nil);
+                                 ?: QLMSystemErrorMake(QLMSystemErrorSendFailed, NO, @"The frame was queued before System checked the leases again.", nil);
             [strongSelf->_clock async:strongSelf->_queue run:^{
                 handler(NULL, error);
             }];
@@ -1889,24 +1898,24 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 // for every node, keyed by hardware ID.
 - (nullable NSDictionary<NSData *, QLMDSPBlock *> *)checkGroup:(QLMSetupGroup *)group error:(NSError **)error {
     if (_applyFinish != nil) {
-        *error = QLMSystemErrorMake(QLMSystemErrorAlreadyApplying, @"A group apply is already running.", nil);
+        *error = QLMSystemErrorMake(QLMSystemErrorAlreadyApplying, YES, @"A group apply is already running.", nil);
         return nil;
     }
     if (!_running) {
-        *error = QLMSystemErrorMake(QLMSystemErrorNotRunning, @"System is not running.", nil);
+        *error = QLMSystemErrorMake(QLMSystemErrorNotRunning, YES, @"System is not running.", nil);
         return nil;
     }
     NSError *underlying = nil;
     NSDictionary<NSData *, QLMDSPBlock *> *blocks = [QLMDSPBlock blocksByHardwareIDForGroup:group error:&underlying];
     if (blocks == nil) {
-        *error = QLMSystemErrorMake(QLMSystemErrorBlocksFailed, @"The DSP blocks could not be built.", underlying);
+        *error = QLMSystemErrorMake(QLMSystemErrorBlocksFailed, YES, @"The DSP blocks could not be built.", underlying);
         return nil;
     }
     for (QLMSetupNode *node in group.nodes) {
         QLMDSPBlock *block = node.hardwareID != nil ? blocks[node.hardwareID] : nil;
         if (block != nil && !block.rateVerified && !self.settings.allowsUnverifiedRates) {
             NSString *description = [NSString stringWithFormat:@"The design rate of node %@ (%@) is unverified.", node.serial, node.className];
-            *error = QLMSystemErrorMake(QLMSystemErrorUnverifiedRate, description, nil);
+            *error = QLMSystemErrorMake(QLMSystemErrorUnverifiedRate, YES, description, nil);
             return nil;
         }
     }
@@ -1915,17 +1924,17 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         BOOL single = node.hardwareID != nil && [hardwareIDs countForObject:node.hardwareID] == 1;
         if (node.on && (!single || [self monitorWithHardwareID:node.hardwareID] == nil)) {
             NSString *description = [NSString stringWithFormat:@"Node %@ matches no single leased monitor.", node.serial];
-            *error = QLMSystemErrorMake(QLMSystemErrorUnknownMonitor, description, nil);
+            *error = QLMSystemErrorMake(QLMSystemErrorUnknownMonitor, YES, description, nil);
             return nil;
         }
     }
     if (_volumeDecibels == nil) {
-        *error = QLMSystemErrorMake(QLMSystemErrorNoVolume, @"Set a volume before a group apply.", nil);
+        *error = QLMSystemErrorMake(QLMSystemErrorNoVolume, YES, @"Set a volume before a group apply.", nil);
         return nil;
     }
     // The switch's restore is a level.
     if (_levelAwaitsKnob) {
-        *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, @"The level waits for the knob's first reading.", nil);
+        *error = QLMSystemErrorMake(QLMSystemErrorKnobUnread, YES, @"The level waits for the knob's first reading.", nil);
         return nil;
     }
     return blocks;
@@ -1941,6 +1950,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
            finish:(void (^)(NSError *_Nullable error))finish {
     _applyFinish = finish;
     _activeGroup = group;
+    _applyingGroupName = [group.name copy];
     _activeBlocks = blocks;
     QLMApplySequence *sequence = [self sequenceFor:group];
 
@@ -1956,13 +1966,13 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     __block NSError *failure = nil;
     QLMSendCompletion wentOut = ^(const QLMMessage *reply, NSError *error) {
         if (failure == nil && error != nil && !QLMSendWentOut(error)) {
-            failure = QLMSystemErrorMake(QLMSystemErrorSendFailed, @"A frame of the apply failed.", error);
+            failure = QLMSystemErrorMake(QLMSystemErrorSendFailed, NO, @"A frame of the apply failed.", error);
         }
     };
     QLMSendCompletion acked = ^(const QLMMessage *reply, NSError *error) {
         wentOut(reply, error);
         if (failure == nil && reply == NULL) {
-            failure = QLMSystemErrorMake(QLMSystemErrorSendFailed, @"A monitor did not ack a frame of the apply.", error);
+            failure = QLMSystemErrorMake(QLMSystemErrorSendFailed, NO, @"A monitor did not ack a frame of the apply.", error);
         }
     };
     QLMSendCompletion (^completionFor)(uint8_t) = ^QLMSendCompletion(uint8_t address) {
@@ -1990,6 +2000,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
 - (void)finishApplyOfGroup:(nullable NSString *)name error:(nullable NSError *)error {
     void (^finish)(NSError *) = _applyFinish;
     _applyFinish = nil;
+    _applyingGroupName = nil;
     if (error == nil) {
         _activeGroupName = name;
         _wokeWithoutGroup = NO;
@@ -2103,6 +2114,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.ceilingDecibels = self.settings.ceilingDecibels;
     snapshot.dimmed = _dimmed;
     snapshot.applying = _applyFinish != nil;
+    snapshot.applyingGroupName = _applyFinish != nil ? _applyingGroupName : nil;
     snapshot.activeGroupName = _activeGroupName;
     snapshot.wokeWithoutGroup = _wokeWithoutGroup;
     snapshot.idle = [self isIdle];
