@@ -142,8 +142,10 @@ static NSString *QLMRangeEndText(double decibels) {
         return [NSString stringWithFormat:@"%@ %@", self.clickedGroupName.localizedUppercaseString ?: @"",
                                           QLMSystemErrorRefused(self.applyError) ? @"REFUSED" : @"FAILED"];
     }
-    if (self.snapshot.allMuted) {
-        return @"MUTED";
+    // Dimmed, it shows the dimmed level instead.
+    NSString *state = QLMOutputStateText(self.snapshot);
+    if (self.snapshot.allMuted && state != nil) {
+        return state;
     }
     NSNumber *output = [self shownLevel] == nil ? nil : self.snapshot.handBack.volumeDecibels;
     return [@"OUTPUT " stringByAppendingString:output == nil ? QLMEmDash : QLMDecibelsNumberText(output.doubleValue, 1)];

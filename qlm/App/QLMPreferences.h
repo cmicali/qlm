@@ -10,6 +10,21 @@ NS_ASSUME_NONNULL_BEGIN
 // The narrowest the volume range may get, from its bottom to the ceiling.
 extern const double QLMVolumeRangeMinimumSpan;
 
+// Where the OSD shows on the main screen.
+typedef NS_ENUM(NSInteger, QLMOSDPlacement) {
+    QLMOSDPlacementTopLeft = 0,
+    QLMOSDPlacementTopCenter,
+    QLMOSDPlacementTopRight,
+    QLMOSDPlacementBottomLeft,
+    QLMOSDPlacementBottomCenter,
+    QLMOSDPlacementBottomRight,
+};
+
+// How long the OSD stays up, in half seconds.
+extern const NSTimeInterval QLMOSDSecondsMin;
+extern const NSTimeInterval QLMOSDSecondsMax;
+extern const NSTimeInterval QLMOSDSecondsStep;
+
 // What one bus keeps across launches: the app's level, System's mute record,
 // and the leases. The real monitors and the fake bus each keep their own, so
 // nothing set on the fake bus reaches the real monitors. On the main queue.
@@ -80,6 +95,14 @@ extern const double QLMVolumeRangeMinimumSpan;
 // The main window's skin, as QLMSkinLibrary names it. QLMSkinDefaultName
 // until set. A skin that no longer loads falls back at the load, not here.
 @property (nonatomic, copy) NSString *skinName;
+// Whether a turn of the adapter's knob shows the OSD. On by default.
+@property (nonatomic) BOOL showsOSD;
+// Bottom center by default. Kept by name, so a name it doesn't know reads
+// as the default.
+@property (nonatomic) QLMOSDPlacement osdPlacement;
+// Held to QLMOSDSecondsMin to QLMOSDSecondsMax, on the nearest half
+// second. A save of no number keeps the old one. 2 s by default.
+@property (nonatomic) NSTimeInterval osdSeconds;
 
 @end
 
@@ -88,6 +111,9 @@ BOOL QLMIsSavableLevel(double decibels);
 
 // The nearest of GLM's 0.5 dB steps.
 double QLMNearestStepDecibels(double decibels);
+
+// The placement's name as kept, "bottomCenter".
+NSString *QLMOSDPlacementName(QLMOSDPlacement placement);
 
 // GLM 5's folder of setup files.
 NSString *QLMSetupDirectory(void);

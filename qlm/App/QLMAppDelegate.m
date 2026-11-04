@@ -9,6 +9,7 @@
 #import "QLMMainWindowController.h"
 #import "QLMMonitorList.h"
 #import "QLMMonitorsWindowController.h"
+#import "QLMOSDController.h"
 #import "QLMPopoverController.h"
 #import "QLMPreferences.h"
 #import "QLMSettingsWindowController.h"
@@ -51,6 +52,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // What the status item shows, so an unchanged snapshot does not redraw it.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
+@property (nonatomic) QLMOSDController *osdController;
 #if DEBUG
 // A debug command's answer to the louder hand-back alert, while its quit runs.
 @property (nonatomic, nullable) NSNumber *debugQuitAnswer;
@@ -95,6 +97,7 @@ static OSType QLMQuitReason(void) {
     self.statusItem.button.target = self;
     self.statusItem.button.action = @selector(togglePopover:);
     [self renderStatusItem];
+    self.osdController = [[QLMOSDController alloc] initWithPreferences:self.preferences];
 
     [self startSystemDimmed:NO];
     if (self.preferences.wakesAtLaunch) {
@@ -305,6 +308,7 @@ static OSType QLMQuitReason(void) {
     }
     [self.kept keepFromSnapshot:snapshot];
     [self renderStatusItem];
+    [self.osdController takeSnapshot:snapshot];
 }
 
 - (void)renderStatusItem {
@@ -474,6 +478,10 @@ static OSType QLMQuitReason(void) {
     return [self mayStop:@"Turning off the adapter" anyway:@"Turn Off Anyway"];
 }
 
+- (void)settingsDidChangeOSD:(QLMSettingsWindowController *)controller {
+    [self.osdController reloadPreferences];
+}
+
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
     [self restartSystem];
 }
@@ -576,7 +584,30 @@ static OSType QLMQuitReason(void) {
 
 // As Settings' skin picker will: a skin the library refuses is not kept.
 - (NSString *)debugChooseSkin:(NSString *)name {
-    return [self.mainWindowController chooseSkinNamed:name];
+    NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
+    if (refusal == nil) {
+        [self.osdController reloadPreferences];
+    }
+    return refusal;
+}
+
+- (NSString *)debugShowOSD {
+    return [self.osdController showSnapshot:self.monitorList.snapshot];
+}
+
+- (void)debugHideOSD {
+    [self.osdController hide];
+}
+
+- (BOOL)debugOSDShowing {
+    return self.osdController.showing;
+}
+
+- (NSString *)debugTurnFakeKnobTo:(NSInteger)tenths {
+    if (self.bus == nil) {
+        return @"qlm drives the GLM adapter, not the fake bus";
+    }
+    return [QLMFakeBusWindowController turnKnobOf:self.bus to:tenths];
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

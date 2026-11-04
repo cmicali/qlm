@@ -32,6 +32,10 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic, copy, nullable) NSString *loginError;
+@property (nonatomic) NSButton *osdCheckbox;
+@property (nonatomic) NSPopUpButton *osdPlacementPicker;
+@property (nonatomic) NSTextField *osdSecondsField;
+@property (nonatomic) NSStepper *osdSecondsStepper;
 @end
 
 @implementation QLMSettingsWindowController
@@ -79,12 +83,12 @@ static const CGFloat QLMSettingsTextWidth = 360;
     self.setupNote.selectable = YES;
 
     self.lowestField = [self decibelsField];
-    self.lowestStepper = [self stepper];
+    self.lowestStepper = [self stepperWithIncrement:QLMVolumeDecibelsStep action:@selector(rangeChanged:)];
     NSStackView *lowestRow = [NSStackView stackViewWithViews:@[self.lowestField, self.lowestStepper, [NSTextField labelWithString:@"dB, up to the ceiling"]]];
     lowestRow.spacing = 4;
 
     self.ceilingField = [self decibelsField];
-    self.ceilingStepper = [self stepper];
+    self.ceilingStepper = [self stepperWithIncrement:QLMVolumeDecibelsStep action:@selector(rangeChanged:)];
     NSStackView *ceilingRow = [NSStackView stackViewWithViews:@[self.ceilingField, self.ceilingStepper, [NSTextField labelWithString:@"dB"]]];
     ceilingRow.spacing = 4;
     self.rangeNote = QLMNoteLabel(@"", QLMSettingsTextWidth);
@@ -103,6 +107,8 @@ static const CGFloat QLMSettingsTextWidth = 360;
     NSTextField *rangeTitle = [NSTextField labelWithString:@"Volume range:"];
     NSTextField *launchTitle = [NSTextField labelWithString:@"At launch:"];
     NSTextField *setupTitle = [NSTextField labelWithString:@"Setup file:"];
+    NSTextField *osdTitle = [NSTextField labelWithString:@"On-screen display:"];
+    [self buildOSD];
     NSGridView *grid = [NSGridView gridViewWithViews:@[
         @[[NSTextField labelWithString:@"Monitors:"], self.adapterCheckbox],
         @[[NSGridCell emptyContentView], adapterNote],
@@ -119,6 +125,9 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @[[NSGridCell emptyContentView], self.loginCheckbox],
         @[[NSGridCell emptyContentView], self.loginNote],
         @[[NSGridCell emptyContentView], self.loginItemsButton],
+        @[osdTitle, self.osdCheckbox],
+        @[[NSTextField labelWithString:@"Place:"], self.osdPlacementPicker],
+        @[[NSTextField labelWithString:@"Keep it up for:"], [self osdSecondsRow]],
     ]];
     grid.rowSpacing = 8;
     grid.columnSpacing = 8;
@@ -128,7 +137,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, self.rangeNote, ceilingNote, self.loginNote]) {
         [grid cellForView:note].row.topPadding = -4;
     }
-    for (NSView *title in @[setupTitle, rangeTitle, launchTitle]) {
+    for (NSView *title in @[setupTitle, rangeTitle, launchTitle, osdTitle]) {
         [grid cellForView:title].row.topPadding = 10;
     }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
@@ -150,13 +159,12 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [self.window setContentSize:self.window.contentView.fittingSize];
 }
 
-- (NSTextField *)decibelsField {
+- (NSTextField *)numberFieldWithFormatter:(NSFormatter *)formatter action:(SEL)action {
     NSTextField *field = [NSTextField textFieldWithString:@""];
-    field.formatter = [[QLMDecibelsFormatter alloc] init];
+    field.formatter = formatter;
     field.alignment = NSTextAlignmentRight;
     field.target = self;
-    field.action = @selector(rangeChanged:);
-    field.delegate = self;
+    field.action = action;
     // TRAP: by default only Return sends the action. In qlm-app-first, a
     // ceiling typed and left was lost.
     field.cell.sendsActionOnEndEditing = YES;
@@ -164,13 +172,20 @@ static const CGFloat QLMSettingsTextWidth = 360;
     return field;
 }
 
-- (NSStepper *)stepper {
+// The level fields' refusals come through control:didFailToFormatString:.
+- (NSTextField *)decibelsField {
+    NSTextField *field = [self numberFieldWithFormatter:[[QLMDecibelsFormatter alloc] init] action:@selector(rangeChanged:)];
+    field.delegate = self;
+    return field;
+}
+
+- (NSStepper *)stepperWithIncrement:(double)increment action:(SEL)action {
     NSStepper *stepper = [[NSStepper alloc] init];
-    stepper.increment = QLMVolumeDecibelsStep;
+    stepper.increment = increment;
     stepper.autorepeat = YES;
     stepper.valueWraps = NO;
     stepper.target = self;
-    stepper.action = @selector(rangeChanged:);
+    stepper.action = action;
     return stepper;
 }
 
@@ -181,6 +196,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [self renderRange];
     [self renderLaunch];
     [self renderHandBack];
+    [self renderOSD];
     [self fitWindow];
     [super showWindow:sender];
 }
@@ -324,6 +340,69 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 - (void)openLoginItems:(id)sender {
     [SMAppService openSystemSettingsLoginItems];
+}
+
+#pragma mark - The on-screen display
+
+// In QLMOSDPlacement's order.
+static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
+    return @[@"Top left", @"Top center", @"Top right", @"Bottom left", @"Bottom center", @"Bottom right"];
+}
+
+- (void)buildOSD {
+    self.osdCheckbox = [NSButton checkboxWithTitle:@"Show the OSD when the knob turns" target:self action:@selector(osdClicked:)];
+    self.osdPlacementPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    [self.osdPlacementPicker addItemsWithTitles:QLMOSDPlacementTitles()];
+    self.osdPlacementPicker.target = self;
+    self.osdPlacementPicker.action = @selector(osdPlacementChosen:);
+
+    NSNumberFormatter *formatter = [[NSNumberFormatter alloc] init];
+    formatter.numberStyle = NSNumberFormatterDecimalStyle;
+    formatter.minimumFractionDigits = 1;
+    formatter.maximumFractionDigits = 1;
+    self.osdSecondsField = [self numberFieldWithFormatter:formatter action:@selector(osdSecondsChanged:)];
+    self.osdSecondsStepper = [self stepperWithIncrement:QLMOSDSecondsStep action:@selector(osdSecondsChanged:)];
+    self.osdSecondsStepper.minValue = QLMOSDSecondsMin;
+    self.osdSecondsStepper.maxValue = QLMOSDSecondsMax;
+}
+
+- (NSStackView *)osdSecondsRow {
+    NSStackView *row = [NSStackView stackViewWithViews:@[self.osdSecondsField, self.osdSecondsStepper, [NSTextField labelWithString:@"s"]]];
+    row.spacing = 4;
+    return row;
+}
+
+- (void)osdClicked:(NSButton *)checkbox {
+    self.preferences.showsOSD = checkbox.state == NSControlStateValueOn;
+    [self renderOSD];
+    [self.delegate settingsDidChangeOSD:self];
+}
+
+- (void)osdPlacementChosen:(NSPopUpButton *)picker {
+    self.preferences.osdPlacement = (QLMOSDPlacement)picker.indexOfSelectedItem;
+    [self.delegate settingsDidChangeOSD:self];
+}
+
+// The preferences hold it to the range, on the half seconds. An emptied
+// field would read as 0 s, so it keeps the old value.
+- (void)osdSecondsChanged:(NSControl *)control {
+    if (control != self.osdSecondsField || control.objectValue != nil) {
+        self.preferences.osdSeconds = control.doubleValue;
+    }
+    [self renderOSD];
+    [self.delegate settingsDidChangeOSD:self];
+}
+
+- (void)renderOSD {
+    BOOL shows = self.preferences.showsOSD;
+    NSTimeInterval seconds = self.preferences.osdSeconds;
+    self.osdCheckbox.state = shows ? NSControlStateValueOn : NSControlStateValueOff;
+    [self.osdPlacementPicker selectItemAtIndex:self.preferences.osdPlacement];
+    self.osdSecondsField.doubleValue = seconds;
+    self.osdSecondsStepper.doubleValue = seconds;
+    self.osdPlacementPicker.enabled = shows;
+    self.osdSecondsField.enabled = shows;
+    self.osdSecondsStepper.enabled = shows;
 }
 
 #pragma mark - Drawing
