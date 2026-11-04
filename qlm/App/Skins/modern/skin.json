@@ -18,11 +18,10 @@
       "draw": {"gradient": ["#3a3b38", "#2c2d2a"], "border": "#4b4d48", "radius": 14}
     },
     "nameplate": {
-      "frame": [28, 26, 200, 50],
+      "frame": [28, 26, 200, 36],
       "draw": {},
       "text": {
-        "logo": {"frame": [0, 0, 120, 36], "size": 36, "weight": "heavy", "tracking": -1.8, "color": "text", "accent": "accent"},
-        "tagline": {"frame": [1, 38, 199, 12], "size": 10, "tracking": 3.2, "color": "secondary"}
+        "logo": {"frame": [0, 0, 120, 36], "size": 36, "weight": "heavy", "tracking": -1.8, "color": "text", "accent": "accent"}
       }
     },
     "status": {
