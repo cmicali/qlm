@@ -359,7 +359,7 @@ static int QLMPoll(int argc, const char *argv[]) {
             return;
         }
         double elapsed = [[NSDate date] timeIntervalSinceDate:start];
-        NSString *knob = QLMKnobText(snapshot.adapter);
+        NSString *knob = [QLMKnobText(snapshot.adapter) stringByAppendingString:snapshot.volumeFromKnob ? @", set the level" : @""];
         if (snapshot.adapter.hasStatus && ![knob isEqualToString:lastKnob]) {
             printf("%7.2f s  knob %s\n", elapsed, knob.UTF8String);
             lastKnob = knob;

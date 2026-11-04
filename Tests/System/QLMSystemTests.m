@@ -698,6 +698,74 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     XCTAssertEqualObjects([self pullKnob].volumeDecibels, @(-35));
 }
 
+// The snapshot says when the knob set the level last, for the app's
+// display. A poll keeps it, a turn held at the ceiling changes nothing, and
+// a level the user sets, or a ceiling that caps it, clears it. So does a
+// pull that takes the knob's raise back (captures/volume-sweep, 25.11 to
+// 25.56 s).
+- (void)testTheSnapshotSaysWhenTheKnobSetTheLevel {
+    _settings.adapterPollInterval = 0.107;
+    XCTAssertFalse([self startWithKnob:@(-400) volume:@(-40)].volumeFromKnob);
+    XCTAssertTrue([self turnKnobTo:-300].volumeFromKnob);
+    [self waitForAdapterPolls:3];
+    XCTAssertTrue(_system.snapshot.volumeFromKnob);
+
+    [_system setVolumeDecibels:-35];
+    XCTAssertFalse([self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+                       return [snapshot.volumeDecibels isEqual:@(-35)] && snapshot.idle;
+                   }].volumeFromKnob);
+
+    // The top stop holds the level at the -20 dB ceiling. A turn that
+    // leaves it there sets nothing.
+    XCTAssertTrue([self turnKnobTo:-100].volumeFromKnob);
+    [_system setVolumeDecibels:-20];
+    [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.volumeFromKnob && snapshot.idle;
+    }];
+    XCTAssertFalse([self turnKnobTo:0].volumeFromKnob);
+
+    // A ceiling that leaves the level keeps it. One that caps it clears it.
+    XCTAssertTrue([self turnKnobTo:-300].volumeFromKnob);
+    [_system setCeilingDecibels:-25];
+    XCTAssertTrue([self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+                      return snapshot.ceilingDecibels == -25 && snapshot.idle;
+                  }].volumeFromKnob);
+    QLMSnapshot *capped = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.ceilingDecibels == -35 && snapshot.idle;
+    } after:^{
+        [self->_system setCeilingDecibels:-35];
+    }];
+    XCTAssertEqualObjects(capped.volumeDecibels, @(-35));
+    XCTAssertFalse(capped.volumeFromKnob);
+
+    XCTAssertTrue([self turnKnobTo:-400].volumeFromKnob);
+    XCTAssertTrue([self turnKnobTo:-360].volumeFromKnob);
+    QLMSnapshot *pulled = [self pullKnob];
+    XCTAssertEqualObjects(pulled.volumeDecibels, @(-40));
+    XCTAssertFalse(pulled.volumeFromKnob);
+}
+
+// A stop keeps it. A start that lowers the level to a knob turned meanwhile
+// clears it: the level is the knob's, but no turn was seen.
+- (void)testAStartThatLowersTheLevelToTheKnobsSaysTheKnobDidNotSetIt {
+    _settings.adapterPollInterval = 0.107;
+    [self startWithKnob:@(-400) volume:@(-40)];
+    XCTAssertTrue([self turnKnobTo:-300].volumeFromKnob);
+    [self stopSystem];
+    XCTAssertTrue(_system.snapshot.volumeFromKnob);
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-600);
+    }];
+    QLMSnapshot *again = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+        return snapshot.running && !snapshot.levelAwaitsKnob && snapshot.allIdentified && snapshot.idle;
+    } after:^{
+        [self->_system start];
+    }];
+    XCTAssertEqualObjects(again.volumeDecibels, @(-60));
+    XCTAssertEqualObjects(again.startLoweredFromDecibels, @(-30));
+    XCTAssertFalse(again.volumeFromKnob);
+}
+
 // Pulls the knob out, and waits until the snapshot shows it, with nothing
 // queued.
 - (QLMSnapshot *)pullKnob {

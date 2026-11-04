@@ -159,6 +159,11 @@ typedef NS_ENUM(NSInteger, QLMHandBackKind) {
 @property (nonatomic, readonly) NSUInteger reconnects;
 @property (nonatomic, readonly) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readonly, nullable) NSNumber *volumeDecibels;  // nil until set, undimmed, at most the ceiling
+// The last change to volumeDecibels was System following the knob. NO once
+// setVolumeDecibels: sets it, a ceiling caps it, a start or gap lowers it to
+// the knob's, or a pull of the knob takes a raise back. A turn that changes
+// nothing changes nothing here. Kept across a stop.
+@property (nonatomic, readonly) BOOL volumeFromKnob;
 // The level set before this start or gap, when the knob had moved since
 // its last reading, and System lowered the level to the knob's. Nil when it
 // lowered nothing. Kept until the next start.

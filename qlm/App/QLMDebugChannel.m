@@ -152,6 +152,7 @@ static NSDictionary *QLMDebugSnapshot(QLMSnapshot *snapshot) {
         },
         @"monitors": monitors,
         @"volumeDecibels": snapshot.volumeDecibels ?: NSNull.null,
+        @"volumeFromKnob": @(snapshot.volumeFromKnob),
         @"startLoweredFromDecibels": snapshot.startLoweredFromDecibels ?: NSNull.null,
         @"ceilingDecibels": @(snapshot.ceilingDecibels),
         @"dimmed": @(snapshot.dimmed),

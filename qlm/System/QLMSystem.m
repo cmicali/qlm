@@ -300,6 +300,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSUInteger _adapterPollsQueued;
     QLMKnob *_knob;
     NSNumber *_volumeDecibels;
+    BOOL _volumeFromKnob;  // see QLMSnapshot
     // No level goes out until the knob is read: at a start with a volume
     // set, and after a gap in the bus. See capLevelAtKnob:.
     BOOL _levelAwaitsKnob;
@@ -1320,6 +1321,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     if (moved && QLMVolumeWordForDecibels(knob) < QLMVolumeWordOf(&set)) {
         _startLoweredFrom = _volumeDecibels;
         _volumeDecibels = @(knob);
+        _volumeFromKnob = NO;
         _dirty = YES;
     }
     // Ahead of everything queued, so no 2B a poll brings precedes it.
@@ -1343,6 +1345,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         NSNumber *before = [_knob volumeAtUnplugAtTime:_clock.now volume:_volumeDecibels];
         if (before != nil) {
             _volumeDecibels = before;
+            _volumeFromKnob = NO;
             _dirty = YES;
             [self scheduleVolumeSend];
         }
@@ -1359,6 +1362,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         return;
     }
     _volumeDecibels = volume;
+    _volumeFromKnob = YES;
     _dirty = YES;
     for (int i = 0; i < 3; i++) {
         [self sendVolume];
@@ -1465,6 +1469,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         self->_levelAwaitsKnob = NO;
         self->_levelHeld = NO;
         self->_volumeDecibels = [self underCeiling:decibels];
+        self->_volumeFromKnob = NO;
         // The user's level stands, so an unmute held back goes out after it.
         if (self->_muteHeld) {
             self->_muteHeld = NO;
@@ -1480,8 +1485,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         QLMSystemSettings *settings = [self.settings copy];
         settings.ceilingDecibels = ceilingDecibels;
         self.settings = settings;
-        if (self->_volumeDecibels != nil) {
-            self->_volumeDecibels = [self underCeiling:self->_volumeDecibels.doubleValue];
+        NSNumber *capped = self->_volumeDecibels != nil ? [self underCeiling:self->_volumeDecibels.doubleValue] : nil;
+        if (capped != nil && ![capped isEqual:self->_volumeDecibels]) {
+            self->_volumeDecibels = capped;
+            self->_volumeFromKnob = NO;
         }
         if (self->_running && !self->_stopping && self->_volumeDecibels != nil) {
             [self sendVolume];
@@ -2093,6 +2100,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     snapshot.reconnects = _reconnects;
     snapshot.monitors = states;
     snapshot.volumeDecibels = _volumeDecibels;
+    snapshot.volumeFromKnob = _volumeFromKnob;
     snapshot.ceilingDecibels = self.settings.ceilingDecibels;
     snapshot.dimmed = _dimmed;
     snapshot.applying = _applyFinish != nil;

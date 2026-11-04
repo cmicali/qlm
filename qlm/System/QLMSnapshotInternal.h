@@ -63,6 +63,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readwrite) NSUInteger reconnects;
 @property (nonatomic, readwrite) NSArray<QLMMonitorState *> *monitors;
 @property (nonatomic, readwrite, nullable) NSNumber *volumeDecibels;
+@property (nonatomic, readwrite) BOOL volumeFromKnob;
 @property (nonatomic, readwrite) double ceilingDecibels;
 @property (nonatomic, readwrite) BOOL dimmed;
 @property (nonatomic, readwrite) BOOL applying;
