@@ -148,7 +148,8 @@ static double QLMLevelOfMessage(QLMMessage message) {
 
 // Replays the capture's knob readings. Checks `compared` rest points, and
 // counts `stale` where GLM lagged. Returns how many times System's level
-// changed.
+// changed. Only the knob changes the level after the first, so the snapshot
+// says the knob set it from its first follow on, and not before.
 - (NSUInteger)replay:(NSString *)scenario compared:(NSUInteger)compared stale:(NSUInteger)stale {
     // The first reading of each pair, the only one GLM reads; GLM's levels;
     // and GLM's knob bursts, each an `01 2B` within 150 ms of a change in the
@@ -195,9 +196,13 @@ static double QLMLevelOfMessage(QLMMessage message) {
     NSTimeInterval offset = time.now - readings.firstObject.time;
     NSUInteger checked = 0;
     NSUInteger lagged = 0;
+    BOOL followed = NO;
     for (NSUInteger i = 1; i < readings.count; i++) {
         QLMKnobMoment *reading = readings[i];
         [time advanceBy:reading.time + offset - time.now];
+        QLMSnapshot *snapshot = system.snapshot;
+        followed = followed || ![snapshot.volumeDecibels isEqual:@(levels.firstObject.value)];
+        XCTAssertEqual(snapshot.volumeFromKnob, followed, @"%@, %.3f s", scenario, reading.time);
         [bus perform:^{
             bus.knobTenths = @(reading.value);
         }];
