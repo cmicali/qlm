@@ -379,9 +379,12 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
     self.preferences.osdPlacement = (QLMOSDPlacement)picker.indexOfSelectedItem;
 }
 
-// The preferences hold it to the range, on the half seconds.
+// The preferences hold it to the range, on the half seconds. An emptied
+// field would read as 0 s, so it keeps the old value.
 - (void)osdSecondsChanged:(NSControl *)control {
-    self.preferences.osdSeconds = control.doubleValue;
+    if (control != self.osdSecondsField || control.objectValue != nil) {
+        self.preferences.osdSeconds = control.doubleValue;
+    }
     [self renderOSD];
 }
 

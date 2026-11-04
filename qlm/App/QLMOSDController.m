@@ -32,6 +32,7 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 @property (nonatomic, nullable) QLMSkinOSDView *osdView;
 @property (nonatomic, copy, nullable) NSString *skinName;
 @property (nonatomic, nullable) NSTimer *timer;
+@property (nonatomic) id<NSObject> defaultsObserver;
 // Each show and hide moves it on, so a fade a show interrupted orders
 // nothing out.
 @property (nonatomic) NSUInteger generation;
@@ -59,19 +60,20 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
         _window.collectionBehavior = NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
                                     | NSWindowCollectionBehaviorStationary | NSWindowCollectionBehaviorIgnoresCycle;
         [self reloadPreferences];
-        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(defaultsDidChange:)
-                                                   name:NSUserDefaultsDidChangeNotification object:nil];
+        // The notification posts on the thread that wrote the defaults.
+        __weak QLMOSDController *weakSelf = self;
+        _defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil
+                                                                             queue:NSOperationQueue.mainQueue
+                                                                        usingBlock:^(NSNotification *notification) {
+            [weakSelf reloadPreferences];
+        }];
     }
     return self;
 }
 
 - (void)dealloc {
-    [NSNotificationCenter.defaultCenter removeObserver:self];
+    [NSNotificationCenter.defaultCenter removeObserver:_defaultsObserver];
     [_timer invalidate];
-}
-
-- (void)defaultsDidChange:(NSNotification *)notification {
-    [self reloadPreferences];
 }
 
 // Every save posts the notification, a knob's level kept among them, so
@@ -156,12 +158,16 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     [self place];
     [self.window orderFrontRegardless];
     [self.timer invalidate];
-    self.timer = [NSTimer scheduledTimerWithTimeInterval:self.rule.seconds target:self selector:@selector(timerEnded:)
-                                                userInfo:nil repeats:NO];
+    // In the common modes, so it ends during a slider drag or a menu held open.
+    __weak QLMOSDController *weakSelf = self;
+    self.timer = [NSTimer timerWithTimeInterval:self.rule.seconds repeats:NO block:^(NSTimer *timer) {
+        [weakSelf timerEnded];
+    }];
     self.timer.tolerance = 0.02;
+    [NSRunLoop.mainRunLoop addTimer:self.timer forMode:NSRunLoopCommonModes];
 }
 
-- (void)timerEnded:(NSTimer *)timer {
+- (void)timerEnded {
     self.timer = nil;
     [self.rule hide];
     NSUInteger generation = self.generation;

@@ -193,4 +193,22 @@ static QLMSnapshot *QLMLevel(double decibels, BOOL fromKnob) {
     }
 }
 
+// The Dock on the left moves the visible frame's left edge to 80.
+- (void)testTheDockOnTheLeft {
+    CGRect visible = CGRectMake(80, 0, 1360, 875);
+    CGSize size = CGSizeMake(480, 150);
+    XCTAssertTrue(NSEqualRects(QLMOSDFrame(visible, size, QLMOSDPlacementBottomLeft), NSMakeRect(104, 24, 480, 150)));
+    XCTAssertTrue(NSEqualRects(QLMOSDFrame(visible, size, QLMOSDPlacementTopCenter), NSMakeRect(520, 701, 480, 150)));
+    XCTAssertTrue(NSEqualRects(QLMOSDFrame(visible, size, QLMOSDPlacementBottomRight), NSMakeRect(936, 24, 480, 150)));
+}
+
+// A main screen left of and below the primary one has a negative origin.
+- (void)testAScreenWithANegativeOrigin {
+    CGRect visible = CGRectMake(-1920, -1080, 1920, 1050);
+    CGSize size = CGSizeMake(480, 150);
+    XCTAssertTrue(NSEqualRects(QLMOSDFrame(visible, size, QLMOSDPlacementTopLeft), NSMakeRect(-1896, -204, 480, 150)));
+    XCTAssertTrue(NSEqualRects(QLMOSDFrame(visible, size, QLMOSDPlacementBottomCenter), NSMakeRect(-1200, -1056, 480, 150)));
+    XCTAssertTrue(NSEqualRects(QLMOSDFrame(visible, size, QLMOSDPlacementBottomRight), NSMakeRect(-504, -1056, 480, 150)));
+}
+
 @end
