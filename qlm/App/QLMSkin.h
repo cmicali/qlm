@@ -211,9 +211,6 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) QLMSkinColor pointerColor;
 @property (nonatomic, readonly) QLMSkinColor pointerDisabledColor;
 @property (nonatomic, readonly, nullable) QLMSkinShadow *shadow;
-// The radius of the disc that casts the shadow. The body's, less 1, unless
-// the skin gives one, as an image body with margin around its knob does.
-@property (nonatomic, readonly) CGFloat shadowRadius;
 @property (nonatomic, readonly) QLMSkinFocus *focus;
 @property (nonatomic, readonly) BOOL hasArc;
 @property (nonatomic, readonly) CGFloat arcRadius;

@@ -69,11 +69,11 @@
     "knob": {
       "frame": [420, 162, 176, 176],
       "anchors": ["right"],
-      "body": {"size": 144, "image": "knob-body"},
+      "body": {"size": 112, "image": "knob-body"},
       "ticks": {"count": 11, "inner": 73, "outer": 78, "width": 0.9, "color": "#efe1bdd9"},
       "pointer": {"inner": 19, "outer": 41, "width": 2.1, "color": "pointer", "disabledColor": "#e8e0c666"},
-      "shadow": {"color": "#000000a6", "radius": 54, "blur": 26, "offset": [2, 7]},
-      "focus": {"color": "focus", "width": 1.2, "outset": -11.6},
+      "shadow": {"color": "#0000006b", "blur": 25, "offset": [2, 7]},
+      "focus": {"color": "focus", "width": 1.2, "outset": 4.4},
       "text": {
         "min": {"frame": [10, 163, 40, 16], "font": "Menlo", "mono": true, "size": 9, "color": "secondary"},
         "max": {"frame": [134, 163, 40, 16], "font": "Menlo", "mono": true, "size": 9, "color": "secondary"},

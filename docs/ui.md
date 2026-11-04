@@ -139,13 +139,14 @@ The OSD is a bezel, not a window, and stays at its size.
 
 ### What the assets don't settle yet
 
-The pack delivers both skins at the reference sizes, and three things go past them:
+The pack delivers both skins at the reference sizes, and four things go past them:
 
-- **Retro's knob should be larger.** Both skins' knob bodies are 144 points. The retro body comes from a 1254 pixel component master, so it can be re-exported at about 200 points. The ring, pointer, and shadow draw at any size, and the layout reflows around the knob's frame.
+- **Retro's knob should be larger.** The pack draws both skins' knob bodies on 144 point canvases. The retro body comes from a 1254 pixel component master, so it can be re-exported at about 200 points. The ring, pointer, and shadow draw at any size, and the layout reflows around the knob's frame.
 - **Retro's display glass must stretch.** See [Resizing](#resizing).
+- **The shipped knob bodies are cropped.** Each body's `png/` images are cut from the pack's 144 point canvas to the body itself, 98 points for vintage and 112 for retro, so `body.size` is the knob's diameter and the shadow, the focus ring, and the drag follow it. The masters keep the canvas. A re-export from them must crop again, or `tools/build_assets.py` learns to.
 - **The OSD should be larger than 300 by 72.** The plan wants about 480 by 150 points, so it reads from across the room. Vintage's housing is vector and re-renders at that size. Retro's was normalized from a 556 by 172 pixel crop, so at that size it needs a fresh render from its master, not a scale-up.
 
-Both are asset work with `tools/build_assets.py`, after the engine lands. The engine takes any size the layout gives.
+Each is asset work with `tools/build_assets.py`, after the engine lands. The engine takes any size the layout gives.
 
 ### What draws it
 

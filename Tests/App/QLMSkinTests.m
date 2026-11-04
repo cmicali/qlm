@@ -131,10 +131,10 @@
 // Each skin the app ships loads with no refusal. The reader checks that each
 // image it names is there at 1x and 2x, so loading is the test.
 - (void)testEveryBuiltInSkinLoads {
-    NSURL *skins = QLMModernSkinURL().URLByDeletingLastPathComponent;
-    QLMSkinLibrary *library = [[QLMSkinLibrary alloc] initWithBuiltIn:skins user:nil];
-    XCTAssertEqualObjects([library skinNames], (@[@"modern", @"retro", @"vintage"]));
-    for (NSString *name in [library skinNames]) {
+    QLMSkinLibrary *library = [[QLMSkinLibrary alloc] initWithBuiltIn:QLMBuiltInSkinsURL() user:nil];
+    NSArray<NSString *> *names = [library skinNames];
+    XCTAssertEqualObjects(names, (@[@"modern", @"retro", @"vintage"]));
+    for (NSString *name in names) {
         NSString *refusal = nil;
         QLMSkin *skin = [library loadSkinNamed:name refusal:&refusal];
         XCTAssertNil(refusal, @"%@", refusal);
@@ -153,7 +153,7 @@
         @"button-selected", @"button-selected-hover", @"button-selected-pressed", @"button-selected-disabled",
         @"knob-body-normal", @"knob-body-hover", @"knob-body-pressed", @"knob-body-disabled",
     ]];
-    NSURL *skins = QLMModernSkinURL().URLByDeletingLastPathComponent;
+    NSURL *skins = QLMBuiltInSkinsURL();
     for (NSString *name in @[@"vintage", @"retro"]) {
         NSError *error = nil;
         QLMSkin *skin = [QLMSkin skinAtURL:[skins URLByAppendingPathComponent:name isDirectory:YES] error:&error];
@@ -171,7 +171,6 @@
         }
         XCTAssertEqualObjects(used, sixteen, @"%@", name);
         XCTAssertEqual(skin.knob.tickCount, 11);
-        XCTAssertLessThan(skin.knob.shadowRadius, skin.knob.bodySize / 2);
         XCTAssertEqual(skin.markings.boxes.count, 2u);
         XCTAssertNotNil([skin element:@"groups"].text[@"message"]);
     }
@@ -228,8 +227,6 @@
     XCTAssertEqual(knob.pointerOuter, 38);
     XCTAssertFalse(knob.hasArc);
     XCTAssertEqual(knob.shadow.offset.height, 4);
-    // No radius: the disc is the body's, less 1.
-    XCTAssertEqual(knob.shadowRadius, 71);
 
     QLMSkinTextSlot *logo = [skin element:@"nameplate"].text[@"logo"];
     XCTAssertEqualObjects(logo.fontName, @"Helvetica Neue");
@@ -519,26 +516,6 @@
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"elements"][@"knob"][@"focus"][@"outset"] = @20;
     } refusedWith:@"elements.knob.focus reaches past half the knob's frame, 88"];
-}
-
-// A knob's shadow may give its disc's radius. A draw block's may not.
-- (void)testAKnobShadowsRadius {
-    NSError *error = nil;
-    QLMSkin *skin = [self fixtureChangedBy:^(NSMutableDictionary *json) {
-        json[@"elements"][@"knob"][@"shadow"][@"radius"] = @50;
-    } error:&error];
-    XCTAssertNotNil(skin, @"%@", error.localizedDescription);
-    XCTAssertEqual(skin.knob.shadowRadius, 50);
-    XCTAssertEqual(skin.knob.shadow.offset.height, 4);
-    [self assertChange:^(NSMutableDictionary *json) {
-        json[@"elements"][@"knob"][@"shadow"][@"radius"] = @89;
-    } refusedWith:@"elements.knob.shadow.radius reaches past half the knob's frame, 88"];
-    [self assertChange:^(NSMutableDictionary *json) {
-        json[@"elements"][@"knob"][@"shadow"][@"radius"] = @0;
-    } refusedWith:@"elements.knob.shadow.radius is not above 0"];
-    [self assertChangeTo:QLMModernSkinURL() change:^(NSMutableDictionary *json) {
-        json[@"button"][@"draw"][@"shadow"][@"radius"] = @4;
-    } refusedWith:@"button.draw.shadow has an unknown key, radius"];
 }
 
 // A scaled slot grows from its element's origin, so it must start inside.
