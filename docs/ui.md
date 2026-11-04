@@ -1,6 +1,6 @@
 # The UI pass: a main window, an OSD, and skins
 
-**Status, 2026-11-04.** Planned. Nothing here is built yet. The menu bar popover stays as it is until its own redesign, later.
+**Status, 2026-11-04.** Built, in #75 to #82, and run on the fake bus only. The monitors see it first in the week of daily use. The popover changed only by a `Window…` button, and stays as it is until its own redesign, later. What the assets don't settle yet is listed under that heading below.
 
 qlm has run on all six monitors through a plain AppKit popover. That was enough to prove the protocol. This doc plans the first real UI: a main window that can be opened and left open, an on-screen display that shows the level when the knob turns, and a skin system that draws both. Three skins come with it: modern, vintage, and retro. The mockups and the assets are in [`qlm/App/Skins/`](../qlm/App/Skins/), one directory per skin, and this doc refers to them by name.
 
