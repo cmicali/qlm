@@ -136,7 +136,9 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
 
 // TRAP: an image with cap insets ignores respectFlipped whenever it draws at
 // any size but its own, so in a flipped view it stretches upside down. Its
-// nine parts draw right side up only in a context that isn't flipped.
+// nine parts draw right side up only in a context that isn't flipped. The
+// stand-in context doesn't carry the outer one's imageInterpolation or
+// antialiasing, so set either on it too if the outer one ever sets them.
 void QLMSkinDrawImage(NSImage *image, NSRect rect) {
     if (image == nil || rect.size.width <= 0 || rect.size.height <= 0) {
         return;
@@ -307,6 +309,22 @@ void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
     CGFloat line = ceil(font.ascender - font.descender);
     NSRect box = NSMakeRect(frame.origin.x, frame.origin.y + (frame.size.height - line) / 2, frame.size.width, line);
     [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
+}
+
+// An image face's bevel, on each side.
+const CGFloat QLMSkinLabelPadding = 6;
+
+QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap, CGFloat ledX) {
+    BOOL beforeTitle = led > 0 && ledX < 0;
+    CGFloat lead = beforeTitle ? led + gap : 0;
+    CGFloat room = faceWidth - 2 * QLMSkinLabelPadding - lead;
+    CGFloat width = MIN(titleWidth, MAX(room, 0));
+    CGFloat x = round(faceWidth / 2 - (lead + width) / 2);
+    QLMSkinLabel label;
+    label.ledX = beforeTitle ? x : ledX;
+    label.textX = x + lead;
+    label.textWidth = width;
+    return label;
 }
 
 // The caps' middle on the frame's: a label with no descenders, as most are,

@@ -248,17 +248,13 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
     QLMSkinDrawStyle(self.skin, button.style, state, bounds, NO);
 
     NSAttributedString *title = [self titleString];
-    CGFloat width = MIN(_titleWidth, bounds.size.width);
     CGFloat led = self.showsLED ? button.ledSize : 0;
-    BOOL beforeTitle = self.showsLED && button.ledX < 0;
-    CGFloat total = beforeTitle ? led + button.ledGap + width : width;
-    CGFloat x = round(NSMidX(bounds) - total / 2);
+    QLMSkinLabel label = QLMSkinLabelLayout(bounds.size.width, _titleWidth, led, button.ledGap, button.ledX);
     if (self.showsLED) {
-        CGFloat ledX = beforeTitle ? x : button.ledX;
-        QLMSkinDrawLED(self.skin.led, NSMakeRect(ledX, round(NSMidY(bounds) - led / 2), led, led), self.ledLit, self.enabled);
+        QLMSkinDrawLED(self.skin.led, NSMakeRect(label.ledX, round(NSMidY(bounds) - led / 2), led, led), self.ledLit,
+                       self.enabled);
     }
-    CGFloat textX = beforeTitle ? x + led + button.ledGap : x;
-    QLMSkinDrawCenteredCaps(title, NSMakeRect(textX, 0, width, bounds.size.height));
+    QLMSkinDrawCenteredCaps(title, NSMakeRect(label.textX, 0, label.textWidth, bounds.size.height));
 
     if (self.focused && self.enabled) {
         QLMSkinDrawFocus(button.focus, bounds, NO);

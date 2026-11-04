@@ -118,6 +118,34 @@ static NSRange QLMTestInkRows(NSBitmapImageRep *bitmap) {
     XCTAssertEqual([bitmap colorAtX:70 y:182].alphaComponent, 0);
 }
 
+// The LED, the gap, and the title center as one block on the face.
+- (void)testALabelCentersAsOneBlock {
+    QLMSkinLabel label = QLMSkinLabelLayout(174, 40, 6, 8, -1);
+    XCTAssertEqual(label.ledX, 60);
+    XCTAssertEqual(label.textX, 74);
+    XCTAssertEqual(label.textWidth, 40);
+    XCTAssertEqual(174 - (label.textX + label.textWidth), label.ledX);
+    // No LED, the title alone.
+    label = QLMSkinLabelLayout(174, 40, 0, 8, -1);
+    XCTAssertEqual(label.textX, 67);
+    // A pinned LED stays, and the title centers alone.
+    label = QLMSkinLabelLayout(174, 40, 6, 8, 20);
+    XCTAssertEqual(label.ledX, 20);
+    XCTAssertEqual(label.textX, 67);
+}
+
+// A long title on a narrow face is cut short inside the padding, and the LED
+// stays on the face.
+- (void)testALongLabelStaysOnTheFace {
+    QLMSkinLabel label = QLMSkinLabelLayout(100, 300, 6, 8, -1);
+    XCTAssertEqual(label.ledX, QLMSkinLabelPadding);
+    XCTAssertEqual(label.textWidth, 100 - 2 * QLMSkinLabelPadding - 14);
+    XCTAssertEqual(label.textX + label.textWidth, 100 - QLMSkinLabelPadding);
+    // A face too narrow for the LED itself draws no title.
+    label = QLMSkinLabelLayout(20, 300, 6, 8, -1);
+    XCTAssertEqual(label.textWidth, 0);
+}
+
 // A button's label: its capitals sit as far from the face's top as from its
 // bottom, within a pixel at 2x, in every skin's size.
 - (void)testALabelsCapitalsAreCentered {

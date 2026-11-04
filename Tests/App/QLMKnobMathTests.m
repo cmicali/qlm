@@ -146,7 +146,7 @@
     XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-70, -20, -80, -30, 200), -65, 1e-9);
     XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-70, 20, -80, -30, 200), -75, 1e-9);
     XCTAssertEqual(QLMKnobDragVertical(-70, 0, -80, -30, 200), -70);
-    // Sideways moves nothing, and Shift's travel is four times as far.
+    // Shift's travel is four times as far, so the same move does a quarter.
     XCTAssertEqualWithAccuracy(QLMKnobDragVertical(-70, -20, -80, -30, 800), -68.75, 1e-9);
     // No step, no range, or no travel keeps the level.
     XCTAssertEqual(QLMKnobDragVertical(-70, NAN, -80, -30, 200), -70);
