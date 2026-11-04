@@ -108,6 +108,9 @@ targets:
           - "**/.DS_Store"
           - "**/*.md"
           - "Info.plist"                    # generated below; consumed via INFOPLIST_FILE
+          # The skins' assets, masters, and tools. The skin engine copies what
+          # it bundles from here itself (docs/ui.md).
+          - "Skins/**"
     info:
       path: qlm/App/Info.plist
       properties:
