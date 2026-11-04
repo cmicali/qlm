@@ -68,7 +68,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (double)debugTurnKnobTo:(double)decibels;
 @property (nonatomic, readonly, copy) NSString *debugWindowSkinName;
 - (nullable NSString *)debugChooseSkin:(NSString *)name;
-// Why the preferences' skin does not load, as Settings' note says.
+// Why the saved skin does not load.
 @property (nonatomic, readonly, copy, nullable) NSString *debugSkinRefusal;
 @end
 

@@ -488,12 +488,11 @@ static OSType QLMQuitReason(void) {
     [self restartSystem];
 }
 
-- (NSString *)settingsDidChooseSkin:(QLMSettingsWindowController *)controller {
-    return [self chooseSkinNamed:self.preferences.skinName];
+- (NSString *)settings:(QLMSettingsWindowController *)controller chooseSkinNamed:(NSString *)name {
+    return [self chooseSkinNamed:name];
 }
 
-// Settings' picker and the skin verb. A skin the library refuses is not
-// kept.
+// Settings' picker and the skin verb share it.
 - (nullable NSString *)chooseSkinNamed:(NSString *)name {
     NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
     if (refusal == nil) {

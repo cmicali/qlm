@@ -369,29 +369,30 @@ static const CGFloat QLMSettingsTextWidth = 360;
 
 - (void)skinChosen:(NSPopUpButton *)picker {
     NSString *name = picker.titleOfSelectedItem;
-    NSString *previous = self.preferences.skinName;
-    if (name == nil || [name isEqualToString:previous]) {
+    if (name == nil || [name isEqualToString:self.preferences.skinName]) {
         return;
     }
-    self.preferences.skinName = name;
-    self.skinPickRefusal = [self.delegate settingsDidChooseSkin:self];
-    if (self.skinPickRefusal != nil) {
-        self.preferences.skinName = previous;
+    // On success the delegate calls reloadSkin.
+    NSString *refusal = [self.delegate settings:self chooseSkinNamed:name];
+    if (refusal != nil) {
+        self.skinPickRefusal = refusal;
+        [self renderSkin];
+        [self fitWindow];
     }
-    [self reloadSkin];
 }
 
 // Only this button makes the user's folder.
 - (void)revealSkins:(id)sender {
     NSURL *directory = [QLMSkinLibrary standardLibrary].userDirectory;
-    if (directory == nil) {
+    if (![NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL]) {
+        NSBeep();
         return;
     }
-    [NSFileManager.defaultManager createDirectoryAtURL:directory withIntermediateDirectories:YES attributes:nil error:NULL];
-    [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[directory]];
+    [NSWorkspace.sharedWorkspace openURL:directory];
 }
 
 - (void)reloadSkin {
+    self.skinPickRefusal = nil;
     if (self.window.visible) {
         [self renderSkin];
         [self renderSetup];

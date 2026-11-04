@@ -20,9 +20,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller;
 // The OSD's setting, place, or seconds changed in the preferences.
 - (void)settingsDidChangeOSD:(QLMSettingsWindowController *)controller;
-// The preferences name another skin. Returns the library's refusal, and
-// then the window keeps its skin, and Settings puts the old name back.
-- (nullable NSString *)settingsDidChooseSkin:(QLMSettingsWindowController *)controller;
+// The user picked a skin. Returns the library's refusal, and then nothing
+// changes.
+- (nullable NSString *)settings:(QLMSettingsWindowController *)controller chooseSkinNamed:(NSString *)name;
 @end
 
 // Settings: the GLM adapter or the fake bus and its hand-back, the setup
