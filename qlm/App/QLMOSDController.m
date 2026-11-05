@@ -141,12 +141,16 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     }
     self.shown = snapshot;
     [self render:snapshot];
-    self.fading = NO;
-    self.window.alphaValue = 1;
-    if (!self.window.visible) {
-        [self place];
+    // Only when it's hidden or fading: on each step of a turn, the order
+    // front would wait on the window server for the last frame.
+    if (!self.window.visible || self.fading) {
+        self.fading = NO;
+        self.window.alphaValue = 1;
+        if (!self.window.visible) {
+            [self place];
+        }
+        [self.window orderFrontRegardless];
     }
-    [self.window orderFrontRegardless];
     [self holdFor:self.preferences.osdSeconds then:^(QLMOSDController *controller) {
         [controller fade];
     }];

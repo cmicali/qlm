@@ -2,6 +2,7 @@
 
 #import "QLMSkinControls.h"
 #import "QLMSkinDrawing.h"
+#import "QLMSkinTestBitmaps.h"
 #import "QLMSkinView.h"
 #import "QLMTestSupport.h"
 
@@ -12,8 +13,6 @@
 // image right side up, at the reference size and stretched.
 @interface QLMSkinLayersTests : XCTestCase
 @end
-
-static const CGFloat QLMTestScale = 2;
 
 static void QLMTestEachLayer(CALayer *layer, void (^each)(CALayer *layer)) {
     each(layer);
@@ -29,20 +28,9 @@ static void QLMTestEachView(NSView *view, void (^each)(NSView *view)) {
     }
 }
 
-static NSBitmapImageRep *QLMTestBitmap(NSSize points) {
-    return [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
-                                                   pixelsWide:(NSInteger)(points.width * QLMTestScale)
-                                                   pixelsHigh:(NSInteger)(points.height * QLMTestScale)
-                                                bitsPerSample:8
-                                              samplesPerPixel:4
-                                                     hasAlpha:YES
-                                                     isPlanar:NO
-                                               colorSpaceName:NSDeviceRGBColorSpace
-                                                  bytesPerRow:0
-                                                 bitsPerPixel:0];
-}
-
 // As a window shows it: each view's update, then each layer's drawing.
+// TRAP: out of a window, renderInContext: draws a layer's content again,
+// whole, so it can't show what a partial redraw left.
 static NSBitmapImageRep *QLMTestComposite(NSView *view) {
     view.wantsLayer = YES;  // as every view in a window is
     QLMTestEachView(view, ^(NSView *each) {
@@ -50,8 +38,10 @@ static NSBitmapImageRep *QLMTestComposite(NSView *view) {
         each.needsDisplay = YES;
     });
     [view displayIfNeeded];
-    QLMTestEachLayer(view.layer, ^(CALayer *layer) {
-        [layer displayIfNeeded];
+    QLMTestEachView(view, ^(NSView *each) {
+        QLMTestEachLayer(each.layer, ^(CALayer *layer) {
+            [layer displayIfNeeded];
+        });
     });
     NSBitmapImageRep *bitmap = QLMTestBitmap(view.bounds.size);
     CGContextRef cg = [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap].CGContext;
@@ -74,10 +64,9 @@ static NSBitmapImageRep *QLMTestComposite(NSView *view) {
     return bitmap;
 }
 
-// Each view's drawRect:, in its place, in the views' order. It draws the
-// material as drawRect: drew it before the layers, its shadows as they fall
-// on the screen. TRAP: not displayRectIgnoringOpacity:, which renders the
-// layers too.
+// Each view's reference drawing, in its place, in the views' order. It
+// draws the material as drawRect: drew it before the layers, its shadows
+// as they fall on the screen.
 static NSBitmapImageRep *QLMTestDrawn(NSView *view) {
     NSBitmapImageRep *bitmap = QLMTestBitmap(view.bounds.size);
     CGContextRef cg = [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap].CGContext;
@@ -93,7 +82,9 @@ static NSBitmapImageRep *QLMTestDrawn(NSView *view) {
         NSRect frame = [each convertRect:each.bounds toView:view];
         CGContextSaveGState(cg);
         CGContextTranslateCTM(cg, NSMinX(frame), NSMinY(frame));
-        [each drawRect:each.bounds];
+        if ([each respondsToSelector:@selector(layers)]) {
+            [[(id)each layers] drawReference:each.bounds];
+        }
         CGContextRestoreGState(cg);
     });
     [NSGraphicsContext restoreGraphicsState];
@@ -201,39 +192,57 @@ static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, QLMTestLook lo
     }
 }
 
-// The rows a modern button's face and shadow ink below and above it, in
-// points, from an image of it at `scale`.
-static void QLMTestShadowReach(QLMSkin *skin, CGFloat scale, CGFloat *below, CGFloat *above) {
-    NSRect face = NSMakeRect(10, 20, 60, 20);
-    CGImageRef image = QLMSkinRenderImage(NSMakeSize(80, 60), scale, ^{
-        QLMSkinDrawStyle(skin, skin.button.style, QLMSkinStateNormal, face, NO);
-    });
-    NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithCGImage:image];
-    CGImageRelease(image);
-    NSInteger first = -1;
-    NSInteger last = -1;
-    NSInteger x = (NSInteger)(NSMidX(face) * scale);
+// The ink outside `rect`, in pixels, of what `draw` draws in a bitmap
+// `size` points big.
+static NSInteger QLMTestInkOutside(NSSize size, NSRect rect, void (^draw)(void)) {
+    NSBitmapImageRep *bitmap = QLMTestDrawFlipped(size, draw);
+    NSRect pixels = NSMakeRect(rect.origin.x * QLMTestScale, rect.origin.y * QLMTestScale, rect.size.width * QLMTestScale,
+                               rect.size.height * QLMTestScale);
+    NSInteger outside = 0;
     for (NSInteger y = 0; y < bitmap.pixelsHigh; y++) {
-        if ([bitmap colorAtX:x y:y].alphaComponent > 0.02) {
-            first = first < 0 ? y : first;
-            last = y;
+        for (NSInteger x = 0; x < bitmap.pixelsWide; x++) {
+            if (!NSPointInRect(NSMakePoint(x + 0.5, y + 0.5), pixels) && [bitmap colorAtX:x y:y].alphaComponent > 0) {
+                outside++;
+            }
         }
     }
-    *below = (CGFloat)(last + 1) / scale - NSMaxY(face);
-    *above = NSMinY(face) - (CGFloat)first / scale;
+    return outside;
 }
 
-// A shadow falls as far, in points, at every scale, as on the screen: modern's
-// buttons cast 1.5 points down with a 2 point blur.
-- (void)testAShadowFallsInPointsAtEveryScale {
-    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
-    CGFloat below1, above1, below2, above2;
-    QLMTestShadowReach(skin, 1, &below1, &above1);
-    QLMTestShadowReach(skin, 2, &below2, &above2);
-    XCTAssertEqualWithAccuracy(below1, below2, 1);
-    XCTAssertEqualWithAccuracy(above1, above2, 1);
-    XCTAssertGreaterThan(below2, above2 + 1);
-    XCTAssertGreaterThan(below2, 2.5);
+// A text's change redraws its slot's ink alone, so its slot must hold all
+// it draws, at the reference size and scaled up, or a change would leave
+// some of the old text behind.
+- (void)testASlotsTextInksInsideWhatItsChangeRedraws {
+    NSDictionary<NSString *, NSString *> *display = @{
+        @"caption": @"MAIN 4X2 WITH A LONG NAME", @"level": @"−88.8", @"unit": @"dB", @"output": @"OUTPUT −88.8",
+        @"max": @"MAX −88.8",
+    };
+    NSDictionary<NSString *, NSString *> *osd = @{
+        @"level": @"−88.8", @"unit": @"dB", @"title": @"Main monitors with a long name", @"subtitle": @"Muted · Dimmed",
+    };
+    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
+        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+        QLMSkinElement *element = [skin element:@"display"];
+        for (NSNumber *grow in @[@1, @1.7]) {
+            CGSize size = CGSizeMake(element.frame.size.width * grow.doubleValue, element.frame.size.height * grow.doubleValue);
+            for (NSString *slotName in display) {
+                QLMSkinTextSlot *slot = element.text[slotName];
+                NSRect frame = QLMSkinSlotFrame(element, slot, size);
+                CGFloat scale = QLMSkinSlotScale(element, slot, size);
+                NSInteger outside = QLMTestInkOutside(size, QLMSkinSlotInk(slot, frame, scale), ^{
+                    QLMSkinDrawSlot(display[slotName], slot, frame, scale, YES, 1);
+                });
+                XCTAssertEqual(outside, 0, @"%@ display %@ at %@", name, slotName, grow);
+            }
+        }
+        for (NSString *slotName in osd) {
+            QLMSkinTextSlot *slot = skin.osd.text[slotName];
+            NSInteger outside = QLMTestInkOutside(skin.osd.frame.size, QLMSkinSlotInk(slot, slot.frame, 1), ^{
+                QLMSkinDrawSlot(osd[slotName], slot, slot.frame, 1, YES, 1);
+            });
+            XCTAssertEqual(outside, 0, @"%@ OSD %@", name, slotName);
+        }
+    }
 }
 
 @end

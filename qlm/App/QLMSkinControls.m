@@ -3,6 +3,7 @@
 #import "NSImage+Util.h"
 #import "PlatformColor.h"
 #import "QLMSkinDrawing.h"
+#import "QLMSkinImages.h"
 #import "QLMSkinLayout.h"
 
 // The symbol a footer button draws where this macOS lacks the skin's.
@@ -38,16 +39,13 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return NO;
 }
 
+// QLMSkinLayerView holds the same glue, as an NSView.
 - (BOOL)wantsUpdateLayer {
     return YES;
 }
 
 - (void)updateLayer {
     [self.layers updateLayer];
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-    [self.layers drawRect:dirtyRect];
 }
 
 - (void)setFrameOrigin:(NSPoint)origin {
@@ -279,23 +277,37 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return string;
 }
 
+- (QLMSkinLabel)label {
+    [self titleString];
+    QLMSkinButton *button = self.skin.button;
+    return QLMSkinLabelLayout(self.bounds.size.width, _titleWidth, self.showsLED ? button.ledSize : 0, button.ledGap);
+}
+
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
+    NSMutableArray<QLMSkinMaterial *> *materials = [NSMutableArray array];
     QLMSkinState state = QLMSkinButtonState(self.selected, self.enabled, self.pressed, self.hovered);
     QLMSkinMaterial *face = [QLMSkinMaterial materialOfStyle:self.skin.button.style skin:self.skin state:state
                                                        frame:self.bounds circle:NO overlay:QLMSkinColorClear layers:layers];
-    return face ? @[face] : @[];
+    if (face != nil) {
+        [materials addObject:face];
+    }
+    if (self.showsLED) {
+        CGFloat led = self.skin.button.ledSize;
+        NSRect frame = NSMakeRect([self label].ledX, round(NSMidY(self.bounds) - led / 2), led, led);
+        QLMSkinMaterial *dot = [QLMSkinMaterial materialOfLED:self.skin.led skin:self.skin lit:self.ledLit
+                                                      enabled:self.enabled frame:frame layers:layers];
+        if (dot != nil) {
+            [materials addObject:dot];
+        }
+    }
+    return materials;
 }
 
 - (void)drawSkinContent:(NSRect)dirtyRect {
     QLMSkinButton *button = self.skin.button;
     NSRect bounds = self.bounds;
     NSAttributedString *title = [self titleString];
-    CGFloat led = self.showsLED ? button.ledSize : 0;
-    QLMSkinLabel label = QLMSkinLabelLayout(bounds.size.width, _titleWidth, led, button.ledGap);
-    if (self.showsLED) {
-        QLMSkinDrawLED(self.skin.led, NSMakeRect(label.ledX, round(NSMidY(bounds) - led / 2), led, led), self.ledLit,
-                       self.enabled);
-    }
+    QLMSkinLabel label = [self label];
     QLMSkinDrawCenteredCaps(title, NSMakeRect(label.textX, 0, label.textWidth, bounds.size.height));
 
     if (self.focused && self.enabled) {
@@ -314,9 +326,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     NSAttributedString *_titleString;
     CGFloat _titleAlpha;
     CGFloat _titleWidth;
-    // By alpha, of which there are three. Building one costs most of a
-    // repaint, which shows in a live resize.
-    NSMutableDictionary<NSNumber *, NSImage *> *_symbols;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin slot:(QLMSkinTextSlot *)slot symbol:(NSString *)symbol {
@@ -324,7 +333,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     if (self) {
         _slot = slot;
         _symbolName = [[NSImage availableSymbolName:symbol fallback:QLMSkinFallbackSymbol] copy];
-        _symbols = [NSMutableDictionary dictionary];
         _title = @"";
         // Its focus ring stands 4 points off each side.
         QLMSkinFocus *focus = skin.button.focus;
@@ -344,7 +352,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     }
     _title = [title copy];
     _titleString = nil;
-    [_symbols removeAllObjects];
     self.needsDisplay = YES;
 }
 
@@ -359,17 +366,19 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return _titleString;
 }
 
+// Kept on the skin: building one costs most of a first show's drawing.
 - (nullable NSImage *)symbolAtAlpha:(CGFloat)alpha color:(NSColor *)color {
-    NSImage *symbol = _symbols[@(alpha)];
-    if (symbol == nil) {
+    CGFloat size = round(_slot.size * 1.25);
+    NSColor *srgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace] ?: color;
+    NSString *key = [NSString stringWithFormat:@"symbol|%@|%g|%g,%g,%g,%g", _symbolName, size, srgb.redComponent,
+                                               srgb.greenComponent, srgb.blueComponent, srgb.alphaComponent];
+    NSString *name = _symbolName;
+    return [[QLMSkinImages imagesOfSkin:self.skin] objectForKey:key make:^id {
         NSImageSymbolConfiguration *configuration =
-            [[NSImageSymbolConfiguration configurationWithPointSize:round(_slot.size * 1.25) weight:NSFontWeightRegular]
+            [[NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightRegular]
                 configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:color]];
-        symbol = [[NSImage imageWithSystemSymbolName:_symbolName accessibilityDescription:nil]
-            imageWithSymbolConfiguration:configuration];
-        _symbols[@(alpha)] = symbol;
-    }
-    return symbol;
+        return [[NSImage imageWithSystemSymbolName:name accessibilityDescription:nil] imageWithSymbolConfiguration:configuration];
+    }];
 }
 
 - (void)drawSkinContent:(NSRect)dirtyRect {
@@ -409,8 +418,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     if (self) {
         _skin = skin;
         _enabled = YES;
-        // The LED's glow falls past the bounds.
-        self.layers.contentOutset = ceil(2 * skin.led.glow);
     }
     return self;
 }
@@ -439,10 +446,15 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     self.needsDisplay = YES;
 }
 
+- (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
+    QLMSkinMaterial *dot = [QLMSkinMaterial materialOfLED:_skin.led skin:_skin lit:self.lit enabled:self.enabled
+                                                    frame:[_skin element:@"status"].ledFrame layers:layers];
+    return dot ? @[dot] : @[];
+}
+
 - (void)drawSkinContent:(NSRect)dirtyRect {
     QLMSkinElement *element = [_skin element:@"status"];
     QLMSkinTextSlot *online = element.text[@"online"];
-    QLMSkinDrawLED(_skin.led, element.ledFrame, self.lit, self.enabled);
     QLMSkinDrawSlot(self.text, online, QLMSkinSlotFrame(element, online, self.bounds.size), 1, YES,
                     self.enabled ? 1 : QLMSkinDisabledAlpha);
 }
@@ -468,12 +480,25 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return self;
 }
 
+// Where a slot inks, in the view.
+- (NSRect)inkOfSlot:(NSString *)name {
+    QLMSkinElement *element = [_skin element:@"display"];
+    QLMSkinTextSlot *slot = element.text[name];
+    CGSize size = self.bounds.size;
+    return QLMSkinSlotInk(slot, QLMSkinSlotFrame(element, slot, size), QLMSkinSlotScale(element, slot, size));
+}
+
+// A text's change redraws its slot alone, over the glass's material.
+- (void)redrawSlot:(NSString *)name {
+    [self.layers setNeedsDisplayInRect:[self inkOfSlot:name]];
+}
+
 - (void)setCaption:(NSString *)caption {
     if (QLMSkinSameText(caption, _caption)) {
         return;
     }
     _caption = [caption copy];
-    self.needsDisplay = YES;
+    [self redrawSlot:@"caption"];
 }
 
 - (void)setLevel:(NSString *)level {
@@ -481,7 +506,8 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         return;
     }
     _level = [level copy];
-    self.needsDisplay = YES;
+    [self redrawSlot:@"level"];
+    [self redrawSlot:@"unit"];
 }
 
 - (void)setOutput:(NSString *)output {
@@ -489,7 +515,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         return;
     }
     _output = [output copy];
-    self.needsDisplay = YES;
+    [self redrawSlot:@"output"];
 }
 
 - (void)setMax:(NSString *)max {
@@ -497,7 +523,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         return;
     }
     _max = [max copy];
-    self.needsDisplay = YES;
+    [self redrawSlot:@"max"];
 }
 
 - (void)setDisabled:(BOOL)disabled {
@@ -528,6 +554,9 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
             @"output": self.output ?: @"", @"max": self.max ?: @"",
         };
         for (NSString *name in texts) {
+            if (!NSIntersectsRect([self inkOfSlot:name], dirtyRect)) {
+                continue;
+            }
             QLMSkinTextSlot *slot = element.text[name];
             QLMSkinDrawSlot(texts[name], slot, QLMSkinSlotFrame(element, slot, size), QLMSkinSlotScale(element, slot, size),
                             YES, 1);
@@ -564,12 +593,23 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return self;
 }
 
+- (NSRect)inkOfSlot:(NSString *)name {
+    QLMSkinTextSlot *slot = _skin.osd.text[name];
+    return QLMSkinSlotInk(slot, slot.frame, 1);
+}
+
+// A change redraws its own part alone, over the housing's material.
+- (void)redrawSlot:(NSString *)name {
+    [self.layers setNeedsDisplayInRect:[self inkOfSlot:name]];
+}
+
 - (void)setLevel:(NSString *)level {
     if (QLMSkinSameText(level, _level)) {
         return;
     }
     _level = [level copy];
-    self.needsDisplay = YES;
+    [self redrawSlot:@"level"];
+    [self redrawSlot:@"unit"];
 }
 
 - (void)setTitle:(NSString *)title {
@@ -577,7 +617,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         return;
     }
     _title = [title copy];
-    self.needsDisplay = YES;
+    [self redrawSlot:@"title"];
 }
 
 - (void)setSubtitle:(NSString *)subtitle {
@@ -585,7 +625,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         return;
     }
     _subtitle = [subtitle copy];
-    self.needsDisplay = YES;
+    [self redrawSlot:@"subtitle"];
 }
 
 - (void)setFraction:(double)fraction {
@@ -594,7 +634,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         return;
     }
     _fraction = fraction;
-    self.needsDisplay = YES;
+    [self.layers setNeedsDisplayInRect:NSInsetRect(_skin.osd.bar.frame, -1, -1)];
 }
 
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
@@ -611,7 +651,9 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         @"subtitle": self.subtitle ?: QLMSkinOSDIdleSubtitle,
     };
     for (NSString *name in texts) {
-        QLMSkinDrawSlot(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
+        if (NSIntersectsRect([self inkOfSlot:name], dirtyRect)) {
+            QLMSkinDrawSlot(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
+        }
     }
 
     QLMSkinBar *bar = osd.bar;

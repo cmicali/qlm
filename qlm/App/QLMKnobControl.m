@@ -4,6 +4,7 @@
 #import "QLMFormat.h"
 #import "QLMKnobMath.h"
 #import "QLMSkinDrawing.h"
+#import "QLMSkinImages.h"
 
 // A trackpad's scroll moves a step per this many points.
 static const CGFloat QLMKnobScrollPointsPerStep = 12;
@@ -14,9 +15,6 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
 @implementation QLMKnobControl {
     double _value;
     CGFloat _scrolled;
-    // A CGImage of the shadow, ticks, and arc track, at the view's size.
-    id _still;
-    CGFloat _stillScale;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -81,13 +79,6 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
 - (void)setMaxValue:(double)maxValue {
     _maxValue = maxValue;
     self.doubleValue = _value;
-}
-
-- (void)setFrameSize:(NSSize)size {
-    if (!NSEqualSizes(size, self.frame.size)) {
-        _still = nil;
-    }
-    [super setFrameSize:size];
 }
 
 // A move by the user: snapped, and sent when it changes the level's step.
@@ -211,43 +202,44 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     return NSMakeRect(center.x - radius, center.y - radius, radius * 2, radius * 2);
 }
 
-// What no turn changes, drawn once per size and scale.
+// What no turn changes, drawn once per size and scale, and kept on the
+// skin, so a new window draws it again.
 - (nullable CGImageRef)stillAtScale:(CGFloat)scale {
-    if (_still != nil && _stillScale == scale) {
-        return (__bridge CGImageRef)_still;
-    }
     QLMSkinKnob *knob = self.skin.knob;
+    NSSize size = self.bounds.size;
     NSPoint center = [self center];
     NSRect disc = [self rectAround:knob.bodySize / 2 - 1];
-    _stillScale = scale;
-    _still = CFBridgingRelease(QLMSkinRenderImage(self.bounds.size, scale, ^{
-        if (knob.shadow != nil) {
-            NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:disc];
-            QLMSkinDrawShadow(knob.shadow, path, NSColor.blackColor);
-            // Only the cast shadow stays, so a body that isn't opaque, as a
-            // disabled image body, shows no disc through it. TRAP: the
-            // erase is safe only because the still is its own fresh image.
-            // In a view's context, as in QLMSkinDrawShadow, it would punch
-            // a hole in the panel under every button.
-            [NSGraphicsContext saveGraphicsState];
-            NSGraphicsContext.currentContext.compositingOperation = NSCompositingOperationDestinationOut;
-            [NSColor.blackColor setFill];
-            [path fill];
-            [NSGraphicsContext restoreGraphicsState];
-        }
-        if (knob.tickCount > 0) {
-            NSBezierPath *ticks = [NSBezierPath bezierPath];
-            for (int i = 0; i < knob.tickCount; i++) {
-                QLMKnobAppendRadial(ticks, center, knob.tickInner, knob.tickOuter, QLMKnobTickAngle(i, (int)knob.tickCount));
+    NSString *key = [NSString stringWithFormat:@"still|%@|%g", NSStringFromSize(size), scale];
+    id still = [[QLMSkinImages imagesOfSkin:self.skin] objectForKey:key make:^id {
+        return CFBridgingRelease(QLMSkinRenderImage(size, scale, ^{
+            if (knob.shadow != nil) {
+                NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:disc];
+                QLMSkinDrawShadow(knob.shadow, path, NSColor.blackColor);
+                // Only the cast shadow stays, so a body that isn't opaque, as a
+                // disabled image body, shows no disc through it. TRAP: the
+                // erase is safe only because the still is its own fresh image.
+                // In a view's context, as in QLMSkinDrawShadow, it would punch
+                // a hole in the panel under every button.
+                [NSGraphicsContext saveGraphicsState];
+                NSGraphicsContext.currentContext.compositingOperation = NSCompositingOperationDestinationOut;
+                [NSColor.blackColor setFill];
+                [path fill];
+                [NSGraphicsContext restoreGraphicsState];
             }
-            QLMKnobStroke(ticks, knob.tickWidth, QLMSkinNSColor(knob.tickColor));
-        }
-        if (knob.hasArc) {
-            QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES), knob.arcWidth,
-                          QLMSkinNSColor(knob.arcTrack));
-        }
-    }));
-    return (__bridge CGImageRef)_still;
+            if (knob.tickCount > 0) {
+                NSBezierPath *ticks = [NSBezierPath bezierPath];
+                for (int i = 0; i < knob.tickCount; i++) {
+                    QLMKnobAppendRadial(ticks, center, knob.tickInner, knob.tickOuter, QLMKnobTickAngle(i, (int)knob.tickCount));
+                }
+                QLMKnobStroke(ticks, knob.tickWidth, QLMSkinNSColor(knob.tickColor));
+            }
+            if (knob.hasArc) {
+                QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES), knob.arcWidth,
+                              QLMSkinNSColor(knob.arcTrack));
+            }
+        }));
+    }];
+    return (__bridge CGImageRef)still;
 }
 
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {

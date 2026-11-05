@@ -16,7 +16,8 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
 @end
 
 // The panel's material, markings, and text, under every element: a view
-// of its own, since a view's sublayers draw over what it draws.
+// of its own, since a layered view is a leaf and the skin view hosts the
+// elements.
 @interface QLMSkinPanelView : QLMSkinLayerView
 @property (nonatomic, weak) QLMSkinView *owner;
 @end

@@ -1,6 +1,7 @@
 #import "QLMSkinLayers.h"
 
 #import "QLMSkinDrawing.h"
+#import "QLMSkinImages.h"
 
 @interface QLMSkinMaterial ()
 @property (nonatomic) id image;  // a CGImage
@@ -10,41 +11,93 @@
 @property (nonatomic, copy) void (^draw)(void);
 @end
 
-static char QLMSkinTintsKey;
-static char QLMSkinRendersKey;
-
 static NSString *QLMSkinColorKey(QLMSkinColor color) {
     return [NSString stringWithFormat:@"%g,%g,%g,%g", color.red, color.green, color.blue, color.alpha];
 }
 
-// The image with `overlay` laid over it in its own shape, as
-// QLMSkinDrawDimmed lays it. One color, so it commutes with the stretch.
-static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGImageRef image, QLMSkinColor overlay) {
-    NSMutableDictionary<NSString *, id> *cache = QLMSkinAttached(skin, &QLMSkinTintsKey, ^id {
-        return [NSMutableDictionary dictionary];
-    });
-    NSString *key = [NSString stringWithFormat:@"%@@%ldx|%@", name, (long)scale, QLMSkinColorKey(overlay)];
-    if (cache[key] == nil) {
-        CGRect rect = CGRectMake(0, 0, CGImageGetWidth(image), CGImageGetHeight(image));
-        CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
-        CGContextRef cg = CGBitmapContextCreate(NULL, (size_t)rect.size.width, (size_t)rect.size.height, 8, 0, space,
-                                                (CGBitmapInfo)kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
-        CGColorSpaceRelease(space);
-        id tinted = nil;
-        if (cg != NULL) {
-            CGContextDrawImage(cg, rect, image);
-            CGContextSetBlendMode(cg, kCGBlendModeSourceAtop);
-            CGContextSetFillColorWithColor(cg, QLMSkinNSColor(overlay).CGColor);
-            CGContextFillRect(cg, rect);
-            tinted = CFBridgingRelease(CGBitmapContextCreateImage(cg));
-            CGContextRelease(cg);
-        }
-        cache[key] = tinted ?: (__bridge id)image;
+// To an eighth of a pixel, so a key holds through a float's noise.
+static NSString *QLMSkinRectKey(NSRect rect, CGFloat scale) {
+    CGFloat step = 1 / (scale * 8);
+    return [NSString stringWithFormat:@"%g,%g,%g,%g", round(rect.origin.x / step) * step, round(rect.origin.y / step) * step,
+                                      round(rect.size.width / step) * step, round(rect.size.height / step) * step];
+}
+
+// One axis of a narrow draw: the cap before the column the layer
+// stretches, the column, and the cap after, in pixels.
+typedef struct {
+    CGFloat cut;       // points taken out between the caps, or 0
+    CGFloat capStart;  // the column's start and span, in the image's unit space
+    CGFloat span;
+} QLMSkinNarrowing;
+
+// Along an axis of `total` points, a shape from `start` for `length`, with
+// `corner` points at each end that don't stretch. It cuts whole pixels, so
+// the far edge keeps its place on them.
+static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat total, CGFloat corner, CGFloat scale) {
+    CGFloat lead = ceil((start + corner) * scale) + 1;
+    CGFloat trail = ceil((total - start - length + corner) * scale) + 1;
+    CGFloat whole = round(total * scale);
+    CGFloat narrow = lead + 1 + trail;
+    if (narrow >= whole) {
+        return (QLMSkinNarrowing){0, 0, 1};
     }
-    return cache[key];
+    return (QLMSkinNarrowing){(whole - narrow) / scale, lead / narrow, 1 / narrow};
 }
 
 @implementation QLMSkinMaterial
+
+// What `paint` draws in `frame`, grown by `margin`, drawn on the window's
+// pixels as a view's backing store is, so the layer shows it unresampled.
+// With `corner`, it draws narrow along each uniform axis, with one column
+// of pixels between corners that wide, which the layer stretches.
++ (nullable instancetype)materialPainting:(void (^)(NSRect rect))paint
+                                    frame:(NSRect)frame
+                                   margin:(CGFloat)margin
+                                   corner:(CGFloat)corner
+                                    width:(BOOL)narrowWidth
+                                   height:(BOOL)narrowHeight
+                                   family:(NSString *)family
+                                   images:(QLMSkinImages *)images
+                                   layers:(QLMSkinLayers *)layers {
+    CGFloat scale = layers.scale;
+    NSRect pixels = [layers pixelRect:NSInsetRect(frame, -margin, -margin)];
+    NSRect inner = NSOffsetRect(frame, -pixels.origin.x, -pixels.origin.y);
+    NSSize size = pixels.size;
+    CGRect center = CGRectMake(0, 0, 1, 1);
+    if (narrowWidth) {
+        QLMSkinNarrowing x = QLMSkinNarrow(inner.origin.x, inner.size.width, size.width, corner, scale);
+        inner.size.width -= x.cut;
+        size.width -= x.cut;
+        center.origin.x = x.capStart;
+        center.size.width = x.span;
+    }
+    if (narrowHeight) {
+        QLMSkinNarrowing y = QLMSkinNarrow(inner.origin.y, inner.size.height, size.height, corner, scale);
+        inner.size.height -= y.cut;
+        size.height -= y.cut;
+        center.origin.y = y.capStart;
+        center.size.height = y.span;
+    }
+    NSString *key = [NSString stringWithFormat:@"%@|%@|%g", QLMSkinRectKey(inner, scale),
+                                               QLMSkinRectKey((NSRect){NSZeroPoint, size}, scale), scale];
+    id image = [images objectForKey:key inFamily:family make:^id {
+        return CFBridgingRelease(QLMSkinRenderImage(size, scale, ^{
+            paint(inner);
+        }));
+    }];
+    if (image == nil) {
+        return nil;
+    }
+    QLMSkinMaterial *material = [[QLMSkinMaterial alloc] init];
+    material.image = image;
+    material.scale = scale;
+    material.center = center;
+    material.frame = pixels;
+    material.draw = ^{
+        paint(frame);
+    };
+    return material;
+}
 
 + (instancetype)materialOfStyle:(QLMSkinStyle *)style
                            skin:(QLMSkin *)skin
@@ -56,100 +109,77 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
     if (frame.size.width <= 0 || frame.size.height <= 0) {
         return nil;
     }
-    CGFloat scale = layers.scale;
     BOOL dimmed = overlay.alpha > 0;
-    QLMSkinMaterial *material = [[QLMSkinMaterial alloc] init];
-    material.draw = ^{
-        QLMSkinDrawDimmed(dimmed, overlay, frame, ^{
-            QLMSkinDrawStyle(skin, style, state, frame, circle);
+    void (^paint)(NSRect) = ^(NSRect rect) {
+        QLMSkinDrawDimmed(dimmed, overlay, rect, ^{
+            QLMSkinDrawStyle(skin, style, state, rect, circle);
         });
     };
+    QLMSkinImages *images = [QLMSkinImages imagesOfSkin:skin];
     QLMSkinDraw *draw = [style drawForState:state];
     if (draw == nil) {
         NSString *name = [style imageNameForState:state];
-        // Only the scale it shows at, so the warm's decode is all it needs.
-        NSInteger pick = scale > 1 ? 2 : 1;
-        CGImageRef image = QLMSkinDecodedImage(skin, name, pick);
+        NSInteger scale = QLMSkinImageFileScale(layers.scale);
+        CGImageRef image = [images decodedImage:name scale:scale];
         if (image == NULL) {
             return nil;
         }
-        material.scale = pick;
-        material.image = dimmed ? QLMSkinTintedImage(skin, name, pick, image, overlay) : (__bridge id)image;
         // The cap insets are in the image's points.
-        CGFloat width = CGImageGetWidth(image) / (CGFloat)pick;
-        CGFloat height = CGImageGetHeight(image) / (CGFloat)pick;
+        NSSize points = NSMakeSize(CGImageGetWidth(image) / (CGFloat)scale, CGImageGetHeight(image) / (CGFloat)scale);
+        QLMSkinMaterial *material = [[QLMSkinMaterial alloc] init];
+        material.image = (__bridge id)image;
+        if (dimmed) {
+            // The overlay is one color, so it commutes with the stretch.
+            NSString *key = [NSString stringWithFormat:@"tint|%@|%ld|%@", name, (long)scale, QLMSkinColorKey(overlay)];
+            material.image = [images objectForKey:key make:^id {
+                NSImage *plain = [[NSImage alloc] initWithCGImage:image size:points];
+                return CFBridgingRelease(QLMSkinRenderImage(points, scale, ^{
+                    NSRect rect = (NSRect){NSZeroPoint, points};
+                    QLMSkinDrawDimmed(YES, overlay, rect, ^{
+                        QLMSkinDrawImage(plain, rect);
+                    });
+                }));
+            }] ?: material.image;
+        }
         NSEdgeInsets insets = style.capInsets;
-        material.center = CGRectMake(insets.left / width, insets.top / height, (width - insets.left - insets.right) / width,
-                                     (height - insets.top - insets.bottom) / height);
+        material.scale = scale;
+        material.center = CGRectMake(insets.left / points.width, insets.top / points.height,
+                                     (points.width - insets.left - insets.right) / points.width,
+                                     (points.height - insets.top - insets.bottom) / points.height);
         material.frame = frame;
+        material.draw = ^{
+            paint(frame);
+        };
         return material;
     }
-
     // A shadow falls outside the frame, as it does in a view that doesn't
-    // clip. The image lies on the window's pixels, as a view's backing
-    // store does, so the layer shows it unresampled.
+    // clip.
     QLMSkinShadow *shadow = draw.shadow;
     CGFloat margin = shadow ? ceil(2 * shadow.blur + MAX(fabs(shadow.offset.width), fabs(shadow.offset.height))) : 0;
-    NSRect pixels = [layers pixelRect:NSInsetRect(frame, -margin, -margin)];
-    NSRect inner = NSOffsetRect(frame, -pixels.origin.x, -pixels.origin.y);
+    NSString *family = [NSString stringWithFormat:@"style|%p|%ld|%d|%@", style, (long)state, circle, QLMSkinColorKey(overlay)];
+    return [self materialPainting:paint frame:frame margin:margin corner:draw.inset + draw.radius + margin
+                            width:!circle && draw.isUniformAlongWidth height:!circle && draw.isUniformAlongHeight
+                           family:family images:images layers:layers];
+}
 
-    // Drawn narrow, with one column of pixels between its corners, which
-    // the layer stretches: along a straight edge the block draws the same
-    // throughout, so a resize draws nothing new. Its gradient runs top to
-    // bottom, so a block with one keeps its height.
-    CGRect center = CGRectMake(0, 0, 1, 1);
-    NSSize size = pixels.size;
-    if (!circle) {
-        CGFloat corner = draw.inset + draw.radius + margin;
-        CGFloat (^narrow)(CGFloat, CGFloat, CGFloat, CGFloat *, CGFloat *) =
-            ^CGFloat(CGFloat start, CGFloat length, CGFloat total, CGFloat *capStart, CGFloat *span) {
-                CGFloat lead = ceil((start + corner) * scale) + 1;
-                CGFloat trail = ceil((total - start - length + corner) * scale) + 1;
-                CGFloat whole = round(total * scale);
-                if (lead + 1 + trail >= whole) {
-                    *capStart = 0;
-                    *span = 1;
-                    return 0;
-                }
-                *capStart = lead / (lead + 1 + trail);
-                *span = 1 / (lead + 1 + trail);
-                return (whole - lead - 1 - trail) / scale;  // whole pixels, so the far edge keeps its place on them
-            };
-        CGFloat cut = narrow(inner.origin.x, inner.size.width, size.width, &center.origin.x, &center.size.width);
-        inner.size.width -= cut;
-        size.width -= cut;
-        if (!draw.hasGradient) {
-            cut = narrow(inner.origin.y, inner.size.height, size.height, &center.origin.y, &center.size.height);
-            inner.size.height -= cut;
-            size.height -= cut;
-        }
++ (instancetype)materialOfLED:(QLMSkinLED *)led
+                         skin:(QLMSkin *)skin
+                          lit:(BOOL)lit
+                      enabled:(BOOL)enabled
+                        frame:(NSRect)frame
+                       layers:(QLMSkinLayers *)layers {
+    NSString *family = [NSString stringWithFormat:@"led|%d|%d", lit, enabled];
+    return [self materialPainting:^(NSRect rect) {
+        QLMSkinDrawLED(led, rect, lit, enabled);
     }
-    NSMutableDictionary<NSString *, id> *cache = QLMSkinAttached(skin, &QLMSkinRendersKey, ^id {
-        return [NSMutableDictionary dictionary];
-    });
-    NSString *key = [NSString stringWithFormat:@"%p|%ld|%@|%@|%g|%d|%@", style, (long)state, NSStringFromRect(inner),
-                                               NSStringFromSize(size), scale, circle, QLMSkinColorKey(overlay)];
-    id image = cache[key];
-    if (image == nil) {
-        image = CFBridgingRelease(QLMSkinRenderImage(size, scale, ^{
-            QLMSkinDrawDimmed(dimmed, overlay, inner, ^{
-                QLMSkinDrawStyle(skin, style, state, inner, circle);
-            });
-        }));
-        if (image == nil) {
-            return nil;
-        }
-        // A live resize makes a size a frame, so the cache keeps few.
-        if (cache.count >= 64) {
-            [cache removeAllObjects];
-        }
-        cache[key] = image;
-    }
-    material.image = image;
-    material.scale = scale;
-    material.center = center;
-    material.frame = pixels;
-    return material;
+                            frame:frame
+                           margin:ceil(2 * led.glow)
+                           corner:0
+                            width:NO
+                           height:NO
+                           family:family
+                           images:[QLMSkinImages imagesOfSkin:skin]
+                           layers:layers];
 }
 
 + (instancetype)materialOfImage:(CGImageRef)image frame:(NSRect)frame layers:(QLMSkinLayers *)layers {
@@ -158,9 +188,8 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
     material.scale = layers.scale;
     material.center = CGRectMake(0, 0, 1, 1);
     material.frame = frame;
-    NSImage *drawn = [[NSImage alloc] initWithCGImage:image size:frame.size];
     material.draw = ^{
-        QLMSkinDrawImage(drawn, frame);
+        QLMSkinDrawImage([[NSImage alloc] initWithCGImage:image size:frame.size], frame);
     };
     return material;
 }
@@ -204,6 +233,8 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
 
 - (void)updateLayer {
     NSView<QLMSkinLayered> *view = _view;
+    // A subview's layer would sit among the view's own sublayers.
+    NSAssert(view.subviews.count == 0, @"a layered view is a leaf");
     CALayer *host = view.layer;
     NSArray<QLMSkinMaterial *> *materials = [view skinMaterials:self];
     while (_materials.count < materials.count) {
@@ -231,7 +262,7 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
     [_content setNeedsDisplay];
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (void)drawReference:(NSRect)dirtyRect {
     NSView<QLMSkinLayered> *view = _view;
     for (QLMSkinMaterial *material in [view skinMaterials:self]) {
         material.draw();
@@ -273,8 +304,15 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
     }
     CGContextTranslateCTM(context, -_contentOrigin.x, -_contentOrigin.y);
     NSRect dirty = CGContextGetClipBoundingBox(context);
+    // TRAP: a partial redraw keeps what was there, so the old text would
+    // show under the new. A whole one starts clear, and its clear here
+    // would cost a live resize a frame's fill of the window.
+    NSRect whole = NSMakeRect(_contentOrigin.x, _contentOrigin.y, layer.bounds.size.width, layer.bounds.size.height);
+    if (!NSContainsRect(dirty, whole)) {
+        CGContextClearRect(context, dirty);
+    }
     [NSGraphicsContext saveGraphicsState];
-    NSGraphicsContext.currentContext = QLMSkinLayerGraphicsContext(context);
+    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:context flipped:YES];
     [view drawSkinContent:dirty];
     [NSGraphicsContext restoreGraphicsState];
     CGContextRestoreGState(context);
@@ -300,16 +338,13 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
     return NO;
 }
 
+// QLMSkinControl holds the same glue, as an NSControl.
 - (BOOL)wantsUpdateLayer {
     return YES;
 }
 
 - (void)updateLayer {
     [self.layers updateLayer];
-}
-
-- (void)drawRect:(NSRect)dirtyRect {
-    [self.layers drawRect:dirtyRect];
 }
 
 - (void)setFrameOrigin:(NSPoint)origin {

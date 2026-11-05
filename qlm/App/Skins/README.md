@@ -62,7 +62,7 @@ Every element has `frame`, and may have `anchors` and `text`. Its other keys are
 
 **Image or draw.** An element takes `image`, with `capInsets`, or `draw`, never both. The image is a file name in `png/`. One state's image is `png/<image>.png`. The button's are `<image>-normal`, `-hover`, `-pressed`, `-disabled`, `-selected`, `-selected-hover`, `-selected-pressed`, and `-selected-disabled`, as the pack names them. The knob body's are the first four. Cap insets can't be negative or meet across their frame. They are not checked against the PNG's own size. A button's frame is its smallest grid cell.
 
-**A draw block** has `fill` or `gradient` (two colors, top then bottom), `border`, `borderWidth`, `radius`, `inset`, `rings` (each `inset`, `color`, `width`), and `shadow` (`color`, `blur`, `offset`). All are optional. A button's or a knob body's block may add `states`.
+**A draw block** has `fill` or `gradient` (two colors, top then bottom), `border`, `borderWidth`, `radius`, `inset`, `rings` (each `inset`, `color`, `width`), and `shadow` (`color`, `blur`, `offset`). All are optional. A button's or a knob body's block may add `states`. A shadow's blur and offset are in points, and a positive y falls down. The shadow falls outside the element's frame, and nothing clips it.
 
 **A text slot** has `frame`, `size`, and `color`. It may have `anchors`, `scales`, `font` (a face the Mac has, else the system font), `mono` (the system monospaced font when the face is missing), `weight` (`ultralight`, `thin`, `light`, `regular`, `medium`, `semibold`, `bold`, `heavy`, `black`), `italic`, `alignment` (`left`, `center`, `right`), `tracking`, and `accent` (the color of a trailing period, as in modern's logo).
 

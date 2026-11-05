@@ -11,9 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMSkinMaterial : NSObject
 
 // The style's material for `state` in `frame`. An image style's is its
-// file, decoded once. A drawn style's is drawn once per size, state, scale,
-// and place on the pixels, and kept on the skin. A clear overlay lays
-// nothing over it.
+// file, decoded once. A drawn style's is drawn into a bitmap once per size,
+// state, scale, and place on the pixels, and kept on the skin. A clear
+// overlay lays nothing over it.
 + (nullable instancetype)materialOfStyle:(QLMSkinStyle *)style
                                     skin:(QLMSkin *)skin
                                    state:(QLMSkinState)state
@@ -21,6 +21,15 @@ NS_ASSUME_NONNULL_BEGIN
                                   circle:(BOOL)circle
                                  overlay:(QLMSkinColor)overlay
                                   layers:(QLMSkinLayers *)layers;
+
+// An LED in `frame`, with its glow, drawn into a bitmap, as every shadow
+// is.
++ (nullable instancetype)materialOfLED:(QLMSkinLED *)led
+                                  skin:(QLMSkin *)skin
+                                   lit:(BOOL)lit
+                               enabled:(BOOL)enabled
+                                 frame:(NSRect)frame
+                                layers:(QLMSkinLayers *)layers;
 
 // An image made at the layers' scale to fill `frame`.
 + (instancetype)materialOfImage:(CGImageRef)image frame:(NSRect)frame layers:(QLMSkinLayers *)layers;
@@ -43,10 +52,11 @@ NS_ASSUME_NONNULL_BEGIN
 // its draw offscreen, most of all a stretched one.
 //
 // The view's layer holds one sublayer per material, then one for the
-// drawn content on top. The view has no subviews. It returns YES from
-// wantsUpdateLayer, and calls updateLayer, drawRect:, and viewDidMove here
-// from its own. Each setNeedsDisplay of the view sets the material and
-// draws the content again.
+// drawn content on top. The view is a leaf: a subview's layer would sit
+// among them. It returns YES from wantsUpdateLayer, and calls updateLayer
+// and viewDidMove here from its own. Each setNeedsDisplay of the view sets
+// the material and draws the content again. The content draws no shadow:
+// a layer's own context casts one apart from a view's.
 @interface QLMSkinLayers : NSObject <CALayerDelegate>
 
 - (instancetype)initWithView:(NSView<QLMSkinLayered> *)view NS_DESIGNATED_INITIALIZER;
@@ -60,9 +70,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSRect)pixelRect:(NSRect)rect;
 
 - (void)updateLayer;
-// The material, then the content, drawn, for whatever draws the view
-// rather than composite its layers, as a cached display or a print does.
-- (void)drawRect:(NSRect)dirtyRect;
+// The material, drawn as drawRect: drew it before the layers, then the
+// content: the tests' reference for what the layers composite.
+- (void)drawReference:(NSRect)dirtyRect;
 // Draws only part of the content again, and sets no material.
 - (void)setNeedsDisplayInRect:(NSRect)rect;
 // From the view's setFrameOrigin:. A move off the pixels the content was
@@ -72,7 +82,6 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 // A view with skin material, as the display, the OSD, and the panel are.
-// Subclasses implement QLMSkinLayered.
 @interface QLMSkinLayerView : NSView <QLMSkinLayered>
 - (instancetype)initWithFrame:(NSRect)frame NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;

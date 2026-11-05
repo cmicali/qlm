@@ -243,6 +243,7 @@ targets:
       - qlm/App/QLMSkinChoice.m
       # It draws into a bitmap, which needs no NSApplication.
       - qlm/App/QLMSkinDrawing.m
+      - qlm/App/QLMSkinImages.m
       - qlm/App/QLMSkinLayout.m
       - qlm/App/QLMSkinLibrary.m
       # The skin's views. Out of any window, they draw, and their layers

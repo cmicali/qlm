@@ -12,8 +12,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 // A control that tracks hover, a press, and keyboard focus, and draws its
 // own focus ring. A click inside sends the action. Space and Return click
-// it while it has focus. Subclasses implement QLMSkinLayered, as a
-// QLMSkinLayerView's do.
+// it while it has focus.
 @interface QLMSkinControl : NSControl <QLMSkinLayered>
 - (instancetype)initWithSkin:(QLMSkin *)skin NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithFrame:(NSRect)frame NS_UNAVAILABLE;

@@ -1,13 +1,13 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMSkinDrawing.h"
+#import "QLMSkinTestBitmaps.h"
+#import "QLMTestSupport.h"
 
 // The skin's drawing, in a flipped bitmap at 2x, as a view on a Retina
 // display draws it.
 @interface QLMSkinDrawingTests : XCTestCase
 @end
-
-static const CGFloat QLMTestScale = 2;
 
 static NSColor *QLMTestRed(void) {
     return [NSColor colorWithDeviceRed:1 green:0 blue:0 alpha:1];
@@ -15,33 +15,6 @@ static NSColor *QLMTestRed(void) {
 
 static NSColor *QLMTestBlue(void) {
     return [NSColor colorWithDeviceRed:0 green:0 blue:1 alpha:1];
-}
-
-static NSBitmapImageRep *QLMTestBitmap(NSSize points) {
-    return [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
-                                                   pixelsWide:(NSInteger)(points.width * QLMTestScale)
-                                                   pixelsHigh:(NSInteger)(points.height * QLMTestScale)
-                                                bitsPerSample:8
-                                              samplesPerPixel:4
-                                                     hasAlpha:YES
-                                                     isPlanar:NO
-                                               colorSpaceName:NSDeviceRGBColorSpace
-                                                  bytesPerRow:0
-                                                 bitsPerPixel:0];
-}
-
-// Draws in points, y down, as a flipped view's drawRect: does.
-static NSBitmapImageRep *QLMTestDrawFlipped(NSSize points, void (^draw)(void)) {
-    NSBitmapImageRep *bitmap = QLMTestBitmap(points);
-    CGContextRef cg = [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap].CGContext;
-    CGContextScaleCTM(cg, QLMTestScale, QLMTestScale);
-    CGContextTranslateCTM(cg, 0, points.height);
-    CGContextScaleCTM(cg, 1, -1);
-    [NSGraphicsContext saveGraphicsState];
-    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:cg flipped:YES];
-    draw();
-    [NSGraphicsContext restoreGraphicsState];
-    return bitmap;
 }
 
 // 20 by 20 points: red over blue, as its file has it.
@@ -62,24 +35,6 @@ static NSImage *QLMTestTwoToneImage(NSEdgeInsets insets) {
 
 static BOOL QLMTestIsRed(NSColor *color) {
     return color.redComponent > 0.5 && color.blueComponent < 0.5;
-}
-
-// The rows of pixels with any ink, top first.
-static NSRange QLMTestInkRows(NSBitmapImageRep *bitmap) {
-    NSInteger first = -1;
-    NSInteger last = -1;
-    for (NSInteger y = 0; y < bitmap.pixelsHigh; y++) {
-        for (NSInteger x = 0; x < bitmap.pixelsWide; x++) {
-            if ([bitmap colorAtX:x y:y].alphaComponent > 0.5) {
-                if (first < 0) {
-                    first = y;
-                }
-                last = y;
-                break;
-            }
-        }
-    }
-    return first < 0 ? NSMakeRange(NSNotFound, 0) : NSMakeRange((NSUInteger)first, (NSUInteger)(last - first + 1));
 }
 
 @implementation QLMSkinDrawingTests
@@ -181,13 +136,38 @@ static NSRange QLMTestInkRows(NSBitmapImageRep *bitmap) {
             NSBitmapImageRep *bitmap = QLMTestDrawFlipped(face, ^{
                 QLMSkinDrawCenteredCaps(label, NSMakeRect(0, 0, face.width, face.height));
             });
-            NSRange ink = QLMTestInkRows(bitmap);
+            NSRange ink = QLMTestInkRows(bitmap, 0.5);
             XCTAssertNotEqual(ink.location, NSNotFound);
             double above = (double)ink.location;
             double below = (double)bitmap.pixelsHigh - (double)NSMaxRange(ink);
             XCTAssertEqualWithAccuracy(above, below, 1, @"%@ pt on %@", size, height);
         }
     }
+}
+
+// How far a modern button's shadow reaches past its face, below and
+// above, in points, drawn at `scale`.
+static void QLMTestShadowReach(QLMSkin *skin, CGFloat scale, CGFloat *below, CGFloat *above) {
+    NSRect face = NSMakeRect(10, 20, 60, 20);
+    NSBitmapImageRep *bitmap = QLMTestDrawFlippedAtScale(NSMakeSize(80, 60), scale, ^{
+        QLMSkinDrawStyle(skin, skin.button.style, QLMSkinStateNormal, face, NO);
+    });
+    NSRange ink = QLMTestInkRows(bitmap, 0.02);
+    *below = (CGFloat)NSMaxRange(ink) / scale - NSMaxY(face);
+    *above = NSMinY(face) - (CGFloat)ink.location / scale;
+}
+
+// A shadow reaches as far, in points, at every scale, as it does on the
+// screen: modern's buttons cast 1.5 points down, with a 2 point blur.
+- (void)testAShadowFallsInPointsAtEveryScale {
+    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
+    CGFloat below1, above1, below2, above2;
+    QLMTestShadowReach(skin, 1, &below1, &above1);
+    QLMTestShadowReach(skin, 2, &below2, &above2);
+    XCTAssertEqualWithAccuracy(below1, below2, 1);
+    XCTAssertEqualWithAccuracy(above1, above2, 1);
+    XCTAssertGreaterThan(below2, above2 + 1);
+    XCTAssertGreaterThan(below2, 2.5);
 }
 
 @end
