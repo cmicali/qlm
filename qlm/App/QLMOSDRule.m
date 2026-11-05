@@ -30,6 +30,13 @@ static const CGFloat QLMOSDMargin = 24;
     return seen && self.enabled && (turned || (stateChanged && showing));
 }
 
+- (NSString *)refusalToShowSnapshot:(QLMSnapshot *)snapshot {
+    if (!self.enabled) {
+        return @"the OSD is off in Settings";
+    }
+    return snapshot.volumeDecibels == nil ? @"no level yet" : nil;
+}
+
 @end
 
 CGRect QLMOSDFrame(CGRect visible, CGSize size, QLMOSDPlacement placement) {

@@ -14,12 +14,9 @@ NS_ASSUME_NONNULL_BEGIN
 // Setting it rebuilds the controls.
 @property (nonatomic, nullable) QLMFakeBus *bus;
 
-// Reads the bus again: System's power steps change the monitors too.
+// Reads the bus again while the window shows: System's power steps change
+// the monitors too. A show reads it too.
 - (void)refresh;
-
-// Turns the bus's knob, in tenths of a dB, as the slider does, or says why
-// a turn is outside its travel.
-+ (nullable NSString *)turnKnobOf:(QLMFakeBus *)bus to:(NSInteger)tenths;
 
 @end
 

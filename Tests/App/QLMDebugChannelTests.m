@@ -7,9 +7,11 @@
 #import "QLMApplySequence.h"
 #import "QLMDebugChannel.h"
 #import "QLMFakeBus.h"
-#import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
+#import "QLMMainWindowModel.h"
+#import "QLMOSDRule.h"
 #import "QLMPreferences.h"
+#import "QLMSkinChoice.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
 #include "QLMCommands.h"
@@ -23,40 +25,144 @@
 @interface QLMDebugChannelTests : XCTestCase
 @end
 
+// The main window, as QLMMainWindowController gives it, by its model's
+// rules.
+@interface QLMTestDebugWindow : NSObject <QLMDebugWindow>
+@property (nonatomic, getter=isShowing) BOOL showing;
+@property (nonatomic) NSSize contentSize;
+@property (nonatomic, copy, nullable) NSString *applyError;
+@property (nonatomic) QLMMainWindowModel *model;
+@property (nonatomic, weak) QLMSystem *system;
+@property (nonatomic) NSMutableArray<NSString *> *actions;
+@end
+
+@implementation QLMTestDebugWindow
+
+- (void)close {
+    self.showing = NO;
+    [self.actions addObject:@"close window"];
+}
+
+- (NSString *)clickGroupNamed:(NSString *)name {
+    self.model.snapshot = self.system.snapshot;
+    NSString *refusal = [self.model refusalToClickGroupNamed:name];
+    if (refusal == nil) {
+        [self.actions addObject:[@"group " stringByAppendingString:name]];
+    }
+    return refusal;
+}
+
+// As the knob: GLM's steps, straight to System.
+- (NSString *)turnKnobTo:(double)decibels level:(double *)level {
+    if (!self.showing) {
+        return QLMWindowClosedRefusal;
+    }
+    [self.actions addObject:@"knob"];
+    [self.system setVolumeDecibels:decibels];
+    *level = decibels;
+    return nil;
+}
+
+// Never below the skin's size.
+- (NSString *)resizeTo:(NSSize)size {
+    if (!self.showing) {
+        return QLMWindowClosedRefusal;
+    }
+    self.contentSize = NSMakeSize(MAX(size.width, 640), MAX(size.height, 480));
+    [self.actions addObject:@"resize window"];
+    return nil;
+}
+
+@end
+
+// The OSD, as QLMOSDController gives it, by its rule.
+@interface QLMTestDebugOSD : NSObject <QLMDebugOSD>
+@property (nonatomic) BOOL showing;
+@property (nonatomic) QLMOSDRule *rule;
+@property (nonatomic) QLMPreferences *preferences;
+@property (nonatomic) NSMutableArray<NSString *> *actions;
+@end
+
+@implementation QLMTestDebugOSD
+
+// Settings' checkbox, as reloadSettings reads it.
+- (NSString *)showSnapshot:(QLMSnapshot *)snapshot {
+    self.rule.enabled = self.preferences.showsOSD;
+    NSString *refusal = [self.rule refusalToShowSnapshot:snapshot];
+    if (refusal == nil) {
+        [self.actions addObject:@"show osd"];
+        self.showing = YES;
+    }
+    return refusal;
+}
+
+- (void)hide {
+    [self.actions addObject:@"hide osd"];
+    self.showing = NO;
+}
+
+@end
+
 // The app's side, as QLMAppDelegate gives it. It never makes a HID adapter.
 @interface QLMTestDebugApp : NSObject <QLMDebugApp>
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences;
+// Loads the saved name's skin, as a launch does.
+- (void)launchSkin;
 @property (nonatomic) QLMPreferences *debugPreferences;
 @property (nonatomic, nullable) QLMSystem *debugSystem;
 @property (nonatomic) NSPopover *debugPopover;
 @property (nonatomic, copy, nullable) NSString *debugQuitGLMTitle;
 @property (nonatomic) BOOL debugQuitAsksFirst;
-@property (nonatomic) BOOL debugOSDShowing;
-// The bus the app delegate has, or nil on the adapter.
 @property (nonatomic, nullable) QLMFakeBus *debugFakeBus;
-@property (nonatomic) BOOL debugWindowShowing;
-@property (nonatomic) NSSize debugWindowSize;
-@property (nonatomic, copy, nullable) NSString *debugWindowApplyError;
-@property (nonatomic, copy, nullable) NSString *debugSkinRefusal;
-// The window's group buttons.
-@property (nonatomic, copy) NSArray<NSString *> *groupNames;
+@property (nonatomic) QLMTestDebugWindow *window;
+@property (nonatomic) QLMTestDebugOSD *osd;
+// Over the shipped skins, from the saved name, as at launch.
+@property (nonatomic) QLMSkinChoice *debugSkinChoice;
 // The app's own actions the verbs called, in order.
 @property (nonatomic) NSMutableArray<NSString *> *actions;
 @end
 
 @implementation QLMTestDebugApp
 
-- (instancetype)init {
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences {
     self = [super init];
     if (self) {
+        _debugPreferences = preferences;
         _debugPopover = [[NSPopover alloc] init];
-        _groupNames = @[@"Main", @"Nearfield"];
         _actions = [NSMutableArray array];
+        _window = [[QLMTestDebugWindow alloc] init];
+        _window.model = [[QLMMainWindowModel alloc] init];
+        _window.model.groupNames = @[@"Main", @"Nearfield"];
+        _window.actions = _actions;
+        _osd = [[QLMTestDebugOSD alloc] init];
+        _osd.rule = [[QLMOSDRule alloc] init];
+        _osd.preferences = preferences;
+        _osd.actions = _actions;
+        [self launchSkin];
     }
     return self;
 }
 
+- (void)launchSkin {
+    QLMSkinLibrary *library = [[QLMSkinLibrary alloc] initWithBuiltIn:QLMBuiltInSkinsURL() user:nil];
+    self.debugSkinChoice = [[QLMSkinChoice alloc] initWithPreferences:self.debugPreferences library:library];
+}
+
+- (void)setDebugSystem:(QLMSystem *)debugSystem {
+    _debugSystem = debugSystem;
+    self.window.system = debugSystem;
+}
+
 - (QLMSnapshot *)debugSnapshot {
     return self.debugSystem.snapshot;
+}
+
+- (id<QLMDebugWindow>)debugWindow {
+    return self.window;
+}
+
+- (id<QLMDebugOSD>)debugOSD {
+    return self.osd;
 }
 
 - (void)debugShowPopover {
@@ -100,87 +206,21 @@
     return @{@"ok": @YES, @"skin": name};
 }
 
-// As the OSD's controller refuses.
-- (NSString *)debugShowOSD {
-    if (!self.debugPreferences.showsOSD) {
-        return @"the OSD is off in Settings";
-    }
-    if (self.debugSnapshot.volumeDecibels == nil) {
-        return @"no level yet";
-    }
-    [self.actions addObject:@"show osd"];
-    self.debugOSDShowing = YES;
-    return nil;
-}
-
-- (void)debugHideOSD {
-    [self.actions addObject:@"hide osd"];
-    self.debugOSDShowing = NO;
-}
-
-- (NSString *)debugTurnFakeKnobTo:(NSInteger)tenths {
-    if (self.debugFakeBus == nil) {
-        return @"qlm drives the GLM adapter, not the fake bus";
-    }
-    return [QLMFakeBusWindowController turnKnobOf:self.debugFakeBus to:tenths];
-}
-
 - (void)debugQuitAnswering:(BOOL)quitAnyway {
     [self.actions addObject:quitAnyway ? @"quit anyway" : @"quit, cancel"];
 }
 
 - (void)debugShowWindow {
-    self.debugWindowShowing = YES;
+    self.window.showing = YES;
     [self.actions addObject:@"show window"];
 }
 
-- (void)debugCloseWindow {
-    self.debugWindowShowing = NO;
-    [self.actions addObject:@"close window"];
-}
-
-// As the window: never below the skin's size.
-- (NSString *)debugResizeWindowTo:(NSSize)size {
-    if (!self.debugWindowShowing) {
-        return @"the window is closed";
-    }
-    self.debugWindowSize = NSMakeSize(MAX(size.width, 640), MAX(size.height, 480));
-    [self.actions addObject:@"resize window"];
-    return nil;
-}
-
-// As the window's buttons: one per group, disabled by the popover picker's
-// rule.
-- (NSString *)debugClickGroupNamed:(NSString *)name {
-    if (![self.groupNames containsObject:name]) {
-        return [NSString stringWithFormat:@"no group button reads %@", name];
-    }
-    if (!QLMSnapshotTracksMonitors(self.debugSnapshot)) {
-        return @"the group buttons are disabled until System tracks a monitor";
-    }
-    [self.actions addObject:[@"group " stringByAppendingString:name]];
-    return nil;
-}
-
-// As the window's knob: GLM's steps, straight to System.
-- (double)debugTurnKnobTo:(double)decibels {
-    double stepped = QLMNearestStepDecibels(decibels);
-    [self.actions addObject:@"knob"];
-    [self.debugSystem setVolumeDecibels:stepped];
-    return stepped;
-}
-
-- (NSString *)debugWindowSkinName {
-    return @"modern";
-}
-
 - (NSString *)debugChooseSkin:(NSString *)name {
-    if (![name isEqualToString:@"modern"]) {
-        return [NSString stringWithFormat:@"There is no skin named %@.", name];
+    NSString *refusal = [self.debugSkinChoice chooseSkinNamed:name];
+    if (refusal == nil) {
+        [self.actions addObject:[@"skin " stringByAppendingString:name]];
     }
-    self.debugPreferences.skinName = name;
-    [self.actions addObject:[@"skin " stringByAppendingString:name]];
-    return nil;
+    return refusal;
 }
 
 @end
@@ -203,8 +243,7 @@
 
     _time = [[QLMVirtualClock alloc] init];
     _bus = [QLMFakeBus demoBusWithSubwoofer:NO];
-    _app = [[QLMTestDebugApp alloc] init];
-    _app.debugPreferences = preferences;
+    _app = [[QLMTestDebugApp alloc] initWithPreferences:preferences];
     _app.debugSystem = [self systemOn:_bus];
     _app.debugFakeBus = _bus;
     // As the app starts it: its own level, kept across launches.
@@ -394,9 +433,9 @@
         @"wake": @[@[@"wake", @"up"]],
         @"quit_glm": @[@[@"quit_glm", @"now"]],
         @"quit_answering <cancel|anyway>": @[@[@"quit_answering"], @[@"quit_answering", @"yes"]],
-        @"skin_preview <name>": @[@[@"skin_preview"], @[@"skin_preview", @"modern", @"big"]],
-        @"skin_preview_disabled <name>": @[@[@"skin_preview_disabled"]],
-        @"skin_preview_osd <name>": @[@[@"skin_preview_osd"]],
+        @"skin_preview <name> <window|disabled|osd>": @[@[@"skin_preview"], @[@"skin_preview", @"modern"],
+                                                        @[@"skin_preview", @"modern", @"big"],
+                                                        @[@"skin_preview", @"modern", @"osd", @"now"]],
         @"osd <show|hide>": @[@[@"osd"], @[@"osd", @"on"], @[@"osd", @"show", @"now"]],
         @"fake_knob <tenths>": @[@[@"fake_knob"], @[@"fake_knob", @"-40dB"], @[@"fake_knob", @"-40.5"], @[@"fake_knob", @"x"]],
         @"window <show|close>": @[@[@"window"], @[@"window", @"open"]],
@@ -533,10 +572,10 @@
 // A skin's look sends nothing to the monitors.
 - (void)testTheSkinPreviewsCallTheAppAndSendNothing {
     NSUInteger mark = _bus.sentMessages.count;
-    NSDictionary *reply = [self runOK:@[@"skin_preview", @"modern"]];
+    NSDictionary *reply = [self runOK:@[@"skin_preview", @"modern", @"window"]];
     XCTAssertEqualObjects(reply[@"skin"], @"modern");
-    [self runOK:@[@"skin_preview_disabled", @"modern"]];
-    [self runOK:@[@"skin_preview_osd", @"modern"]];
+    [self runOK:@[@"skin_preview", @"modern", @"disabled"]];
+    [self runOK:@[@"skin_preview", @"modern", @"OSD"]];
     XCTAssertEqualObjects(_app.actions,
                           (@[@"skin preview modern", @"disabled skin preview modern", @"osd preview modern"]));
     [self assertNothingSentSince:mark];
@@ -804,21 +843,25 @@
 }
 
 - (void)testDumpStateCarriesTheWindowsApplyError {
-    _app.debugWindowApplyError = @"The 8351B's filter design rate is unverified.";
+    _app.window.applyError = @"The 8351B's filter design rate is unverified.";
     XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"windowApplyError"], @"The 8351B's filter design rate is unverified.");
 }
 
-// The button's refusals: a name no button reads, and the picker's rule.
+// The button's refusals, as the window's model gives them: a name no button
+// reads, and the picker's rule.
 - (void)testGroupClicksTheWindowsButton {
     XCTAssertEqualObjects(([self runOK:@[@"group", @"Nearfield"]][@"group"]), @"Nearfield");
-    XCTAssertEqualObjects(([self errorOf:@[@"group", @"Cinema"]]), @"no group button reads Cinema");
+    XCTAssertEqualObjects(([self errorOf:@[@"group", @"Cinema"]]), @"no group button reads Cinema. They read: Main, Nearfield");
     [self stopSystem];
     XCTAssertEqualObjects(([self errorOf:@[@"group", @"Main"]]), @"the group buttons are disabled until System tracks a monitor");
+    _app.window.model.groupNames = nil;
+    XCTAssertEqualObjects(([self errorOf:@[@"group", @"Main"]]), @"no group buttons show: No setup file in GLM's folder");
     XCTAssertEqualObjects(_app.actions, @[@"group Nearfield"]);
 }
 
 // As a drag: GLM's 0.5 dB steps, up to the ceiling.
 - (void)testKnobGoesToSystemOnTheSteps {
+    [self runOK:@[@"window", @"show"]];
     XCTAssertEqualObjects(([self runOK:@[@"knob", @"-40.3"]][@"volumeDecibels"]), @(-40.5));
     QLMSystem *system = _app.debugSystem;
     XCTAssertTrue([_time runUntil:^BOOL {
@@ -829,33 +872,45 @@
 }
 
 // The knob's range is the slider's. A level outside it is refused, not
-// moved into it, and so is any turn while System is stopped.
+// moved into it, and so is any turn while System is stopped, or while the
+// window is closed, as window_size is.
 - (void)testKnobOutsideItsRangeIsRefused {
     NSUInteger mark = _bus.sentMessages.count;
+    XCTAssertEqualObjects(([self errorOf:@[@"knob", @"-40"]]), @"the window is closed");
+    [self runOK:@[@"window", @"show"]];
     XCTAssertEqualObjects(([self errorOf:@[@"knob", @"-29.5"]]), @"-29.5 dB is outside the knob's range, -60.0 to -30.0 dB");
     XCTAssertEqualObjects(([self errorOf:@[@"knob", @"-61"]]), @"-61.0 dB is outside the knob's range, -60.0 to -30.0 dB");
-    XCTAssertEqualObjects(_app.actions, @[]);
+    XCTAssertEqualObjects(_app.actions, @[@"show window"]);
     [self assertNothingSentSince:mark];
     [self stopSystem];
     XCTAssertEqualObjects(([self errorOf:@[@"knob", @"-40"]]), @"System is not running");
-    XCTAssertEqualObjects(_app.actions, @[]);
+    XCTAssertEqualObjects(_app.actions, @[@"show window"]);
 }
 
-// A skin the library refuses is not kept. A skin sends nothing.
+// A skin the library refuses is not kept. A skin sends nothing. The skin
+// that shows loads again.
 - (void)testSkinKeepsOnlyASkinThatLoads {
     NSUInteger mark = _bus.sentMessages.count;
-    XCTAssertEqualObjects(([self errorOf:@[@"skin", @"chrome"]]), @"There is no skin named chrome.");
+    NSString *refusal = [self errorOf:@[@"skin", @"chrome"]];
+    XCTAssertTrue([refusal hasPrefix:@"The skin chrome is refused. There is no skin.json in "], @"%@", refusal);
     XCTAssertEqualObjects(_app.debugPreferences.skinName, @"modern");
-    XCTAssertEqualObjects(([self runOK:@[@"skin", @"modern"]][@"skinName"]), @"modern");
-    XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"skinName"], @"modern");
-    XCTAssertEqualObjects(_app.actions, @[@"skin modern"]);
+    XCTAssertEqualObjects(([self runOK:@[@"skin", @"retro"]][@"skinName"]), @"retro");
+    XCTAssertEqualObjects(([self runOK:@[@"skin", @"retro"]][@"skinName"]), @"retro");
+    NSDictionary *state = [self runOK:@[@"dump_state"]];
+    XCTAssertEqualObjects(state[@"skinName"], @"retro");
+    XCTAssertEqualObjects(state[@"windowSkin"], @"retro");
+    XCTAssertEqualObjects(_app.actions, (@[@"skin retro", @"skin retro"]));
     [self assertNothingSentSince:mark];
 }
 
 // A saved skin that no longer loads, as Settings' note says it.
 - (void)testDumpStateSaysWhyTheSavedSkinIsRefused {
-    _app.debugSkinRefusal = @"The skin broken is refused. skin.json is not an object.";
-    XCTAssertEqualObjects([self runOK:@[@"dump_state"]][@"skinRefusal"], @"The skin broken is refused. skin.json is not an object.");
+    _app.debugPreferences.skinName = @"chrome";
+    [_app launchSkin];
+    NSDictionary *state = [self runOK:@[@"dump_state"]];
+    XCTAssertEqualObjects(state[@"skinName"], @"chrome");
+    XCTAssertEqualObjects(state[@"windowSkin"], @"modern");
+    XCTAssertTrue([state[@"skinRefusal"] hasPrefix:@"The skin chrome is refused. There is no skin.json in "], @"%@", state);
 }
 
 #pragma mark - GLM and quitting

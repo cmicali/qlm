@@ -3,12 +3,21 @@
 #include <math.h>
 
 #import "QLMFormat.h"
-#import "QLMSkinLayout.h"
 #import "QLMSystem.h"
+
+NSString *const QLMWindowClosedRefusal = @"the window is closed";
 
 // A range's end, as the mockups draw it: whole when on a whole dB.
 static NSString *QLMRangeEndText(double decibels) {
     return QLMDecibelsNumberText(decibels, decibels == floor(decibels) ? 0 : 1);
+}
+
+static NSArray<NSString *> *QLMGroupLetters(void) {
+    return @[@"A", @"B", @"C", @"D", @"E", @"F"];
+}
+
+NSUInteger QLMShownGroupButtons(NSUInteger cells) {
+    return MIN(cells, QLMGroupLetters().count);
 }
 
 @implementation QLMMainWindowModel
@@ -16,7 +25,7 @@ static NSString *QLMRangeEndText(double decibels) {
 - (instancetype)init {
     self = [super init];
     if (self) {
-        _groupCapacity = QLMSkinMaxGroups;
+        _groupCapacity = NSUIntegerMax;
         _shownGroupNames = @[];
         _groupTitles = @[];
         _groupPrefixes = @[];
@@ -35,7 +44,7 @@ static NSString *QLMRangeEndText(double decibels) {
 - (NSUInteger)onlineCount {
     NSUInteger online = 0;
     for (QLMMonitorState *monitor in self.snapshot.monitors) {
-        online += !monitor.offline && monitor.status == QLMMonitorStatusOn ? 1 : 0;
+        online += QLMMonitorIsOnline(monitor) ? 1 : 0;
     }
     return online;
 }
@@ -52,6 +61,10 @@ static NSString *QLMRangeEndText(double decibels) {
     return [self onlineCount] > 0;
 }
 
+- (BOOL)statusEnabled {
+    return self.snapshot.running;
+}
+
 #pragma mark - The groups
 
 - (void)setGroupNames:(NSArray<NSString *> *)groupNames {
@@ -65,15 +78,10 @@ static NSString *QLMRangeEndText(double decibels) {
 }
 
 - (void)showGroups {
-    static NSArray<NSString *> *letters;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        letters = @[@"A", @"B", @"C", @"D", @"E", @"F"];
-    });
     NSArray<NSString *> *names = self.groupNames ?: @[];
-    NSUInteger shown = MIN(MIN(self.groupCapacity, letters.count), names.count);
+    NSUInteger shown = MIN(QLMShownGroupButtons(self.groupCapacity), names.count);
     _shownGroupNames = [names subarrayWithRange:NSMakeRange(0, shown)];
-    _groupPrefixes = [letters subarrayWithRange:NSMakeRange(0, shown)];
+    _groupPrefixes = [QLMGroupLetters() subarrayWithRange:NSMakeRange(0, shown)];
     NSMutableArray<NSString *> *titles = [NSMutableArray arrayWithCapacity:shown];
     for (NSString *name in _shownGroupNames) {
         [titles addObject:name.localizedUppercaseString];
@@ -95,7 +103,7 @@ static NSString *QLMRangeEndText(double decibels) {
 }
 
 - (NSUInteger)selectedGroupIndex {
-    if (self.applyingGroupName != nil && !self.blinkOn) {
+    if (self.applying && !self.blinkOn) {
         return NSNotFound;
     }
     return self.chosenGroupIndex;
@@ -119,6 +127,21 @@ static NSString *QLMRangeEndText(double decibels) {
         return [NSString stringWithFormat:@"Reading %@…", self.setupFileName];
     }
     return [NSString stringWithFormat:@"%@ has no groups", self.setupFileName];
+}
+
+- (NSString *)refusalToClickGroupNamed:(NSString *)name {
+    NSArray<NSString *> *names = self.shownGroupNames;
+    if (names.count == 0) {
+        return [NSString stringWithFormat:@"no group buttons show: %@", self.groupsMessage];
+    }
+    if (![names containsObject:name]) {
+        return [NSString stringWithFormat:@"no group button reads %@. They read: %@", name, [names componentsJoinedByString:@", "]];
+    }
+    if (!self.groupsEnabled) {
+        return self.applying ? @"the group buttons are disabled while an apply runs"
+                             : @"the group buttons are disabled until System tracks a monitor";
+    }
+    return nil;
 }
 
 #pragma mark - The display

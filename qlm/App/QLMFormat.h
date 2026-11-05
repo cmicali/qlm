@@ -106,4 +106,7 @@ NSString *QLMBusProblemDetail(QLMSnapshot *snapshot);
 // picker take a click. The debug channel's verbs refuse by it too.
 BOOL QLMSnapshotTracksMonitors(QLMSnapshot *_Nullable snapshot);
 
+// The monitor answers and is on: not offline, and not in standby.
+BOOL QLMMonitorIsOnline(QLMMonitorState *monitor);
+
 NS_ASSUME_NONNULL_END

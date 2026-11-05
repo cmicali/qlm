@@ -125,6 +125,8 @@ typedef NS_ENUM(NSInteger, QLMSetupNodeClass) {
 @property (nonatomic, readonly, nullable) QLMSetupDevice *adapter;
 @property (nonatomic, readonly) NSArray<QLMSetupDevice *> *devices;
 @property (nonatomic, readonly) NSArray<QLMSetupGroup *> *groups;
+// The groups' names, in the file's order.
+@property (nonatomic, readonly) NSArray<NSString *> *groupNames;
 // Every key the reader did not know, as "<where>: <key>", in file order.
 @property (nonatomic, readonly) NSArray<NSString *> *unknownKeys;
 

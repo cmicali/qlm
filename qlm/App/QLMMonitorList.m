@@ -1,5 +1,7 @@
 #import "QLMMonitorList.h"
 
+#import "QLMFormat.h"
+
 NSColor *QLMPresenceColor(QLMMonitorPresence presence) {
     switch (presence) {
     case QLMMonitorPresenceOnline: return NSColor.systemGreenColor;
@@ -82,7 +84,7 @@ NSString *QLMEntryStatusText(QLMMonitorEntry *entry) {
         entry.tracked = [tracked containsObject:hardwareID];
         if (!entry.tracked || entry.state.offline) {
             entry.presence = QLMMonitorPresenceOffline;
-        } else if (entry.state.status == QLMMonitorStatusOn) {
+        } else if (QLMMonitorIsOnline(entry.state)) {
             entry.presence = QLMMonitorPresenceOnline;
         } else if (entry.state.status == QLMMonitorStatusStandby) {
             entry.presence = QLMMonitorPresenceStandby;

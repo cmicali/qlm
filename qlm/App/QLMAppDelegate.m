@@ -15,10 +15,10 @@
 #import "QLMSettingsWindowController.h"
 #import "QLMSetupReader.h"
 #import "QLMSetupWatcher.h"
+#import "QLMSkinChoice.h"
 #import "QLMSystem.h"
 #if DEBUG
 #import "QLMDebugChannel.h"
-#import "QLMSkinLibrary.h"
 #import "QLMSkinPreview.h"
 #endif
 
@@ -54,6 +54,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
 @property (nonatomic) QLMOSDController *osdController;
+@property (nonatomic) QLMSkinChoice *skinChoice;
 #if DEBUG
 // A debug command's answer to the louder hand-back alert, while its quit runs.
 @property (nonatomic, nullable) NSNumber *debugQuitAnswer;
@@ -83,6 +84,7 @@ static OSType QLMQuitReason(void) {
     NSApp.windowsMenu = [NSApp.mainMenu itemWithTitle:@"Window"].submenu;
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
+    self.skinChoice = [[QLMSkinChoice alloc] initWithPreferences:self.preferences library:[QLMSkinLibrary standardLibrary]];
     self.alerts = [[QLMMonitorAlerts alloc] initWithPoster:[[QLMNotifier alloc] init] now:^NSTimeInterval {
         return QLMSecondsCountingSleep();
     }];
@@ -92,14 +94,15 @@ static OSType QLMQuitReason(void) {
     self.popover = [[NSPopover alloc] init];
     self.popover.contentViewController = self.popoverController;
     self.popover.behavior = NSPopoverBehaviorTransient;
-    self.mainWindowController = [[QLMMainWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
+    self.mainWindowController = [[QLMMainWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList
+                                                                                skin:self.skinChoice.skin];
     self.mainWindowController.delegate = self;
 
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
     self.statusItem.button.target = self;
     self.statusItem.button.action = @selector(togglePopover:);
     [self renderStatusItem];
-    self.osdController = [[QLMOSDController alloc] initWithPreferences:self.preferences];
+    self.osdController = [[QLMOSDController alloc] initWithPreferences:self.preferences skin:self.skinChoice.skin];
 
     [self startSystemDimmed:NO];
     if (self.preferences.wakesAtLaunch) {
@@ -305,9 +308,7 @@ static OSType QLMQuitReason(void) {
     [self.mainWindowController refresh];
     [self.monitorsController refresh];
     [self.settingsController refresh];
-    if (self.fakeBusController.window.visible) {
-        [self.fakeBusController refresh];
-    }
+    [self.fakeBusController refresh];
     [self.kept keepFromSnapshot:snapshot];
     [self renderStatusItem];
     [self.osdController takeSnapshot:snapshot];
@@ -447,6 +448,7 @@ static OSType QLMQuitReason(void) {
         self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
         self.settingsController.delegate = self;
         [self.settingsController showSetup:self.setup error:self.setupError];
+        [self.settingsController showSkin:self.skinChoice.skin refusal:self.skinChoice.refusal];
     }
     [self bringForward:self.settingsController];
 }
@@ -481,7 +483,7 @@ static OSType QLMQuitReason(void) {
 }
 
 - (void)settingsDidChangeOSD:(QLMSettingsWindowController *)controller {
-    [self.osdController reloadPreferences];
+    [self.osdController reloadSettings];
 }
 
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller {
@@ -494,10 +496,12 @@ static OSType QLMQuitReason(void) {
 
 // Settings' picker and the skin verb share it.
 - (nullable NSString *)chooseSkinNamed:(NSString *)name {
-    NSString *refusal = [self.mainWindowController chooseSkinNamed:name];
+    QLMSkinChoice *choice = self.skinChoice;
+    NSString *refusal = [choice chooseSkinNamed:name];
     if (refusal == nil) {
-        [self.osdController reloadPreferences];
-        [self.settingsController reloadSkin];
+        [self.mainWindowController showSkin:choice.skin];
+        self.osdController.skin = choice.skin;
+        [self.settingsController showSkin:choice.skin refusal:choice.refusal];
     }
     return refusal;
 }
@@ -570,69 +574,28 @@ static OSType QLMQuitReason(void) {
     return QLMShowSkinPreview(name, osd, disabled);
 }
 
-- (BOOL)debugWindowShowing {
-    return self.mainWindowController.showing;
+- (QLMFakeBus *)debugFakeBus {
+    return self.bus;
+}
+
+- (id<QLMDebugWindow>)debugWindow {
+    return self.mainWindowController;
+}
+
+- (id<QLMDebugOSD>)debugOSD {
+    return self.osdController;
 }
 
 - (void)debugShowWindow {
     [self showMainWindow:nil];
 }
 
-- (void)debugCloseWindow {
-    [self.mainWindowController close];
-}
-
-- (NSString *)debugClickGroupNamed:(NSString *)name {
-    return [self.mainWindowController clickGroupNamed:name];
-}
-
-- (NSString *)debugWindowApplyError {
-    return self.mainWindowController.applyError;
-}
-
-- (double)debugTurnKnobTo:(double)decibels {
-    return [self.mainWindowController turnKnobTo:decibels];
-}
-
-- (NSString *)debugWindowSkinName {
-    return self.mainWindowController.shownSkinName;
-}
-
-- (NSString *)debugResizeWindowTo:(NSSize)size {
-    return [self.mainWindowController resizeTo:size];
-}
-
-- (NSSize)debugWindowSize {
-    return self.mainWindowController.contentSize;
+- (QLMSkinChoice *)debugSkinChoice {
+    return self.skinChoice;
 }
 
 - (NSString *)debugChooseSkin:(NSString *)name {
     return [self chooseSkinNamed:name];
-}
-
-- (NSString *)debugSkinRefusal {
-    NSString *refusal = nil;
-    [[QLMSkinLibrary standardLibrary] loadSkinNamed:self.preferences.skinName refusal:&refusal];
-    return refusal;
-}
-
-- (NSString *)debugShowOSD {
-    return [self.osdController showSnapshot:self.monitorList.snapshot];
-}
-
-- (void)debugHideOSD {
-    [self.osdController hide];
-}
-
-- (BOOL)debugOSDShowing {
-    return self.osdController.showing;
-}
-
-- (NSString *)debugTurnFakeKnobTo:(NSInteger)tenths {
-    if (self.bus == nil) {
-        return @"qlm drives the GLM adapter, not the fake bus";
-    }
-    return [QLMFakeBusWindowController turnKnobOf:self.bus to:tenths];
 }
 
 - (void)debugQuitAnswering:(BOOL)quitAnyway {

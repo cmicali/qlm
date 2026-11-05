@@ -10,8 +10,11 @@
 #import "DebugStandardVerbs.h"
 #import "DebugSyntheticInput.h"
 #import "DebugWireFormat.h"
+#include "QLMCommands.h"
+#import "QLMFakeBus.h"
 #import "QLMFormat.h"
 #import "QLMPreferences.h"
+#import "QLMSkinChoice.h"
 #import "QLMSnapshot.h"
 #import "QLMSystem.h"
 
@@ -56,6 +59,19 @@ static NSDictionary *QLMDebugError(NSString *format, ...) {
     return @{@"error": message};
 }
 
+// A verb's own refusal becomes its error. Call it once the verb has run.
+static NSDictionary *QLMDebugResult(NSString *_Nullable refusal, NSDictionary *ok) {
+    return refusal != nil ? QLMDebugError(@"%@", refusal) : ok;
+}
+
+// One of a verb's two words, as <show|close>, in any case. YES for the
+// first.
+static BOOL QLMDebugParseWord(NSString *token, NSString *first, NSString *second, BOOL *isFirst) {
+    NSString *word = token.lowercaseString;
+    *isFirst = [word isEqualToString:first];
+    return *isFirst || [word isEqualToString:second];
+}
+
 // One of the popover's controls, which takes no click while disabled: the
 // slider and Dim while System is stopped, and Mute and the power button
 // while it tracks no monitor too.
@@ -77,8 +93,10 @@ static BOOL QLMDebugParseFinite(NSString *token, double *value) {
 }
 
 // A control over the volume range. A level outside it is refused, not moved
-// into it. `move` takes the level on GLM's steps and returns where it went.
-static NSDictionary *QLMDebugLevel(NSString *usage, NSString *control, double (^move)(id<QLMDebugApp> app, double stepped)) {
+// into it. `move` takes the level on GLM's steps, sets where it went, and
+// returns its control's refusal.
+static NSDictionary *QLMDebugLevel(NSString *usage, NSString *control,
+                                   NSString *_Nullable (^move)(id<QLMDebugApp> app, double stepped, double *level)) {
     return QLMDebugControl(usage, NO, QLM_HANDLER {
         double decibels = 0;
         if (!QLMDebugParseFinite(tokens[1], &decibels)) {
@@ -89,7 +107,9 @@ static NSDictionary *QLMDebugLevel(NSString *usage, NSString *control, double (^
         if (decibels < lowest || decibels > ceiling) {
             return QLMDebugError(@"%.1f dB is outside the %@'s range, %.1f to %.1f dB", decibels, control, lowest, ceiling);
         }
-        return @{@"ok": @YES, @"volumeDecibels": @(move(app, QLMNearestStepDecibels(decibels)))};
+        double level = 0;
+        NSString *refusal = move(app, QLMNearestStepDecibels(decibels), &level);
+        return QLMDebugResult(refusal, @{@"ok": @YES, @"volumeDecibels": @(level)});
     });
 }
 
@@ -211,29 +231,29 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             };
             reply[@"quitGLMButton"] = app.debugQuitGLMTitle ?: NSNull.null;
             reply[@"quitAsksFirst"] = @(app.debugQuitAsksFirst);
-            reply[@"windowShowing"] = @(app.debugWindowShowing);
-            reply[@"windowApplyError"] = app.debugWindowApplyError ?: NSNull.null;
+            reply[@"windowShowing"] = @(app.debugWindow.showing);
+            reply[@"windowApplyError"] = app.debugWindow.applyError ?: NSNull.null;
             reply[@"skinName"] = preferences.skinName;
-            reply[@"windowSkin"] = app.debugWindowSkinName;
-            reply[@"skinRefusal"] = app.debugSkinRefusal ?: NSNull.null;
+            reply[@"windowSkin"] = app.debugSkinChoice.skin.name;
+            reply[@"skinRefusal"] = app.debugSkinChoice.refusal ?: NSNull.null;
             reply[@"opensWindowAtLaunch"] = @(preferences.opensWindowAtLaunch);
             reply[@"osd"] = @{
                 @"showsOSD": @(preferences.showsOSD),
                 @"placement": QLMOSDPlacementName(preferences.osdPlacement),
                 @"seconds": @(preferences.osdSeconds),
-                @"showing": @(app.debugOSDShowing),
+                @"showing": @(app.debugOSD.showing),
             };
             return reply;
         }),
         QLMDebugVerb(@"popover <show|close>", QLM_HANDLER {
-            if ([tokens[1] isEqualToString:@"show"]) {
-                [app debugShowPopover];
-            }
-            else if ([tokens[1] isEqualToString:@"close"]) {
-                [app.debugPopover close];
-            }
-            else {
+            BOOL show = NO;
+            if (!QLMDebugParseWord(tokens[1], @"show", @"close", &show)) {
                 return nil;
+            }
+            if (show) {
+                [app debugShowPopover];
+            } else {
+                [app.debugPopover close];
             }
             return QLMDebugWindows(app);
         }),
@@ -246,28 +266,26 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             return QLMDebugWindows(app);
         }),
         // A look at a skin, with the mockups' sample text, for
-        // dump_screenshot. It drives nothing.
-        QLMDebugVerb(@"skin_preview <name>", QLM_HANDLER {
-            return [app debugShowSkinPreview:tokens[1] osd:NO disabled:NO];
-        }),
-        QLMDebugVerb(@"skin_preview_disabled <name>", QLM_HANDLER {
-            return [app debugShowSkinPreview:tokens[1] osd:NO disabled:YES];
-        }),
-        QLMDebugVerb(@"skin_preview_osd <name>", QLM_HANDLER {
-            return [app debugShowSkinPreview:tokens[1] osd:YES disabled:NO];
-        }),
-        QLMDebugVerb(@"window <show|close>", QLM_HANDLER {
-            if ([tokens[1] isEqualToString:@"show"]) {
-                [app debugShowWindow];
-            }
-            else if ([tokens[1] isEqualToString:@"close"]) {
-                [app debugCloseWindow];
-            }
-            else {
+        // dump_screenshot, without choosing it. It drives nothing.
+        QLMDebugVerb(@"skin_preview <name> <window|disabled|osd>", QLM_HANDLER {
+            NSUInteger look = [@[@"window", @"disabled", @"osd"] indexOfObject:tokens[2].lowercaseString];
+            if (look == NSNotFound) {
                 return nil;
             }
+            return [app debugShowSkinPreview:tokens[1] osd:look == 2 disabled:look == 1];
+        }),
+        QLMDebugVerb(@"window <show|close>", QLM_HANDLER {
+            BOOL show = NO;
+            if (!QLMDebugParseWord(tokens[1], @"show", @"close", &show)) {
+                return nil;
+            }
+            if (show) {
+                [app debugShowWindow];
+            } else {
+                [app.debugWindow close];
+            }
             NSMutableDictionary *reply = [QLMDebugWindows(app) mutableCopy];
-            reply[@"windowShowing"] = @(app.debugWindowShowing);
+            reply[@"windowShowing"] = @(app.debugWindow.showing);
             return reply;
         }),
         // The window's content size in points, as a drag of its corner sets
@@ -278,45 +296,35 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             if (!QLMDebugParseFinite(tokens[1], &width) || !QLMDebugParseFinite(tokens[2], &height)) {
                 return nil;
             }
-            NSString *refusal = [app debugResizeWindowTo:NSMakeSize(width, height)];
-            if (refusal != nil) {
-                return QLMDebugError(@"%@", refusal);
-            }
-            NSSize size = app.debugWindowSize;
-            return @{@"ok": @YES, @"width": @(size.width), @"height": @(size.height)};
+            NSString *refusal = [app.debugWindow resizeTo:NSMakeSize(width, height)];
+            NSSize size = app.debugWindow.contentSize;
+            return QLMDebugResult(refusal, @{@"ok": @YES, @"width": @(size.width), @"height": @(size.height)});
         }),
         // The window's group button. The apply's own refusal comes later, in
         // dump_state's windowApplyError.
         QLMDebugVerb(@"group <name>", QLM_HANDLER {
-            NSString *refusal = [app debugClickGroupNamed:tokens[1]];
-            if (refusal != nil) {
-                return QLMDebugError(@"%@", refusal);
-            }
-            return @{@"ok": @YES, @"group": tokens[1]};
+            NSString *refusal = [app.debugWindow clickGroupNamed:tokens[1]];
+            return QLMDebugResult(refusal, @{@"ok": @YES, @"group": tokens[1]});
         }),
-        // The window's skin, kept in the preferences.
+        // The skin Settings' picker chooses, kept in the preferences. The
+        // skin that shows loads again.
         QLMDebugVerb(@"skin <name>", QLM_HANDLER {
             NSString *refusal = [app debugChooseSkin:tokens[1]];
-            if (refusal != nil) {
-                return QLMDebugError(@"%@", refusal);
-            }
-            return @{@"ok": @YES, @"skinName": app.debugPreferences.skinName};
+            return QLMDebugResult(refusal, @{@"ok": @YES, @"skinName": app.debugPreferences.skinName});
         }),
         // The OSD as a turn of the knob shows it, for dump_screenshot.
         QLMDebugVerb(@"osd <show|hide>", QLM_HANDLER {
-            if ([tokens[1] isEqualToString:@"show"]) {
-                NSString *refusal = [app debugShowOSD];
-                if (refusal != nil) {
-                    return QLMDebugError(@"%@", refusal);
-                }
-            }
-            else if ([tokens[1] isEqualToString:@"hide"]) {
-                [app debugHideOSD];
-            }
-            else {
+            BOOL show = NO;
+            if (!QLMDebugParseWord(tokens[1], @"show", @"hide", &show)) {
                 return nil;
             }
-            return @{@"ok": @YES, @"showing": @(app.debugOSDShowing)};
+            NSString *refusal = nil;
+            if (show) {
+                refusal = [app.debugOSD showSnapshot:app.debugSnapshot];
+            } else {
+                [app.debugOSD hide];
+            }
+            return QLMDebugResult(refusal, @{@"ok": @YES, @"showing": @(app.debugOSD.showing)});
         }),
         // The fake bus's knob, as its window's slider turns it, in tenths of
         // a dB.
@@ -326,11 +334,15 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             if (![scanner scanInteger:&tenths] || !scanner.atEnd) {
                 return nil;
             }
-            NSString *refusal = [app debugTurnFakeKnobTo:tenths];
-            if (refusal != nil) {
-                return QLMDebugError(@"%@", refusal);
+            QLMFakeBus *bus = app.debugFakeBus;
+            NSString *refusal = nil;
+            if (bus == nil) {
+                refusal = @"qlm drives the GLM adapter, not the fake bus";
+            } else if (![bus turnKnobToTenths:tenths]) {
+                refusal = [NSString stringWithFormat:@"%ld is outside the knob's travel, %ld to 0", (long)tenths,
+                                                     (long)QLMFakeKnobBottomTenths];
             }
-            return @{@"ok": @YES, @"knobTenths": @(tenths)};
+            return QLMDebugResult(refusal, @{@"ok": @YES, @"knobTenths": @(tenths)});
         }),
         // The read lands on a utility queue, so the reply only acknowledges it.
         QLMDebugVerb(@"read_setup", QLM_HANDLER {
@@ -339,12 +351,14 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         }),
         // The popover's slider and the window's knob: GLM's 0.5 dB steps, from
         // the range's bottom to the ceiling.
-        QLMDebugLevel(@"volume <dB>", @"slider", ^double(id<QLMDebugApp> app, double stepped) {
+        QLMDebugLevel(@"volume <dB>", @"slider", ^NSString *(id<QLMDebugApp> app, double stepped, double *level) {
             [app.debugSystem setVolumeDecibels:stepped];
-            return stepped;
+            *level = stepped;
+            return nil;
         }),
-        QLMDebugLevel(@"knob <dB>", @"knob", ^double(id<QLMDebugApp> app, double stepped) {
-            return [app debugTurnKnobTo:stepped];
+        // The knob turns only while the window shows.
+        QLMDebugLevel(@"knob <dB>", @"knob", ^NSString *(id<QLMDebugApp> app, double stepped, double *level) {
+            return [app.debugWindow turnKnobTo:stepped level:level];
         }),
         // Settings' ceiling. It refuses what the field refuses, and the
         // preferences bound the rest, as they do a typed one.
@@ -383,11 +397,11 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         }),
         // The argument answers the louder alert, as quit_answering's does.
         QLMDebugVerb(@"adapter_off_answering <cancel|anyway>", QLM_HANDLER {
-            NSString *answer = tokens[1].lowercaseString;
-            BOOL anyway = [answer isEqualToString:@"anyway"];
-            if (!anyway && ![answer isEqualToString:@"cancel"]) {
+            BOOL cancel = NO;
+            if (!QLMDebugParseWord(tokens[1], @"cancel", @"anyway", &cancel)) {
                 return nil;
             }
+            BOOL anyway = !cancel;
             BOOL asks = app.debugQuitAsksFirst;
             BOOL turningOff = app.debugPreferences.usesAdapter && (!asks || anyway);
             if (turningOff) {
@@ -471,11 +485,11 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         // from the run loop, after the reply. Where the alert would show, a
         // cancel does nothing.
         QLMDebugVerb(@"quit_answering <cancel|anyway>", QLM_HANDLER {
-            NSString *answer = tokens[1].lowercaseString;
-            BOOL anyway = [answer isEqualToString:@"anyway"];
-            if (!anyway && ![answer isEqualToString:@"cancel"]) {
+            BOOL cancel = NO;
+            if (!QLMDebugParseWord(tokens[1], @"cancel", @"anyway", &cancel)) {
                 return nil;
             }
+            BOOL anyway = !cancel;
             BOOL asks = app.debugQuitAsksFirst;
             BOOL quitting = !asks || anyway;
             if (quitting) {

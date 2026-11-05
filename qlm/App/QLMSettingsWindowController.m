@@ -4,6 +4,7 @@
 
 #include "QLMCommands.h"
 #import "QLMFormat.h"
+#import "QLMMainWindowModel.h"
 #import "QLMSkinLayout.h"
 #import "QLMSkinLibrary.h"
 #import "QLMViews.h"
@@ -38,6 +39,8 @@ static const CGFloat QLMSettingsTextWidth = 360;
 @property (nonatomic) NSStepper *osdSecondsStepper;
 @property (nonatomic) NSPopUpButton *skinPicker;
 @property (nonatomic) NSTextField *skinNote;
+@property (nonatomic, nullable) QLMSkin *skin;
+@property (nonatomic, copy, nullable) NSString *skinRefusal;
 // The last pick's refusal, until the window opens again or a pick loads.
 @property (nonatomic, copy, nullable) NSString *skinPickRefusal;
 @end
@@ -367,12 +370,13 @@ static const CGFloat QLMSettingsTextWidth = 360;
     return [NSStackView stackViewWithViews:@[self.skinPicker, reveal]];
 }
 
+// The skin that shows is loaded again too, so a fixed one takes.
 - (void)skinChosen:(NSPopUpButton *)picker {
     NSString *name = picker.titleOfSelectedItem;
-    if (name == nil || [name isEqualToString:self.preferences.skinName]) {
+    if (name == nil) {
         return;
     }
-    // On success the delegate calls reloadSkin.
+    // On success the delegate calls showSkin:refusal:.
     NSString *refusal = [self.delegate settings:self chooseSkinNamed:name];
     if (refusal != nil) {
         self.skinPickRefusal = refusal;
@@ -391,7 +395,9 @@ static const CGFloat QLMSettingsTextWidth = 360;
     [NSWorkspace.sharedWorkspace openURL:directory];
 }
 
-- (void)reloadSkin {
+- (void)showSkin:(QLMSkin *)skin refusal:(NSString *)refusal {
+    self.skin = skin;
+    self.skinRefusal = refusal;
     self.skinPickRefusal = nil;
     if (self.window.visible) {
         [self renderSkin];
@@ -404,9 +410,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 - (void)renderSkin {
     QLMSkinLibrary *library = [QLMSkinLibrary standardLibrary];
     NSString *chosen = self.preferences.skinName;
-    NSString *refusal = nil;
-    QLMSkin *shown = [library loadSkinNamed:chosen refusal:&refusal];
-    NSString *shownName = shown.name ?: QLMSkinDefaultName;
+    NSString *shownName = self.skin.name ?: QLMSkinDefaultName;
 
     [self.skinPicker removeAllItems];
     BOOL separated = NO;
@@ -420,7 +424,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     // A chosen skin whose folder is gone shows as the fallback.
     [self.skinPicker selectItemWithTitle:[self.skinPicker itemWithTitle:chosen] != nil ? chosen : shownName];
 
-    self.skinNote.stringValue = QLMSkinNote(self.skinPickRefusal ?: refusal, shownName, library.userDirectory);
+    self.skinNote.stringValue = QLMSkinNote(self.skinPickRefusal ?: self.skinRefusal, shownName, library.userDirectory);
 }
 
 #pragma mark - The on-screen display
@@ -503,15 +507,10 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
 
 - (void)renderSetup {
     if (self.setup != nil) {
-        NSMutableArray<NSString *> *names = [NSMutableArray array];
-        for (QLMSetupGroup *group in self.setup.groups) {
-            [names addObject:group.name];
-        }
-        NSString *count = self.setup.groups.count == 1 ? @"1 group" : [NSString stringWithFormat:@"%lu groups", (unsigned long)self.setup.groups.count];
+        NSArray<NSString *> *names = self.setup.groupNames;
+        NSString *count = names.count == 1 ? @"1 group" : [NSString stringWithFormat:@"%lu groups", (unsigned long)names.count];
         self.setupNote.stringValue = [NSString stringWithFormat:@"%@: %@.", count, [names componentsJoinedByString:@", "]];
-        // The library's fallback gives the skin the window shows.
-        QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:self.preferences.skinName refusal:NULL];
-        NSUInteger buttons = skin != nil ? QLMSkinGroupButtonCount(skin) : QLMSkinMaxGroups;
+        NSUInteger buttons = QLMShownGroupButtons(QLMSkinGroupButtonCount(self.skin));
         if (names.count > buttons) {
             self.setupNote.stringValue = [self.setupNote.stringValue
                 stringByAppendingFormat:@" The window shows the first %lu.", (unsigned long)buttons];

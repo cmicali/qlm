@@ -3,7 +3,11 @@
 #import "QLMMonitorList.h"
 #import "QLMPreferences.h"
 #import "QLMSetup.h"
+#import "QLMSkin.h"
 #import "QLMSystem.h"
+#if DEBUG
+#import "QLMDebugChannel.h"
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -13,12 +17,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)mainWindowControllerShowMonitors:(QLMMainWindowController *)controller;
 @end
 
-// The main window, in the chosen skin. It reads the monitor list's snapshots
-// and drives System, never the adapter, by the popover's rules for what is
-// enabled when. On the main queue.
+// The main window, in the skin it is handed. It reads the monitor list's
+// snapshots and drives System, never the adapter, by the popover's rules
+// for what is enabled when. On the main queue.
 @interface QLMMainWindowController : NSWindowController
 
-- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList;
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList skin:(QLMSkin *)skin;
 
 @property (nonatomic, weak, nullable) id<QLMMainWindowControllerDelegate> delegate;
 @property (nonatomic, nullable) QLMSystem *system;
@@ -30,11 +34,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)refresh;
 // Reads the volume range from the preferences again.
 - (void)reloadVolumeRange;
-// Shows the named skin and keeps it in the preferences. Returns the
-// library's refusal, and keeps nothing, for a skin that does not load.
-- (nullable NSString *)chooseSkinNamed:(NSString *)name;
-// The skin that shows: the preference's, or the default for a refused one.
-@property (nonatomic, readonly, copy) NSString *shownSkinName;
+// Draws the window in the skin, from now on.
+- (void)showSkin:(QLMSkin *)skin;
 
 @property (nonatomic, readonly, getter=isShowing) BOOL showing;
 // The last apply's error, until the next click.
@@ -43,14 +44,20 @@ NS_ASSUME_NONNULL_BEGIN
 // A click on the named group's button. Returns why it takes no click, or
 // nil once the apply starts.
 - (nullable NSString *)clickGroupNamed:(NSString *)name;
-// A turn of the knob to the level, as a drag's. The caller checks the
-// range. Returns the level the knob points at.
-- (double)turnKnobTo:(double)decibels;
+// A turn of the knob to the level, as a drag's, with the level it points
+// at. The caller checks the range. Returns why not while the window is
+// closed.
+- (nullable NSString *)turnKnobTo:(double)decibels level:(double *)level;
 // The content size, as a drag of the window's corner sets it, never below
 // the skin's size. Returns why not while the window is closed.
 - (nullable NSString *)resizeTo:(NSSize)size;
 @property (nonatomic, readonly) NSSize contentSize;
 
 @end
+
+#if DEBUG
+@interface QLMMainWindowController (Debug) <QLMDebugWindow>
+@end
+#endif
 
 NS_ASSUME_NONNULL_END

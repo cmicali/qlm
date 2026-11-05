@@ -8,7 +8,6 @@
 // The shape of QLMHostCheck's sentence for GLM, so System reads it as GLM
 // holding the adapter.
 static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applications/GLMv5.app/Contents/MacOS/GLMv5). Quit GLM first.";
-static const NSInteger QLMKnobBottomTenths = -1004;
 
 // One simulated monitor's controls. Each control's tag is the monitor's
 // index on the bus.
@@ -90,7 +89,7 @@ static const NSInteger QLMKnobBottomTenths = -1004;
         480);
 
     self.knobCheckbox = [NSButton checkboxWithTitle:@"Attached" target:self action:@selector(knobAttachedClicked:)];
-    self.knobSlider = [NSSlider sliderWithValue:QLMKnobBottomTenths minValue:QLMKnobBottomTenths maxValue:0
+    self.knobSlider = [NSSlider sliderWithValue:QLMFakeKnobBottomTenths minValue:QLMFakeKnobBottomTenths maxValue:0
                                          target:self action:@selector(knobTurned:)];
     self.knobSlider.continuous = YES;
     [self.knobSlider.widthAnchor constraintEqualToConstant:220].active = YES;
@@ -140,12 +139,19 @@ static const NSInteger QLMKnobBottomTenths = -1004;
         [rows addObject:row];
     }];
     self.rows = rows;
-    [self refresh];
+    [self change:nil];
     [self.window setContentSize:self.window.contentView.fittingSize];
 }
 
-- (void)refresh {
+- (void)showWindow:(id)sender {
     [self change:nil];
+    [super showWindow:sender];
+}
+
+- (void)refresh {
+    if (self.window.visible) {
+        [self change:nil];
+    }
 }
 
 // Runs the change on the bus's queue, reads the bus back in the same visit,
@@ -195,21 +201,8 @@ static const NSInteger QLMKnobBottomTenths = -1004;
 }
 
 - (void)knobTurned:(NSSlider *)slider {
-    QLMFakeBus *bus = self.bus;
-    if (bus != nil) {
-        (void)[QLMFakeBusWindowController turnKnobOf:bus to:lround(slider.doubleValue)];
-    }
+    (void)[self.bus turnKnobToTenths:lround(slider.doubleValue)];
     [self change:nil];
-}
-
-+ (NSString *)turnKnobOf:(QLMFakeBus *)bus to:(NSInteger)tenths {
-    if (tenths < QLMKnobBottomTenths || tenths > 0) {
-        return [NSString stringWithFormat:@"%ld is outside the knob's travel, %ld to 0", (long)tenths, (long)QLMKnobBottomTenths];
-    }
-    [bus perform:^{
-        bus.knobTenths = @(tenths);
-    }];
-    return nil;
 }
 
 - (void)busyClicked:(NSButton *)checkbox {

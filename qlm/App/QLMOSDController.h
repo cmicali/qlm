@@ -1,7 +1,11 @@
 #import <Cocoa/Cocoa.h>
 
 #import "QLMPreferences.h"
+#import "QLMSkin.h"
 #import "QLMSnapshot.h"
+#if DEBUG
+#import "QLMDebugChannel.h"
+#endif
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -10,11 +14,14 @@ NS_ASSUME_NONNULL_BEGIN
 // queue.
 @interface QLMOSDController : NSObject
 
-- (instancetype)initWithPreferences:(QLMPreferences *)preferences NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences skin:(QLMSkin *)skin NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
-// Call after the OSD's settings or the skin change in the preferences.
-- (void)reloadPreferences;
+// What it draws in. A change redraws it while it shows.
+@property (nonatomic) QLMSkin *skin;
+
+// Call after the OSD's settings change in the preferences.
+- (void)reloadSettings;
 - (void)takeSnapshot:(QLMSnapshot *)snapshot;
 // Shows the snapshot's level now, as a turn would, or says why not.
 - (nullable NSString *)showSnapshot:(nullable QLMSnapshot *)snapshot;
@@ -24,5 +31,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) BOOL showing;
 
 @end
+
+#if DEBUG
+@interface QLMOSDController (Debug) <QLMDebugOSD>
+@end
+#endif
 
 NS_ASSUME_NONNULL_END

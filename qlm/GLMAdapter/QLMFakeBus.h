@@ -56,7 +56,7 @@ NS_ASSUME_NONNULL_BEGIN
 // The adapter at 01. Change these only inside perform:.
 @property (nonatomic, copy) NSString *adapterSystemInfo;
 @property (nonatomic, copy) NSString *adapterSerialNumber;
-@property (nonatomic, nullable) NSNumber *knobTenths;  // nil: no knob. -1004, the bottom stop, by default.
+@property (nonatomic, nullable) NSNumber *knobTenths;  // nil: no knob. The bottom stop by default.
 // The calibration mic. It is in when micIn is YES or either reading is set,
 // and each reading set goes out. Every capture with the mic in has both.
 @property (nonatomic) BOOL micIn;
@@ -67,6 +67,14 @@ NS_ASSUME_NONNULL_BEGIN
 // Runs the block on the bus's queue and waits for it.
 - (void)perform:(dispatch_block_t)block;
 
+// Turns the knob to `tenths` of a dB, through perform:, so never from
+// inside it. NO, and nothing turns, outside its travel, from
+// QLMFakeKnobBottomTenths to 0.
+- (BOOL)turnKnobToTenths:(NSInteger)tenths;
+
 @end
+
+// The knob's bottom stop.
+extern const NSInteger QLMFakeKnobBottomTenths;
 
 NS_ASSUME_NONNULL_END

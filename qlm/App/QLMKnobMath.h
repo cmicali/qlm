@@ -35,7 +35,7 @@ static inline double QLMKnobAngleForDecibels(double decibels, double minimum, do
 static inline double QLMKnobSnap(double decibels, double minimum, double maximum) {
     double low = ceil(minimum / QLM_KNOB_STEP_DECIBELS) * QLM_KNOB_STEP_DECIBELS;
     double high = floor(maximum / QLM_KNOB_STEP_DECIBELS) * QLM_KNOB_STEP_DECIBELS;
-    double stepped = round(decibels / QLM_KNOB_STEP_DECIBELS) * QLM_KNOB_STEP_DECIBELS;
+    double stepped = QLMNearestStepDecibels(decibels);
     if (high < low) {
         return low;
     }

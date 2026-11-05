@@ -161,6 +161,20 @@
     XCTAssertEqual(monitors[1].temperature, 41);
 }
 
+// The knob turns within its travel, from the bottom stop, -1004, to 0
+// (captures/startup-idle), as the fake bus window's slider and the
+// fake_knob verb turn it.
+- (void)testTheKnobTurnsWithinItsTravel {
+    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
+    XCTAssertEqualObjects(bus.knobTenths, @(QLMFakeKnobBottomTenths));
+    XCTAssertEqual(QLMFakeKnobBottomTenths, -1004);
+    XCTAssertTrue([bus turnKnobToTenths:-500]);
+    XCTAssertTrue([bus turnKnobToTenths:0]);
+    XCTAssertFalse([bus turnKnobToTenths:1]);
+    XCTAssertFalse([bus turnKnobToTenths:-1005]);
+    XCTAssertEqualObjects(bus.knobTenths, @0);
+}
+
 // Section 7, 3A 03, and section 9, "System Power": 03 02 prepares, 03 00
 // powers off, and 03 7F and 03 01 wake. Broadcasts get no reply. The fake
 // keeps each lease across the change.

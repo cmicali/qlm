@@ -69,6 +69,7 @@
         XCTAssertEqualObjects(setup.groups[i].name, names[i]);
         XCTAssertEqual(setup.groups[i].nodes.count, 6u);
     }
+    XCTAssertEqualObjects(setup.groupNames, names);
     QLMSetupGroup *main = setup.groups[0];
     XCTAssertEqualObjects(main.calibrated, @"Calibrated 29 Oct 2025");
     XCTAssertEqual(main.groupSensitivity, 0);

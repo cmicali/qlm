@@ -87,6 +87,14 @@
     return nil;
 }
 
+- (NSArray<NSString *> *)groupNames {
+    NSMutableArray<NSString *> *names = [NSMutableArray arrayWithCapacity:_groups.count];
+    for (QLMSetupGroup *group in _groups) {
+        [names addObject:group.name];
+    }
+    return names;
+}
+
 - (QLMSetupGroup *)groupNamed:(NSString *)name {
     for (QLMSetupGroup *group in _groups) {
         if ([group.name isEqualToString:name]) {

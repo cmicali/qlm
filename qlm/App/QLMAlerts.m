@@ -80,7 +80,7 @@ NSTimeInterval QLMSecondsCountingSleep(void) {
 - (void)updateWithMonitorList:(QLMMonitorList *)list {
     QLMSnapshot *snapshot = list.snapshot;
     for (QLMMonitorState *monitor in snapshot.monitors) {
-        if (monitor.status == QLMMonitorStatusOn && !monitor.offline) {
+        if (QLMMonitorIsOnline(monitor)) {
             [_dropped removeObject:monitor.hardwareID];
         }
     }

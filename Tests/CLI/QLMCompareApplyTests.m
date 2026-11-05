@@ -67,7 +67,7 @@ static NSString *QLMStartupIdle(void) {
 }
 
 - (NSString *)temporaryFile:(NSString *)text extension:(NSString *)extension {
-    NSString *path = [[NSTemporaryDirectory() stringByAppendingPathComponent:[NSUUID UUID].UUIDString] stringByAppendingPathExtension:extension];
+    NSString *path = [QLMScratchPath() stringByAppendingPathExtension:extension];
     XCTAssertTrue([text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL]);
     [_temporaryFiles addObject:path];
     return path;
