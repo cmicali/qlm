@@ -77,6 +77,25 @@ static OSType QLMQuitReason(void) {
     return reason.typeCodeValue;
 }
 
+// The adapter's host watch checks again as GLM launches or quits.
+// NSWorkspace posts both for every app with a Dock icon, as GLM is.
+static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePath)) {
+    NSNotificationCenter *center = NSWorkspace.sharedWorkspace.notificationCenter;
+    void (^take)(NSNotification *) = ^(NSNotification *notification) {
+        NSRunningApplication *app = notification.userInfo[NSWorkspaceApplicationKey];
+        NSString *path = app.executableURL.path;
+        if (path != nil) {
+            changed(path);
+        }
+    };
+    id launched = [center addObserverForName:NSWorkspaceDidLaunchApplicationNotification object:nil queue:nil usingBlock:take];
+    id quit = [center addObserverForName:NSWorkspaceDidTerminateApplicationNotification object:nil queue:nil usingBlock:take];
+    return ^{
+        [center removeObserver:launched];
+        [center removeObserver:quit];
+    };
+}
+
 @implementation QLMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -185,7 +204,11 @@ static OSType QLMQuitReason(void) {
     id<QLMAdapter> adapter = nil;
     QLMFakeBus *bus = nil;
     if (self.preferences.usesAdapter) {
-        adapter = [[QLMHIDAdapter alloc] init];
+        QLMHIDAdapter *hid = [[QLMHIDAdapter alloc] init];
+        hid.launchWatch = ^dispatch_block_t(void (^changed)(NSString *executablePath)) {
+            return QLMWatchLaunches(changed);
+        };
+        adapter = hid;
     } else {
         bus = [QLMFakeBus demoBusWithSubwoofer:YES];
         bus.recordsSentMessages = NO;

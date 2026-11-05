@@ -5,12 +5,16 @@
 #import <IOKit/hid/IOHIDKeys.h>
 
 #import "QLMHostCheck.h"
+#import "QLMHostWatch.h"
 #import "QLMReportLink.h"
 
-static const NSTimeInterval QLMHIDWatchInterval = 1.0;
+// The adapter's HID device, its interface, and its USB device: an open of
+// any of them is an open of the adapter.
+enum { QLMHIDWatchedEntries = 8 };
 
 @interface QLMHIDAdapter ()
 - (void)takeArrivals;
+- (void)adapterChanged;
 - (void)takeTerminations;
 - (void)receiveReport:(const uint8_t *)report length:(CFIndex)length result:(IOReturn)result sender:(void *)sender;
 - (void)removed:(void *)sender;
@@ -33,6 +37,12 @@ static void QLMHIDInput(void *context, IOReturn result, void *sender, IOHIDRepor
 
 static void QLMHIDRemoved(void *context, IOReturn result, void *sender) {
     [(__bridge QLMHIDAdapter *)context removed:sender];
+}
+
+// Any message: an open, an attempt at one while qlm holds the seize, a
+// close, or a termination.
+static void QLMHIDInterest(void *context, io_service_t service, natural_t type, void *argument) {
+    [(__bridge QLMHIDAdapter *)context adapterChanged];
 }
 
 NSError *QLMHIDWriteError(IOReturn result) {
@@ -64,9 +74,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 @implementation QLMHIDAdapter {
     dispatch_queue_t _queue;
-    dispatch_queue_t _checkQueue;
     BOOL _running;
-    BOOL _checking;
     // Keeps self alive while IOKit holds it as a callback context.
     const void *_runningSelf;
     IONotificationPortRef _port;
@@ -81,7 +89,10 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     id<QLMClock> _clock;
     uint64_t _linkEntry;
     uint8_t _input[QLMReportLength];
-    id<QLMTimer> _watch;
+    QLMHostWatch *_hostWatch;
+    dispatch_block_t _endLaunchWatch;
+    io_object_t _interests[QLMHIDWatchedEntries];
+    int _interestCount;
     NSError *_problem;  // why a send fails while no device is open
     NSString *_deviceDescription;
 }
@@ -90,7 +101,6 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     self = [super init];
     if (self) {
         _replyTimeout = 0.1;
-        _checkQueue = dispatch_queue_create("com.commonwealthrecordings.qlm.hostcheck", DISPATCH_QUEUE_SERIAL);
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
         _deviceDescription = @"the GLM adapter over USB, not open";
         _open = ^IOReturn(IOHIDDeviceRef device, IOOptionBits options) {
@@ -125,6 +135,20 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     _runningSelf = CFBridgingRetain(self);
     _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
 
+    __weak QLMHIDAdapter *weakSelf = self;
+    QLMHostWatch *watch = [[QLMHostWatch alloc] initWithQueue:queue clock:clock check:^NSString * {
+        return QLMHostCheckOtherHost();
+    } found:^(NSString *host) {
+        [weakSelf finishCheck:host];
+    }];
+    _hostWatch = watch;
+    [watch start];
+    if (_launchWatch != nil) {
+        _endLaunchWatch = _launchWatch(^(NSString *executablePath) {
+            [watch appChangedAtPath:executablePath];
+        });
+    }
+
     _port = IONotificationPortCreate(kIOMainPortDefault);
     IONotificationPortSetDispatchQueue(_port, queue);
     kern_return_t result = IOServiceAddMatchingNotification(_port, kIOFirstMatchNotification, QLMHostCheckCreateHIDMatching(),
@@ -141,11 +165,6 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                                          (__bridge void *)self, &_terminations) == KERN_SUCCESS) {
         [self takeTerminations];
     }
-
-    __weak QLMHIDAdapter *weakSelf = self;
-    _watch = [_clock every:QLMHIDWatchInterval queue:queue run:^{
-        [weakSelf checkHosts];
-    }];
 }
 
 - (void)stop {
@@ -153,8 +172,12 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return;
     }
     _running = NO;
-    [_watch cancel];
-    _watch = nil;
+    [_hostWatch stop];
+    _hostWatch = nil;
+    if (_endLaunchWatch != nil) {
+        _endLaunchWatch();
+        _endLaunchWatch = nil;
+    }
     [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is stopped.") removed:NO];
     if (_arrivals != IO_OBJECT_NULL) {
         IOObjectRelease(_arrivals);
@@ -164,9 +187,9 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         IOObjectRelease(_terminations);
         _terminations = IO_OBJECT_NULL;
     }
+    [self forgetService];
     IONotificationPortDestroy(_port);
     _port = NULL;
-    [self forgetService];
     const void *runningSelf = _runningSelf;
     _runningSelf = NULL;
     dispatch_async(_queue, ^{
@@ -183,6 +206,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         if (_device == NULL) {
             [self forgetService];
             _service = service;
+            [self watchService];
         } else {
             IOObjectRelease(service);
         }
@@ -205,10 +229,49 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 }
 
 - (void)forgetService {
+    [self unwatchService];
     if (_service != IO_OBJECT_NULL) {
         IOObjectRelease(_service);
         _service = IO_OBJECT_NULL;
     }
+}
+
+// IOKit sends an interest message to a service each time a process opens it,
+// tries to, or closes it. An open of the adapter goes through its HID
+// device, its USB interface, or its USB device, so each is watched, from the
+// HID device up to the USB device.
+- (void)watchService {
+    [self unwatchService];
+    io_registry_entry_t entry = _service;
+    IOObjectRetain(entry);
+    while (entry != IO_OBJECT_NULL && _interestCount < QLMHIDWatchedEntries) {
+        io_object_t interest = IO_OBJECT_NULL;
+        if (IOServiceAddInterestNotification(_port, entry, kIOGeneralInterest, QLMHIDInterest, (__bridge void *)self, &interest)
+            == KERN_SUCCESS) {
+            _interests[_interestCount++] = interest;
+        }
+        io_registry_entry_t parent = IO_OBJECT_NULL;
+        BOOL top = IOObjectConformsTo(entry, "IOUSBHostDevice");
+        if (top || IORegistryEntryGetParentEntry(entry, kIOServicePlane, &parent) != KERN_SUCCESS) {
+            parent = IO_OBJECT_NULL;
+        }
+        IOObjectRelease(entry);
+        entry = parent;
+    }
+    if (entry != IO_OBJECT_NULL) {
+        IOObjectRelease(entry);
+    }
+}
+
+- (void)unwatchService {
+    for (int i = 0; i < _interestCount; i++) {
+        IOObjectRelease(_interests[i]);
+    }
+    _interestCount = 0;
+}
+
+- (void)adapterChanged {
+    [_hostWatch adapterChanged];
 }
 
 - (void)refuse:(NSString *)host {
@@ -368,24 +431,10 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 #pragma mark - Watching for another host
 
-// The process scan takes milliseconds, so it runs off System's queue.
-- (void)checkHosts {
-    if (!_running || _checking) {
-        return;
-    }
-    _checking = YES;
-    dispatch_queue_t queue = _queue;
-    __weak QLMHIDAdapter *weakSelf = self;
-    dispatch_async(_checkQueue, ^{
-        NSString *host = QLMHostCheckOtherHost();
-        dispatch_async(queue, ^{
-            [weakSelf finishCheck:host];
-        });
-    });
-}
-
+// The host watch's answer. TRAP: the seize keeps GLM from opening the
+// adapter while qlm holds it, so the watch is the rule that qlm lets go
+// when GLM launches, and a net under the seize.
 - (void)finishCheck:(nullable NSString *)host {
-    _checking = NO;
     if (!_running) {
         return;
     }

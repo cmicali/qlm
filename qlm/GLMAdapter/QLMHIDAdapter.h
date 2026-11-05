@@ -12,10 +12,13 @@ NS_ASSUME_NONNULL_BEGIN
 // It never opens the adapter while another host has it: GLM 5 running, or
 // another process holding the device. Then every send fails with
 // QLMAdapterErrorBusy, whose description names the host, and nothing goes
-// out. It checks before it opens, again just after, and every second while
-// it runs; when a host appears, it closes the device at once. It opens the
-// device only seized, so GLM cannot open it meanwhile. When IOKit will not
-// let it seize the device, that too is a refusal.
+// out. It checks before it opens, and again just after. While it runs, it
+// checks again when GLM launches or quits, as the launch watch tells it,
+// and when a process opens the adapter, tries to, or closes it, as IOKit
+// tells it. It checks every 30 s too, in case an event never comes. When a
+// host appears, it closes the device at once. It opens the device only
+// seized, so GLM cannot open it meanwhile. When IOKit will not let it seize
+// the device, that too is a refusal.
 //
 // Each arrival of the adapter gets one report link, kept across closes and
 // reopens. If the link gives up, reconnect closes the device and opens it
@@ -29,6 +32,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 // Whether a device is open, which it is only seized.
 @property (nonatomic, readonly) BOOL seized;
+
+// Starts a watch of app launches and quits, which calls `changed` with each
+// app's executable path, from any queue, until the block it returns runs.
+// GLMAdapter links no AppKit, so the app hands it NSWorkspace's. Set it
+// before the start. Without one, as in qlmctl, IOKit's events and the 30 s
+// check remain.
+typedef dispatch_block_t _Nonnull (^QLMLaunchWatch)(void (^changed)(NSString *executablePath));
+@property (nonatomic, copy, nullable) QLMLaunchWatch launchWatch;
 
 @end
 
