@@ -389,6 +389,14 @@ NSRect QLMSkinSlotInk(QLMSkinTextSlot *slot, NSRect frame, CGFloat scale) {
     return NSInsetRect(NSUnionRect(frame, line), -2, -2);
 }
 
+void QLMSkinDrawSlotInInk(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits,
+                          CGFloat alpha) {
+    [NSGraphicsContext saveGraphicsState];
+    NSRectClip(QLMSkinSlotInk(slot, frame, scale));
+    QLMSkinDrawSlot(text, slot, frame, scale, monoDigits, alpha);
+    [NSGraphicsContext restoreGraphicsState];
+}
+
 void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits, CGFloat alpha) {
     if (text.length == 0) {
         return;

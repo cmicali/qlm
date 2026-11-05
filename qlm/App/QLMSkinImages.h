@@ -15,11 +15,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init NS_UNAVAILABLE;
 
 // png/<name>.png at scale 1, or its @2x at 2. NULL when the file won't
-// load. A miss waits on the skin's queue, behind any decode already asked
-// for, so nothing decodes twice.
+// load. Every call runs on the skin's queue, so it waits for the file being
+// decoded and the files the warm queued ahead of it, and nothing decodes
+// twice.
 - (nullable CGImageRef)decodedImage:(NSString *)name scale:(NSInteger)scale CF_RETURNS_NOT_RETAINED;
-// Decodes every image the skin names, at `scale`, largest first, on the
-// skin's queue.
+// Queues a decode of every image the skin names, at `scale`, one file to a
+// block, largest first, on the skin's queue.
 - (void)warmAtScale:(NSInteger)scale;
 
 // The value kept for `key`, made the first time it's asked for.

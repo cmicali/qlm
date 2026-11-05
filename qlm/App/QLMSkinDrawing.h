@@ -68,6 +68,10 @@ void QLMSkinDrawSlot(NSString *_Nullable text, QLMSkinTextSlot *slot, NSRect fra
 // Where a slot's text may ink, for one slot's redraw: its frame and its
 // line, with a margin for the glyphs' overhang.
 NSRect QLMSkinSlotInk(QLMSkinTextSlot *slot, NSRect frame, CGFloat scale);
+// QLMSkinDrawSlot clipped to the slot's ink, so a change that redraws only
+// that rect leaves none of the old text behind, however far it inked.
+void QLMSkinDrawSlotInInk(NSString *_Nullable text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits,
+                          CGFloat alpha);
 // Where a button's label goes on a face `faceWidth` wide: the LED, `led`
 // wide, then `gap`, then the title, centered as one block. A title too long
 // for the face, inside its padding, is cut short, never pushed off it.

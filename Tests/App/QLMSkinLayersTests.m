@@ -29,8 +29,9 @@ static void QLMTestEachView(NSView *view, void (^each)(NSView *view)) {
 }
 
 // As a window shows it: each view's update, then each layer's drawing.
-// TRAP: out of a window, renderInContext: draws a layer's content again,
-// whole, so it can't show what a partial redraw left.
+// Out of a window, this view tree's content layers came back drawn whole
+// at the render, so a test here can't show what a partial redraw left. A
+// standalone layer's render showed its partial state.
 static NSBitmapImageRep *QLMTestComposite(NSView *view) {
     view.wantsLayer = YES;  // as every view in a window is
     QLMTestEachView(view, ^(NSView *each) {
@@ -193,11 +194,12 @@ static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, QLMTestLook lo
 }
 
 // The ink outside `rect`, in pixels, of what `draw` draws in a bitmap
-// `size` points big.
-static NSInteger QLMTestInkOutside(NSSize size, NSRect rect, void (^draw)(void)) {
-    NSBitmapImageRep *bitmap = QLMTestDrawFlipped(size, draw);
-    NSRect pixels = NSMakeRect(rect.origin.x * QLMTestScale, rect.origin.y * QLMTestScale, rect.size.width * QLMTestScale,
-                               rect.size.height * QLMTestScale);
+// `size` points big at `scale`.
+static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void (^draw)(void)) {
+    NSBitmapImageRep *bitmap = QLMTestDrawFlippedAtScale(size, scale, draw);
+    // A redraw covers every pixel the rect touches.
+    NSRect pixels = NSIntegralRect(
+        NSMakeRect(rect.origin.x * scale, rect.origin.y * scale, rect.size.width * scale, rect.size.height * scale));
     NSInteger outside = 0;
     for (NSInteger y = 0; y < bitmap.pixelsHigh; y++) {
         for (NSInteger x = 0; x < bitmap.pixelsWide; x++) {
@@ -209,38 +211,48 @@ static NSInteger QLMTestInkOutside(NSSize size, NSRect rect, void (^draw)(void))
     return outside;
 }
 
-// A text's change redraws its slot's ink alone, so its slot must hold all
-// it draws, at the reference size and scaled up, or a change would leave
-// some of the old text behind.
+// A text's change redraws its slot's ink alone, so a slot draws nothing
+// past it: not a fallback font's glyphs, nor stacked combining marks, at
+// the reference size and scaled up, at 1x and 2x. Otherwise a change would
+// leave some of the old text behind.
 - (void)testASlotsTextInksInsideWhatItsChangeRedraws {
-    NSDictionary<NSString *, NSString *> *display = @{
-        @"caption": @"MAIN 4X2 WITH A LONG NAME", @"level": @"−88.8", @"unit": @"dB", @"output": @"OUTPUT −88.8",
-        @"max": @"MAX −88.8",
+    NSArray<NSString *> *names = @[@"MAIN 4X2 WITH A LONG NAME", @"监听 4X2", @"MAIN 4X2 \u0301\u0301\u0301"];
+    NSDictionary<NSString *, NSArray<NSString *> *> *display = @{
+        @"caption": names, @"level": @[@"−88.8", @"−100.0"], @"unit": @[@"dB"], @"output": @[@"OUTPUT −100.0", @"MUTED"],
+        @"max": @[@"MAX −88.8"],
     };
-    NSDictionary<NSString *, NSString *> *osd = @{
-        @"level": @"−88.8", @"unit": @"dB", @"title": @"Main monitors with a long name", @"subtitle": @"Muted · Dimmed",
+    NSDictionary<NSString *, NSArray<NSString *> *> *osd = @{
+        @"level": @[@"−100.0"], @"unit": @[@"dB"], @"title": names, @"subtitle": @[@"Muted · Dimmed"],
     };
     for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
         QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
         QLMSkinElement *element = [skin element:@"display"];
-        for (NSNumber *grow in @[@1, @1.7]) {
-            CGSize size = CGSizeMake(element.frame.size.width * grow.doubleValue, element.frame.size.height * grow.doubleValue);
-            for (NSString *slotName in display) {
-                QLMSkinTextSlot *slot = element.text[slotName];
-                NSRect frame = QLMSkinSlotFrame(element, slot, size);
-                CGFloat scale = QLMSkinSlotScale(element, slot, size);
-                NSInteger outside = QLMTestInkOutside(size, QLMSkinSlotInk(slot, frame, scale), ^{
-                    QLMSkinDrawSlot(display[slotName], slot, frame, scale, YES, 1);
-                });
-                XCTAssertEqual(outside, 0, @"%@ display %@ at %@", name, slotName, grow);
+        for (NSNumber *scale in @[@1, @2]) {
+            for (NSNumber *grow in @[@1, @1.7]) {
+                // Whole points, so the bitmap lies on the pixels the drawing does.
+                CGSize size = CGSizeMake(round(element.frame.size.width * grow.doubleValue),
+                                         round(element.frame.size.height * grow.doubleValue));
+                for (NSString *slotName in display) {
+                    QLMSkinTextSlot *slot = element.text[slotName];
+                    NSRect frame = QLMSkinSlotFrame(element, slot, size);
+                    CGFloat slotScale = QLMSkinSlotScale(element, slot, size);
+                    for (NSString *text in display[slotName]) {
+                        NSInteger outside = QLMTestInkOutside(size, scale.doubleValue, QLMSkinSlotInk(slot, frame, slotScale), ^{
+                            QLMSkinDrawSlotInInk(text, slot, frame, slotScale, YES, 1);
+                        });
+                        XCTAssertEqual(outside, 0, @"%@ display %@ \"%@\" at %@, %@x", name, slotName, text, grow, scale);
+                    }
+                }
             }
-        }
-        for (NSString *slotName in osd) {
-            QLMSkinTextSlot *slot = skin.osd.text[slotName];
-            NSInteger outside = QLMTestInkOutside(skin.osd.frame.size, QLMSkinSlotInk(slot, slot.frame, 1), ^{
-                QLMSkinDrawSlot(osd[slotName], slot, slot.frame, 1, YES, 1);
-            });
-            XCTAssertEqual(outside, 0, @"%@ OSD %@", name, slotName);
+            for (NSString *slotName in osd) {
+                QLMSkinTextSlot *slot = skin.osd.text[slotName];
+                for (NSString *text in osd[slotName]) {
+                    NSInteger outside = QLMTestInkOutside(skin.osd.frame.size, scale.doubleValue, QLMSkinSlotInk(slot, slot.frame, 1), ^{
+                        QLMSkinDrawSlotInInk(text, slot, slot.frame, 1, YES, 1);
+                    });
+                    XCTAssertEqual(outside, 0, @"%@ OSD %@ \"%@\", %@x", name, slotName, text, scale);
+                }
+            }
         }
     }
 }

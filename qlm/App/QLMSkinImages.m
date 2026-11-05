@@ -85,11 +85,13 @@ static NSString *QLMSkinDecodedKey(NSString *name, NSInteger scale) {
     NSArray<NSString *> *largestFirst = [sizes keysSortedByValueUsingComparator:^NSComparisonResult(NSNumber *a, NSNumber *b) {
         return [b compare:a];
     }];
-    dispatch_async(_queue, ^{
-        for (NSString *name in largestFirst) {
+    // A block per file, so a miss waits behind those queued ahead of it,
+    // not the whole list.
+    for (NSString *name in largestFirst) {
+        dispatch_async(_queue, ^{
             [self decodeOnQueue:name scale:scale];
-        }
-    });
+        });
+    }
 }
 
 - (id)objectForKey:(NSString *)key make:(id _Nullable (^)(void))make {

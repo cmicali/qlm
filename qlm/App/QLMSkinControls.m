@@ -558,8 +558,8 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
                 continue;
             }
             QLMSkinTextSlot *slot = element.text[name];
-            QLMSkinDrawSlot(texts[name], slot, QLMSkinSlotFrame(element, slot, size), QLMSkinSlotScale(element, slot, size),
-                            YES, 1);
+            QLMSkinDrawSlotInInk(texts[name], slot, QLMSkinSlotFrame(element, slot, size),
+                                 QLMSkinSlotScale(element, slot, size), YES, 1);
         }
     });
 }
@@ -652,7 +652,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     };
     for (NSString *name in texts) {
         if (NSIntersectsRect([self inkOfSlot:name], dirtyRect)) {
-            QLMSkinDrawSlot(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
+            QLMSkinDrawSlotInInk(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
         }
     }
 

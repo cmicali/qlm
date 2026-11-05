@@ -304,9 +304,11 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
     }
     CGContextTranslateCTM(context, -_contentOrigin.x, -_contentOrigin.y);
     NSRect dirty = CGContextGetClipBoundingBox(context);
-    // TRAP: a partial redraw keeps what was there, so the old text would
-    // show under the new. A whole one starts clear, and its clear here
-    // would cost a live resize a frame's fill of the window.
+    // A guard for a window, which no one could check: in a standalone 2x
+    // layer, Core Animation cleared a partial redraw's rect itself, but if
+    // it ever doesn't, the old text would show under the new. A whole
+    // redraw starts clear, and a clear here would cost a live resize a
+    // frame's fill of the window.
     NSRect whole = NSMakeRect(_contentOrigin.x, _contentOrigin.y, layer.bounds.size.width, layer.bounds.size.height);
     if (!NSContainsRect(dirty, whole)) {
         CGContextClearRect(context, dirty);
