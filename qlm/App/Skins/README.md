@@ -75,3 +75,7 @@ Every element has `frame`, and may have `anchors` and `text`. Its other keys are
 **The OSD.** `osd` has `size`, at least 300 by 72, an image or draw, `bar`, and `text`, and may have `capInsets`. `bar` has `frame`, `track`, and `fill`, and may have `radius`. `text` has `level`, `unit`, `title`, and `subtitle`. Its frames are in the OSD. The OSD keeps its size, so its slots take no `anchors` or `scales`.
 
 A `disabledOverlay` is a color laid over the display while System is stopped, in the shape of what it covers.
+
+Since #86, `osd.disabledOverlay` and the nameplate's `tagline` slot are accepted and ignored, so a skin copied from modern before then still loads.
+
+A slot that `scales` draws its text at the nearest half point.

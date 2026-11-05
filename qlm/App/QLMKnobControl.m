@@ -52,6 +52,12 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     return [self stepBy:-1];
 }
 
+// Not QLMSkinControl's, which sends the action with the level as it stands,
+// off the steps the action promises. A knob has no press.
+- (BOOL)accessibilityPerformPress {
+    return NO;
+}
+
 - (double)doubleValue {
     return _value;
 }

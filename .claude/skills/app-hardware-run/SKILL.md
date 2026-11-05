@@ -65,7 +65,7 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
 
 `dump_state` gives:
 
-- `usesAdapter`, `sliderRange` (`lowestDecibels` and `ceilingDecibels`), `quitGLMButton` (its title, or null while hidden), `quitAsksFirst`, `popoverShown`, and `windows`. For the main window, it gives `windowShowing`, `windowApplyError` (the last error of its group buttons, until the next click), `skinName` (the setting), `windowSkin` (the skin that shows), `skinRefusal` (why the saved skin does not load, or null), and `opensWindowAtLaunch`. `osd` gives the OSD's settings, `showsOSD`, `placement`, and `seconds`, and whether it is `showing`.
+- `usesAdapter`, `sliderRange` (`lowestDecibels` and `ceilingDecibels`), `quitGLMButton` (its title, or null while hidden), `quitAsksFirst`, `popoverShown`, and `windows`. For the main window, it gives `windowShowing`, `windowApplyError` (the last error of its group buttons, until the next click), `skinName` (the setting), `windowSkin` (the skin that shows), `skinRefusal` (why the saved skin did not load at launch or at the last pick, or null. It does not read the disk again), and `opensWindowAtLaunch`. `osd` gives the OSD's settings, `showsOSD`, `placement`, and `seconds`, and whether it is `showing`.
 - `snapshot`, or null before System's first one:
   - `running`, `idle`, `busProblem` (`none`, `noAdapter`, `glm`, or `otherHost`), `adapterProblem`, `reconnects`, and `adapterError`. `reconnects` counts System's tries to reopen the adapter since its link gave up. `adapterProblem` is `none`, `unresponsive`, `lostTrack`, or `notTaking`.
   - `adapter`: the device, model, and serial, and the knob: `knobPresent` and `knobTenths`.

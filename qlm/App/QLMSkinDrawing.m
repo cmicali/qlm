@@ -257,8 +257,6 @@ static NSFont *QLMSkinMakeFont(NSString *_Nullable name, BOOL mono, CGFloat size
 }
 
 // Each face, once: building one through descriptors costs more than a draw.
-// A scaled slot's size follows a live resize, so it goes to the half point
-// first, or each frame would make two new fonts.
 NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weight, BOOL italic, BOOL monoDigits) {
     static NSCache<NSString *, NSFont *> *cache;
     static dispatch_once_t once;
@@ -266,7 +264,6 @@ NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weigh
         cache = [[NSCache alloc] init];
         cache.countLimit = 64;
     });
-    size = round(size * 2) / 2;
     NSString *key = [NSString stringWithFormat:@"%@|%d|%g|%ld|%d|%d", name ?: @"", mono, size, (long)weight, italic, monoDigits];
     NSFont *font = [cache objectForKey:key];
     if (font == nil) {
@@ -277,7 +274,10 @@ NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weigh
 }
 
 NSFont *QLMSkinSlotFont(QLMSkinTextSlot *slot, CGFloat scale, BOOL monoDigits) {
-    return QLMSkinFont(slot.fontName, slot.mono, slot.size * scale, slot.weight, slot.italic, monoDigits);
+    // A scaled size follows a live resize, so it goes to the half point, or
+    // each frame would make new fonts.
+    CGFloat size = scale == 1 ? slot.size : MAX(0.5, round(slot.size * scale * 2) / 2);
+    return QLMSkinFont(slot.fontName, slot.mono, size, slot.weight, slot.italic, monoDigits);
 }
 
 NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSColor *color, QLMSkinAlignment alignment,

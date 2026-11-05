@@ -59,6 +59,12 @@ static BOOL QLMSkinIsNumber(id value) {
     return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID();
 }
 
+// Keys format 1 had until #86, by the path they sit at. A user's skin copied
+// from modern before then carries them, so they are accepted and never read.
+static NSDictionary<NSString *, NSArray<NSString *> *> *QLMSkinIgnoredKeys(void) {
+    return @{@"elements.nameplate.text": @[@"tagline"], @"osd": @[@"disabledOverlay"]};
+}
+
 NSString *QLMSkinImagePath(NSString *name, NSInteger scale) {
     return [@"png" stringByAppendingPathComponent:[name stringByAppendingString:scale >= 2 ? @"@2x.png" : @".png"]];
 }
@@ -848,12 +854,16 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
         return @{};
     }
     NSDictionary *object = [self object:value at:path];
-    if (![self checkKeys:object at:path allowed:[required arrayByAddingObjectsFromArray:optional] required:required]) {
+    NSArray<NSString *> *ignored = QLMSkinIgnoredKeys()[path] ?: @[];
+    NSArray<NSString *> *allowed = [[required arrayByAddingObjectsFromArray:optional] arrayByAddingObjectsFromArray:ignored];
+    if (![self checkKeys:object at:path allowed:allowed required:required]) {
         return @{};
     }
     NSMutableDictionary<NSString *, QLMSkinTextSlot *> *slots = [NSMutableDictionary dictionary];
     for (NSString *name in [object.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
-        slots[name] = [self slot:object[name] placed:placed at:QLMSkinKey(path, name)];
+        if (![ignored containsObject:name]) {
+            slots[name] = [self slot:object[name] placed:placed at:QLMSkinKey(path, name)];
+        }
     }
     return slots;
 }
@@ -1277,7 +1287,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     osd.name = @"osd";
     NSDictionary *object = [self object:value at:@"osd"];
     if (![self checkKeys:object at:@"osd"
-                 allowed:@[@"size", @"image", @"draw", @"capInsets", @"bar", @"text"]
+                 allowed:[@[@"size", @"image", @"draw", @"capInsets", @"bar", @"text"] arrayByAddingObjectsFromArray:QLMSkinIgnoredKeys()[@"osd"]]
                 required:@[@"size", @"bar", @"text"]]) {
         return osd;
     }

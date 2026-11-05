@@ -192,7 +192,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     QLMMainWindowModel *model = self.model;
     model.snapshot = self.monitorList.snapshot;
     QLMSystem *system = self.system;
-    NSString *refusal = system == nil ? @"System is not running" : [model refusalToClickGroupNamed:name];
+    NSString *refusal = [model refusalToClickGroupNamed:name] ?: (system == nil ? @"System is not running" : nil);
     if (refusal != nil) {
         return refusal;
     }

@@ -299,11 +299,23 @@
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"elements"][@"logo"] = json[@"elements"][@"nameplate"];
     } refusedWith:@"elements has an unknown key, logo"];
-    // The OSD shows only while System runs, so it is never disabled.
-    [self assertChange:^(NSMutableDictionary *json) {
-        json[@"osd"][@"disabledOverlay"] = @"#00000080";
-    } refusedWith:@"osd has an unknown key, disabledOverlay"];
 }
+
+// A user's skin copied from modern before #86 carries the OSD's
+// disabledOverlay and the nameplate's tagline. Format 1 still takes both,
+// and reads neither.
+- (void)testTheKeysBefore86StillLoad {
+    NSError *error = nil;
+    QLMSkin *skin = [self skin:QLMModernSkinURL() changedBy:^(NSMutableDictionary *json) {
+        json[@"osd"][@"disabledOverlay"] = @"#1e1f1cb0";
+        json[@"elements"][@"nameplate"][@"text"][@"tagline"] =
+            [@{@"frame": @[@0, @40, @200, @12], @"size": @9, @"color": @"#a3a59c"} mutableCopy];
+    } error:&error];
+    XCTAssertNotNil(skin, @"%@", error.localizedDescription);
+    XCTAssertNil([skin element:@"nameplate"].text[@"tagline"]);
+    XCTAssertNotNil([skin element:@"nameplate"].text[@"logo"]);
+}
+
 
 - (void)testAMissingElementIsRefused {
     [self assertChange:^(NSMutableDictionary *json) {
