@@ -14,6 +14,10 @@
 #define QLM_KNOB_END_DEGREES (QLM_KNOB_START_DEGREES + QLM_KNOB_SWEEP_DEGREES)
 #define QLM_KNOB_STEP_DECIBELS QLMVolumeDecibelsStep
 
+static inline double QLMKnobRadians(double degrees) {
+    return degrees * M_PI / 180.0;
+}
+
 static inline double QLMKnobClamp(double value, double low, double high) {
     return value < low ? low : value > high ? high : value;
 }
@@ -113,7 +117,7 @@ static inline double QLMKnobDragVertical(double level, double dy, double minimum
 
 // A point at `radius` from (cx, cy) along `degrees`, y down.
 static inline void QLMKnobPointAt(double cx, double cy, double radius, double degrees, double *x, double *y) {
-    double radians = degrees * M_PI / 180.0;
+    double radians = QLMKnobRadians(degrees);
     *x = cx + radius * sin(radians);
     *y = cy - radius * cos(radians);
 }

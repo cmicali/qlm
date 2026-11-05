@@ -55,6 +55,9 @@ NS_ASSUME_NONNULL_BEGIN
 // What the view draws over its material, in its flipped bounds.
 - (void)drawSkinContent:(NSRect)dirtyRect;
 @optional
+// NO while drawSkinContent: would draw nothing, so an update draws no
+// content. YES if not implemented.
+- (BOOL)drawsSkinContent;
 // Sets the moving layers' geometry and look for the view's state, with no
 // ease. Each update of the layers calls it, after the materials.
 - (void)layoutSkinMovingLayers:(QLMSkinLayers *)layers;
@@ -100,7 +103,7 @@ NS_ASSUME_NONNULL_BEGIN
 // inside it.
 - (__kindof CALayer *)makeLayerOfClass:(Class)layerClass;
 // The view's own layers, from makeLayerOfClass:, bottom first, over its
-// material.
+// material. Set at the view's init: the next update puts them in.
 @property (nonatomic, copy) NSArray<CALayer *> *movingLayers;
 // Puts `material` in `layer`, at the material's frame in the view, in the
 // view's layer's coordinates.

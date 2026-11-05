@@ -179,7 +179,7 @@ These files in `qlm/App/`, over the resources. Those marked Foundation only comp
 
 A view's material, its images and its draw blocks, is its layer's contents, and the view draws only its content, its text and focus ring, in one layer above. So a change of a level composites the glass, and draws no image again.
 
-What moves with the level has layers of its own, between the material and the content. The knob's pointer is a `CAShapeLayer` drawn pointing up, and a level turns it. Modern's lit arc is a `CAShapeLayer` of the whole sweep, and a level sets its `strokeEnd`. The arc is a curve per degree, since one arc of a few curves puts `strokeEnd` up to half a degree off. The OSD's track is material. Its fill is a bitmap of the whole bar, in a layer that clips it, and a level sets the clip's width, in whole points. So a step sets one property and draws nothing. Core Animation eases it on the render server, from where the layer shows, with no work in qlm per frame. At rest the fill draws as it did. The pointer and the arc differ only in a few edge pixels, since the render server rasterizes a shape itself.
+What moves with the level has layers of its own, between the material and the content. The knob's pointer is a `CAShapeLayer` drawn pointing up, and a level turns it. Modern's lit arc is a `CAShapeLayer` of the whole sweep, and a level sets its `strokeEnd`. The arc is made of 30° curves, since one arc of a few curves puts `strokeEnd` up to half a degree off. The knob draws no content layer while it has no focus ring to draw. The OSD's track is material. Its fill is a bitmap of the whole bar, in a layer that clips it, and a level sets the clip's width, in whole points. So a step sets one property and draws nothing. Core Animation eases it on the render server, from where the layer shows, with no work in qlm per frame. At rest the fill draws as it did. The pointer and the arc differ only in a few edge pixels, since the render server rasterizes a shape itself.
 
 A layered view is a leaf, since a subview's layer would sit among its own. A draw block is drawn narrow and stretched by the layer, so it must draw the same along each straight edge, as every key but the gradient does along its height. Every shadow is cast in a bitmap, in points, as it falls in a view on the screen, since a layer's own context casts one apart.
 
@@ -204,7 +204,7 @@ Each new control gets a verb, so `.claude/skills/app-hardware-run` can drive the
 | `skin_preview <name> <window\|disabled\|osd>` | Opens a look at a skin, with sample text, without choosing it: its window, its window with every control disabled, or its OSD. Skin authors screenshot it |
 | `fake_knob <tenths>` | Turns the fake bus's knob, as its window's slider does, so the OSD can be seen on a turn |
 
-`dump_state` gains the skin's name and why it is refused, if it is, the OSD's settings, and whether the window and the OSD are showing. `dump_screenshot -` already captures the key window, so each skin's rendering can be checked by eye from a script. It ends any ease first, so it shows the level, not the way there.
+`dump_state` gains the skin's name and why it is refused, if it is, the OSD's settings, and whether the window and the OSD are showing. `dump_screenshot -` already captures the key window, so each skin's rendering can be checked by eye from a script. It, and `dump_view_tree`, end any ease first, so a screenshot shows the level, not the way there.
 
 ## The work, in order
 

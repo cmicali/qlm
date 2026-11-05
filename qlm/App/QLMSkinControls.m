@@ -584,8 +584,8 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
 
 @implementation QLMSkinOSDView {
     QLMSkin *_skin;
-    CALayer *_fillClip;  // the fill shows as far as its width
-    CALayer *_fill;      // the whole bar's fill
+    CALayer *_fillClip;
+    CALayer *_fill;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -648,7 +648,6 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     [self showFractionEased:QLMSkinEases(self)];
 }
 
-// The bar's whole shape in `color`, in `rect`.
 static void QLMSkinOSDFillBar(QLMSkinBar *bar, QLMSkinColor color, NSRect rect) {
     CGFloat radius = MIN(bar.radius, rect.size.height / 2);
     [QLMSkinNSColor(color) setFill];

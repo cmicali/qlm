@@ -11,6 +11,9 @@ static const CGFloat QLMKnobScrollPointsPerStep = 12;
 // nowhere.
 static const CGFloat QLMKnobDeadFraction = 0.25;
 static NSString *const QLMKnobTurnKey = @"transform.rotation.z";
+// TRAP: one arc of a few curves puts strokeEnd up to half a degree off its
+// share of the sweep. Curves of 30° each put it within a twentieth of one.
+static const double QLMKnobArcSegmentDegrees = 30;
 
 @implementation QLMKnobControl {
     double _value;
@@ -18,6 +21,8 @@ static NSString *const QLMKnobTurnKey = @"transform.rotation.z";
     BOOL _dragging;
     CAShapeLayer *_arc;  // nil for a skin with no arc
     CAShapeLayer *_pointer;
+    NSSize _pathSize;  // the bounds the paths were built for
+    BOOL _pathFlipped;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -32,6 +37,12 @@ static NSString *const QLMKnobTurnKey = @"transform.rotation.z";
             _arc = [self.layers makeLayerOfClass:[CAShapeLayer class]];
         }
         self.layers.movingLayers = _arc != nil ? @[_arc, _pointer] : @[_pointer];
+        for (CAShapeLayer *layer in self.layers.movingLayers) {
+            layer.fillColor = nil;
+            layer.lineCap = kCALineCapRound;
+        }
+        _pointer.lineWidth = skin.knob.pointerWidth;
+        _arc.lineWidth = skin.knob.arcWidth;
     }
     return self;
 }
@@ -91,15 +102,18 @@ static NSString *const QLMKnobTurnKey = @"transform.rotation.z";
     [self showLevelEased:[self easesLevel]];
 }
 
-// A change of the range moves the pointer at once.
 - (void)setMinValue:(double)minValue {
     _minValue = minValue;
-    _value = [self clamped:_value];
-    [self showLevelEased:NO];
+    [self rangeDidChange];
 }
 
 - (void)setMaxValue:(double)maxValue {
     _maxValue = maxValue;
+    [self rangeDidChange];
+}
+
+// It moves the pointer at once.
+- (void)rangeDidChange {
     _value = [self clamped:_value];
     [self showLevelEased:NO];
 }
@@ -220,17 +234,11 @@ static void QLMKnobStroke(NSBezierPath *path, CGFloat width, NSColor *color) {
     [path stroke];
 }
 
-static double QLMKnobRadians(double degrees) {
-    return degrees * M_PI / 180.0;
-}
-
 // The arc's whole sweep, around `center`, in a space whose y grows down,
 // mapped by `transform`. Its angles run from +x toward +y, so up is -90.
-// TRAP: one arc of a few curves puts strokeEnd up to half a degree off its
-// share of the sweep. A curve per degree puts it on.
 static CGPathRef QLMKnobArcPath(NSPoint center, CGFloat radius, CGAffineTransform transform) {
     CGMutablePathRef path = CGPathCreateMutable();
-    int count = (int)ceil(QLM_KNOB_SWEEP_DEGREES);
+    int count = (int)round(QLM_KNOB_SWEEP_DEGREES / QLMKnobArcSegmentDegrees);
     for (int i = 0; i < count; i++) {
         double from = QLM_KNOB_START_DEGREES + i * QLM_KNOB_SWEEP_DEGREES / count;
         double to = QLM_KNOB_START_DEGREES + (i + 1) * QLM_KNOB_SWEEP_DEGREES / count;
@@ -344,26 +352,36 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
         layer.bounds = (CGRect){CGPointZero, frame.size};
         layer.position = CGPointMake(NSMidX(frame), NSMidY(frame));
         layer.contentsScale = layers.scale;
-        layer.fillColor = nil;
-        layer.lineCap = kCALineCapRound;
     }
-    CGAffineTransform toLayer = _pointer.contentsAreFlipped ? CGAffineTransformIdentity
-                                                            : CGAffineTransformMake(1, 0, 0, -1, 0, bounds.size.height);
-    CGPathRef pointer = QLMKnobPointerPath(center, knob.pointerInner, knob.pointerOuter, toLayer);
-    _pointer.path = pointer;
-    CGPathRelease(pointer);
-    _pointer.lineWidth = knob.pointerWidth;
-    _pointer.strokeColor = [self pointerColor].CGColor;
+    BOOL flipped = _pointer.contentsAreFlipped;
+    if (_pointer.path == NULL || !NSEqualSizes(bounds.size, _pathSize) || flipped != _pathFlipped) {
+        _pathSize = bounds.size;
+        _pathFlipped = flipped;
+        CGAffineTransform toLayer = flipped ? CGAffineTransformIdentity
+                                            : CGAffineTransformMake(1, 0, 0, -1, 0, bounds.size.height);
+        CGPathRef pointer = QLMKnobPointerPath(center, knob.pointerInner, knob.pointerOuter, toLayer);
+        _pointer.path = pointer;
+        CGPathRelease(pointer);
+        if (_arc != nil) {
+            CGPathRef arc = QLMKnobArcPath(center, knob.arcRadius, toLayer);
+            _arc.path = arc;
+            CGPathRelease(arc);
+        }
+    }
+    QLMKnobSetStroke(_pointer, [self pointerColor]);
     if (_arc != nil) {
-        CGPathRef arc = QLMKnobArcPath(center, knob.arcRadius, toLayer);
-        _arc.path = arc;
-        CGPathRelease(arc);
-        _arc.lineWidth = knob.arcWidth;
-        _arc.strokeColor = [self arcFillColor].CGColor;
+        QLMKnobSetStroke(_arc, [self arcFillColor]);
         _arc.strokeEnd = [self arcEnd];
     }
     // An ease under way goes on.
     [_pointer setValue:@([self pointerTurn]) forKeyPath:QLMKnobTurnKey];
+}
+
+static void QLMKnobSetStroke(CAShapeLayer *layer, NSColor *color) {
+    CGColorRef stroke = color.CGColor;
+    if (!CGColorEqualToColor(layer.strokeColor, stroke)) {
+        layer.strokeColor = stroke;
+    }
 }
 
 - (double)pointerTurn {
@@ -375,7 +393,6 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     return QLMKnobFraction(_value, self.minValue, self.maxValue);
 }
 
-// The pointer turns, and the arc's fill runs to it.
 - (void)showLevelEased:(BOOL)eases {
     QLMSkinSetLayerValue(_pointer, QLMKnobTurnKey, @([self pointerTurn]), eases);
     if (_arc != nil) {
@@ -397,8 +414,12 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     QLMKnobStroke(pointer, knob.pointerWidth, [self pointerColor]);
 }
 
+- (BOOL)drawsSkinContent {
+    return self.focused && self.enabled;
+}
+
 - (void)drawSkinContent:(NSRect)dirtyRect {
-    if (self.focused && self.enabled) {
+    if ([self drawsSkinContent]) {
         QLMSkinDrawFocus(self.skin.knob.focus, [self rectAround:self.skin.knob.bodySize / 2], YES);
     }
 }

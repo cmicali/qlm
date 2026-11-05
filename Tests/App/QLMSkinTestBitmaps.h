@@ -2,6 +2,7 @@
 #define QLMSKINTESTBITMAPS_H
 
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 
 #import "QLMSkinDrawing.h"
 
@@ -70,6 +71,24 @@ static inline NSRange QLMTestInkRows(NSBitmapImageRep *bitmap, CGFloat alpha) {
         return u[3] > alpha * 255;
     });
     return NSIsEmptyRect(ink) ? NSMakeRange(NSNotFound, 0) : NSMakeRange((NSUInteger)NSMinY(ink), (NSUInteger)ink.size.height);
+}
+
+// An offscreen window, as the screen's: it draws without being shown.
+static inline NSWindow *QLMTestOffscreenWindow(NSSize size) {
+    NSWindow *window = [[NSWindow alloc] initWithContentRect:(NSRect){NSZeroPoint, size} styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered defer:NO];
+    window.releasedWhenClosed = NO;
+    window.contentView.wantsLayer = YES;  // as on the screen
+    return window;
+}
+
+// What a window on the screen does at its next frame. TRAP: here, a
+// window's displayIfNeeded draws nothing. The transaction's commit draws,
+// and gives each layer its presentation.
+static inline void QLMTestPumpWindow(NSWindow *window) {
+    [window displayIfNeeded];
+    [CATransaction flush];
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
 }
 
 NS_ASSUME_NONNULL_END

@@ -9,20 +9,6 @@ const CFTimeInterval QLMSkinEaseSeconds = 0.14;
 
 static NSInteger QLMSkinEaseHolds;
 
-#if DEBUG
-static NSHashTable<CALayer *> *QLMSkinEasedLayers;
-
-void QLMSkinFinishEases(void) {
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
-    for (CALayer *layer in QLMSkinEasedLayers) {
-        [layer removeAllAnimations];
-    }
-    [CATransaction commit];
-    [QLMSkinEasedLayers removeAllObjects];
-    [CATransaction flush];
-}
-#endif
 
 static BOOL QLMSkinMotionIsReduced(void) {
     return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
@@ -41,12 +27,15 @@ void QLMSkinWithoutEase(void (^block)(void)) {
     QLMSkinEaseHolds--;
 }
 
-// A layer never committed has no presentation, so its first value never
-// eases.
+// The ease starts from the presentation only while an ease runs. A layer
+// not yet in its view's layer has never shown, so its first value never
+// eases. The layers' delegate turns implicit animations off.
 void QLMSkinSetLayerValue(CALayer *layer, NSString *keyPath, id value, BOOL eases) {
-    id from = eases ? [layer.presentationLayer valueForKeyPath:keyPath] : nil;
-    [CATransaction begin];
-    [CATransaction setDisableActions:YES];
+    id from = nil;
+    if (eases && layer.superlayer != nil) {
+        from = [layer animationForKey:keyPath] != nil ? [layer.presentationLayer valueForKeyPath:keyPath]
+                                                       : [layer valueForKeyPath:keyPath];
+    }
     [layer setValue:value forKeyPath:keyPath];
     if (from != nil && ![from isEqual:value]) {
         CABasicAnimation *ease = [CABasicAnimation animationWithKeyPath:keyPath];
@@ -55,17 +44,37 @@ void QLMSkinSetLayerValue(CALayer *layer, NSString *keyPath, id value, BOOL ease
         ease.duration = QLMSkinEaseSeconds;
         ease.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
         [layer addAnimation:ease forKey:keyPath];
-#if DEBUG
-        if (QLMSkinEasedLayers == nil) {
-            QLMSkinEasedLayers = [NSHashTable weakObjectsHashTable];
-        }
-        [QLMSkinEasedLayers addObject:layer];
-#endif
     } else {
         [layer removeAnimationForKey:keyPath];
     }
-    [CATransaction commit];
 }
+
+#if DEBUG
+static void QLMSkinFinishEasesIn(NSView *view) {
+    if ([view conformsToProtocol:@protocol(QLMSkinLayered)] && [view respondsToSelector:@selector(layers)]) {
+        for (CALayer *layer in ((QLMSkinLayers *)[(id)view layers]).movingLayers) {
+            [layer removeAllAnimations];
+            for (CALayer *sublayer in layer.sublayers) {
+                [sublayer removeAllAnimations];
+            }
+        }
+    }
+    for (NSView *subview in view.subviews) {
+        QLMSkinFinishEasesIn(subview);
+    }
+}
+
+// Only the moving layers: AppKit's own layer animations, as a spinner's,
+// would never come back.
+void QLMSkinFinishEases(void) {
+    for (NSWindow *window in NSApp.windows) {
+        if (window.contentView != nil) {
+            QLMSkinFinishEasesIn(window.contentView);
+        }
+    }
+    [CATransaction flush];
+}
+#endif
 
 @interface QLMSkinLayers ()
 // `rect`, grown to the window's pixels, in the view.
@@ -258,7 +267,6 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
 @implementation QLMSkinLayers {
     __weak NSView<QLMSkinLayered> *_view;
     NSMutableArray<CALayer *> *_materials;
-    NSArray<CALayer *> *_movingLayers;
     CALayer *_content;
     NSRect _contentFrame;  // the content layer's frame, in the view, at the last update
     NSSize _size;          // the view's size at the last update
@@ -320,15 +328,16 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
         [self showMaterial:materials[i] inLayer:_materials[i]];
     }
     if ([view respondsToSelector:@selector(layoutSkinMovingLayers:)]) {
-        [CATransaction begin];
-        [CATransaction setDisableActions:YES];
         [view layoutSkinMovingLayers:self];
-        [CATransaction commit];
     }
     _contentFrame = [self contentFrame];
     _content.frame = [view convertRectToLayer:_contentFrame];
     _content.contentsScale = self.scale;
-    [_content setNeedsDisplay];
+    if ([view respondsToSelector:@selector(drawsSkinContent)] && ![view drawsSkinContent]) {
+        _content.contents = nil;
+    } else {
+        [_content setNeedsDisplay];
+    }
 }
 
 - (void)showMaterial:(QLMSkinMaterial *)material inLayer:(CALayer *)layer {
@@ -345,11 +354,6 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
     CALayer *layer = [layerClass layer];
     layer.delegate = self;
     return layer;
-}
-
-- (void)setMovingLayers:(NSArray<CALayer *> *)movingLayers {
-    _movingLayers = [movingLayers copy];
-    _view.needsDisplay = YES;
 }
 
 - (void)drawReference:(NSRect)dirtyRect {

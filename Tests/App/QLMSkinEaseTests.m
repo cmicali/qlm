@@ -42,22 +42,6 @@ static BOOL QLMTestMotionIsReduced(void) {
 }
 @end
 
-static NSWindow *QLMTestEaseWindow(void) {
-    NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 400, 400) styleMask:NSWindowStyleMaskBorderless
-                                                     backing:NSBackingStoreBuffered defer:NO];
-    window.releasedWhenClosed = NO;
-    window.contentView.wantsLayer = YES;
-    return window;
-}
-
-// TRAP: here, a window's displayIfNeeded draws nothing. The transaction's
-// commit draws, and gives each layer its presentation.
-static void QLMTestPump(NSWindow *window) {
-    [window displayIfNeeded];
-    [CATransaction flush];
-    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-}
-
 static CAShapeLayer *QLMTestPointer(QLMKnobControl *knob) {
     return (CAShapeLayer *)knob.layers.movingLayers.lastObject;
 }
@@ -77,14 +61,14 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
     QLMTestReduced = NO;
     QLMSkinEaseWindowIsSeen = QLMTestWindowIsSeen;
     QLMSkinEaseMotionIsReduced = QLMTestMotionIsReduced;
-    _window = QLMTestEaseWindow();
+    _window = QLMTestOffscreenWindow(NSMakeSize(400, 400));
     _knob = [[QLMTestCountingKnob alloc] initWithSkin:QLMBuiltInSkin(@"modern")];
     _knob.frame = NSMakeRect(20, 20, 200, 200);
     _knob.minValue = -80;
     _knob.maxValue = -30;
     _knob.doubleValue = -59;
     [_window.contentView addSubview:_knob];
-    QLMTestPump(_window);
+    QLMTestPumpWindow(_window);
 }
 
 - (void)tearDown {
@@ -95,7 +79,7 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
 }
 
 - (double)turnAt:(double)decibels {
-    double radians = QLMKnobAngleForDecibels(decibels, -80, -30) * M_PI / 180;
+    double radians = QLMKnobRadians(QLMKnobAngleForDecibels(decibels, -80, -30));
     return QLMTestPointer(_knob).contentsAreFlipped ? radians : -radians;
 }
 
@@ -104,7 +88,7 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
 - (void)testAStepSetsTheLayersAndDrawsNothing {
     _knob.updates = 0;
     XCTAssertTrue([_knob stepBy:1]);
-    QLMTestPump(_window);
+    QLMTestPumpWindow(_window);
     XCTAssertEqual(_knob.updates, 0);
     CAShapeLayer *arc = (CAShapeLayer *)_knob.layers.movingLayers.firstObject;
     XCTAssertEqualWithAccuracy([[QLMTestPointer(_knob) valueForKeyPath:QLMTestTurn] doubleValue], [self turnAt:-58.5], 1e-9);
@@ -125,7 +109,7 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
     held.speed = 0;
     held.timeOffset = 0.5;
     [pointer addAnimation:held forKey:QLMTestTurn];
-    QLMTestPump(_window);
+    QLMTestPumpWindow(_window);
     double shown = [[pointer.presentationLayer valueForKeyPath:QLMTestTurn] doubleValue];
     XCTAssertEqualWithAccuracy(shown, ([self turnAt:-59] + [self turnAt:-45]) / 2, 1e-6);
 
@@ -167,7 +151,7 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
     [_window.contentView addSubview:knob];
     knob.doubleValue = -20;
     XCTAssertNil([QLMTestPointer(knob) animationForKey:QLMTestTurn]);
-    QLMTestPump(_window);
+    QLMTestPumpWindow(_window);
     XCTAssertNil([QLMTestPointer(knob) animationForKey:QLMTestTurn]);
 }
 
@@ -192,12 +176,12 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
 // The OSD's fill shows to the level's whole point, and eases there.
 - (void)testTheOSDsBarEasesToItsWidth {
     QLMSkin *skin = QLMBuiltInSkin(@"retro");
-    NSWindow *window = QLMTestEaseWindow();
+    NSWindow *window = QLMTestOffscreenWindow(NSMakeSize(400, 400));
     QLMSkinOSDView *osd = [[QLMSkinOSDView alloc] initWithSkin:skin];
     [window setContentSize:osd.frame.size];
     [window.contentView addSubview:osd];
     osd.fraction = 0.25;
-    QLMTestPump(window);
+    QLMTestPumpWindow(window);
     CALayer *clip = osd.layers.movingLayers.firstObject;
     XCTAssertNil([clip animationForKey:@"bounds.size.width"]);
     osd.fraction = 0.42;
@@ -208,6 +192,15 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
     XCTAssertNil([clip animationForKey:@"bounds.size.width"]);
     XCTAssertEqual(clip.bounds.size.width, round(skin.osd.bar.frame.size.width * 0.5));
     [window close];
+}
+
+// Without focus the knob's content draws nothing, so a hover draws no
+// content layer.
+- (void)testAnUnfocusedKnobDrawsNoContent {
+    _knob.hovered = YES;
+    QLMTestPumpWindow(_window);
+    XCTAssertFalse([_knob drawsSkinContent]);
+    XCTAssertNil(_knob.layer.sublayers.lastObject.contents);
 }
 
 // A screenshot shows the level, not the way there.
@@ -238,20 +231,21 @@ static NSInteger QLMTestInk(CALayer *layer) {
     QLMTestSeen = NO;
     CAShapeLayer *arc = (CAShapeLayer *)_knob.layers.movingLayers.firstObject;
     _knob.doubleValue = -80;
-    QLMTestPump(_window);
+    QLMTestPumpWindow(_window);
     XCTAssertEqual(arc.lineCap, kCALineCapRound);
     XCTAssertEqual(QLMTestInk(arc), 0);
     _knob.doubleValue = -79.5;
-    QLMTestPump(_window);
+    QLMTestPumpWindow(_window);
     XCTAssertGreaterThan(QLMTestInk(arc), 0);
 }
 
-// The middle of the pointer's ink, in points from the knob's center, y
-// down, as AppKit draws the view: what the pointer adds to the knob without
-// it. AppKit's own drawing, not the layers' flip rule, places it.
+// The middle of the box around the pointer's ink, in points from the
+// knob's center, y down, as AppKit draws the view: where the knob differs
+// from itself without the pointer. AppKit's own drawing, not the layers'
+// flip rule, places it.
 - (NSPoint)pointerInkAt:(double)decibels {
     _knob.doubleValue = decibels;
-    QLMTestPump(_window);
+    QLMTestPumpWindow(_window);
     NSBitmapImageRep *(^draw)(void) = ^NSBitmapImageRep * {
         NSBitmapImageRep *bitmap = [self->_knob bitmapImageRepForCachingDisplayInRect:self->_knob.bounds];
         [self->_knob cacheDisplayInRect:self->_knob.bounds toBitmapImageRep:bitmap];
@@ -261,24 +255,20 @@ static NSInteger QLMTestInk(CALayer *layer) {
     QLMTestPointer(_knob).hidden = YES;
     NSBitmapImageRep *without = draw();
     QLMTestPointer(_knob).hidden = NO;
-    double sumX = 0, sumY = 0, count = 0;
-    for (NSInteger y = 0; y < with.pixelsHigh; y++) {
-        for (NSInteger x = 0; x < with.pixelsWide; x++) {
-            NSColor *a = [with colorAtX:x y:y], *b = [without colorAtX:x y:y];
-            double d = fabs(a.redComponent - b.redComponent) + fabs(a.greenComponent - b.greenComponent)
-                       + fabs(a.blueComponent - b.blueComponent) + fabs(a.alphaComponent - b.alphaComponent);
-            if (d > 0.1) {
-                sumX += x;
-                sumY += y;
-                count++;
+    XCTAssertEqual(with.bitsPerPixel, 32);
+    NSRect ink = QLMTestPixelBounds(with, without, ^BOOL(const uint8_t *u, const uint8_t *v) {
+        for (int k = 0; k < 4; k++) {
+            if (abs((int)u[k] - (int)v[k]) > 25) {
+                return YES;
             }
         }
-    }
-    if (count == 0) {
+        return NO;
+    });
+    if (NSIsEmptyRect(ink)) {
         return NSMakePoint(NAN, NAN);
     }
     CGFloat scale = with.pixelsWide / _knob.bounds.size.width;
-    return NSMakePoint((sumX / count + 0.5) / scale - NSMidX(_knob.bounds), (sumY / count + 0.5) / scale - NSMidY(_knob.bounds));
+    return NSMakePoint(NSMidX(ink) / scale - NSMidX(_knob.bounds), NSMidY(ink) / scale - NSMidY(_knob.bounds));
 }
 
 // The bottom of the range points down and left, its middle up, and its
