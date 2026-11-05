@@ -44,7 +44,10 @@ typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
 // out in order on a queue of its own. A lowering and a stop wait for theirs
 // to land, and so does the mute record. A raise and the leases don't. Every
 // read waits for the writes queued before it. Every stop writes the level
-// and the reading kept, changed or not. The level kept is the level as it
+// and the reading kept, changed or not, but never a level above the one
+// stored. A stale reading restated can't make a start louder: a knob that
+// reads otherwise counts as moved, and a moved knob only lowers the start.
+// The level kept is the level as it
 // plays, never above it. "In storage" means this process's NSUserDefaults,
 // as on the main queue.
 @property (nonatomic, copy) QLMKeptScheduler scheduler;

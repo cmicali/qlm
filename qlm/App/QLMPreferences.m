@@ -370,12 +370,14 @@ static dispatch_queue_t QLMKeptWrites(void) {
 
 // A stop writes the level and the reading kept, changed or not, so a
 // louder one put in the defaults from outside, by a hand edit or another
-// copy of the app, can't outlast it.
+// copy of the app, can't outlast it. TRAP: it only ever lowers. Another
+// copy on the same defaults may have written a lower level since this one
+// read, and a restate of its own older level would raise it.
 - (void)restateKept {
     [self loadWritten];
     if (!_volumeWaits) {
         _volumeWaits = YES;
-        _waitingVolume = _writtenVolume;
+        _waitingVolume = fmin(_writtenVolume, [self storedVolume]);
     }
     if (!_knobWaits && _writtenKnobRead) {
         _knobWaits = YES;

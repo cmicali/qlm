@@ -714,6 +714,22 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertEqual(self.written.volumeDecibels, -60, @"a stopped System's snapshot restates it too");
 }
 
+// Two copies of the app on one defaults, as a Debug build with the
+// installed bundle ID: a stop's restate never raises the level the other
+// wrote. The third review's probe.
+- (void)testAnotherCopysStopNeverRaisesTheLevel {
+    QLMPreferences *other = [[QLMPreferences alloc] initWithDefaults:_defaults];
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    (void)[self holdFlushesOf:kept];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-20, @(-200))];
+    [kept flush];
+    [other flushKept];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-60, @(-600))];
+    XCTAssertEqual(self.written.volumeDecibels, -60);
+    [other flushKept];
+    XCTAssertLessThanOrEqual(self.written.volumeDecibels, -60);
+}
+
 // The mute record's keys land together, before the snapshot's keep returns.
 - (void)testTheMuteRecordLandsAtOnce {
     QLMBusPreferences *kept = _preferences.adapterBus;
