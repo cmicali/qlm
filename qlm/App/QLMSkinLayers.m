@@ -67,18 +67,17 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
     QLMSkinDraw *draw = [style drawForState:state];
     if (draw == nil) {
         NSString *name = [style imageNameForState:state];
-        CGImageRef one = QLMSkinDecodedImage(skin, name, 1);
-        CGImageRef two = QLMSkinDecodedImage(skin, name, 2);
-        if (one == NULL || two == NULL) {
+        // Only the scale it shows at, so the warm's decode is all it needs.
+        NSInteger pick = scale > 1 ? 2 : 1;
+        CGImageRef image = QLMSkinDecodedImage(skin, name, pick);
+        if (image == NULL) {
             return nil;
         }
-        NSInteger pick = scale > 1 ? 2 : 1;
-        CGImageRef image = pick == 2 ? two : one;
         material.scale = pick;
         material.image = dimmed ? QLMSkinTintedImage(skin, name, pick, image, overlay) : (__bridge id)image;
-        // The cap insets are in the image's points, the 1x file's pixels.
-        CGFloat width = CGImageGetWidth(one);
-        CGFloat height = CGImageGetHeight(one);
+        // The cap insets are in the image's points.
+        CGFloat width = CGImageGetWidth(image) / (CGFloat)pick;
+        CGFloat height = CGImageGetHeight(image) / (CGFloat)pick;
         NSEdgeInsets insets = style.capInsets;
         material.center = CGRectMake(insets.left / width, insets.top / height, (width - insets.left - insets.right) / width,
                                      (height - insets.top - insets.bottom) / height);
@@ -275,7 +274,7 @@ static id QLMSkinTintedImage(QLMSkin *skin, NSString *name, NSInteger scale, CGI
     CGContextTranslateCTM(context, -_contentOrigin.x, -_contentOrigin.y);
     NSRect dirty = CGContextGetClipBoundingBox(context);
     [NSGraphicsContext saveGraphicsState];
-    NSGraphicsContext.currentContext = QLMSkinLayerGraphicsContext(context, layer.contentsScale);
+    NSGraphicsContext.currentContext = QLMSkinLayerGraphicsContext(context);
     [view drawSkinContent:dirty];
     [NSGraphicsContext restoreGraphicsState];
     CGContextRestoreGState(context);

@@ -31,16 +31,18 @@ void QLMSkinDrawImage(NSImage *_Nullable image, NSRect rect);
 // skin. NULL when the file won't load. Any queue.
 CGImageRef _Nullable QLMSkinDecodedImage(QLMSkin *skin, NSString *name, NSInteger scale) CF_RETURNS_NOT_RETAINED;
 
-// Decodes every image the skin's styles name on a background queue, so the
-// first show finds them decoded.
+// Decodes every image the skin's styles name, at the main screen's scale,
+// on a background queue, so the first show finds them decoded. The other
+// scale decodes when first asked for.
 void QLMSkinWarmImages(QLMSkin *skin);
 
 // What `draw` draws in `size` points at `scale`, in a flipped context.
 CGImageRef _Nullable QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) CF_RETURNS_RETAINED;
 
-// A flipped context for a layer's own drawing, at its contents scale, in
-// which the skin's shadows fall as they do in a view.
-NSGraphicsContext *QLMSkinLayerGraphicsContext(CGContextRef context, CGFloat scale);
+// Flipped contexts for a bitmap at `scale` and for a layer's own drawing,
+// in which the skin's shadows fall as they do in a view on the screen.
+NSGraphicsContext *QLMSkinBitmapGraphicsContext(CGContextRef context, CGFloat scale);
+NSGraphicsContext *QLMSkinLayerGraphicsContext(CGContextRef context);
 
 // A value kept on `owner`, made the first time it's asked for. Keys are by
 // address. On the main queue.

@@ -1,6 +1,7 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMSkinControls.h"
+#import "QLMSkinDrawing.h"
 #import "QLMSkinView.h"
 #import "QLMTestSupport.h"
 
@@ -74,8 +75,9 @@ static NSBitmapImageRep *QLMTestComposite(NSView *view) {
 }
 
 // Each view's drawRect:, in its place, in the views' order. It draws the
-// material as drawRect: drew it before the layers. TRAP: not
-// displayRectIgnoringOpacity:, which renders the layers too.
+// material as drawRect: drew it before the layers, its shadows as they fall
+// on the screen. TRAP: not displayRectIgnoringOpacity:, which renders the
+// layers too.
 static NSBitmapImageRep *QLMTestDrawn(NSView *view) {
     NSBitmapImageRep *bitmap = QLMTestBitmap(view.bounds.size);
     CGContextRef cg = [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap].CGContext;
@@ -83,7 +85,7 @@ static NSBitmapImageRep *QLMTestDrawn(NSView *view) {
     CGContextTranslateCTM(cg, 0, view.bounds.size.height);
     CGContextScaleCTM(cg, 1, -1);
     [NSGraphicsContext saveGraphicsState];
-    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:cg flipped:YES];
+    NSGraphicsContext.currentContext = QLMSkinBitmapGraphicsContext(cg, QLMTestScale);
     QLMTestEachView(view, ^(NSView *each) {
         if (each.hiddenOrHasHiddenAncestor) {
             return;
@@ -120,7 +122,13 @@ static double QLMTestMatch(NSBitmapImageRep *a, NSBitmapImageRep *b) {
     return (double)matched / (double)(a.pixelsWide * a.pixelsHigh);
 }
 
-static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, BOOL disabled) {
+typedef NS_ENUM(NSInteger, QLMTestLook) {
+    QLMTestLookHovered,  // a group button and the knob under the pointer
+    QLMTestLookPressed,  // a group button, Dim, and the knob pressed
+    QLMTestLookDisabled,
+};
+
+static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, QLMTestLook look) {
     QLMSkinView *view = [[QLMSkinView alloc] initWithSkin:skin];
     view.frame = NSMakeRect(0, 0, size.width, size.height);
     view.knobMin = @"−80";
@@ -140,7 +148,15 @@ static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, BOOL disabled)
     view.knob.maxValue = -30;
     view.knob.doubleValue = -59;
     view.powerButton.title = @"Standby";
-    if (disabled) {
+    if (look == QLMTestLookHovered) {
+        view.knob.hovered = YES;
+    }
+    if (look == QLMTestLookPressed) {
+        view.groupButtons[2].pressed = YES;
+        view.dimButton.pressed = YES;
+        view.knob.pressed = YES;
+    }
+    if (look == QLMTestLookDisabled) {
         NSArray<QLMSkinControl *> *others = @[view.muteButton, view.dimButton, view.knob, view.monitorsButton,
                                               view.powerButton];
         for (QLMSkinControl *control in [others arrayByAddingObjectsFromArray:view.groupButtons]) {
@@ -160,11 +176,13 @@ static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, BOOL disabled)
         QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:&error];
         XCTAssertNotNil(skin, @"%@", error);
         for (NSValue *size in @[[NSValue valueWithSize:NSMakeSize(640, 480)], [NSValue valueWithSize:NSMakeSize(900, 640)]]) {
-            for (NSNumber *disabled in @[@NO, @YES]) {
-                QLMSkinView *view = QLMTestWindowView(skin, size.sizeValue, disabled.boolValue);
-                double match = QLMTestMatch(QLMTestComposite(view), QLMTestDrawn(view));
-                XCTAssertGreaterThanOrEqual(match, 0.999, @"%@ at %@%@", name, NSStringFromSize(size.sizeValue),
-                                            disabled.boolValue ? @", disabled" : @"");
+            for (QLMTestLook look = QLMTestLookHovered; look <= QLMTestLookDisabled; look++) {
+                QLMSkinView *view = QLMTestWindowView(skin, size.sizeValue, look);
+                // The composite first: the drawing reads the scale it sets.
+                NSBitmapImageRep *composite = QLMTestComposite(view);
+                double match = QLMTestMatch(composite, QLMTestDrawn(view));
+                XCTAssertGreaterThanOrEqual(match, 0.999, @"%@ at %@, look %ld", name, NSStringFromSize(size.sizeValue),
+                                            (long)look);
             }
         }
     }
@@ -177,9 +195,45 @@ static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, BOOL disabled)
         view.level = @"−59.0";
         view.title = @"Main monitors";
         view.fraction = 0.42;
-        double match = QLMTestMatch(QLMTestComposite(view), QLMTestDrawn(view));
+        NSBitmapImageRep *composite = QLMTestComposite(view);
+        double match = QLMTestMatch(composite, QLMTestDrawn(view));
         XCTAssertGreaterThanOrEqual(match, 0.999, @"%@", name);
     }
+}
+
+// The rows a modern button's face and shadow ink below and above it, in
+// points, from an image of it at `scale`.
+static void QLMTestShadowReach(QLMSkin *skin, CGFloat scale, CGFloat *below, CGFloat *above) {
+    NSRect face = NSMakeRect(10, 20, 60, 20);
+    CGImageRef image = QLMSkinRenderImage(NSMakeSize(80, 60), scale, ^{
+        QLMSkinDrawStyle(skin, skin.button.style, QLMSkinStateNormal, face, NO);
+    });
+    NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithCGImage:image];
+    CGImageRelease(image);
+    NSInteger first = -1;
+    NSInteger last = -1;
+    NSInteger x = (NSInteger)(NSMidX(face) * scale);
+    for (NSInteger y = 0; y < bitmap.pixelsHigh; y++) {
+        if ([bitmap colorAtX:x y:y].alphaComponent > 0.02) {
+            first = first < 0 ? y : first;
+            last = y;
+        }
+    }
+    *below = (CGFloat)(last + 1) / scale - NSMaxY(face);
+    *above = NSMinY(face) - (CGFloat)first / scale;
+}
+
+// A shadow falls as far, in points, at every scale, as on the screen: modern's
+// buttons cast 1.5 points down with a 2 point blur.
+- (void)testAShadowFallsInPointsAtEveryScale {
+    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
+    CGFloat below1, above1, below2, above2;
+    QLMTestShadowReach(skin, 1, &below1, &above1);
+    QLMTestShadowReach(skin, 2, &below2, &above2);
+    XCTAssertEqualWithAccuracy(below1, below2, 1);
+    XCTAssertEqualWithAccuracy(above1, above2, 1);
+    XCTAssertGreaterThan(below2, above2 + 1);
+    XCTAssertGreaterThan(below2, 2.5);
 }
 
 @end

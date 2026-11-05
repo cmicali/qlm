@@ -92,10 +92,10 @@ static NSArray<NSString *> *QLMSkinImageNames(QLMSkin *skin) {
 }
 
 void QLMSkinWarmImages(QLMSkin *skin) {
+    NSInteger scale = NSScreen.mainScreen.backingScaleFactor > 1 ? 2 : 1;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         for (NSString *name in QLMSkinImageNames(skin)) {
-            QLMSkinDecodedImage(skin, name, 1);
-            QLMSkinDecodedImage(skin, name, 2);
+            QLMSkinDecodedImage(skin, name, scale);
         }
     });
 }
@@ -117,7 +117,7 @@ CGImageRef QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) {
     CGContextTranslateCTM(cg, 0, size.height);
     CGContextScaleCTM(cg, 1, -1);
     [NSGraphicsContext saveGraphicsState];
-    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:cg flipped:YES];
+    NSGraphicsContext.currentContext = QLMSkinBitmapGraphicsContext(cg, scale);
     draw();
     [NSGraphicsContext restoreGraphicsState];
     CGImageRef image = CGBitmapContextCreateImage(cg);
@@ -170,32 +170,42 @@ static NSBezierPath *QLMSkinShape(NSRect rect, CGFloat radius, BOOL circle) {
     return [NSBezierPath bezierPathWithRoundedRect:rect xRadius:radius yRadius:radius];
 }
 
-static char QLMSkinLayerScaleKey;
+// A context's shadow space: a bitmap's pixels per point, or 0 for a layer's
+// own context. A view's drawRect: tags nothing.
+static char QLMSkinShadowSpaceKey;
 
-NSGraphicsContext *QLMSkinLayerGraphicsContext(CGContextRef context, CGFloat scale) {
+static NSGraphicsContext *QLMSkinTaggedContext(CGContextRef context, CGFloat space) {
     NSGraphicsContext *graphics = [NSGraphicsContext graphicsContextWithCGContext:context flipped:YES];
-    objc_setAssociatedObject(graphics, &QLMSkinLayerScaleKey, @(scale), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    objc_setAssociatedObject(graphics, &QLMSkinShadowSpaceKey, @(space), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     return graphics;
 }
 
+NSGraphicsContext *QLMSkinBitmapGraphicsContext(CGContextRef context, CGFloat scale) {
+    return QLMSkinTaggedContext(context, scale);
+}
+
+NSGraphicsContext *QLMSkinLayerGraphicsContext(CGContextRef context) {
+    return QLMSkinTaggedContext(context, 0);
+}
+
 // TRAP: a shadow's blur and offset are in the context's base space, which
-// the CTM doesn't scale. A bitmap's is in pixels with y up, so a flipped
-// drawing's y-down offset changes sign. A layer's own context's is in
-// points with y down, so there a shadow would blur twice as wide. A view's
-// backing store's has y down too: drawn there, modern's button shadows
-// fell upward. So no shadow draws in a view's drawRect: on the screen.
+// the CTM doesn't scale. Measured with an offset of (0, −20) in a flipped
+// drawing: in a view's drawRect: on the screen, it falls 20 points down, so
+// that space is points with y up. In a layer's own drawLayer:inContext:, it
+// falls 20 points up: points with y down. In a 2x bitmap, it falls 10
+// points down: pixels with y up. Each falls here as in a view on the screen.
 static void QLMSkinSetShadow(QLMSkinColor color, CGFloat blur, CGSize offset) {
-    NSNumber *layerScale = objc_getAssociatedObject(NSGraphicsContext.currentContext, &QLMSkinLayerScaleKey);
+    NSNumber *space = objc_getAssociatedObject(NSGraphicsContext.currentContext, &QLMSkinShadowSpaceKey);
     NSShadow *shadow = [[NSShadow alloc] init];
     shadow.shadowColor = QLMSkinNSColor(color);
-    if (layerScale != nil) {
-        CGFloat scale = layerScale.doubleValue;
-        shadow.shadowBlurRadius = blur / scale;
-        shadow.shadowOffset = NSMakeSize(offset.width / scale, offset.height / scale);
+    if (space != nil && space.doubleValue == 0) {
+        shadow.shadowBlurRadius = blur;
+        shadow.shadowOffset = NSMakeSize(offset.width, offset.height);
     }
     else {
-        shadow.shadowBlurRadius = blur;
-        shadow.shadowOffset = NSMakeSize(offset.width, -offset.height);
+        CGFloat scale = space != nil ? space.doubleValue : 1;
+        shadow.shadowBlurRadius = blur * scale;
+        shadow.shadowOffset = NSMakeSize(offset.width * scale, -offset.height * scale);
     }
     [shadow set];
 }
