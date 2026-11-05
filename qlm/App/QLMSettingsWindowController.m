@@ -222,11 +222,13 @@ static const CGFloat QLMSettingsTextWidth = 360;
     }
 }
 
+#if DEBUG
 - (void)drawWhileOpen {
     if (self.window.visible && [self renderHandBack]) {
         [self fitWindow];
     }
 }
+#endif
 
 // A window that comes into view catches up at once.
 - (void)windowDidChangeOcclusionState:(NSNotification *)notification {

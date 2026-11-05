@@ -175,11 +175,13 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     }
 }
 
+#if DEBUG
 - (void)drawWhileOpen {
     if (self.showing) {
         [self render];
     }
 }
+#endif
 
 // A window that comes into view catches up at once.
 - (void)windowDidChangeOcclusionState:(NSNotification *)notification {
@@ -239,7 +241,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 // In the common modes, so it blinks on through a live resize.
 - (void)startBlink {
-    if (self.blinkTimer != nil || !self.showing) {
+    if (self.blinkTimer != nil || !QLMWindowIsSeen(super.window)) {
         return;
     }
     self.model.blinkOn = YES;

@@ -17,9 +17,11 @@ NS_ASSUME_NONNULL_BEGIN
 // Reads the bus again while any of the window is on screen: System's power
 // steps change the monitors too. A show, or a return into view, reads it too.
 - (void)refresh;
+#if DEBUG
 // Draws the latest snapshot while the window is open, seen or not, for a
 // debug verb that reads what the window shows.
 - (void)drawWhileOpen;
+#endif
 
 @end
 
