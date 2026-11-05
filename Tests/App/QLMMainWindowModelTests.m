@@ -111,6 +111,10 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     _model.groupCapacity = 4;
     XCTAssertEqualObjects(_model.shownGroupNames, (@[@"1", @"2", @"3", @"4"]));
     XCTAssertEqual(_model.groupTitles.count, 4u);
+    _model.groupCapacity = 9;
+    XCTAssertEqual(_model.shownGroupNames.count, 6u);
+    XCTAssertEqual(QLMShownGroupButtons(9), 6u);
+    XCTAssertEqual(QLMShownGroupButtons(4), 4u);
 }
 
 - (void)testTheActiveGroupIsSelected {
@@ -142,6 +146,20 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     _model.applyPending = NO;
     _model.snapshot = nil;
     XCTAssertFalse(_model.groupsEnabled);
+}
+
+// What the window's group verb answers, and what a click does nothing on.
+- (void)testAButtonSaysWhyItTakesNoClick {
+    XCTAssertNil([_model refusalToClickGroupNamed:@"Nearfield"]);
+    XCTAssertEqualObjects([_model refusalToClickGroupNamed:@"Cinema"],
+                          @"no group button reads Cinema. They read: Main, Nearfield, Full Range");
+    _model.applyPending = YES;
+    XCTAssertEqualObjects([_model refusalToClickGroupNamed:@"Main"], @"the group buttons are disabled while an apply runs");
+    _model.applyPending = NO;
+    [self showNoMonitors];
+    XCTAssertEqualObjects([_model refusalToClickGroupNamed:@"Main"], @"the group buttons are disabled until System tracks a monitor");
+    _model.groupNames = nil;
+    XCTAssertEqualObjects([_model refusalToClickGroupNamed:@"Main"], @"no group buttons show: Reading Main.sam…");
 }
 
 // While an apply runs, whoever started it, the applying group's button
@@ -281,11 +299,15 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     XCTAssertEqualObjects(_model.outputText, @"MUTED");
 }
 
+// The status dims with it.
 - (void)testTheDisplayDimsWhileSystemIsStopped {
+    XCTAssertTrue(_model.statusEnabled);
     [self showStopped];
     XCTAssertTrue(_model.displayDisabled);
+    XCTAssertFalse(_model.statusEnabled);
     _model.snapshot = nil;
     XCTAssertTrue(_model.displayDisabled);
+    XCTAssertFalse(_model.statusEnabled);
 }
 
 #pragma mark - Mute, dim, the knob, and power

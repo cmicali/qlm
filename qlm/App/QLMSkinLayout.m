@@ -12,11 +12,9 @@ static void QLMSkinSpringAxis(CGFloat *origin, CGFloat *length, BOOL low, BOOL h
     }
 }
 
-const NSUInteger QLMSkinMaxGroups = 6;
-
 NSUInteger QLMSkinGroupButtonCount(QLMSkin *skin) {
     QLMSkinElement *groups = [skin element:@"groups"];
-    return MIN((NSUInteger)MAX(groups.columns * groups.rows, 0), QLMSkinMaxGroups);
+    return (NSUInteger)MAX(groups.columns * groups.rows, 0);
 }
 
 CGRect QLMSkinSpring(CGRect frame, QLMSkinAnchors anchors, CGSize extra) {
@@ -27,17 +25,18 @@ CGRect QLMSkinSpring(CGRect frame, QLMSkinAnchors anchors, CGSize extra) {
     return frame;
 }
 
-NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger rows, CGSize gap) {
+// Row by row.
+static NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger rows, CGSize gap) {
     NSMutableArray<NSValue *> *cells = [NSMutableArray array];
     if (columns < 1 || rows < 1) {
         return cells;
     }
-    CGFloat width = (frame.size.width - gap.width * (columns - 1)) / columns;
-    CGFloat height = (frame.size.height - gap.height * (rows - 1)) / rows;
+    CGSize cell = QLMSkinGridCellSize(frame.size, columns, rows, gap);
     for (NSInteger row = 0; row < rows; row++) {
         for (NSInteger column = 0; column < columns; column++) {
-            [cells addObject:[NSValue valueWithRect:CGRectMake(frame.origin.x + column * (width + gap.width),
-                                                               frame.origin.y + row * (height + gap.height), width, height)]];
+            [cells addObject:[NSValue valueWithRect:CGRectMake(frame.origin.x + column * (cell.width + gap.width),
+                                                               frame.origin.y + row * (cell.height + gap.height),
+                                                               cell.width, cell.height)]];
         }
     }
     return cells;

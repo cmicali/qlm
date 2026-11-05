@@ -8,7 +8,8 @@ const QLMSkinColor QLMSkinColorClear = {0, 0, 0, 0};
 
 static const int QLMSkinFormat = 1;
 
-// The smallest window and OSD a skin may declare: the image skins' sizes.
+// The smallest window and OSD a skin may declare: the pack's sizes for the
+// window and for its OSD housing's image.
 static const CGSize QLMSkinReferenceWindowSize = {640, 480};
 static const CGSize QLMSkinReferenceOSDSize = {300, 72};
 
@@ -50,6 +51,31 @@ static NSString *QLMSkinStateName(QLMSkinState state) {
 
 static NSString *QLMSkinKey(NSString *path, NSString *key) {
     return [NSString stringWithFormat:@"%@.%@", path, key];
+}
+
+// JSON's number, not its true or false, which NSJSONSerialization also
+// gives as an NSNumber.
+static BOOL QLMSkinIsNumber(id value) {
+    return [value isKindOfClass:NSNumber.class] && CFGetTypeID((__bridge CFTypeRef)value) != CFBooleanGetTypeID();
+}
+
+// Keys format 1 had until #86, by the path they sit at. A user's skin copied
+// from modern before then carries them, so they are accepted and never read.
+static NSDictionary<NSString *, NSArray<NSString *> *> *QLMSkinIgnoredKeys(void) {
+    return @{@"elements.nameplate.text": @[@"tagline"], @"osd": @[@"disabledOverlay"]};
+}
+
+NSString *QLMSkinImagePath(NSString *name, NSInteger scale) {
+    return [@"png" stringByAppendingPathComponent:[name stringByAppendingString:scale >= 2 ? @"@2x.png" : @".png"]];
+}
+
+CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSize gap) {
+    return CGSizeMake((size.width - gap.width * (columns - 1)) / columns, (size.height - gap.height * (rows - 1)) / rows);
+}
+
+CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
+    return CGRectMake(frame.origin.x - outset.left, frame.origin.y - outset.top, frame.size.width + outset.left + outset.right,
+                      frame.size.height + outset.top + outset.bottom);
 }
 
 #pragma mark - Values
@@ -138,7 +164,6 @@ static NSString *QLMSkinKey(NSString *path, NSString *key) {
 @end
 
 @interface QLMSkinTextSlot ()
-@property (nonatomic, copy) NSString *name;
 @property (nonatomic) CGRect frame;
 @property (nonatomic) QLMSkinAnchors anchors;
 @property (nonatomic) BOOL scales;
@@ -367,8 +392,7 @@ static NSString *QLMSkinKey(NSString *path, NSString *key) {
 }
 
 - (CGFloat)number:(id)value at:(NSString *)path {
-    if (![value isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)value) == CFBooleanGetTypeID()
-        || !isfinite([value doubleValue])) {
+    if (!QLMSkinIsNumber(value) || !isfinite([value doubleValue])) {
         [self fail:@"%@ is not a number", path];
         return 0;
     }
@@ -781,10 +805,10 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
 }
 
 - (void)checkImage:(NSString *)name at:(NSString *)path {
-    for (NSString *file in @[[name stringByAppendingString:@".png"], [name stringByAppendingString:@"@2x.png"]]) {
-        NSURL *url = [self.directory URLByAppendingPathComponent:[@"png" stringByAppendingPathComponent:file]];
-        if (![NSFileManager.defaultManager fileExistsAtPath:url.path]) {
-            [self fail:@"%@ names the image %@, but the skin has no png/%@", path, name, file];
+    for (NSNumber *scale in @[@1, @2]) {
+        NSString *file = QLMSkinImagePath(name, scale.integerValue);
+        if (![NSFileManager.defaultManager fileExistsAtPath:[self.directory URLByAppendingPathComponent:file].path]) {
+            [self fail:@"%@ names the image %@, but the skin has no %@", path, name, file];
             return;
         }
     }
@@ -792,9 +816,8 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
 
 // A slot. `placed` is NO for the OSD's, which has no layout to place them
 // by.
-- (QLMSkinTextSlot *)slot:(id)value named:(NSString *)name placed:(BOOL)placed at:(NSString *)path {
+- (QLMSkinTextSlot *)slot:(id)value placed:(BOOL)placed at:(NSString *)path {
     QLMSkinTextSlot *slot = [[QLMSkinTextSlot alloc] init];
-    slot.name = name;
     NSDictionary *object = [self object:value at:path];
     NSArray *allowed = @[@"frame", @"anchors", @"scales", @"font", @"mono", @"size", @"weight", @"italic",
                          @"alignment", @"color", @"tracking", @"accent"];
@@ -831,12 +854,16 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
         return @{};
     }
     NSDictionary *object = [self object:value at:path];
-    if (![self checkKeys:object at:path allowed:[required arrayByAddingObjectsFromArray:optional] required:required]) {
+    NSArray<NSString *> *ignored = QLMSkinIgnoredKeys()[path] ?: @[];
+    NSArray<NSString *> *allowed = [[required arrayByAddingObjectsFromArray:optional] arrayByAddingObjectsFromArray:ignored];
+    if (![self checkKeys:object at:path allowed:allowed required:required]) {
         return @{};
     }
     NSMutableDictionary<NSString *, QLMSkinTextSlot *> *slots = [NSMutableDictionary dictionary];
     for (NSString *name in [object.allKeys sortedArrayUsingSelector:@selector(compare:)]) {
-        slots[name] = [self slot:object[name] named:name placed:placed at:QLMSkinKey(path, name)];
+        if (![ignored containsObject:name]) {
+            slots[name] = [self slot:object[name] placed:placed at:QLMSkinKey(path, name)];
+        }
     }
     return slots;
 }
@@ -872,8 +899,7 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
 
 // A grid's cell, at the skin's size.
 static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
-    return CGSizeMake((grid.frame.size.width - grid.gap.width * (grid.columns - 1)) / grid.columns,
-                      (grid.frame.size.height - grid.gap.height * (grid.rows - 1)) / grid.rows);
+    return QLMSkinGridCellSize(grid.frame.size, grid.columns, grid.rows, grid.gap);
 }
 
 - (void)readGrid:(QLMSkinElement *)element from:(NSDictionary *)object cells:(NSInteger)least {
@@ -1108,11 +1134,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
             }
         }
         if (element) {
-            NSEdgeInsets o = read.outset;
-            CGRect outer = CGRectMake(element.frame.origin.x - o.left, element.frame.origin.y - o.top,
-                                      element.frame.size.width + o.left + o.right,
-                                      element.frame.size.height + o.top + o.bottom);
-            [self checkFrame:outer inside:window named:@"window" at:path];
+            [self checkFrame:QLMSkinBoxFrame(element.frame, read.outset) inside:window named:@"window" at:path];
         }
         [boxes addObject:read];
     }
@@ -1158,8 +1180,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
         return nil;
     }
     id format = root[@"format"];
-    if (![format isKindOfClass:NSNumber.class] || CFGetTypeID((__bridge CFTypeRef)format) == CFBooleanGetTypeID()
-        || [format doubleValue] != QLMSkinFormat) {
+    if (!QLMSkinIsNumber(format) || [format doubleValue] != QLMSkinFormat) {
         [self fail:@"skin.json's format is %@, and qlm reads format %d", format, QLMSkinFormat];
         return nil;
     }
@@ -1186,7 +1207,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     panel.style = [self style:elements[@"panel"] states:1 fits:panel.frame.size at:@"elements.panel"];
 
     QLMSkinElement *nameplate = [self element:@"nameplate" from:elements keys:styled required:@[] slots:@[]
-                                optionalSlots:@[@"logo", @"tagline"]];
+                                optionalSlots:@[@"logo"]];
     nameplate.style = [self style:elements[@"nameplate"] states:1 fits:nameplate.frame.size at:@"elements.nameplate"];
 
     QLMSkinElement *status = [self element:@"status" from:elements keys:@[@"led"] required:@[@"led"]
@@ -1266,7 +1287,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     osd.name = @"osd";
     NSDictionary *object = [self object:value at:@"osd"];
     if (![self checkKeys:object at:@"osd"
-                 allowed:@[@"size", @"image", @"draw", @"capInsets", @"disabledOverlay", @"bar", @"text"]
+                 allowed:[@[@"size", @"image", @"draw", @"capInsets", @"bar", @"text"] arrayByAddingObjectsFromArray:QLMSkinIgnoredKeys()[@"osd"]]
                 required:@[@"size", @"bar", @"text"]]) {
         return osd;
     }
@@ -1277,9 +1298,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
         return osd;
     }
     osd.frame = CGRectMake(0, 0, size.width, size.height);
-    osd.anchors = QLMSkinAnchorLeft | QLMSkinAnchorTop;
     osd.style = [self style:object states:1 fits:size at:@"osd"];
-    osd.disabledOverlay = [self color:object[@"disabledOverlay"] at:@"osd.disabledOverlay" orDefault:QLMSkinColorClear];
     osd.text = [self slots:object[@"text"] at:@"osd.text" required:@[@"level", @"unit", @"title", @"subtitle"] optional:@[]
                     placed:NO];
 
@@ -1330,8 +1349,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
 }
 
 - (NSURL *)imageURLForName:(NSString *)name scale:(NSInteger)scale {
-    NSString *file = scale >= 2 ? [name stringByAppendingString:@"@2x.png"] : [name stringByAppendingString:@".png"];
-    return [self.directory URLByAppendingPathComponent:[@"png" stringByAppendingPathComponent:file]];
+    return [self.directory URLByAppendingPathComponent:QLMSkinImagePath(name, scale)];
 }
 
 @end

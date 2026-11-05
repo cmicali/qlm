@@ -16,6 +16,10 @@ NS_ASSUME_NONNULL_BEGIN
 // Takes each snapshot, in order, and remembers it for the next.
 - (BOOL)showsSnapshot:(QLMSnapshot *)snapshot whileShowing:(BOOL)showing;
 
+// Why a show of the snapshot's level now, with no turn, shows nothing: the
+// OSD is off, or there is no level. Nil when it shows.
+- (nullable NSString *)refusalToShowSnapshot:(nullable QLMSnapshot *)snapshot;
+
 @end
 
 // The OSD's frame on a screen whose visible frame is `visible`, 24 points

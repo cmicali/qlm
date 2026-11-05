@@ -249,3 +249,7 @@ NSString *QLMBusProblemDetail(QLMSnapshot *snapshot) {
 BOOL QLMSnapshotTracksMonitors(QLMSnapshot *snapshot) {
     return snapshot.running && snapshot.monitors.count > 0;
 }
+
+BOOL QLMMonitorIsOnline(QLMMonitorState *monitor) {
+    return !monitor.offline && monitor.status == QLMMonitorStatusOn;
+}

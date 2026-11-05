@@ -118,7 +118,6 @@
     "size": [480, 150],
     "image": "osd-background",
     "capInsets": [12, 14, 12, 14],
-    "disabledOverlay": "overlay",
     "bar": {"frame": [256, 104, 196, 5], "track": "#ff702c40", "fill": "display", "radius": 2.5},
     "text": {
       "level": {"frame": [28, 38, 200, 72], "font": "Menlo", "mono": true, "size": 56, "color": "display"},

@@ -1,6 +1,7 @@
 #ifndef QLMCOMMANDS_H
 #define QLMCOMMANDS_H
 
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -19,6 +20,11 @@ enum {
 #define QLMVolumeDecibelsMax (0.0)
 #define QLMVolumeDecibelsMin (-100.0)
 #define QLMDimDecibels (20.0)
+
+// The nearest of GLM's steps.
+static inline double QLMNearestStepDecibels(double decibels) {
+    return round(decibels / QLMVolumeDecibelsStep) * QLMVolumeDecibelsStep;
+}
 
 // GLM's word for the nearest step. At or below QLMVolumeDecibelsMin, and for
 // NaN, it is QLMVolumeWordMin.

@@ -52,6 +52,12 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     return [self stepBy:-1];
 }
 
+// Not QLMSkinControl's, which sends the action with the level as it stands,
+// off the steps the action promises. A knob has no press.
+- (BOOL)accessibilityPerformPress {
+    return NO;
+}
+
 - (double)doubleValue {
     return _value;
 }
@@ -159,7 +165,7 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
         steps = delta > 0 ? 1 : -1;
     }
     if (steps != 0) {
-        [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];
+        [self stepBy:steps];
     }
 }
 
@@ -169,11 +175,9 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
                 : key == NSDownArrowFunctionKey || key == NSLeftArrowFunctionKey ? -1 : 0;
     // Not QLMSkinControl's, whose Space and Return send the action with no
     // change.
-    if (steps == 0 || !self.enabled) {
+    if (steps == 0 || ![self stepBy:steps]) {
         [self.nextResponder keyDown:event];
-        return;
     }
-    [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];
 }
 
 static void QLMKnobAppendRadial(NSBezierPath *path, NSPoint center, CGFloat inner, CGFloat outer, double degrees) {

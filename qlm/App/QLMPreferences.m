@@ -44,10 +44,6 @@ static double QLMStepBelow(double decibels) {
     return floor(decibels / QLMVolumeDecibelsStep) * QLMVolumeDecibelsStep;
 }
 
-double QLMNearestStepDecibels(double decibels) {
-    return round(decibels / QLMVolumeDecibelsStep) * QLMVolumeDecibelsStep;
-}
-
 BOOL QLMIsSavableLevel(double decibels) {
     return decibels <= QLMVolumeDecibelsMax;
 }
@@ -192,8 +188,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     if (!self.knobRead) {
         return nil;
     }
-    id kept = [_defaults objectForKey:[self key:QLMKnobName]];
-    double tenths = [kept isKindOfClass:[NSNumber class]] ? [kept doubleValue] : NAN;
+    double tenths = QLMKeptNumber(_defaults, [self key:QLMKnobName]);
     return tenths == floor(tenths) && tenths <= 0 && tenths > INT32_MIN ? @((NSInteger)tenths) : nil;
 }
 

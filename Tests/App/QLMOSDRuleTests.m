@@ -2,6 +2,7 @@
 
 #import "QLMOSDRule.h"
 #import "QLMSnapshotInternal.h"
+#import "QLMTestSupport.h"
 
 // When the OSD shows. Source: docs/ui.md's "The OSD", and the snapshot's
 // volumeFromKnob, which System sets only when it followed the knob.
@@ -18,8 +19,7 @@
 }
 
 static QLMSnapshot *QLMLevel(double decibels, BOOL fromKnob) {
-    QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
-    snapshot.running = YES;
+    QLMSnapshot *snapshot = QLMMakeRunningSnapshot(@[]);
     snapshot.volumeDecibels = @(decibels);
     snapshot.volumeFromKnob = fromKnob;
     return snapshot;
@@ -82,6 +82,17 @@ static QLMSnapshot *QLMLevel(double decibels, BOOL fromKnob) {
     _rule.enabled = YES;
     XCTAssertFalse([self shows:QLMLevel(-38, YES)]);
     XCTAssertTrue([self shows:QLMLevel(-37, YES)]);
+}
+
+// A show with no turn, as the osd verb's: off, or no level, shows nothing.
+- (void)testAShowWithNoTurnSaysWhyNot {
+    XCTAssertNil([_rule refusalToShowSnapshot:QLMLevel(-40, NO)]);
+    QLMSnapshot *none = QLMLevel(0, NO);
+    none.volumeDecibels = nil;
+    XCTAssertEqualObjects([_rule refusalToShowSnapshot:none], @"no level yet");
+    XCTAssertEqualObjects([_rule refusalToShowSnapshot:nil], @"no level yet");
+    _rule.enabled = NO;
+    XCTAssertEqualObjects([_rule refusalToShowSnapshot:QLMLevel(-40, NO)], @"the OSD is off in Settings");
 }
 
 // While it shows, mute all or dim shows it again, so the subtitle follows.

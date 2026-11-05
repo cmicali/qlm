@@ -57,12 +57,15 @@ Q=build/DerivedData/Build/Products/Debug/qlm.app/Contents/MacOS/qlm
 | `window <show\|close>` | The popover's Window… button, or the window's close | never |
 | `window_size <width> <height>` | A drag of the window's corner, to that content size in points, never below the skin's | the window is closed |
 | `group <name>` | The window's button for that group. System's own refusal comes later, in `windowApplyError` | no button reads the name, System is stopped or tracks no monitor, or an apply runs |
-| `knob <dB>` | The window's knob, as a drag, on GLM's 0.5 dB steps | System is stopped, or the level is outside the slider's range |
-| `skin <name>` | The window's skin, kept in the settings | the skin library refuses the skin |
+| `knob <dB>` | The window's knob, as a drag, on GLM's 0.5 dB steps | System is stopped, the level is outside the slider's range, or the window is closed |
+| `skin <name>` | Settings' skin picker: the skin for the window and the OSD, kept in the settings. The skin that shows loads again, so a fixed one takes | the skin library refuses the skin |
+| `osd <show\|hide>` | Shows the OSD at the current level, as a turn of the adapter's knob does, or hides it | `show` while Settings has the OSD off, or with no level yet |
+| `skin_preview <name> <window\|disabled\|osd>` | Nothing on the monitors. Opens a look at a skin, with sample text, for `dump_screenshot -`: its window, its window with every control disabled, or its OSD. It doesn't choose the skin | never: a refused skin shows modern, and the reply says why |
+| `fake_knob <tenths>` | The fake bus window's knob slider, in tenths of a dB | qlm drives the GLM adapter, or the turn is outside −1004 to 0 |
 
 `dump_state` gives:
 
-- `usesAdapter`, `sliderRange` (`lowestDecibels` and `ceilingDecibels`), `quitGLMButton` (its title, or null while hidden), `quitAsksFirst`, `popoverShown`, and `windows`. For the main window, it gives `windowShowing`, `windowApplyError` (the last error of its group buttons, until the next click), `skinName` (the setting), `windowSkin` (the skin that shows), `skinRefusal` (why the saved skin does not load, or null), and `opensWindowAtLaunch`.
+- `usesAdapter`, `sliderRange` (`lowestDecibels` and `ceilingDecibels`), `quitGLMButton` (its title, or null while hidden), `quitAsksFirst`, `popoverShown`, and `windows`. For the main window, it gives `windowShowing`, `windowApplyError` (the last error of its group buttons, until the next click), `skinName` (the setting), `windowSkin` (the skin that shows), `skinRefusal` (why the saved skin did not load at launch or at the last pick, or null. It does not read the disk again), and `opensWindowAtLaunch`. `osd` gives the OSD's settings, `showsOSD`, `placement`, and `seconds`, and whether it is `showing`.
 - `snapshot`, or null before System's first one:
   - `running`, `idle`, `busProblem` (`none`, `noAdapter`, `glm`, or `otherHost`), `adapterProblem`, `reconnects`, and `adapterError`. `reconnects` counts System's tries to reopen the adapter since its link gave up. `adapterProblem` is `none`, `unresponsive`, `lostTrack`, or `notTaking`.
   - `adapter`: the device, model, and serial, and the knob: `knobPresent` and `knobTenths`.

@@ -9,7 +9,7 @@ NSColor *QLMSkinNSColor(QLMSkinColor color) {
     return [NSColor colorWithSRGBRed:color.red green:color.green blue:color.blue alpha:color.alpha];
 }
 
-BOOL QLMSkinColorIsClear(QLMSkinColor color) {
+static BOOL QLMSkinColorIsClear(QLMSkinColor color) {
     return color.alpha <= 0;
 }
 
@@ -262,6 +262,7 @@ NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weigh
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         cache = [[NSCache alloc] init];
+        cache.countLimit = 64;
     });
     NSString *key = [NSString stringWithFormat:@"%@|%d|%g|%ld|%d|%d", name ?: @"", mono, size, (long)weight, italic, monoDigits];
     NSFont *font = [cache objectForKey:key];
@@ -273,7 +274,10 @@ NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weigh
 }
 
 NSFont *QLMSkinSlotFont(QLMSkinTextSlot *slot, CGFloat scale, BOOL monoDigits) {
-    return QLMSkinFont(slot.fontName, slot.mono, slot.size * scale, slot.weight, slot.italic, monoDigits);
+    // A scaled size follows a live resize, so it goes to the half point, or
+    // each frame would make new fonts.
+    CGFloat size = scale == 1 ? slot.size : MAX(0.5, round(slot.size * scale * 2) / 2);
+    return QLMSkinFont(slot.fontName, slot.mono, size, slot.weight, slot.italic, monoDigits);
 }
 
 NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSColor *color, QLMSkinAlignment alignment,

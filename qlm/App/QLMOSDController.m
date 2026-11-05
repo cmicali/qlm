@@ -4,7 +4,6 @@
 #import "QLMKnobMath.h"
 #import "QLMOSDRule.h"
 #import "QLMSkinControls.h"
-#import "QLMSkinLibrary.h"
 #import "QLMSkinView.h"
 
 static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
@@ -42,10 +41,11 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 
 @implementation QLMOSDController
 
-- (instancetype)initWithPreferences:(QLMPreferences *)preferences {
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences skin:(QLMSkin *)skin {
     self = [super init];
     if (self) {
         _preferences = preferences;
+        _skin = skin;
         _rule = [[QLMOSDRule alloc] init];
         _rule.enabled = preferences.showsOSD;
     }
@@ -56,17 +56,23 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     [_timer invalidate];
 }
 
-- (void)reloadPreferences {
-    self.rule.enabled = self.preferences.showsOSD;
-    if (!self.rule.enabled) {
-        [self hide];
-    }
-    // The next show loads the skin again.
+- (void)setSkin:(QLMSkin *)skin {
+    _skin = skin;
+    // The next show draws in it.
     self.osdView = nil;
     QLMSnapshot *shown = self.shown;
     if (self.window.visible && shown != nil) {
-        [self loadSkin];
+        [self hostSkin];
         [self render:shown];
+        [self place];
+    }
+}
+
+- (void)reloadSettings {
+    self.rule.enabled = self.preferences.showsOSD;
+    if (!self.rule.enabled) {
+        [self hide];
+    } else if (self.window.visible) {
         [self place];
     }
 }
@@ -87,13 +93,8 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     self.window = window;
 }
 
-- (void)loadSkin {
-    QLMSkin *skin = [[QLMSkinLibrary standardLibrary] loadSkinNamed:self.preferences.skinName refusal:NULL];
-    if (skin == nil) {
-        return;
-    }
-    QLMSkinOSDView *view = [[QLMSkinOSDView alloc] initWithSkin:skin];
-    view.unit = @"dB";
+- (void)hostSkin {
+    QLMSkinOSDView *view = [[QLMSkinOSDView alloc] initWithSkin:self.skin];
     [self.window setContentSize:view.frame.size];
     QLMSkinHost(self.window, view);
     self.osdView = view;
@@ -114,14 +115,11 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 }
 
 - (NSString *)showSnapshot:(QLMSnapshot *)snapshot {
-    if (!self.rule.enabled) {
-        return @"the OSD is off in Settings";
+    NSString *refusal = [self.rule refusalToShowSnapshot:snapshot];
+    if (refusal == nil) {
+        [self present:snapshot];
     }
-    if (snapshot.volumeDecibels == nil) {
-        return @"no level yet";
-    }
-    [self present:snapshot];
-    return nil;
+    return refusal;
 }
 
 - (void)render:(QLMSnapshot *)snapshot {
@@ -129,7 +127,7 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     QLMSkinOSDView *view = self.osdView;
     view.level = QLMDecibelsNumberText(decibels, 1);
     view.title = QLMGroupNameText(snapshot);
-    view.subtitle = QLMOutputStateText(snapshot) ?: @"qlm · Output level";
+    view.subtitle = QLMOutputStateText(snapshot);
     view.fraction = QLMKnobFraction(decibels, self.preferences.lowestDecibels, QLMShownCeiling(snapshot, self.preferences.ceilingDecibels));
 }
 
@@ -139,7 +137,7 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
         [self makeWindow];
     }
     if (self.osdView == nil) {
-        [self loadSkin];
+        [self hostSkin];
     }
     self.shown = snapshot;
     [self render:snapshot];
@@ -195,3 +193,8 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 }
 
 @end
+
+#if DEBUG
+@implementation QLMOSDController (Debug)
+@end
+#endif

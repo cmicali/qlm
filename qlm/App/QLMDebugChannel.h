@@ -1,6 +1,8 @@
 #import <Cocoa/Cocoa.h>
 
+@class QLMFakeBus;
 @class QLMPreferences;
+@class QLMSkinChoice;
 @class QLMSnapshot;
 @class QLMSystem;
 
@@ -14,7 +16,31 @@ NS_ASSUME_NONNULL_BEGIN
 //
 // Every .m here wraps its body in #if DEBUG, so a Release build compiles it
 // to nothing. This header has no #if DEBUG, so a call from Release code
-// compiles and then fails to link. Every caller stays under #if DEBUG.
+// compiles and then fails to link. Every caller stays under #if DEBUG, and
+// so does every adoption of a protocol here, which would put its name in
+// the Release app.
+
+// The main window, as QLMMainWindowController gives it.
+@protocol QLMDebugWindow <NSObject>
+@property (nonatomic, readonly, getter=isShowing) BOOL showing;
+// The last apply's error, until the next click.
+@property (nonatomic, readonly, copy, nullable) NSString *applyError;
+@property (nonatomic, readonly) NSSize contentSize;
+- (void)close;
+- (nullable NSString *)clickGroupNamed:(NSString *)name;
+- (nullable NSString *)turnKnobTo:(double)decibels level:(double *)level;
+- (nullable NSString *)resizeTo:(NSSize)size;
+@end
+
+// The OSD, as QLMOSDController gives it. dump_screenshot takes it while the
+// app has no key window.
+@protocol QLMDebugOSD <NSObject>
+@property (nonatomic, readonly) BOOL showing;
+// As a turn of the adapter's knob shows it, timer and all, or why not.
+- (nullable NSString *)showSnapshot:(nullable QLMSnapshot *)snapshot;
+// At once.
+- (void)hide;
+@end
 
 // What the verbs drive. The app delegate adopts it. On the main queue.
 @protocol QLMDebugApp <NSObject>
@@ -43,35 +69,23 @@ NS_ASSUME_NONNULL_BEGIN
 // The banner's Quit GLM button. NO while it is hidden or disabled.
 - (BOOL)debugQuitGLM;
 // Opens a look at the named skin, its window or its OSD, and makes it key.
-// A disabled look shows every control, or the OSD, disabled. The reply says
-// which skin shows, and why it fell back, if it did.
+// A disabled look shows every control disabled. The reply says which skin
+// shows, and why it fell back, if it did.
 - (NSDictionary *)debugShowSkinPreview:(NSString *)name osd:(BOOL)osd disabled:(BOOL)disabled;
-// The OSD: shows the latest snapshot's level, as a turn of the adapter's
-// knob would, timer and all, or says why not. The hide is at once.
-// dump_screenshot takes it while the app has no key window.
-- (nullable NSString *)debugShowOSD;
-- (void)debugHideOSD;
-@property (nonatomic, readonly) BOOL debugOSDShowing;
-// Turns the fake bus's knob, as its window's slider does, or says why not.
-- (nullable NSString *)debugTurnFakeKnobTo:(NSInteger)tenths;
+// The fake bus the app runs on, or nil on the GLM adapter.
+@property (nonatomic, readonly, nullable) QLMFakeBus *debugFakeBus;
 // The app's Quit. quitAnyway answers the louder hand-back alert, if it would
 // show. Returns only when the quit is cancelled.
 - (void)debugQuitAnswering:(BOOL)quitAnyway;
 
-// The main window: what the popover's Window… button opens, and its close.
-// The rest are as QLMMainWindowController's.
-@property (nonatomic, readonly) BOOL debugWindowShowing;
+@property (nonatomic, readonly) id<QLMDebugWindow> debugWindow;
+@property (nonatomic, readonly) id<QLMDebugOSD> debugOSD;
+// What the popover's Window… button does.
 - (void)debugShowWindow;
-- (void)debugCloseWindow;
-- (nullable NSString *)debugClickGroupNamed:(NSString *)name;
-@property (nonatomic, readonly, copy, nullable) NSString *debugWindowApplyError;
-- (double)debugTurnKnobTo:(double)decibels;
-@property (nonatomic, readonly, copy) NSString *debugWindowSkinName;
-- (nullable NSString *)debugResizeWindowTo:(NSSize)size;
-@property (nonatomic, readonly) NSSize debugWindowSize;
+// The skin that shows, and why the saved one does not, if it does not.
+@property (nonatomic, readonly) QLMSkinChoice *debugSkinChoice;
+// What Settings' skin picker does. Returns the library's refusal.
 - (nullable NSString *)debugChooseSkin:(NSString *)name;
-// Why the saved skin does not load.
-@property (nonatomic, readonly, copy, nullable) NSString *debugSkinRefusal;
 @end
 
 // Installs the channel under the bundle identifier. Call it once, at launch.

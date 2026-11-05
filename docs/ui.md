@@ -1,6 +1,6 @@
 # The UI pass: a main window, an OSD, and skins
 
-**Status, 2026-11-04.** Built, in #75 to #82, and run on the fake bus only. The monitors see it first in the week of daily use. The popover changed only by a `Window…` button, and stays as it is until its own redesign, later. What the assets don't settle yet is listed under that heading below.
+**Status, 2026-11-04.** Built in #75 to #85, then tidied in one more PR, and run on the fake bus only. The monitors see it first in the week of daily use. The popover changed only by a `Window…` button, and stays as it is until its own redesign, later. What the assets don't settle yet is listed under that heading below.
 
 qlm has run on all six monitors through a plain AppKit popover. That was enough to prove the protocol. This doc plans the first real UI: a main window that can be opened and left open, an on-screen display that shows the level when the knob turns, and a skin system that draws both. Three skins come with it: modern, vintage, and retro. The mockups and the assets are in [`qlm/App/Skins/`](../qlm/App/Skins/), one directory per skin, and this doc refers to them by name.
 
@@ -10,12 +10,12 @@ The plan's rules still hold. The window and the OSD read snapshots on the main q
 
 ### The main window
 
-One fixed-size panel, with no title bar of its own. The skin draws the whole thing, and the app draws text over it. From the top:
+One panel, with no title bar of its own, that resizes from the skin's size up. The skin draws the whole thing, and the app draws text over it. From the top:
 
 | Element | Shows | Reads | Drives |
 | --- | --- | --- | --- |
-| Logo | The skin's logo | | |
-| Status LED | "6 ONLINE", from the monitor list's counts. The LED is lit while any monitor is online, dim otherwise. A bus problem replaces the count with its title. | `QLMMonitorList.entries`, `QLMBusProblemTitle` | |
+| Logo | The app's name, `qlm.`, in the skin's slot for it | | |
+| Status LED | "6 ONLINE", from the monitors online. The LED is lit while any monitor is online, dim otherwise. A bus problem replaces the count with its title. The status dims while System is stopped. | `snapshot.monitors`, `QLMBusProblemTitle` | |
 | Listening setup | One button per group of the loaded setup file, in the file's order, lit for the active group | `QLMSetup.groups`, `snapshot.activeGroupName`, `snapshot.applying` | `applyGroup:` |
 | Display | The active group's name at the top left, the level large in the middle, and `OUTPUT` and `MAX` along the bottom | `snapshot.volumeDecibels`, `snapshot.handBack.volumeDecibels`, `snapshot.ceilingDecibels` | |
 | Mute, Dim | Toggles, lit while on. Dim's title carries its depth, `DIM −20`. | `snapshot.allMuted`, `snapshot.dimmed` | `setAllMuted:`, `setDimmed:` |
@@ -34,7 +34,7 @@ The display's three numbers mean three different things. The large one is the le
 
 ### The OSD
 
-When the knob on the adapter turns, a small panel shows the new level, then fades. Its shape is the mockups' second image: the level large on the left, `Main monitors` and `qlm · Output level` on the right, and a bar across the bottom that fills from the lowest level to the ceiling. The bar is the level's place in the slider's range. The panel is bigger than the mockups draw it: the number at about 56 pt and the panel about 480 by 150 points, so it reads from across the room.
+When the knob on the adapter turns, a small panel shows the new level, then fades. Its shape is the mockups' second image: the level large on the left, the active group's name, else `Monitors`, and `qlm · Output level` on the right, and a bar across the bottom that fills from the lowest level to the ceiling. The bar is the level's place in the slider's range. The panel is bigger than the mockups draw it: the number at about 56 pt and the panel about 480 by 150 points, so it reads from across the room.
 
 The OSD is a floating panel that takes no focus and no clicks. It is a borderless window, not an `NSPanel`, that never becomes key, so `dump_screenshot` can capture it: AppKit's list of the app's windows leaves panels out. It joins every Space and shows over full-screen apps, as the Mac's own volume bezel does. It shows on the main screen, in one of six places the user picks: the top or bottom of the screen, at the left, center, or right. Each show restarts its timer, so a turn that goes on keeps it up. When the timer ends it fades over about a quarter second.
 
@@ -80,7 +80,7 @@ What the app draws, from the skin's colors and metrics:
 | Modern's knob arc | The track and fill colors |
 | The buttons' focus ring | A focus color and radius |
 | The OSD's track and fill | Two colors and a height |
-| The display's and the OSD's dimming when disabled | An overlay alpha |
+| The display's dimming while System is stopped | An overlay color |
 | Every piece of text | The slots below |
 
 What a skin supplies as images, at 1x and 2x, or as a `draw` block where it has no material:
@@ -112,13 +112,15 @@ So a qlm skin is one self-contained directory:
 2. **The elements.** Each with its frame at the reference size, its anchors and whether it stretches, and an image name or a `draw` block. The images' cap insets sit with the element, so a user's skin edits nothing outside its directory. The pack's `asset_catalog_name` goes, with the asset catalog.
 3. **A grid for the groups, not three buttons.** The pack places three setup buttons by role. The skin gives one `groups` element: a frame, the columns and rows, and the gap. The app lays as many buttons in it as it has cells, up to six, in the file's order, and leaves the rest of the grid empty. A file with more groups shows the first ones. Modern's grid is two rows of three. Vintage's and retro's is one row of four, since their setup box has room for one row of 40-point buttons.
 4. **The knob's metrics.** Its frame, the ticks, the pointer, the shadow, and the sweep, −135° to +135° clockwise from straight up, as the pack has it. Only the pointer rotates. The body's highlight stays where the light is.
-5. **Text slots, not sample text.** The pack's layout lists sample strings at sample frames, `LEVEL` and `MAIN · ACTIVE` among them. The skin instead names each slot the app fills, with its frame, font, size, weight, alignment, and color: `online`, `groupsTitle`, the display's `caption`, `level`, `unit`, `output`, and `max`, the knob's `min`, `max`, and `caption`, the footer's `monitors` and `power`, and the OSD's `level`, `unit`, `title`, and `subtitle`. The strings are the app's. A skin can't put words on the panel, and the app can't put text where the skin left no slot. Fonts name a face the Mac has, and a face it lacks falls back to the system font, or the system monospaced font for a slot marked `mono`. The display's digits are monospaced in every skin.
+5. **Text slots, not sample text.** The pack's layout lists sample strings at sample frames, `LEVEL` and `MAIN · ACTIVE` among them. The skin instead names each slot the app fills, with its frame, font, size, weight, alignment, and color: the nameplate's `logo`, `online`, the groups' `groupsTitle` and `message`, the display's `caption`, `level`, `unit`, `output`, and `max`, the knob's `min`, `max`, and `caption`, the footer's `monitors` and `power`, and the OSD's `level`, `unit`, `title`, and `subtitle`. The strings are the app's. A skin can't put words on the panel, and the app can't put text where the skin left no slot. Fonts name a face the Mac has, and a face it lacks falls back to the system font, or the system monospaced font for a slot marked `mono`. The display's digits are monospaced in every skin.
 
 The state rules are the pack's: disabled first, then pressed, then hover, then normal, with selection independent and focus an overlay. The symbol names are the pack's too.
 
-The first two `skin.json` files are written from the pack's layouts by hand in PR 5, and `tools/build_assets.py` learns to write `skin.json` and export only the sixteen images when the assets are next re-exported. The pack's `layout.json` and `manifest.json` stay until then.
+Vintage's and retro's `skin.json` files were written by hand from the pack's layouts, in #78. `tools/build_assets.py` doesn't write `skin.json` yet. It learns to, and to export only the sixteen images, when the assets are next re-exported. The pack's `layout.json` and `manifest.json` stay until then.
 
-A user's skin is a directory of the same shape in `~/Library/Application Support/qlm/Skins/`, read at launch and when Settings' skin list opens. A missing image, a frame outside the window, an unknown key, or an element with both an image and a `draw` refuses the skin, with the reason in Settings, and the app falls back to modern. The reader is strict, as the setup reader is.
+A user's skin is a directory of the same shape in `~/Library/Application Support/qlm/Skins/`. Settings lists that folder again each time it opens. A missing image, a frame outside the window, an unknown key, or an element with both an image and a `draw` refuses the skin, with the reason in Settings, and the app falls back to modern. The reader is strict, as the setup reader is.
+
+The skin loads once, at launch and at each pick, and the window, the OSD, and Settings all take that one. So they never disagree about which skin shows. A pick of the skin that shows loads it again. That is how a user tries a skin again after fixing its `skin.json`, with no relaunch.
 
 ### Resizing
 
@@ -151,15 +153,25 @@ The OSD went past them too, and needed no new image. Vintage's and retro's OSDs 
 
 ### What draws it
 
-Four classes in `qlm/App/`, over the resources:
+These files in `qlm/App/`, over the resources. Those marked Foundation only compile into the hostless tests, and so does `QLMSkinDrawing`, which draws into a bitmap there.
 
-- `QLMSkin` reads a skin's `skin.json` into values: the window's size, each element's frame and style, the fonts, the colors, the cap insets, and the OSD's layout. It loads no image itself. It is Foundation only, so the hostless tests cover it, with the two shipped layouts and a fixture for each refusal.
-- `QLMSkinView` is the window's content view. It draws the panel and its markings and hosts one subview per element, laid out from the skin's frames, with no Auto Layout, since every frame is given. Each subview draws its element from the skin's style and the state the controller hands it, by the pack's state rules, and draws the geometry itself: LEDs, rings, bars, and overlays. `appkit/QLMSkinAssets.m` in the pack shows the button and knob drawing, and the engine takes it as reference, not as code to compile: it loads from an asset catalog, and qlm loads from the skin's directory, so user skins load the same way.
-- `QLMKnobControl` is the knob, an `NSControl` with a `doubleValue` in dB. It draws the shadow, the tick ring, the body image, the pointer, and the focus ring, in that order. Its math is a C header, `QLMKnobMath.h`, which the tests cover: dB to angle, both drags, the step snap, and each tick's position.
-- `QLMMainWindowController` owns the window, reads the monitor list's snapshot, renders each element, and drives System. It mirrors `QLMPopoverController`'s rules for what is enabled and when, and shares its helpers in `QLMFormat`.
-- `QLMOSDController` owns the OSD panel, its timer, and its fade. Its rule for when to show, and for how the timer restarts, is a plain object with an injectable clock, so the tests cover it.
+- `QLMSkin` reads a skin's `skin.json` into values and refuses what it can't read. It loads no image itself. Foundation only.
+- `QLMSkinLibrary` finds the app's skins and the user's, by name, and falls back to modern for a refused one. Foundation only.
+- `QLMSkinChoice` holds the skin that shows, and why the saved one was refused, if it was. The app delegate hands its skin to the window, the OSD, and Settings. Foundation only.
+- `QLMSkinLayout` is the resize pass: each element's and slot's frame at a window size, by its anchors. Foundation only.
+- `QLMSkinDrawing` draws a skin's colors, images, fonts, and the geometry the app draws itself: LEDs, rings, and focus rings.
+- `QLMSkinControls` holds the element views: the buttons, the footer's buttons, the status, the display, and the OSD's content.
+- `QLMSkinView` is the window's content view. It draws the panel, the nameplate, the markings, and the panel's own words, and lays out the element views, with no Auto Layout, since every frame is given.
+- `QLMKnobControl` is the knob, an `NSControl` with a `doubleValue` in dB. Its math is a C header, `QLMKnobMath.h`: dB to angle, both drags, the step snap, and each tick's place.
+- `QLMMainWindowModel` turns the snapshot, the setup's groups, the range, and the window's last click into the window's texts and states. It holds the popover's rules for what is enabled, and why a group button takes no click. Foundation only.
+- `QLMMainWindowController` owns the window. It hands the model's outputs to the views and drives System.
+- `QLMOSDRule` says when a snapshot shows the OSD, why a show with no turn shows nothing, and where the OSD sits on the screen. Foundation only.
+- `QLMOSDController` owns the OSD's window, its timer, and its fade.
+- `QLMSkinPreview`, in a Debug build only, opens a look at a skin with sample text, for the `skin_preview` verb.
 
-`project.yml` compiles all of `qlm/App` today, so the Skins directory needs an exclude there, and a resources entry that copies each skin's `skin.json` and `png/` into the bundle, leaving the masters, the mockups, the previews, the sources, the pack's layouts, and the tools out. The pack's `appkit/` is reference and compiles into nothing.
+`appkit/QLMSkinAssets.m` in the pack shows the button and knob drawing, and the engine took it as reference, not as code to compile: it loads from an asset catalog, and qlm loads from the skin's directory, so user skins load the same way.
+
+`project.yml` leaves `qlm/App/Skins/` out of the sources, and copies each skin's `skin.json` and `png/` into the bundle, without the masters, the mockups, the previews, the sources, the pack's layouts, and the tools. The pack's `appkit/` is reference and compiles into nothing.
 
 The images and the drawn controls are the app's own. vibe-libs' `ui/Controls` has drawn sliders and symbol buttons for another look, and none of this is general enough for a second app yet, so nothing goes there now. If a second app wants skins, the engine moves, by vibe-libs' own rule.
 
@@ -169,12 +181,14 @@ Each new control gets a verb, so `.claude/skills/app-hardware-run` can drive the
 
 | Verb | Does |
 | --- | --- |
-| `window <show|close>` | Opens or closes the main window |
+| `window <show\|close>` | Opens or closes the main window |
 | `window_size <width> <height>` | Sets the window's content size in points, as a drag of its corner does, never below the skin's size |
 | `group <name>` | Clicks that group's button, with the button's refusals |
-| `knob <dB>` | Turns the window's knob, as a drag would |
-| `osd <show|hide>` | Shows the OSD at the current level, or hides it, so a screenshot can check it |
-| `skin <name>` | Switches the skin, as Settings does |
+| `knob <dB>` | Turns the window's knob, as a drag would, while the window shows |
+| `osd <show\|hide>` | Shows the OSD at the current level, or hides it, so a screenshot can check it |
+| `skin <name>` | Switches the skin, as Settings does. The skin that shows loads again |
+| `skin_preview <name> <window\|disabled\|osd>` | Opens a look at a skin, with sample text, without choosing it: its window, its window with every control disabled, or its OSD. Skin authors screenshot it |
+| `fake_knob <tenths>` | Turns the fake bus's knob, as its window's slider does, so the OSD can be seen on a turn |
 
 `dump_state` gains the skin's name and why it is refused, if it is, the OSD's settings, and whether the window and the OSD are showing. `dump_screenshot -` already captures the key window, so each skin's rendering can be checked by eye from a script.
 

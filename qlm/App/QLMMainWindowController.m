@@ -3,7 +3,6 @@
 #include "QLMCommands.h"
 #import "QLMFormat.h"
 #import "QLMMainWindowModel.h"
-#import "QLMSkinLibrary.h"
 #import "QLMSkinView.h"
 
 static NSString *const QLMMainWindowAutosaveName = @"QLMMainWindow";
@@ -11,7 +10,6 @@ static NSString *const QLMMainWindowAutosaveName = @"QLMMainWindow";
 static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 @interface QLMMainWindowController () <NSWindowDelegate>
-@property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMMainWindowModel *model;
 @property (nonatomic, nullable) QLMSetup *setup;
@@ -22,17 +20,17 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 @end
 
 @implementation QLMMainWindowController {
+    QLMPreferences *_preferences;
     BOOL _windowMade;
 }
 
-- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList {
+- (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList skin:(QLMSkin *)skin {
     self = [super initWithWindow:nil];
     if (self) {
         _preferences = preferences;
         _monitorList = monitorList;
         _model = [[QLMMainWindowModel alloc] init];
-        _skin = [self loadSkinNamed:preferences.skinName refusal:NULL];
-        _model.groupCapacity = QLMSkinGroupButtonCount(_skin);
+        [self showSkin:skin];
         [self reloadVolumeRange];
     }
     return self;
@@ -48,7 +46,6 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 }
 
 - (void)makeWindow {
-    NSAssert(self.skin != nil, @"the default skin is refused");
     NSWindowStyleMask style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable
                               | NSWindowStyleMaskResizable;
     NSWindow *window = QLMSkinHostWindow(self.skin, style);
@@ -57,7 +54,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     window.excludedFromWindowsMenu = YES;
     window.delegate = self;
     super.window = window;
-    [self showSkin:self.skin];
+    [self hostSkin];
     if ([window setFrameUsingName:QLMMainWindowAutosaveName]) {
         [self growToSkin];
     } else {
@@ -66,18 +63,12 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     window.frameAutosaveName = QLMMainWindowAutosaveName;
 }
 
-// With the library's fallback: a refused name gives the default skin.
-- (QLMSkin *)loadSkinNamed:(NSString *)name refusal:(NSString *_Nullable *_Nullable)refusal {
-    return [[QLMSkinLibrary standardLibrary] loadSkinNamed:name refusal:refusal];
-}
-
 // A frame kept under a skin with a smaller size could be too small for this
 // one.
 - (void)growToSkin {
     NSWindow *window = super.window;
-    NSSize minimum = self.skin.windowSize;
-    window.contentMinSize = minimum;
     NSSize size = window.contentView.bounds.size;
+    NSSize minimum = self.skin.windowSize;
     if (size.width < minimum.width || size.height < minimum.height) {
         [window setContentSize:QLMSizeAtLeast(size, minimum)];
     }
@@ -89,19 +80,15 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     if (!_windowMade) {
         return;
     }
+    super.window.contentMinSize = skin.windowSize;
     [self growToSkin];
-    QLMSkinView *view = [[QLMSkinView alloc] initWithSkin:skin];
+    [self hostSkin];
+}
+
+- (void)hostSkin {
+    QLMSkinView *view = [[QLMSkinView alloc] initWithSkin:self.skin];
     QLMSkinHost(super.window, view);
     self.skinView = view;
-
-    view.logo = QLMSkinLogo;
-    view.tagline = QLMSkinTagline;
-    view.groupsTitle = QLMSkinGroupsTitle;
-    view.knobCaption = QLMSkinKnobCaption;
-    view.display.unit = @"dB";
-    view.muteButton.title = @"MUTE";
-    view.dimButton.title = [@"DIM " stringByAppendingString:QLMDecibelsNumberText(-QLMDimDecibels, 0)];
-    view.monitorsButton.title = @"Monitors";
 
     view.display.accessibilityElement = YES;
     view.display.accessibilityRole = NSAccessibilityStaticTextRole;
@@ -139,21 +126,6 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     [self render];
 }
 
-- (NSString *)chooseSkinNamed:(NSString *)name {
-    NSString *refusal = nil;
-    QLMSkin *skin = [self loadSkinNamed:name refusal:&refusal];
-    if (refusal != nil) {
-        return refusal;
-    }
-    self.preferences.skinName = name;
-    [self showSkin:skin];
-    return nil;
-}
-
-- (NSString *)shownSkinName {
-    return self.skin.name;
-}
-
 - (BOOL)isShowing {
     return _windowMade && super.window.visible;
 }
@@ -179,14 +151,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 - (void)showSetup:(QLMSetup *)setup fileName:(NSString *)fileName error:(NSError *)error {
     self.setup = setup;
-    NSMutableArray<NSString *> *names = nil;
-    if (setup != nil) {
-        names = [NSMutableArray array];
-        for (QLMSetupGroup *group in setup.groups) {
-            [names addObject:group.name];
-        }
-    }
-    self.model.groupNames = names;
+    self.model.groupNames = setup.groupNames;
     self.model.setupFileName = fileName;
     self.model.setupError = error.localizedDescription;
     [self renderGroups];
@@ -194,8 +159,8 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 }
 
 - (void)reloadVolumeRange {
-    self.model.lowestDecibels = self.preferences.lowestDecibels;
-    self.model.ceilingDecibels = self.preferences.ceilingDecibels;
+    self.model.lowestDecibels = _preferences.lowestDecibels;
+    self.model.ceilingDecibels = _preferences.ceilingDecibels;
     self.knobTurnedAt = 0;
     [self renderRange];
     [self refresh];
@@ -210,36 +175,26 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 #pragma mark - Actions
 
 - (void)groupClicked:(QLMSkinButtonView *)button {
-    (void)[self applyGroupAtIndex:(NSUInteger)button.tag];
+    NSArray<NSString *> *names = self.model.shownGroupNames;
+    NSUInteger index = (NSUInteger)button.tag;
+    if (index < names.count) {
+        (void)[self clickGroup:names[index] atIndex:index];
+    }
 }
 
 - (NSString *)clickGroupNamed:(NSString *)name {
-    self.model.snapshot = self.monitorList.snapshot;
-    NSArray<NSString *> *names = self.model.shownGroupNames;
-    NSUInteger index = [names indexOfObject:name];
-    if (index == NSNotFound) {
-        return names.count == 0 ? [NSString stringWithFormat:@"no group buttons show: %@", self.model.groupsMessage]
-                                : [NSString stringWithFormat:@"no group button reads %@. They read: %@", name,
-                                                             [names componentsJoinedByString:@", "]];
-    }
-    return [self applyGroupAtIndex:index];
+    return [self clickGroup:name atIndex:[self.model.shownGroupNames indexOfObject:name]];
 }
 
 // As the popover's picker: the error shows until the next click. Returns
 // why the button takes no click, or nil once the apply starts.
-- (nullable NSString *)applyGroupAtIndex:(NSUInteger)index {
+- (nullable NSString *)clickGroup:(NSString *)name atIndex:(NSUInteger)index {
     QLMMainWindowModel *model = self.model;
     model.snapshot = self.monitorList.snapshot;
     QLMSystem *system = self.system;
-    if (system == nil) {
-        return @"System is not running";
-    }
-    if (!model.groupsEnabled) {
-        return model.applying ? @"the group buttons are disabled while an apply runs"
-                              : @"the group buttons are disabled until System tracks a monitor";
-    }
-    if (index >= model.shownGroupNames.count) {
-        return @"no group button there";
+    NSString *refusal = [model refusalToClickGroupNamed:name] ?: (system == nil ? @"System is not running" : nil);
+    if (refusal != nil) {
+        return refusal;
     }
     QLMSetupGroup *group = self.setup.groups[index];
     model.clickedGroupName = group.name;
@@ -288,8 +243,9 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     [self.system setDimmed:!self.monitorList.snapshot.dimmed];
 }
 
+// The knob sends only its steps.
 - (void)knobTurned:(QLMKnobControl *)knob {
-    double decibels = QLMNearestStepDecibels(knob.doubleValue);
+    double decibels = knob.doubleValue;
     self.knobTurnedAt = NSProcessInfo.processInfo.systemUptime;
     self.skinView.display.level = QLMDecibelsNumberText(decibels, 1);
     // Once the hold lapses, the display catches up with no new snapshot.
@@ -298,17 +254,20 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     [self.system setVolumeDecibels:decibels];
 }
 
-- (double)turnKnobTo:(double)decibels {
-    (void)self.window;
+- (NSString *)turnKnobTo:(double)decibels level:(double *)level {
+    if (!self.showing) {
+        return QLMWindowClosedRefusal;
+    }
     [self render];
     QLMKnobControl *knob = self.skinView.knob;
     [knob moveTo:decibels];
-    return knob.doubleValue;
+    *level = knob.doubleValue;
+    return nil;
 }
 
 - (NSString *)resizeTo:(NSSize)size {
     if (!self.showing) {
-        return @"the window is closed";
+        return QLMWindowClosedRefusal;
     }
     NSWindow *window = super.window;
     // Within the screen, so the frame kept on quit still shows.
@@ -373,9 +332,10 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
     view.status.text = model.statusText;
     view.status.lit = model.statusLit;
+    view.status.enabled = model.statusEnabled;
     view.status.toolTip = model.busProblem;
 
-    if (model.applyingGroupName != nil) {
+    if (model.applying) {
         [self startBlink];
     } else {
         [self stopBlink];
@@ -424,3 +384,8 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 }
 
 @end
+
+#if DEBUG
+@implementation QLMMainWindowController (Debug)
+@end
+#endif

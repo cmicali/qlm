@@ -109,9 +109,6 @@ extern const NSTimeInterval QLMOSDSecondsStep;
 // At or under 0 dB, the monitors' full level. NaN is not.
 BOOL QLMIsSavableLevel(double decibels);
 
-// The nearest of GLM's 0.5 dB steps.
-double QLMNearestStepDecibels(double decibels);
-
 // The placement's name as kept, "bottomCenter".
 NSString *QLMOSDPlacementName(QLMOSDPlacement placement);
 

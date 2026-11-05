@@ -10,8 +10,8 @@
 // bottom to +135 at its top. Only the pointer turns.
 
 #define QLM_KNOB_START_DEGREES (-135.0)
-#define QLM_KNOB_END_DEGREES 135.0
 #define QLM_KNOB_SWEEP_DEGREES 270.0
+#define QLM_KNOB_END_DEGREES (QLM_KNOB_START_DEGREES + QLM_KNOB_SWEEP_DEGREES)
 #define QLM_KNOB_STEP_DECIBELS QLMVolumeDecibelsStep
 
 static inline double QLMKnobClamp(double value, double low, double high) {
@@ -35,7 +35,7 @@ static inline double QLMKnobAngleForDecibels(double decibels, double minimum, do
 static inline double QLMKnobSnap(double decibels, double minimum, double maximum) {
     double low = ceil(minimum / QLM_KNOB_STEP_DECIBELS) * QLM_KNOB_STEP_DECIBELS;
     double high = floor(maximum / QLM_KNOB_STEP_DECIBELS) * QLM_KNOB_STEP_DECIBELS;
-    double stepped = round(decibels / QLM_KNOB_STEP_DECIBELS) * QLM_KNOB_STEP_DECIBELS;
+    double stepped = QLMNearestStepDecibels(decibels);
     if (high < low) {
         return low;
     }
@@ -98,10 +98,9 @@ static inline double QLMKnobDragStep(double level, double fromDegrees, double to
 #define QLM_KNOB_DRAG_TRAVEL_POINTS 200.0
 #define QLM_KNOB_FINE_DRAG_TRAVEL_POINTS 800.0
 
-// One step of a vertical drag, `dy` points down since the last event: up is
-// louder: the travel is a turn of the whole sweep. Each step turns at most
-// the angular drag's cap, clamped where that drag drops it, so a leap of the
-// mouse in one event can't jump the level. `level` is
+// One step of a vertical drag: up is louder, and `travel` points, `dy`
+// counted down, turn the whole sweep. One event turns at most the angular
+// drag's cap, so a leap of the mouse can't jump the level. `level` is
 // unsnapped, so a slow drag adds up.
 static inline double QLMKnobDragVertical(double level, double dy, double minimum, double maximum, double travel) {
     if (!(maximum > minimum) || !(travel > 0) || !isfinite(dy)) {

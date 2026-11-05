@@ -3,6 +3,8 @@
 #include "QLMCommands.h"
 #include "QLMReplies.h"
 
+const NSInteger QLMFakeKnobBottomTenths = -1004;
+
 @implementation QLMFakeMonitor {
     NSTimeInterval _stepsSentAt;  // when a frame last carried 8A, or NAN
 }
@@ -65,7 +67,7 @@
         // The shape of the adapter's own replies in captures/startup-idle.
         _adapterSystemInfo = @"c-0;model-GLM Adapter;ver-1.4.0.6113;hw-0.0.202;build-2025.05.19.s  ";
         _adapterSerialNumber = @"H00000F001";
-        _knobTenths = @(-1004);
+        _knobTenths = @(QLMFakeKnobBottomTenths);
     }
     return self;
 }
@@ -115,6 +117,16 @@
     } else {
         dispatch_sync(queue, block);
     }
+}
+
+- (BOOL)turnKnobToTenths:(NSInteger)tenths {
+    if (tenths < QLMFakeKnobBottomTenths || tenths > 0) {
+        return NO;
+    }
+    [self perform:^{
+        self->_knobTenths = @(tenths);
+    }];
+    return YES;
 }
 
 - (void)startOnQueue:(dispatch_queue_t)queue clock:(id<QLMClock>)clock {

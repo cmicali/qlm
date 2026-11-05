@@ -136,7 +136,6 @@
   "osd": {
     "size": [480, 150],
     "draw": {"fill": "#2b2c29", "border": "#53554f", "radius": 18},
-    "disabledOverlay": "#1e1f1cb0",
     "bar": {"frame": [250, 104, 200, 5], "track": "#4a4c46", "fill": "accent", "radius": 2.5},
     "text": {
       "level": {"frame": [28, 40, 200, 70], "mono": true, "size": 54, "color": "text"},

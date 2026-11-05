@@ -3,6 +3,7 @@
 #import "QLMMonitorList.h"
 #import "QLMPreferences.h"
 #import "QLMSetup.h"
+#import "QLMSkin.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -20,8 +21,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)settingsDidChangeAdapter:(QLMSettingsWindowController *)controller;
 // The OSD's setting, place, or seconds changed in the preferences.
 - (void)settingsDidChangeOSD:(QLMSettingsWindowController *)controller;
-// The user picked a skin. Returns the library's refusal, and then nothing
-// changes.
+// The user picked a skin, maybe the one that shows. Returns the library's
+// refusal, and then nothing changes.
 - (nullable NSString *)settings:(QLMSettingsWindowController *)controller chooseSkinNamed:(NSString *)name;
 @end
 
@@ -42,9 +43,10 @@ NS_ASSUME_NONNULL_BEGIN
 // open.
 - (void)refresh;
 
-// Draws the skin's picker, its note, and the groups note again, after the
-// skin changed elsewhere, while the window is open.
-- (void)reloadSkin;
+// The skin that shows, and why the saved one does not, if it does not. It
+// draws the skin's picker, its note, and the groups note while the window
+// is open.
+- (void)showSkin:(QLMSkin *)skin refusal:(nullable NSString *)refusal;
 
 // Saves a field still being edited, as Return would.
 - (void)endEditing;

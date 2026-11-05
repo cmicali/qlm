@@ -16,7 +16,7 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, nullable) QLMSnapshot *snapshot;
 // The loaded setup's groups, in the file's order. Nil with no setup.
 @property (nonatomic, copy, nullable) NSArray<NSString *> *groupNames;
-// The skin's group buttons. QLMSkinMaxGroups until set.
+// The cells of the skin's grid. Unbounded until set.
 @property (nonatomic) NSUInteger groupCapacity;
 // The setup file's name, or nil with none found.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
@@ -41,11 +41,13 @@ NS_ASSUME_NONNULL_BEGIN
 // is online.
 @property (nonatomic, readonly) NSString *statusText;
 @property (nonatomic, readonly) BOOL statusLit;
+// The status dims while System is stopped.
+@property (nonatomic, readonly) BOOL statusEnabled;
 // The bus problem's title as written, or nil.
 @property (nonatomic, readonly, nullable) NSString *busProblem;
 
-// As many as the skin has buttons for, in the file's order, and each one's
-// title and letter.
+// As many as QLMShownGroupButtons gives for the skin's grid, in the file's
+// order, and each one's title and letter.
 @property (nonatomic, readonly) NSArray<NSString *> *shownGroupNames;
 @property (nonatomic, readonly) NSArray<NSString *> *groupTitles;
 @property (nonatomic, readonly) NSArray<NSString *> *groupPrefixes;
@@ -62,10 +64,15 @@ NS_ASSUME_NONNULL_BEGIN
 // The popover picker's rule: a setup, System tracks a monitor, and no apply
 // runs.
 @property (nonatomic, readonly) BOOL groupsEnabled;
+// By the snapshot or the window's pending click. The applying group's
+// button blinks meanwhile.
 @property (nonatomic, readonly) BOOL applying;
 // In the grid's place while no group shows: the file's name, its error, or
 // that there is none. Nil while groups show.
 @property (nonatomic, readonly, nullable) NSString *groupsMessage;
+// Why the named group's button takes no click: no button reads it, or the
+// buttons are disabled. Nil when it takes one.
+- (nullable NSString *)refusalToClickGroupNamed:(NSString *)name;
 
 @property (nonatomic, readonly) NSString *caption;
 // The undimmed level, or an em dash while none is set or it waits for the
@@ -99,5 +106,12 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) BOOL powerEnabled;
 
 @end
+
+// The group buttons a window shows on a grid of `cells`: one per cell, up to
+// six, one per letter, A to F.
+NSUInteger QLMShownGroupButtons(NSUInteger cells);
+
+// Why the window's knob and size take nothing while it is closed.
+extern NSString *const QLMWindowClosedRefusal;
 
 NS_ASSUME_NONNULL_END

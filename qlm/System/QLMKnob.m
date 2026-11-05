@@ -20,7 +20,7 @@ BOOL QLMKnobMoved(NSInteger fromTenths, NSInteger toTenths) {
 }
 
 double QLMKnobStep(NSInteger tenths) {
-    double decibels = round((double)tenths / (10 * QLMVolumeDecibelsStep)) * QLMVolumeDecibelsStep;
+    double decibels = QLMNearestStepDecibels((double)tenths / 10);
     return fmin(QLMVolumeDecibelsMax, fmax(QLMVolumeDecibelsMin, decibels));
 }
 

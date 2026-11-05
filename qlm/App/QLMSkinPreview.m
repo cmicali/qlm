@@ -22,12 +22,8 @@ static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin, BOOL disabled) {
     window.title = @"Skin preview";
 
     QLMSkinView *view = [[QLMSkinView alloc] initWithSkin:skin];
-    view.logo = QLMSkinLogo;
-    view.tagline = QLMSkinTagline;
-    view.groupsTitle = QLMSkinGroupsTitle;
     view.knobMin = @"−80";
     view.knobMax = @"−30";
-    view.knobCaption = QLMSkinKnobCaption;
     view.status.text = @"6 ONLINE";
     view.status.lit = YES;
     // The owner's setup file has four groups.
@@ -35,15 +31,11 @@ static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin, BOOL disabled) {
     view.groupButtons[0].selected = YES;
     view.display.caption = @"MAIN";
     view.display.level = @"−59.0";
-    view.display.unit = @"dB";
     view.display.output = @"OUTPUT −59.0";
     view.display.max = @"MAX −30";
-    view.muteButton.title = @"MUTE";
-    view.dimButton.title = @"DIM −20";
     view.knob.minValue = -80;
     view.knob.maxValue = -30;
     view.knob.doubleValue = -59;
-    view.monitorsButton.title = @"Monitors";
     view.powerButton.title = @"Standby";
     if (disabled) {
         NSArray<QLMSkinControl *> *others = @[view.muteButton, view.dimButton, view.knob, view.monitorsButton,
@@ -58,7 +50,7 @@ static NSWindow *QLMSkinPreviewMainWindow(QLMSkin *skin, BOOL disabled) {
     return window;
 }
 
-static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin, BOOL disabled) {
+static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin) {
     NSRect frame = skin.osd.frame;
     NSWindow *window = [[QLMSkinPreviewWindow alloc] initWithContentRect:frame styleMask:NSWindowStyleMaskBorderless
                                                                  backing:NSBackingStoreBuffered defer:NO];
@@ -68,11 +60,8 @@ static NSWindow *QLMSkinPreviewOSDWindow(QLMSkin *skin, BOOL disabled) {
     window.hasShadow = YES;
     QLMSkinOSDView *view = [[QLMSkinOSDView alloc] initWithSkin:skin];
     view.level = @"−59.0";
-    view.unit = @"dB";
     view.title = @"Main monitors";
-    view.subtitle = @"qlm · Output level";
     view.fraction = (-59.0 + 80) / 50;
-    view.disabled = disabled;
     QLMSkinHost(window, view);
     return window;
 }
@@ -85,7 +74,7 @@ NSDictionary *QLMShowSkinPreview(NSString *name, BOOL osd, BOOL disabled) {
         return @{@"error": refusal ?: @"no skin loads"};
     }
     [shown close];
-    shown = osd ? QLMSkinPreviewOSDWindow(skin, disabled) : QLMSkinPreviewMainWindow(skin, disabled);
+    shown = osd ? QLMSkinPreviewOSDWindow(skin) : QLMSkinPreviewMainWindow(skin, disabled);
     shown.releasedWhenClosed = NO;
     [shown center];
     [shown makeKeyAndOrderFront:nil];
