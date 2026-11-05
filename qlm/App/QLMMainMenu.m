@@ -6,7 +6,6 @@
 - (void)redo:(nullable id)sender;
 @end
 
-static NSString *const QLMControlsTitle = @"Controls";
 static const NSInteger QLMGroupItemTag = 1000;
 
 static NSMenuItem *QLMItem(NSMenu *menu, NSString *title, SEL action, NSString *key, NSEventModifierFlags modifiers,
@@ -51,7 +50,7 @@ NSMenu *QLMMainMenu(id<QLMMainMenuActions> app, id<QLMMainMenuControls> controls
     QLMItem(edit, @"Select All", @selector(selectAll:), @"a", command, nil);
 
     // Cmd-M is Minimize's, so Mute and Dim take Shift too.
-    NSMenu *controlsMenu = [[NSMenu alloc] initWithTitle:QLMControlsTitle];
+    NSMenu *controlsMenu = [[NSMenu alloc] initWithTitle:@"Controls"];
     QLMItem(controlsMenu, @"Mute", @selector(toggleMute:), @"m", shift, controls);
     QLMItem(controlsMenu, @"Dim", @selector(toggleDim:), @"d", shift, controls);
     QLMItem(controlsMenu, @"Standby", @selector(togglePower:), @"", 0, controls);
@@ -75,11 +74,8 @@ NSMenu *QLMMainMenu(id<QLMMainMenuActions> app, id<QLMMainMenuControls> controls
     for (NSMenu *menu in @[qlm, file, edit, controlsMenu, window, help]) {
         [bar addItemWithTitle:menu.title action:NULL keyEquivalent:@""].submenu = menu;
     }
+    controls.controlsMenu = controlsMenu;
     return bar;
-}
-
-NSMenu *QLMMainMenuControlsMenu(NSMenu *bar) {
-    return [bar itemWithTitle:QLMControlsTitle].submenu;
 }
 
 void QLMMainMenuSetGroups(NSMenu *controls, NSArray<NSString *> *names, id<QLMMainMenuControls> target) {

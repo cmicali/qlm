@@ -15,23 +15,6 @@ static BOOL QLMSkinColorIsClear(QLMSkinColor color) {
     return color.alpha <= 0;
 }
 
-// A value kept on an object, made the first time it's asked for. On the
-// main queue.
-static id QLMSkinAttached(id owner, const void *key, id (^make)(void)) {
-    id value = objc_getAssociatedObject(owner, key);
-    if (value == nil) {
-        value = make();
-        objc_setAssociatedObject(owner, key, value, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-    }
-    return value;
-}
-
-static char QLMSkinGradientKey;
-
-void QLMSkinWarmImages(QLMSkin *skin) {
-    [[QLMSkinImages imagesOfSkin:skin] warmAtScale:QLMSkinImageFileScale(NSScreen.mainScreen.backingScaleFactor)];
-}
-
 CGImageRef QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) {
     size_t wide = (size_t)ceil(size.width * scale);
     size_t high = (size_t)ceil(size.height * scale);
@@ -71,8 +54,7 @@ static NSImageRep *_Nullable QLMSkinImageRep(QLMSkin *skin, NSString *name, NSIn
 // through `insets`, or nil when either file won't load. Kept on the skin,
 // so a skin read again reads its files again.
 static NSImage *_Nullable QLMSkinStretchedImage(QLMSkin *skin, NSString *name, NSEdgeInsets insets) {
-    NSString *key = [NSString stringWithFormat:@"stretched|%@|%g,%g,%g,%g", name, insets.top, insets.left, insets.bottom,
-                                               insets.right];
+    NSString *key = [NSString stringWithFormat:@"stretched|%@|%@", name, QLMSkinInsetsKey(insets)];
     return [[QLMSkinImages imagesOfSkin:skin] objectForKey:key make:^id {
         NSImageRep *one = QLMSkinImageRep(skin, name, 1);
         NSImageRep *two = QLMSkinImageRep(skin, name, 2);
@@ -107,11 +89,10 @@ NSGraphicsContext *QLMSkinBitmapGraphicsContext(CGContextRef context, CGFloat sc
 }
 
 // TRAP: a shadow's blur and offset are in the context's base space, which
-// the CTM doesn't scale. Measured with an offset of (0, -20) in a flipped
-// drawing: in a view's drawRect: on the screen, it falls 20 points down,
-// so that space is points with y up. In a 2x bitmap, it falls 10 points
-// down: pixels with y up. A layer's own context differs again, points with
-// y down, so the skin casts no shadow there: every one is cast in a bitmap.
+// the CTM doesn't scale. A view's on the screen is points, y up. A bitmap's
+// is pixels, y up, so a bitmap's context scales them here. A layer's own
+// context is points, y down, so the skin casts no shadow there: every one
+// is cast in a bitmap.
 static void QLMSkinSetShadow(QLMSkinColor color, CGFloat blur, CGSize offset) {
     NSNumber *pixels = objc_getAssociatedObject(NSGraphicsContext.currentContext, &QLMSkinPixelsPerPointKey);
     CGFloat scale = pixels != nil ? pixels.doubleValue : 1;
@@ -130,7 +111,7 @@ void QLMSkinDrawShadow(QLMSkinShadow *shadow, NSBezierPath *path, NSColor *fill)
     [NSGraphicsContext restoreGraphicsState];
 }
 
-static void QLMSkinDrawBlock(QLMSkinDraw *draw, NSRect rect, BOOL circle) {
+static void QLMSkinDrawBlock(QLMSkin *skin, QLMSkinDraw *draw, NSRect rect, BOOL circle) {
     rect = NSInsetRect(rect, draw.inset, draw.inset);
     if (rect.size.width <= 0 || rect.size.height <= 0) {
         return;
@@ -140,11 +121,7 @@ static void QLMSkinDrawBlock(QLMSkinDraw *draw, NSRect rect, BOOL circle) {
         QLMSkinDrawShadow(draw.shadow, shape, QLMSkinNSColor(draw.hasGradient ? draw.gradientBottom : draw.fill));
     }
     if (draw.hasGradient) {
-        NSGradient *gradient = QLMSkinAttached(draw, &QLMSkinGradientKey, ^id {
-            return [[NSGradient alloc] initWithStartingColor:QLMSkinNSColor(draw.gradientTop)
-                                                 endingColor:QLMSkinNSColor(draw.gradientBottom)];
-        });
-        [gradient drawInBezierPath:shape angle:90];
+        [[[QLMSkinImages imagesOfSkin:skin] gradientOfDraw:draw] drawInBezierPath:shape angle:90];
     }
     else if (!QLMSkinColorIsClear(draw.fill)) {
         [QLMSkinNSColor(draw.fill) setFill];
@@ -169,7 +146,7 @@ static void QLMSkinDrawBlock(QLMSkinDraw *draw, NSRect rect, BOOL circle) {
 void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NSRect rect, BOOL circle) {
     QLMSkinDraw *draw = [style drawForState:state];
     if (draw != nil) {
-        QLMSkinDrawBlock(draw, rect, circle);
+        QLMSkinDrawBlock(skin, draw, rect, circle);
         return;
     }
     QLMSkinDrawImage(QLMSkinStretchedImage(skin, [style imageNameForState:state], style.capInsets), rect);
@@ -369,6 +346,21 @@ QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat l
     label.textX = x + lead;
     label.textWidth = width;
     return label;
+}
+
+QLMSkinInk QLMSkinLabelInk(NSAttributedString *text) {
+    CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)text);
+    CGRect ink = CTLineGetBoundsWithOptions(line, kCTLineBoundsUseGlyphPathBounds);
+    CGFloat advance = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+    CFRelease(line);
+    QLMSkinInk measured = {CGRectGetMinX(ink), ink.size.width, ceil(advance) + 1 - ink.size.width};
+    return measured;
+}
+
+// TRAP: the draw cuts the text at its rect's width, so the rect takes the
+// ink's width and the advance past it.
+void QLMSkinDrawLabel(NSAttributedString *text, QLMSkinInk ink, CGFloat x, CGFloat width, NSRect frame) {
+    QLMSkinDrawCenteredCaps(text, NSMakeRect(x - ink.x, frame.origin.y, width + ink.bearings, frame.size.height));
 }
 
 // The caps' middle on the frame's: a label with no descenders, as most are,

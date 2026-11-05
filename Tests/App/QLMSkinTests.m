@@ -153,11 +153,8 @@
         @"button-selected", @"button-selected-hover", @"button-selected-pressed", @"button-selected-disabled",
         @"knob-body-normal", @"knob-body-hover", @"knob-body-pressed", @"knob-body-disabled",
     ]];
-    NSURL *skins = QLMBuiltInSkinsURL();
     for (NSString *name in @[@"vintage", @"retro"]) {
-        NSError *error = nil;
-        QLMSkin *skin = [QLMSkin skinAtURL:[skins URLByAppendingPathComponent:name isDirectory:YES] error:&error];
-        XCTAssertNotNil(skin, @"%@", error.localizedDescription);
+        QLMSkin *skin = QLMBuiltInSkin(name);
         NSMutableSet<NSString *> *used = [NSMutableSet set];
         for (QLMSkinStyle *style in @[[skin element:@"panel"].style, [skin element:@"nameplate"].style,
                                       [skin element:@"display"].style, skin.osd.style]) {
@@ -280,12 +277,12 @@
 // A button's face lies within its cap insets, so it holds at any size.
 // Pressed, it is the face's unless it says otherwise.
 - (void)testAButtonsFace {
-    QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"retro"] error:NULL];
+    QLMSkin *skin = QLMBuiltInSkin(@"retro");
     XCTAssertEqual(skin.button.face.bottom, 7);
     XCTAssertEqual(skin.button.pressedFace.top, 3.5);
     CGRect face = [skin.button faceInBounds:CGRectMake(0, 0, 100, 40) pressed:NO];
     XCTAssertTrue(CGRectEqualToRect(face, CGRectMake(3, 1.5, 93, 31.5)), @"%@", NSStringFromRect(face));
-    skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"modern"] error:NULL];
+    skin = QLMBuiltInSkin(@"modern");
     face = [skin.button faceInBounds:CGRectMake(0, 0, 100, 34) pressed:YES];
     XCTAssertTrue(CGRectEqualToRect(face, CGRectMake(0, 0, 100, 34)));
 
@@ -294,7 +291,7 @@
     } refusedWith:@"button.face reaches past button.capInsets"];
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"button"][@"pressedFace"] = @[@-1, @1, @1, @1];
-    } refusedWith:@"button.pressedFace is below 0"];
+    } refusedWith:@"button.pressedFace has an inset below 0"];
     // A drawn button has no cap insets, so only its cell bounds its face.
     [self assertChangeTo:QLMModernSkinURL() change:^(NSMutableDictionary *json) {
         json[@"button"][@"face"] = @[@20, @0, @20, @0];

@@ -38,6 +38,11 @@
 
 @implementation QLMTestDebugWindow
 
+- (void)setSystem:(QLMSystem *)system {
+    _system = system;
+    self.model.hasSystem = system != nil;
+}
+
 - (void)close {
     self.showing = NO;
     [self.actions addObject:@"close window"];

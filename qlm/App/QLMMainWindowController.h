@@ -28,8 +28,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList skin:(QLMSkin *)skin;
 
 @property (nonatomic, weak, nullable) id<QLMMainWindowControllerDelegate> delegate;
-// The menu that lists the groups the window shows.
-@property (nonatomic, weak, nullable) NSMenu *controlsMenu;
 @property (nonatomic, nullable) QLMSystem *system;
 // The loaded setup, the file's name, and why it did not read.
 - (void)showSetup:(nullable QLMSetup *)setup fileName:(nullable NSString *)fileName error:(nullable NSError *)error;

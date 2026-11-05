@@ -27,11 +27,6 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
 // and cap insets. Every image the skin draws goes through here.
 void QLMSkinDrawImage(NSImage *_Nullable image, NSRect rect);
 
-// Decodes every image the skin's styles name, at the main screen's scale,
-// on a background queue, so the first show finds them decoded. The other
-// scale decodes when first asked for.
-void QLMSkinWarmImages(QLMSkin *skin);
-
 // What `draw` draws in `size` points at `scale`, in a flipped context.
 CGImageRef _Nullable QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) CF_RETURNS_RETAINED;
 
@@ -82,6 +77,19 @@ typedef struct {
 } QLMSkinLabel;
 extern const CGFloat QLMSkinLabelPadding;
 QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat led, CGFloat gap);
+
+// A label's ink, from its origin on the baseline, and its advance past the
+// ink. A label centers by its ink, not its advance, which a glyph's side
+// bearings and the last one's tracking would push off center.
+typedef struct {
+    CGFloat x;
+    CGFloat width;
+    CGFloat bearings;
+} QLMSkinInk;
+QLMSkinInk QLMSkinLabelInk(NSAttributedString *text);
+// Draws `text` with its ink from `x`, cut short past `width`, its capitals
+// centered on `frame`'s height.
+void QLMSkinDrawLabel(NSAttributedString *text, QLMSkinInk ink, CGFloat x, CGFloat width, NSRect frame);
 
 // A button's label, its capitals centered on the frame's height.
 void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame);

@@ -3,11 +3,21 @@
 #import <ImageIO/ImageIO.h>
 #import <objc/runtime.h>
 
+#import "QLMSkinDrawing.h"
+
 // What a family keeps: a group's three buttons, at their places on the
 // pixels, and a resize's last frame.
 static const NSUInteger QLMSkinFamilySize = 4;
 
 static char QLMSkinImagesKey;
+
+NSString *QLMSkinColorKey(QLMSkinColor color) {
+    return [NSString stringWithFormat:@"%g,%g,%g,%g", color.red, color.green, color.blue, color.alpha];
+}
+
+NSString *QLMSkinInsetsKey(NSEdgeInsets insets) {
+    return [NSString stringWithFormat:@"%g,%g,%g,%g", insets.top, insets.left, insets.bottom, insets.right];
+}
 
 @implementation QLMSkinImages {
     __weak QLMSkin *_skin;
@@ -71,11 +81,12 @@ static NSString *QLMSkinDecodedKey(NSString *name, NSInteger scale) {
     return image == NSNull.null ? NULL : (__bridge CGImageRef)image;
 }
 
-- (void)warmAtScale:(NSInteger)scale {
+- (void)warm {
     QLMSkin *skin = _skin;
     if (skin == nil) {
         return;
     }
+    NSInteger scale = QLMSkinImageFileScale(NSScreen.mainScreen.backingScaleFactor);
     NSMutableDictionary<NSString *, NSNumber *> *sizes = [NSMutableDictionary dictionary];
     for (NSString *name in skin.imageNames) {
         NSNumber *size = nil;
@@ -110,6 +121,9 @@ static NSString *QLMSkinDecodedKey(NSString *name, NSInteger scale) {
         recent = [NSMutableArray array];
         _families[family] = recent;
     }
+    if ([recent.lastObject isEqualToString:full]) {
+        return [self objectForKey:full make:make];
+    }
     [recent removeObject:full];
     [recent addObject:full];
     while (recent.count > QLMSkinFamilySize) {
@@ -117,6 +131,15 @@ static NSString *QLMSkinDecodedKey(NSString *name, NSInteger scale) {
         [recent removeObjectAtIndex:0];
     }
     return [self objectForKey:full make:make];
+}
+
+- (NSGradient *)gradientOfDraw:(QLMSkinDraw *)draw {
+    QLMSkinColor top = draw.gradientTop;
+    QLMSkinColor bottom = draw.gradientBottom;
+    NSString *key = [NSString stringWithFormat:@"gradient|%@|%@", QLMSkinColorKey(top), QLMSkinColorKey(bottom)];
+    return [self objectForKey:key make:^id {
+        return [[NSGradient alloc] initWithStartingColor:QLMSkinNSColor(top) endingColor:QLMSkinNSColor(bottom)];
+    }];
 }
 
 @end

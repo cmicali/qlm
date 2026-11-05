@@ -98,7 +98,6 @@ static OSType QLMQuitReason(void) {
     NSApp.mainMenu = QLMMainMenu(self, self.mainWindowController);
     NSApp.windowsMenu = [NSApp.mainMenu itemWithTitle:@"Window"].submenu;
     NSApp.helpMenu = [NSApp.mainMenu itemWithTitle:@"Help"].submenu;
-    self.mainWindowController.controlsMenu = QLMMainMenuControlsMenu(NSApp.mainMenu);
 
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
     self.statusItem.button.target = self;
@@ -451,8 +450,11 @@ static OSType QLMQuitReason(void) {
 // window comes back to the front.
 - (void)mainWindowControllerWillClose:(QLMMainWindowController *)controller {
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    NSWindowController *settings = self.settingsController;
+    NSWindowController *monitors = self.monitorsController;
     for (NSWindow *window in NSApp.orderedWindows) {
-        if (window != controller.window && window.visible && (window.styleMask & NSWindowStyleMaskTitled) != 0) {
+        BOOL kept = (settings.windowLoaded && window == settings.window) || (monitors.windowLoaded && window == monitors.window);
+        if (kept && window.visible) {
             [self activateApp];
             [window makeKeyAndOrderFront:nil];
             return;

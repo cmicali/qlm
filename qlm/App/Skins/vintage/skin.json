@@ -101,7 +101,7 @@
       "disabledColor": "#dfd4b966",
       "prefixColor": "secondary"
     },
-    "focus": {"color": "focus", "width": 1.5, "radius": 4.8, "outset": -1.55},
+    "focus": {"color": "focus", "width": 1.5, "radius": 4.8, "outset": 1},
     "led": {"size": 6, "gap": 8}
   },
   "led": {"on": "#f5916a", "off": "#665848", "glow": 5},
@@ -112,8 +112,8 @@
       {"element": "footer", "y": -4}
     ],
     "boxes": [
-      {"element": "groups", "outset": [10.4, 8.4, 7.4, 6.4], "radius": 6, "gap": "groupsTitle"},
-      {"element": "toggles", "outset": [9.9, 8.4, 6.9, 8.4], "radius": 5}
+      {"element": "groups", "outset": [11.9, 9.9, 11.9, 9.9], "radius": 6, "gap": "groupsTitle"},
+      {"element": "toggles", "outset": [11.4, 9.9, 11.4, 9.9], "radius": 5}
     ]
   },
   "osd": {

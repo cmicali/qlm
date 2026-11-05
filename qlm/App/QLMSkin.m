@@ -79,12 +79,16 @@ CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSiz
 }
 
 CGRect QLMSkinInsetRect(CGRect frame, NSEdgeInsets insets) {
-    return QLMSkinBoxFrame(frame, NSEdgeInsetsMake(-insets.top, -insets.left, -insets.bottom, -insets.right));
+    return QLMSkinGrowRect(frame, NSEdgeInsetsMake(-insets.top, -insets.left, -insets.bottom, -insets.right));
 }
 
-CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
+CGRect QLMSkinGrowRect(CGRect frame, NSEdgeInsets outset) {
     return CGRectMake(frame.origin.x - outset.left, frame.origin.y - outset.top, frame.size.width + outset.left + outset.right,
                       frame.size.height + outset.top + outset.bottom);
+}
+
+CGRect QLMSkinBoxedRect(QLMSkinElement *element, QLMSkinButton *button, CGRect frame) {
+    return element.columns > 0 ? QLMSkinInsetRect(frame, button.face) : frame;
 }
 
 #pragma mark - Values
@@ -143,10 +147,6 @@ CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
     copy.rings = self.rings;
     copy.shadow = self.shadow;
     return copy;
-}
-
-- (BOOL)isUniformAlongWidth {
-    return YES;
 }
 
 - (BOOL)isUniformAlongHeight {
@@ -770,12 +770,8 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
         }
         NSString *insetsPath = QLMSkinKey(path, @"capInsets");
         NSEdgeInsets insets = [self insets:object[@"capInsets"] at:insetsPath];
-        if (insets.top < 0 || insets.left < 0 || insets.bottom < 0 || insets.right < 0) {
-            [self fail:@"%@ has an inset below 0", insetsPath];
-        }
-        if (insets.left + insets.right > size.width || insets.top + insets.bottom > size.height) {
-            [self fail:@"%@ is larger than its frame, %g by %g", insetsPath, size.width, size.height];
-        }
+        [self checkInsets:insets at:insetsPath fit:size room:NO
+                 tooLarge:[NSString stringWithFormat:@"is larger than its frame, %g by %g", size.width, size.height]];
         style.capInsets = insets;
         for (NSUInteger state = 0; state < states && ![self failed]; state++) {
             [self checkImage:[style imageNameForState:(QLMSkinState)state] at:path];
@@ -831,9 +827,6 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
 }
 
 - (void)checkImage:(NSString *)name at:(NSString *)path {
-    if (self.imageNames == nil) {
-        self.imageNames = [NSMutableOrderedSet orderedSet];
-    }
     [self.imageNames addObject:name];
     for (NSNumber *scale in @[@1, @2]) {
         NSString *file = QLMSkinImagePath(name, scale.integerValue);
@@ -971,7 +964,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     NSMutableArray<NSArray *> *radii = [NSMutableArray arrayWithArray:@[
         @[@"elements.knob.body.size", @(knob.bodySize / 2)],
         @[@"elements.knob.pointer.outer", @(knob.pointerOuter + knob.pointerWidth / 2)],
-        @[@"elements.knob.focus", @(knob.bodySize / 2 + knob.focus.outset + knob.focus.width)],
+        @[@"elements.knob.focus", @(knob.bodySize / 2 + QLMSkinFocusReach(knob.focus))],
     ]];
     if (knob.tickCount > 0) {
         [radii addObject:@[@"elements.knob.ticks.outer", @(knob.tickOuter + knob.tickWidth / 2)]];
@@ -992,19 +985,28 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     }
 }
 
+// Insets of 0 or more that leave a middle in `size`, and with `room`, one
+// more than 0 across. Past that, it fails with `tooLarge` after the path.
+- (void)checkInsets:(NSEdgeInsets)insets at:(NSString *)path fit:(CGSize)size room:(BOOL)room tooLarge:(NSString *)tooLarge {
+    CGFloat across = size.width - insets.left - insets.right;
+    CGFloat down = size.height - insets.top - insets.bottom;
+    if (insets.top < 0 || insets.left < 0 || insets.bottom < 0 || insets.right < 0) {
+        [self fail:@"%@ has an inset below 0", path];
+    }
+    else if (room ? (across <= 0 || down <= 0) : (across < 0 || down < 0)) {
+        [self fail:@"%@ %@", path, tooLarge];
+    }
+}
+
 // A face's insets. Each lies within the image's cap insets, so it holds at
 // any size, and the face keeps room in `cell`.
 - (NSEdgeInsets)face:(id)value of:(QLMSkinStyle *)style cell:(CGSize)cell at:(NSString *)path {
     NSEdgeInsets face = [self insets:value at:path];
+    [self checkInsets:face at:path fit:cell room:YES
+             tooLarge:[NSString stringWithFormat:@"leaves the face no room in the button, %g by %g", cell.width, cell.height]];
     NSEdgeInsets caps = style.imageName != nil ? style.capInsets : NSEdgeInsetsMake(INFINITY, INFINITY, INFINITY, INFINITY);
-    if (face.top < 0 || face.left < 0 || face.bottom < 0 || face.right < 0) {
-        [self fail:@"%@ is below 0", path];
-    }
-    else if (face.top > caps.top || face.left > caps.left || face.bottom > caps.bottom || face.right > caps.right) {
+    if (face.top > caps.top || face.left > caps.left || face.bottom > caps.bottom || face.right > caps.right) {
         [self fail:@"%@ reaches past button.capInsets", path];
-    }
-    else if (face.top + face.bottom >= cell.height || face.left + face.right >= cell.width) {
-        [self fail:@"%@ leaves the face no room in the button, %g by %g", path, cell.width, cell.height];
     }
     return face;
 }
@@ -1118,6 +1120,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
 
 - (QLMSkinMarkings *)markings:(id)value
                      elements:(NSDictionary<NSString *, QLMSkinElement *> *)elements
+                       button:(QLMSkinButton *)button
                        window:(CGSize)window {
     QLMSkinMarkings *markings = [[QLMSkinMarkings alloc] init];
     markings.lines = @[];
@@ -1185,7 +1188,8 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
             }
         }
         if (element) {
-            [self checkFrame:QLMSkinBoxFrame(element.frame, read.outset) inside:window named:@"window" at:path];
+            [self checkFrame:QLMSkinGrowRect(QLMSkinBoxedRect(element, button, element.frame), read.outset) inside:window
+                       named:@"window" at:path];
         }
         [boxes addObject:read];
     }
@@ -1328,9 +1332,9 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     skin.button = [self button:root[@"button"]
                           cell:CGSizeMake(MIN(groupCell.width, toggleCell.width), MIN(groupCell.height, toggleCell.height))];
     skin.led = [self led:root[@"led"]];
-    skin.markings = [self markings:root[@"markings"] elements:read window:window];
+    skin.markings = [self markings:root[@"markings"] elements:read button:skin.button window:window];
     skin.osd = [self osd:root[@"osd"]];
-    skin.imageNames = self.imageNames.array ?: @[];
+    skin.imageNames = self.imageNames.array;
     return [self failed] ? nil : skin;
 }
 
@@ -1384,6 +1388,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     QLMSkinReader *reader = [[QLMSkinReader alloc] init];
     reader.directory = directory;
     reader.palette = @{};
+    reader.imageNames = [NSMutableOrderedSet orderedSet];
     QLMSkin *skin = [reader read];
     if (skin == nil && error != NULL) {
         *error = [NSError errorWithDomain:QLMSkinErrorDomain

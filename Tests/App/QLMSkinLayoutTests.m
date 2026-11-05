@@ -171,32 +171,29 @@ static CGRect QLMCell(NSArray<NSValue *> *cells, NSUInteger index) {
     XCTAssertEqual(QLMCell(cells, 4).origin.y, 144);
 }
 
-// A marking box leaves the same room above its buttons' face as below it,
-// at the reference size and larger, since the box follows its element.
-- (void)testEachBoxCentersItsButtonsFace {
-    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
-        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
-        for (NSValue *size in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {
-            QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:skin size:size.sizeValue];
-            for (QLMSkinBox *box in skin.markings.boxes) {
-                CGRect frame = [layout frameOfElement:box.element];
-                CGRect outer = QLMSkinBoxFrame(frame, box.outset);
-                NSEdgeInsets face = skin.button.face;
-                CGFloat above = CGRectGetMinY(frame) + face.top - CGRectGetMinY(outer);
-                CGFloat below = CGRectGetMaxY(outer) - (CGRectGetMaxY(frame) - face.bottom);
-                XCTAssertEqualWithAccuracy(above, below, 0.001, @"%@'s %@ box at %@", name, box.element,
-                                           NSStringFromSize(size.sizeValue));
-            }
+// A box around a button grid grows its buttons' face, past their shadow,
+// so each skin's even outsets center it on the face. Around any other
+// element, it grows the frame.
+- (void)testEachBoxGrowsItsButtonsFace {
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
+        for (QLMSkinBox *box in skin.markings.boxes) {
+            NSEdgeInsets outset = box.outset;
+            XCTAssertTrue(outset.top == outset.bottom && outset.left == outset.right, @"%@'s %@ box", name, box.element);
         }
     }
+    QLMSkin *retro = QLMBuiltInSkin(@"retro");
+    CGRect frame = CGRectMake(48, 338, 356, 40);
+    QLMAssertRect(QLMSkinBoxedRect([retro element:@"toggles"], retro.button, frame), 51, 339.5, 349, 31.5);
+    QLMAssertRect(QLMSkinBoxedRect([retro element:@"display"], retro.button, frame), 48, 338, 356, 40);
 }
 
 // The display's bottom line stays on its glass's flat part, inside its cap
 // insets, at every size: the glass's bezel doesn't stretch, so it can't
 // grow under the text.
 - (void)testTheDisplaysTextStaysOffItsBezel {
-    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
-        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
         QLMSkinElement *display = [skin element:@"display"];
         for (NSValue *size in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(900, 640)],
                                 [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {

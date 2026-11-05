@@ -24,6 +24,7 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
 - (void)setUp {
     [super setUp];
     _model = [[QLMMainWindowModel alloc] init];
+    _model.hasSystem = YES;
     _model.lowestDecibels = -60;
     _model.ceilingDecibels = -30;
     _model.setupFileName = @"Main.sam";
@@ -31,15 +32,9 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     [self showRunningWith:nil];
 }
 
-// A running System that tracks two monitors, both on, at -40 dB under a
-// -30 dB ceiling, sending -40 dB, as `change` then leaves it.
+// QLMMakeTwoMonitorSnapshot's, as `change` then leaves it.
 - (void)showRunningWith:(nullable void (^)(QLMSnapshot *snapshot))change {
-    QLMSnapshot *snapshot = QLMMakeRunningSnapshot(@[QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusOn),
-                                                     QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusOn)]);
-    snapshot.anyOn = YES;
-    snapshot.volumeDecibels = @(-40);
-    snapshot.ceilingDecibels = -30;
-    snapshot.handBack = QLMMakeHandBack(QLMHandBackKnobLevel, @(-60), @(-40));
+    QLMSnapshot *snapshot = QLMMakeTwoMonitorSnapshot();
     if (change != nil) {
         change(snapshot);
     }
@@ -349,31 +344,16 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     XCTAssertFalse(_model.powerEnabled);
 }
 
-#pragma mark - The menu
-
-// The menu's Volume Up and Down step the knob as its arrow keys do: one
-// 0.5 dB step, inside the range, so never past the ceiling. They take
-// nothing while the knob takes nothing, before a level is known, or at an
-// end.
-- (void)testTheMenusVolumeStepsTheKnob {
-    XCTAssertEqualObjects([_model levelSteppedFrom:-40 by:1], @(-39.5));
-    XCTAssertEqualObjects([_model levelSteppedFrom:-40 by:-1], @(-40.5));
-    XCTAssertEqualObjects([_model levelSteppedFrom:-40.2 by:1], @(-39.5));
-    XCTAssertEqualObjects([_model levelSteppedFrom:-30.5 by:1], @(-30));
-    XCTAssertNil([_model levelSteppedFrom:-30 by:1]);
-    XCTAssertNil([_model levelSteppedFrom:-60 by:-1]);
-    XCTAssertEqualObjects([_model levelSteppedFrom:-60 by:1], @(-59.5));
-
-    [self showRunningWith:^(QLMSnapshot *snapshot) {
-        snapshot.levelAwaitsKnob = YES;
-    }];
-    XCTAssertNil([_model levelSteppedFrom:-40 by:1]);
-    [self showRunningWith:^(QLMSnapshot *snapshot) {
-        snapshot.volumeDecibels = nil;
-    }];
-    XCTAssertNil([_model levelSteppedFrom:-40 by:1]);
-    [self showStopped];
-    XCTAssertNil([_model levelSteppedFrom:-40 by:-1]);
+// Before a System exists, no control takes a click, and the menu answers
+// by the same rule.
+- (void)testNoControlTakesAClickWithNoSystem {
+    _model.hasSystem = NO;
+    XCTAssertFalse(_model.groupsEnabled);
+    XCTAssertEqualObjects([_model refusalToClickGroupNamed:@"Main"], @"System is not running");
+    XCTAssertFalse(_model.muteEnabled);
+    XCTAssertFalse(_model.dimEnabled);
+    XCTAssertFalse(_model.knobEnabled);
+    XCTAssertFalse(_model.powerEnabled);
 }
 
 @end

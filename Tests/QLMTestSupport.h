@@ -10,6 +10,7 @@
 #import "QLMClock.h"
 #include "QLMFrame.h"
 #import "QLMSetup.h"
+#import "QLMSkin.h"
 #import "QLMSnapshot.h"
 
 NS_ASSUME_NONNULL_BEGIN
@@ -42,6 +43,10 @@ QLMMonitorState *QLMMakeMonitor(uint8_t first, uint8_t session, QLMMonitorStatus
 // A running System's snapshot with these monitors and nothing else set.
 QLMSnapshot *QLMMakeRunningSnapshot(NSArray<QLMMonitorState *> *monitors);
 
+// A running System that tracks two monitors, both on, at -40 dB under a
+// -30 dB ceiling, sending -40 dB.
+QLMSnapshot *QLMMakeTwoMonitorSnapshot(void);
+
 // The snapshot's monitor with this hardware ID, or nil.
 QLMMonitorState *_Nullable QLMFindMonitor(QLMSnapshot *snapshot, NSData *hardwareID);
 
@@ -64,6 +69,11 @@ NSString *QLMFixturePath(NSString *name);
 NSURL *QLMBuiltInSkinsURL(void);
 NSURL *QLMModernSkinURL(void);
 NSURL *QLMFixtureSkinURL(void);
+
+// The shipped skins' names, sorted, and each one, read fresh, as the app's
+// library reads them.
+NSArray<NSString *> *QLMBuiltInSkinNames(void);
+QLMSkin *QLMBuiltInSkin(NSString *name);
 
 // A fresh path in the temporary directory, with nothing at it yet.
 NSString *QLMScratchPath(void);

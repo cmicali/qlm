@@ -101,10 +101,10 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) CGFloat inset;
 @property (nonatomic, readonly) NSArray<QLMSkinRing *> *rings;
 @property (nonatomic, readonly, nullable) QLMSkinShadow *shadow;
-// Whether each row, or each column, between the corners draws as the next,
-// so a narrow draw stretches to any width, or height. Every key draws the
-// same along a straight edge but the gradient, which runs top to bottom.
-@property (nonatomic, readonly) BOOL isUniformAlongWidth;
+// Whether each row between the corners draws as the next, so a narrow draw
+// stretches to any height. Every key draws the same along a straight edge
+// but the gradient, which runs top to bottom. Each column draws as the next
+// in every draw.
 @property (nonatomic, readonly) BOOL isUniformAlongHeight;
 @end
 
@@ -176,6 +176,11 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) CGFloat radius;
 @property (nonatomic, readonly) CGFloat outset;
 @end
+
+// How far past what it rings a focus ring reaches, with its stroke.
+static inline CGFloat QLMSkinFocusReach(QLMSkinFocus *focus) {
+    return focus.outset + focus.width;
+}
 
 // A button's title, centered in its face.
 @interface QLMSkinTitle : NSObject
@@ -290,10 +295,14 @@ NSInteger QLMSkinImageFileScale(CGFloat scale);
 // A grid's cell in `size`: the same for each, `gap` apart.
 CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSize gap);
 
-// A marking box's outer edge: its element's frame grown by `outset`.
-CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset);
-
 // `frame` shrunk by `insets`.
 CGRect QLMSkinInsetRect(CGRect frame, NSEdgeInsets insets);
+// `frame` grown by `outset`.
+CGRect QLMSkinGrowRect(CGRect frame, NSEdgeInsets outset);
+
+// What a marking box grows by its outset, in its element laid out in
+// `frame`: a button grid's face, past its buttons' shadow, or any other
+// element's frame.
+CGRect QLMSkinBoxedRect(QLMSkinElement *element, QLMSkinButton *button, CGRect frame);
 
 NS_ASSUME_NONNULL_END
