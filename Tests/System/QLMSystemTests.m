@@ -363,9 +363,7 @@
 }
 
 - (NSArray<NSData *> *)sentWithOpcode:(uint8_t)opcode from:(NSUInteger)start {
-    return [self sentFrom:start matching:^BOOL(NSData *message) {
-        return message.length >= 2 && ((const uint8_t *)message.bytes)[1] == opcode;
-    }];
+    return QLMSentWithOpcode(_bus.sentMessages, opcode, start);
 }
 
 - (NSUInteger)countSentTo:(uint8_t)address opcode:(uint8_t)opcode from:(NSUInteger)start {
@@ -2736,7 +2734,7 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
             return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
         }];
         XCTAssertEqualObjects(settled.volumeDecibels, volume, @"%@", row);
-        XCTAssertEqual(settled.volumeFromKnob, volume != nil, @"%@", row);
+        XCTAssertFalse(settled.volumeFromKnob, @"%@", row);  // a start, as QLMSnapshot.h says
         XCTAssertFalse(settled.levelAwaitsKnob, @"%@", row);
         NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:0];
         XCTAssertEqual([self sentWithOpcode:0x2B from:0].count, 0u, @"%@", row);

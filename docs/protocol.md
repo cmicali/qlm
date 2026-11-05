@@ -1155,7 +1155,7 @@ On or in standby, monitors drop a quiet host's leases, within 2.84 s of the last
 [^mute-outlasts]: `qlm-control-first`, 648.7 to 660.5 s.
 [^poll-silent]: `qlm-poll-meters`, `poll-music.txt`, and its notes; `testWithMusicTheOutputsFallSilentWhileTheInputStaysAt252`.
 [^level-or-2b]: `qlm-control-first`, and its notes; `testALevelOrA2BKeepsALeasedMonitorPlaying`.
-[^poll-level]: `QLMSystemSettings`' `startsAtKnob`; `testAStartAtTheKnobSendsTheKnobsLevelUnderTheCeiling`; `testAStartAtTheKnobFollowsTheKnob`; `testPollSendsTheKnobsLevelUnderTheCeiling`; `testPollWithNoKnobSendsNoLevel`.
+[^poll-level]: `QLMSystemSettings`' `startsAtKnob`; `testAStartAtTheKnobSendsTheKnobsLevelUnderTheCeiling`; `testAStartAtTheKnobWaitsForAKnobPluggedInLater`; `testAStartAtTheKnobFollowsTheKnob`; `testPollSendsTheKnobsLevelUnderTheCeiling`; `testPollWithNoKnobSendsNoLevel`.
 [^standby-answers]: `qlm-standby-discover`.
 [^clock-49]: [telemetry.md](telemetry.md#49-seconds-since-the-wake).
 

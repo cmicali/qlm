@@ -49,6 +49,10 @@ enum {
     QLMTelemetryClassTwoWay = 0x02,
     QLMTelemetryClassStandby = 0x03,
     QLMTelemetryOutputSilent = 0x80,  // an output meter's floor; a count is about a dB
+    // An input meter at or above it carries a signal. Every input's floor is
+    // 161 or below, and music read 199 or more but for fades
+    // (docs/telemetry.md: With music).
+    QLMTelemetryInputSignal = 0xB0,
 };
 
 typedef struct {

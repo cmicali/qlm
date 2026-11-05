@@ -1,11 +1,13 @@
 #import <XCTest/XCTest.h>
 
-#import "QLMFormat.h"
+#include <stdio.h>
+
+#include "QLMReplies.h"
 #import "QLMTestSupport.h"
 
 // captures/qlm-poll-meters: what qlmctl poll printed on all six monitors,
 // with nothing playing, then with music. Its notes.md, docs/telemetry.md's
-// The meters, and docs/protocol.md's A host that sends no level cite these.
+// With music, and docs/protocol.md's A host that sends no level cite these.
 @interface QLMPollMetersTests : XCTestCase
 @end
 
@@ -16,58 +18,74 @@
 @property (nonatomic) NSInteger input;
 @property (nonatomic) NSInteger hf;
 @property (nonatomic) NSInteger lf;
-@property (nonatomic) NSInteger sub;
+@property (nonatomic) NSInteger sub;  // QLMTelemetryAbsent but on a subwoofer
 @property (nonatomic) NSInteger temperature;
+// HF, LF, and the subwoofer's sub meter when it has one.
+@property (nonatomic, readonly) NSArray<NSNumber *> *outputs;
 @end
 
 @implementation QLMPollLine
+
+- (NSArray<NSNumber *> *)outputs {
+    return self.sub == QLMTelemetryAbsent ? @[@(self.hf), @(self.lf)] : @[@(self.hf), @(self.lf), @(self.sub)];
+}
+
 @end
+
+// Every monitor's line in the run, in order, read once per file. The
+// knob's and the mic's lines are left out.
+static NSArray<QLMPollLine *> *QLMPollLines(NSString *name) {
+    static NSMutableDictionary<NSString *, NSArray<QLMPollLine *> *> *cache;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        cache = [NSMutableDictionary dictionary];
+    });
+    @synchronized(cache) {
+        if (cache[name] != nil) {
+            return cache[name];
+        }
+        NSString *path = QLMRepositoryPath([@"captures/qlm-poll-meters/" stringByAppendingString:name]);
+        NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+        NSMutableArray<QLMPollLine *> *lines = [NSMutableArray array];
+        for (NSString *row in [text componentsSeparatedByString:@"\n"]) {
+            double seconds = 0;
+            unsigned session = 0;
+            unsigned long hardwareID = 0;
+            char model[16] = "";
+            char status[16] = "";
+            long temperature = 0, input = 0, hf = 0, lf = 0, sub = 0;
+            int read = sscanf(row.UTF8String, " %lf s %x %lu %15s %15s %ld C in %ld hf %ld lf %ld sub %ld", &seconds, &session,
+                              &hardwareID, model, status, &temperature, &input, &hf, &lf, &sub);
+            if (read != 10 || strcmp(status, "on") != 0) {
+                continue;
+            }
+            QLMPollLine *line = [[QLMPollLine alloc] init];
+            line.seconds = seconds;
+            line.model = @(model);
+            line.temperature = temperature;
+            line.input = input;
+            line.hf = hf;
+            line.lf = lf;
+            line.sub = sub;
+            [lines addObject:line];
+        }
+        cache[name] = lines;
+        return lines;
+    }
+}
 
 @implementation QLMPollMetersTests
 
-// Every monitor's line in the run, in order. The knob's and the mic's lines
-// are left out.
 - (NSArray<QLMPollLine *> *)linesOf:(NSString *)name {
-    NSString *path = QLMRepositoryPath([@"captures/qlm-poll-meters/" stringByAppendingString:name]);
-    NSString *text = [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
-    XCTAssertNotNil(text, @"%@", path);
-    NSMutableArray<QLMPollLine *> *lines = [NSMutableArray array];
-    for (NSString *row in [text componentsSeparatedByString:@"\n"]) {
-        NSArray<NSString *> *fields = [[row componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
-            filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"length > 0"]];
-        if (fields.count < 18 || ![fields[5] isEqualToString:@"on"]) {
-            continue;
-        }
-        XCTAssertEqualObjects(fields[8], @"in", @"%@", row);
-        XCTAssertEqualObjects(fields[10], @"hf", @"%@", row);
-        XCTAssertEqualObjects(fields[12], @"lf", @"%@", row);
-        XCTAssertEqualObjects(fields[14], @"sub", @"%@", row);
-        QLMPollLine *line = [[QLMPollLine alloc] init];
-        line.seconds = fields[0].doubleValue;
-        line.model = fields[4];
-        line.temperature = fields[6].integerValue;
-        line.input = fields[9].integerValue;
-        line.hf = fields[11].integerValue;
-        line.lf = fields[13].integerValue;
-        line.sub = fields[15].integerValue;
-        [lines addObject:line];
-    }
+    NSArray<QLMPollLine *> *lines = QLMPollLines(name);
     // Six monitors, 18 frames each, over 10 s.
     XCTAssertEqual(lines.count, 108u, @"%@", name);
     return lines;
 }
 
-- (NSArray<NSNumber *> *)outputsOf:(QLMPollLine *)line {
-    NSMutableArray<NSNumber *> *outputs = [NSMutableArray arrayWithObjects:@(line.hf), @(line.lf), nil];
-    if (line.sub != QLMMonitorValueAbsent) {
-        [outputs addObject:@(line.sub)];
-    }
-    return outputs;
-}
-
-// With nothing playing, every output reads its floor, 80, but the first
-// 8330A's HF, 2 or 3 counts above it. Each input rests at its model's
-// floor, all at 161 or below.
+// With nothing playing, every output reads its floor, but the first 8330A's
+// HF, 2 or 3 counts above it. Each input rests at its model's floor, all
+// at 161 or below, under QLMTelemetryInputSignal.
 - (void)testWithNothingPlayingEachMeterRestsAtItsFloor {
     NSDictionary<NSString *, NSArray<NSNumber *> *> *floors = @{
         @"8330A": @[@157, @160],
@@ -81,11 +99,11 @@
         XCTAssertNotNil(range, @"%@", line.model);
         XCTAssertGreaterThanOrEqual(line.input, range[0].integerValue, @"%@ at %.2f s", line.model, line.seconds);
         XCTAssertLessThanOrEqual(line.input, range[1].integerValue, @"%@ at %.2f s", line.model, line.seconds);
-        XCTAssertEqual(QLMInputSignalOf(line.input), QLMInputSignalNone);
-        for (NSNumber *output in [self outputsOf:line]) {
-            XCTAssertGreaterThanOrEqual(output.integerValue, 128);
-            XCTAssertLessThanOrEqual(output.integerValue, 131);
-            aboveFloor += output.integerValue > 128 ? 1 : 0;
+        XCTAssertLessThan(line.input, QLMTelemetryInputSignal);
+        for (NSNumber *output in line.outputs) {
+            XCTAssertGreaterThanOrEqual(output.integerValue, QLMTelemetryOutputSilent);
+            XCTAssertLessThanOrEqual(output.integerValue, QLMTelemetryOutputSilent + 3);
+            aboveFloor += output.integerValue > QLMTelemetryOutputSilent ? 1 : 0;
         }
     }
     XCTAssertEqual(aboveFloor, 18u);  // the first 8330A's HF, in every frame
@@ -100,16 +118,17 @@
     NSInteger lowestPlaying = 255;
     for (QLMPollLine *line in [self linesOf:@"poll-music.txt"]) {
         XCTAssertEqual(line.input, 252, @"%@ at %.2f s", line.model, line.seconds);
-        XCTAssertEqual(QLMInputSignalOf(line.input), QLMInputSignalPresent);
+        XCTAssertGreaterThanOrEqual(line.input, QLMTelemetryInputSignal);
+        NSArray<NSNumber *> *outputs = line.outputs;
         BOOL early = [line.model isEqualToString:@"8351B"] || [line.model isEqualToString:@"7370A"];
-        BOOL silent = line.seconds >= (early ? 1.77 : 2.38);
-        if (silent) {
-            XCTAssertEqualObjects([self outputsOf:line], [self outputsOf:line].count == 3 ? (@[@128, @128, @128]) : (@[@128, @128]),
-                                  @"%@ at %.2f s", line.model, line.seconds);
+        if (line.seconds >= (early ? 1.77 : 2.38)) {
+            for (NSNumber *output in outputs) {
+                XCTAssertEqual(output.integerValue, QLMTelemetryOutputSilent, @"%@ at %.2f s", line.model, line.seconds);
+            }
             continue;
         }
         // The subwoofers send music on LF alone.
-        NSArray<NSNumber *> *playing = line.sub == QLMMonitorValueAbsent ? [self outputsOf:line] : @[@(line.lf)];
+        NSArray<NSNumber *> *playing = line.sub == QLMTelemetryAbsent ? outputs : @[@(line.lf)];
         for (NSNumber *output in playing) {
             highest = MAX(highest, output.integerValue);
             lowestPlaying = MIN(lowestPlaying, output.integerValue);
@@ -117,8 +136,8 @@
     }
     XCTAssertEqual(highest, 240);
     XCTAssertEqual(lowestPlaying, 221);
-    XCTAssertLessThanOrEqual(highest - 0x80, QLMOutputMeterSpan);
-    XCTAssertGreaterThanOrEqual(highest - 0x80, 100);
+    XCTAssertLessThanOrEqual(highest, 0xFF);
+    XCTAssertGreaterThanOrEqual(highest - QLMTelemetryOutputSilent, 100);
 }
 
 // The temperatures held: 29 to 31 °C on the 8330As, 43 to 47 °C on the rest.

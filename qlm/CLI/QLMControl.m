@@ -8,6 +8,7 @@
 #import "QLMAdapter.h"
 #include "QLMCommands.h"
 #import "QLMFakeBus.h"
+#import "QLMKnob.h"
 #include "QLMReplies.h"
 
 // 10 dB under System's default ceiling, for the first runs on the monitors.
@@ -118,23 +119,22 @@ NSDictionary<NSString *, NSString *> *QLMQueryArguments(NSString *command, NSArr
         @"discover": @[@"--replay", @"--setup", @"--seconds"],
         @"poll": @[@"--replay", @"--seconds", @"--ceiling"],
     };
+    NSDictionary<NSString *, NSArray<NSString *> *> *flags = @{
+        @"info": @[@"--fake"],
+        @"discover": @[@"--fake"],
+        @"poll": @[@"--fake", @"--allow-high-ceiling"],
+    };
     NSCParameterAssert(options[command] != nil);
-    BOOL poll = [command isEqualToString:@"poll"];
-    NSSet<NSString *> *flags = poll ? [NSSet setWithObjects:@"--fake", @"--allow-high-ceiling", nil] : [NSSet setWithObject:@"--fake"];
-    NSDictionary<NSString *, NSString *> *given = QLMReadArguments(arguments, flags, [NSSet setWithArray:options[command]], NULL, problem);
-    double ceiling = 0;
-    if (given != nil && poll && !QLMReadCeiling(given, &ceiling, problem)) {
-        return nil;
-    }
-    return given;
+    return QLMReadArguments(arguments, [NSSet setWithArray:flags[command]], [NSSet setWithArray:options[command]], NULL, problem);
 }
 
-QLMSystemSettings *QLMPollSettings(NSDictionary<NSString *, NSString *> *given) {
+QLMSystemSettings *QLMPollSettings(NSDictionary<NSString *, NSString *> *given, NSString **problem) {
+    double ceiling = 0;
+    if (!QLMReadCeiling(given, &ceiling, problem)) {
+        return nil;
+    }
     QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
-    double ceiling = QLMCeilingLimit;
-    NSString *problem = nil;
-    // QLMQueryArguments refused any other ceiling.
-    settings.ceilingDecibels = QLMReadCeiling(given, &ceiling, &problem) ? ceiling : QLMCeilingLimit;
+    settings.ceilingDecibels = ceiling;
     settings.startsAtKnob = YES;
     return settings;
 }
@@ -151,7 +151,7 @@ NSString *_Nullable QLMPollLevelText(QLMSnapshot *snapshot) {
     }
     double volume = snapshot.volumeDecibels.doubleValue;
     NSNumber *knob = snapshot.adapter.knobTenths;
-    if (snapshot.volumeDecibels != nil && knob != nil && knob.doubleValue / 10 > snapshot.ceilingDecibels) {
+    if (snapshot.volumeDecibels != nil && knob != nil && QLMKnobStep(knob.integerValue) > snapshot.ceilingDecibels) {
         return [NSString stringWithFormat:@"poll sends %.1f dB, the ceiling, which is under the knob's level.", volume];
     }
     if (snapshot.volumeDecibels != nil) {

@@ -1,6 +1,7 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMFormat.h"
+#include "QLMReplies.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMTestSupport.h"
 
@@ -318,27 +319,25 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
 
 #pragma mark - The meters
 
-// An output bar spans its floor, 80, to the byte's top, FF: 127 counts.
-// With music, the outputs rose to 240 (captures/qlm-poll-meters) and 246
-// (captures/qlm-control-all), so the old bar of 48 counts pinned.
+// An output bar spans its floor to the byte's top, FF: 127 counts. With
+// music, the outputs rose to 246 (QLMTelemetryTests' testTheMetersWithMusic),
+// so the old bar of 48 counts pinned.
 - (void)testAnOutputSpansItsFloorToTheTop {
-    XCTAssertEqual(QLMOutputMeterSpan, 127);
-    XCTAssertEqual(QLMMeterCounts(0x80), 0);
-    XCTAssertEqual(QLMMeterCounts(0x7F), 0);
-    XCTAssertEqual(QLMMeterCounts(240), 112);
+    XCTAssertEqual(QLMOutputMeterSpan, 0xFF - QLMTelemetryOutputSilent);
+    XCTAssertEqual(QLMMeterCounts(QLMTelemetryOutputSilent), 0);
+    XCTAssertEqual(QLMMeterCounts(QLMTelemetryOutputSilent - 1), 0);
+    XCTAssertEqual(QLMMeterCounts(QLMTelemetryOutputSilent + 112), 112);
     XCTAssertEqual(QLMMeterCounts(0xFF), QLMOutputMeterSpan);
     XCTAssertEqual(QLMMeterCounts(QLMMonitorValueAbsent), -1);
 }
 
-// With nothing playing, every input rested at 161 or below, on every model.
-// With music, it read 252 (captures/qlm-poll-meters, both runs). So the
-// threshold sits between, well clear of each.
+// The input is a signal from QLMTelemetryInputSignal, whose source is in
+// QLMTelemetryTests.
 - (void)testTheInputSaysSignalOrNone {
-    XCTAssertEqual(QLMInputSignalThreshold, 176);
-    for (NSNumber *raw in @[@146, @149, @157, @161, @175]) {
+    for (NSNumber *raw in @[@0, @(QLMTelemetryInputSignal - 1)]) {
         XCTAssertEqual(QLMInputSignalOf(raw.integerValue), QLMInputSignalNone, @"%@", raw);
     }
-    for (NSNumber *raw in @[@176, @199, @229, @252, @255]) {
+    for (NSNumber *raw in @[@(QLMTelemetryInputSignal), @255]) {
         XCTAssertEqual(QLMInputSignalOf(raw.integerValue), QLMInputSignalPresent, @"%@", raw);
     }
     XCTAssertEqual(QLMInputSignalOf(QLMMonitorValueAbsent), QLMInputSignalAbsent);

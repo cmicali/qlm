@@ -78,18 +78,19 @@ static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
 - (void)showRaw:(NSInteger)raw;
 @end
 
-@implementation QLMMeterCell
+@implementation QLMMeterCell {
+    NSInteger _shownRaw;
+}
 
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
+        _shownRaw = NSIntegerMin;
         _bar = [[NSLevelIndicator alloc] init];
         _bar.levelIndicatorStyle = NSLevelIndicatorStyleContinuousCapacity;
         _bar.minValue = 0;
         _bar.maxValue = QLMOutputMeterSpan;
         _bar.fillColor = NSColor.controlAccentColor;
-        _bar.warningFillColor = NSColor.controlAccentColor;
-        _bar.criticalFillColor = NSColor.controlAccentColor;
         _bar.editable = NO;
         _label = [NSTextField labelWithString:@""];
         _label.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
@@ -110,6 +111,10 @@ static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
 }
 
 - (void)showRaw:(NSInteger)raw {
+    if (raw == _shownRaw) {
+        return;
+    }
+    _shownRaw = raw;
     NSInteger counts = QLMMeterCounts(raw);
     self.bar.hidden = counts < 0;
     self.bar.doubleValue = (double)MAX(0, counts);
@@ -119,53 +124,51 @@ static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
 
 @end
 
-// The input: signal or none, or an em dash when the telemetry has none.
-@interface QLMSignalCell : NSTableCellView
-@property (nonatomic, readonly) NSImageView *dot;
-@property (nonatomic, readonly) NSTextField *label;
+// The input: signal or none, or an em dash when the telemetry has none, in
+// the status cell's dot and label.
+@interface QLMSignalCell : QLMStatusCell
 - (void)showRaw:(NSInteger)raw;
 @end
 
-@implementation QLMSignalCell
+@implementation QLMSignalCell {
+    NSInteger _shownRaw;
+}
 
 - (instancetype)initWithFrame:(NSRect)frame {
     self = [super initWithFrame:frame];
     if (self) {
-        _dot = QLMDotView();
-        _label = [NSTextField labelWithString:@""];
-        _label.lineBreakMode = NSLineBreakByTruncatingTail;
-        NSStackView *stack = [NSStackView stackViewWithViews:@[_dot, _label]];
-        stack.spacing = 5;
-        stack.translatesAutoresizingMaskIntoConstraints = NO;
-        [self addSubview:stack];
-        [NSLayoutConstraint activateConstraints:@[
-            [stack.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:2],
-            [stack.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor],
-            [stack.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
-        ]];
+        _shownRaw = NSIntegerMin;
     }
     return self;
 }
 
 - (void)showRaw:(NSInteger)raw {
-    QLMInputSignal signal = QLMInputSignalOf(raw);
-    self.dot.hidden = signal == QLMInputSignalAbsent;
-    self.dot.contentTintColor = signal == QLMInputSignalPresent ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor;
-    switch (signal) {
+    if (raw == _shownRaw) {
+        return;
+    }
+    _shownRaw = raw;
+    switch (QLMInputSignalOf(raw)) {
     case QLMInputSignalPresent:
+        self.dot.hidden = NO;
+        self.dot.contentTintColor = NSColor.controlAccentColor;
         self.label.stringValue = @"Signal";
         self.label.textColor = NSColor.labelColor;
+        self.toolTip = [NSString stringWithFormat:@"Raw %ld (%02lX)", (long)raw, (long)raw];
         break;
     case QLMInputSignalNone:
+        self.dot.hidden = NO;
+        self.dot.contentTintColor = NSColor.tertiaryLabelColor;
         self.label.stringValue = @"None";
         self.label.textColor = NSColor.secondaryLabelColor;
+        self.toolTip = [NSString stringWithFormat:@"Raw %ld (%02lX)", (long)raw, (long)raw];
         break;
     case QLMInputSignalAbsent:
+        self.dot.hidden = YES;
         self.label.stringValue = QLMEmDash;
         self.label.textColor = NSColor.secondaryLabelColor;
+        self.toolTip = @"Not in the last telemetry";
         break;
     }
-    self.toolTip = signal == QLMInputSignalAbsent ? @"Not in the last telemetry" : [NSString stringWithFormat:@"Raw %ld (%02lX)", (long)raw, (long)raw];
 }
 
 @end
@@ -371,14 +374,12 @@ static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
         [cell showRaw:entry.tracked ? monitor.inputMeter : QLMMonitorValueAbsent];
         return cell;
     }
-    NSNumber *meter = @{
-        QLMColumnHF: @(monitor.hfMeter),
-        QLMColumnLF: @(monitor.lfMeter),
-        QLMColumnSub: @(monitor.subMeter),
-    }[identifier];
-    if (meter != nil) {
+    BOOL hf = [identifier isEqualToString:QLMColumnHF];
+    BOOL lf = [identifier isEqualToString:QLMColumnLF];
+    if (hf || lf || [identifier isEqualToString:QLMColumnSub]) {
+        NSInteger raw = hf ? monitor.hfMeter : (lf ? monitor.lfMeter : monitor.subMeter);
         QLMMeterCell *cell = [self cellOfClass:[QLMMeterCell class] identifier:identifier];
-        [cell showRaw:entry.tracked ? meter.integerValue : QLMMonitorValueAbsent];
+        [cell showRaw:entry.tracked ? raw : QLMMonitorValueAbsent];
         return cell;
     }
 

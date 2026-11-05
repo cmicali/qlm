@@ -188,7 +188,7 @@ So the input tells signal from none: every floor is 161 or below, and music read
 ### What the Monitors window shows
 
 - **Each output is a bar from its floor to the meter's top**, `80` to `FF`, 127 counts, with the count over the floor beside it. The bar has one fill, the system's accent colour, since these aren't clip meters (`QLMOutputMeterSpan`).
-- **The input says Signal or None**, not a bar. Signal is a raw reading of 176 or more: 15 counts over the highest floor, 161, and below every reading with music but fades (`QLMInputSignalThreshold`). Its tooltip has the raw reading.
+- **The input says Signal or None**, not a bar. Signal is a raw reading of 176 or more: 15 counts over the highest floor, 161, and below every reading with music but fades (`QLMTelemetryInputSignal`, `testTheInputSignalSitsBetweenTheFloorsAndTheMusic`). Its tooltip has the raw reading.
 - **A dash** when the last frame lacks the meter.
 
 A reading holds until the next frame, about a second on.

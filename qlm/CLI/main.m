@@ -198,6 +198,27 @@ static QLMSystem *_Nullable QLMMakeSystemOn(BOOL fake, NSString *_Nullable repla
     return [[QLMSystem alloc] initWithAdapter:adapter settings:settings];
 }
 
+// Neither --fake nor --replay, as QLMControlOptions' overUSB.
+static BOOL QLMGivenOverUSB(NSDictionary<NSString *, NSString *> *given) {
+    return given[@"--fake"] == nil && given[@"--replay"] == nil;
+}
+
+// Stops System, and waits for the stop, which may send the knob's level
+// first. With `report`, prints what the stop did about the take-over, as a
+// warning but for the knob's level.
+static void QLMStopReportingHandBack(QLMSystem *system, BOOL report) {
+    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^QLMCallNumber {
+        return [system stop];
+    }, ^BOOL(QLMSnapshot *snapshot) {
+        return !snapshot.running;
+    });
+    if (report) {
+        QLMHandBack *handBack = (stopped ?: system.snapshot).handBack;
+        BOOL warning = handBack.kind != QLMHandBackKnobLevel;
+        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", QLMHandBackText(handBack).UTF8String);
+    }
+}
+
 static QLMSystem *_Nullable QLMMakeSystem(NSDictionary<NSString *, NSString *> *given, QLMSystemSettings *settings) {
     return QLMMakeSystemOn(given[@"--fake"] != nil, given[@"--replay"], settings);
 }
@@ -342,7 +363,12 @@ static int QLMPoll(int argc, const char *argv[]) {
     if (given == nil) {
         return EX_USAGE;
     }
-    QLMSystemSettings *settings = QLMPollSettings(given);
+    NSString *problem = nil;
+    QLMSystemSettings *settings = QLMPollSettings(given, &problem);
+    if (settings == nil) {
+        QLMPrintRefusal(problem);
+        return EX_USAGE;
+    }
     QLMSystem *system = QLMMakeSystem(given, settings);
     if (system == nil) {
         return EX_UNAVAILABLE;
@@ -355,10 +381,12 @@ static int QLMPoll(int argc, const char *argv[]) {
     __block NSString *lastKnob = nil;
     __block NSString *lastMic = nil;
     __block BOOL reported = NO;
-    __block BOOL leveled = NO;
-    __block NSNumber *startLevel = nil;  // the level the start or a knob plugged in set
-    __block BOOL turned = NO;            // a turn of the knob set the level since
-    __block BOOL done = NO;              // set on the printing queue before the stop
+    // The level its line last printed, NSNull for none, or nil before the
+    // line. A knob plugged in later prints it again.
+    __block id printedLevel = nil;
+    // TRAP: a snapshot already queued on `printing` still runs once the
+    // handler is gone, so this, set there before the stop, ends the printing.
+    __block BOOL done = NO;
     [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
         if (reported || done) {
             return;
@@ -370,16 +398,13 @@ static int QLMPoll(int argc, const char *argv[]) {
         }
         double elapsed = [[NSDate date] timeIntervalSinceDate:start];
         NSNumber *volume = snapshot.volumeDecibels;
-        NSString *level = (!leveled || (startLevel == nil && volume != nil)) ? QLMPollLevelText(snapshot) : nil;
+        NSString *level = printedLevel == nil || (printedLevel == NSNull.null && volume != nil) ? QLMPollLevelText(snapshot) : nil;
         if (level != nil) {
             printf("%7.2f s  %s\n", elapsed, level.UTF8String);
-            leveled = YES;
-            startLevel = volume;
-        } else if (startLevel != nil && ![volume isEqual:startLevel]) {
-            turned = YES;
+            printedLevel = volume ?: NSNull.null;
         }
         NSString *knob = QLMKnobText(snapshot.adapter);
-        if (snapshot.volumeFromKnob && turned) {
+        if (snapshot.volumeFromKnob) {
             knob = [knob stringByAppendingString:@", set the level"];
         }
         if (snapshot.adapter.hasStatus && ![knob isEqualToString:lastKnob]) {
@@ -408,18 +433,7 @@ static int QLMPoll(int argc, const char *argv[]) {
     dispatch_sync(printing, ^{
         done = YES;
     });
-    // The stop may send the knob's level first, so wait for it.
-    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^QLMCallNumber {
-        return [system stop];
-    }, ^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    });
-    BOOL overUSB = given[@"--fake"] == nil && given[@"--replay"] == nil;
-    QLMHandBack *handBack = (stopped ?: system.snapshot).handBack;
-    if (!early && overUSB && handBack != nil) {
-        BOOL warning = handBack.kind != QLMHandBackKnobLevel;
-        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", QLMHandBackText(handBack).UTF8String);
-    }
+    QLMStopReportingHandBack(system, !early && QLMGivenOverUSB(given));
     return early ? EX_UNAVAILABLE : 0;
 }
 
@@ -581,17 +595,7 @@ static int QLMRunControl(QLMControlOptions *options, QLMControlAction action, QL
             status = EX_UNAVAILABLE;
         }
     }
-    // The stop may send the knob's level first, so wait for it.
-    QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^QLMCallNumber {
-        return [system stop];
-    }, ^BOOL(QLMSnapshot *snapshot) {
-        return !snapshot.running;
-    });
-    if (sent && options.overUSB) {
-        QLMHandBack *handBack = (stopped ?: system.snapshot).handBack;
-        BOOL warning = handBack.kind != QLMHandBackKnobLevel;
-        fprintf(stderr, "qlmctl: %s%s\n", warning ? "warning: " : "", QLMHandBackText(handBack).UTF8String);
-    }
+    QLMStopReportingHandBack(system, sent && options.overUSB);
     return status;
 }
 
