@@ -1315,7 +1315,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         } else if (!self->_knobReadSinceStart && self.settings.startsAtKnob) {
             [self startAtKnob:&status];
         }
-        self->_knobReadSinceStart = YES;
+        // A knob plugged in later starts the level, as one in at the start.
+        if (QLMKnobTenthsOf(&status) != nil) {
+            self->_knobReadSinceStart = YES;
+        }
         self->_knobRead = YES;
         self->_lastKnobTenths = QLMKnobTenthsOf(&status);
         [self followKnob:&status];

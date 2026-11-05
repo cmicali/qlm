@@ -25,7 +25,8 @@ NSDictionary<NSString *, NSString *> *_Nullable QLMQueryArguments(NSString *comm
 
 // poll's System settings, from QLMQueryArguments' poll: the ceiling, as a
 // control takes it, and startsAtKnob. So poll sends the knob's level, under
-// the ceiling, and follows the knob, or with no knob in, sends no level.
+// the ceiling, and follows the knob, or with no knob in, sends no level
+// until one is.
 QLMSystemSettings *QLMPollSettings(NSDictionary<NSString *, NSString *> *given);
 // What poll prints before it starts.
 NSString *QLMPollStartText(QLMSystemSettings *settings);

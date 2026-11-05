@@ -141,7 +141,7 @@ QLMSystemSettings *QLMPollSettings(NSDictionary<NSString *, NSString *> *given) 
 
 NSString *QLMPollStartText(QLMSystemSettings *settings) {
     return [NSString stringWithFormat:@"poll sends the knob's level, at most the %.1f dB ceiling, once it reads the knob, and "
-                                      @"follows the knob. With no knob in, it sends no level.",
+                                      @"follows the knob. With no knob in, it sends no level until one is.",
                                       settings.ceilingDecibels];
 }
 
@@ -157,7 +157,7 @@ NSString *_Nullable QLMPollLevelText(QLMSnapshot *snapshot) {
     if (snapshot.volumeDecibels != nil) {
         return [NSString stringWithFormat:@"poll sends %.1f dB, the knob's level.", volume];
     }
-    return @"No knob is in, so poll sends no level. The monitors' outputs may fall silent while it runs.";
+    return @"No knob is in, so poll sends no level until one is. The monitors' outputs may fall silent until a knob is in.";
 }
 
 NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *arguments, NSString **problem) {

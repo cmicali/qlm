@@ -2760,6 +2760,37 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// A knob plugged in after a start with none sets the level then, at its
+// step under the ceiling, and no frame before it, nor any after, is above.
+- (void)testAStartAtTheKnobWaitsForAKnobPluggedInLater {
+    _settings.startsAtKnob = YES;
+    _settings.adapterPollInterval = 0.01;
+    _settings.cycleInterval = 10;
+    for (NSArray<NSNumber *> *row in @[@[@(-100), @(-20)], @[@(-473), @(-47.5)]]) {
+        [self stopSystem];
+        _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
+        [_bus perform:^{
+            self->_bus.knobTenths = nil;
+            self->_left.session = 0;
+            self->_right.session = 0;
+        }];
+        [self startSystem];
+        [self waitForDiscovery];
+        NSUInteger before = _bus.sentMessages.count;
+        XCTAssertEqual([self sentWithOpcode:0x1F from:0].count, 0u, @"%@", row);
+        XCTAssertNil(_system.snapshot.volumeDecibels, @"%@", row);
+        QLMSnapshot *plugged = [self turnKnobTo:row[0].integerValue];
+        XCTAssertEqualObjects(plugged.volumeDecibels, row[1], @"%@", row);
+        NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:before];
+        XCTAssertGreaterThan(levels.count, 0u, @"%@", row);
+        QLMMessage expected = QLMCommandVolume(row[1].doubleValue, _settings.ceilingDecibels);
+        XCTAssertEqualObjects(levels[0], QLMAdapterRecord(&expected), @"%@", row);
+        for (NSData *level in levels) {
+            XCTAssertLessThanOrEqual(QLMVolumeWordOf(QLMApplyMessage(level)), QLMVolumeWordForDecibels(_settings.ceilingDecibels), @"%@", row);
+        }
+    }
+}
+
 // After poll's start, the knob moves the level as a turn does, under the
 // ceiling.
 - (void)testAStartAtTheKnobFollowsTheKnob {

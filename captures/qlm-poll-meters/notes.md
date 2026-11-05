@@ -20,7 +20,7 @@ The times are the files' own, to the minute.
 
 - **With nothing playing, every output reads its floor, 128.** The first 8330A's HF reads 130 or 131. Every other output reads 128 in every frame.
 - **With nothing playing, each input rests at its model's floor.** The 8330As read 157 to 160, the 8351Bs 158 to 161, the 7370A 147 to 149, and the 7350A 146 to 148.
-- **With music, the outputs read 221 to 240.** The 8330As read 228 to 231 on HF and 235 to 240 on LF. The 8351Bs read 221 to 224 on HF and 225 to 229 on LF. The 7370A's LF read 228 to 230, and the 7350A's 231 to 236.
+- **With music, the full-range outputs, and the subwoofers' LF, read 221 to 240.** The subwoofers' HF and sub meters stayed at 128. The 8330As read 228 to 231 on HF and 235 to 240 on LF. The 8351Bs read 221 to 224 on HF and 225 to 229 on LF. The 7370A's LF read 228 to 230, and the 7350A's 231 to 236.
 - **With music, every input read 252, in every frame, all 10 s.** It read 252 even once the outputs fell silent.
 - **The outputs fell to their floor while the input still read the music.** The 8351Bs and the 7370A read 128 from the frame at 1.77 s. The 8330As and the 7350A read it from 2.38 s. Every output read 128 from then to the end.
 - **The temperatures were steady.** The 8330As read 29 and 31 °C, and the rest 43 to 47 °C.

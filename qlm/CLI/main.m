@@ -30,7 +30,7 @@ static void QLMPrintUsage(FILE *stream) {
             "                                 print each monitor's telemetry as it arrives, for N seconds, and the\n"
             "                                 knob and the mic as they change. It sends the knob's level, at most\n"
             "                                 the ceiling, and follows the knob, since monitors a host leases and\n"
-            "                                 sends no level fall silent. With no knob in, it sends no level.\n"
+            "                                 sends no level fall silent. With no knob in, it sends none until one is.\n"
             "  volume <dB> [BUS] [CONTROL] [--ceiling dB [--allow-high-ceiling]] [--adapter-poll SECONDS]\n"
             "                                 set the volume, at or below the ceiling. --adapter-poll sends one\n"
             "                                 01 08 every SECONDS, 0 to %.0f, in place of GLM's pair every %g s, and\n"
@@ -356,8 +356,11 @@ static int QLMPoll(int argc, const char *argv[]) {
     __block NSString *lastMic = nil;
     __block BOOL reported = NO;
     __block BOOL leveled = NO;
+    __block NSNumber *startLevel = nil;  // the level the start or a knob plugged in set
+    __block BOOL turned = NO;            // a turn of the knob set the level since
+    __block BOOL done = NO;              // set on the printing queue before the stop
     [system setSnapshotHandler:^(QLMSnapshot *snapshot) {
-        if (reported) {
+        if (reported || done) {
             return;
         }
         if (QLMReportAdapterError(snapshot)) {
@@ -366,13 +369,17 @@ static int QLMPoll(int argc, const char *argv[]) {
             return;
         }
         double elapsed = [[NSDate date] timeIntervalSinceDate:start];
-        NSString *level = leveled ? nil : QLMPollLevelText(snapshot);
+        NSNumber *volume = snapshot.volumeDecibels;
+        NSString *level = (!leveled || (startLevel == nil && volume != nil)) ? QLMPollLevelText(snapshot) : nil;
         if (level != nil) {
             printf("%7.2f s  %s\n", elapsed, level.UTF8String);
             leveled = YES;
+            startLevel = volume;
+        } else if (startLevel != nil && ![volume isEqual:startLevel]) {
+            turned = YES;
         }
         NSString *knob = QLMKnobText(snapshot.adapter);
-        if (snapshot.volumeFromKnob) {
+        if (snapshot.volumeFromKnob && turned) {
             knob = [knob stringByAppendingString:@", set the level"];
         }
         if (snapshot.adapter.hasStatus && ![knob isEqualToString:lastKnob]) {
@@ -398,7 +405,9 @@ static int QLMPoll(int argc, const char *argv[]) {
     [system start];
     BOOL early = [system.settings.clock wait:failed timeout:seconds];
     [system setSnapshotHandler:nil queue:printing];
-    dispatch_sync(printing, ^{});
+    dispatch_sync(printing, ^{
+        done = YES;
+    });
     // The stop may send the knob's level first, so wait for it.
     QLMSnapshot *stopped = QLMWaitForSnapshot(system, QLMEffectTimeout, ^QLMCallNumber {
         return [system stop];

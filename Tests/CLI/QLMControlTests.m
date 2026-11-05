@@ -685,7 +685,7 @@ static NSArray<NSData *> *QLMPair(void) {
 - (void)testPollWithNoKnobSendsNoLevel {
     NSString *text = nil;
     XCTAssertEqual([self pollLevelsWithKnob:nil arguments:@[] text:&text].count, 0u);
-    XCTAssertEqualObjects(text, @"No knob is in, so poll sends no level. The monitors' outputs may fall silent while it runs.");
+    XCTAssertEqualObjects(text, @"No knob is in, so poll sends no level until one is. The monitors' outputs may fall silent until a knob is in.");
     XCTAssertTrue([QLMPollStartText(QLMPollSettings(@{})) containsString:@"-30.0 dB ceiling"]);
 }
 
