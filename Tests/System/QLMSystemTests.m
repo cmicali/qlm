@@ -2708,6 +2708,72 @@ static BOOL QLMIsDiscoveryOrPoll(NSData *record) {
     }
 }
 
+// qlmctl poll's start. Monitors a host leases and sends no level fall
+// silent (captures/qlm-poll-meters). So with startsAtKnob, the start's first
+// reading of the knob sets the volume to the knob's step, under the ceiling,
+// and it goes out before any lease. With no knob in, no level goes out.
+// Without startsAtKnob, as before, the knob sets nothing.
+- (void)testAStartAtTheKnobSendsTheKnobsLevelUnderTheCeiling {
+    NSArray<NSArray *> *cases = @[
+        @[@YES, @(-400), @(-40)],  // the knob's level
+        @[@YES, @(-473), @(-47.5)],  // its nearest step
+        @[@YES, @(-100), @(-20)],  // above the -20 dB ceiling: the ceiling
+        @[@YES, [NSNull null], [NSNull null]],  // no knob: no level
+        @[@NO, @(-400), [NSNull null]],  // the knob sets nothing
+    ];
+    for (NSArray *row in cases) {
+        _settings.startsAtKnob = [row[0] boolValue];
+        NSNumber *knob = row[1] == [NSNull null] ? nil : row[1];
+        NSNumber *volume = row[2] == [NSNull null] ? nil : row[2];
+        _bus = [[QLMFakeBus alloc] initWithMonitors:@[_left, _right]];
+        [_bus perform:^{
+            self->_bus.knobTenths = knob;
+            self->_left.session = 0;
+            self->_right.session = 0;
+        }];
+        [self startSystem];
+        QLMSnapshot *settled = [self waitForSnapshot:^BOOL(QLMSnapshot *snapshot) {
+            return snapshot.monitors.count == 2 && snapshot.allIdentified && snapshot.idle;
+        }];
+        XCTAssertEqualObjects(settled.volumeDecibels, volume, @"%@", row);
+        XCTAssertEqual(settled.volumeFromKnob, volume != nil, @"%@", row);
+        XCTAssertFalse(settled.levelAwaitsKnob, @"%@", row);
+        NSArray<NSData *> *levels = [self sentWithOpcode:0x1F from:0];
+        XCTAssertEqual([self sentWithOpcode:0x2B from:0].count, 0u, @"%@", row);
+        if (volume == nil) {
+            XCTAssertEqual(levels.count, 0u, @"%@", row);
+            [self stopSystem];
+            continue;
+        }
+        XCTAssertGreaterThanOrEqual(levels.count, 3u, @"%@", row);  // the start's, the cycle's, and each lease's
+        QLMMessage expected = QLMCommandVolume(volume.doubleValue, _settings.ceilingDecibels);
+        for (NSData *level in levels) {
+            XCTAssertEqualObjects(level, QLMAdapterRecord(&expected), @"%@", row);
+        }
+        NSUInteger first = [_bus.sentMessages indexOfObject:levels[0]];
+        NSUInteger lease = [_bus.sentMessages indexOfObjectPassingTest:^BOOL(NSData *message, NSUInteger index, BOOL *stop) {
+            return QLMIsLease(QLMApplyMessage(message));
+        }];
+        XCTAssertNotEqual(lease, NSNotFound, @"%@", row);
+        XCTAssertLessThan(first, lease, @"%@", row);
+        [self stopSystem];
+    }
+}
+
+// After poll's start, the knob moves the level as a turn does, under the
+// ceiling.
+- (void)testAStartAtTheKnobFollowsTheKnob {
+    _settings.startsAtKnob = YES;
+    _settings.adapterPollInterval = 0.01;
+    [_bus perform:^{
+        self->_bus.knobTenths = @(-400);
+    }];
+    [self startSystem];
+    [self waitForDiscovery];
+    XCTAssertEqualObjects([self turnKnobTo:-500].volumeDecibels, @(-50));
+    XCTAssertEqualObjects([self turnKnobTo:-100].volumeDecibels, @(-20));
+}
+
 // The knob sets the undimmed level, so an undim after a dimmed start that
 // the knob capped goes back to the knob's level, not 20 dB above it.
 - (void)testAnUndimAfterACappedDimmedStartGoesToTheKnob {

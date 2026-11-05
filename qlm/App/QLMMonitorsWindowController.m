@@ -15,10 +15,6 @@ static NSUserInterfaceItemIdentifier const QLMColumnLF = @"lf";
 static NSUserInterfaceItemIdentifier const QLMColumnSub = @"sub";
 static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
 
-// The meters read about 1 dB a count over 80. Real replies stayed under 9F
-// (docs/refused-frames.md), so the bar spans 48 counts.
-static const double QLMMeterBarCounts = 48;
-
 // A label, centered in the row.
 @interface QLMTextCell : NSTableCellView
 @end
@@ -74,7 +70,8 @@ static const double QLMMeterBarCounts = 48;
 
 @end
 
-// A level bar and its count, or an em dash when the telemetry has none.
+// An output's level bar and its count, or an em dash when the telemetry has
+// none. One fill: the meters are approximate, not clip meters.
 @interface QLMMeterCell : NSTableCellView
 @property (nonatomic, readonly) NSLevelIndicator *bar;
 @property (nonatomic, readonly) NSTextField *label;
@@ -89,9 +86,10 @@ static const double QLMMeterBarCounts = 48;
         _bar = [[NSLevelIndicator alloc] init];
         _bar.levelIndicatorStyle = NSLevelIndicatorStyleContinuousCapacity;
         _bar.minValue = 0;
-        _bar.maxValue = QLMMeterBarCounts;
-        _bar.warningValue = QLMMeterBarCounts * 0.75;
-        _bar.criticalValue = QLMMeterBarCounts * 0.9;
+        _bar.maxValue = QLMOutputMeterSpan;
+        _bar.fillColor = NSColor.controlAccentColor;
+        _bar.warningFillColor = NSColor.controlAccentColor;
+        _bar.criticalFillColor = NSColor.controlAccentColor;
         _bar.editable = NO;
         _label = [NSTextField labelWithString:@""];
         _label.font = [NSFont monospacedDigitSystemFontOfSize:NSFont.smallSystemFontSize weight:NSFontWeightRegular];
@@ -117,6 +115,57 @@ static const double QLMMeterBarCounts = 48;
     self.bar.doubleValue = (double)MAX(0, counts);
     self.label.stringValue = counts < 0 ? QLMEmDash : [NSString stringWithFormat:@"%ld", (long)counts];
     self.toolTip = counts < 0 ? @"Not in the last telemetry" : [NSString stringWithFormat:@"Raw %02lX: about %ld dB over the floor", (long)raw, (long)counts];
+}
+
+@end
+
+// The input: signal or none, or an em dash when the telemetry has none.
+@interface QLMSignalCell : NSTableCellView
+@property (nonatomic, readonly) NSImageView *dot;
+@property (nonatomic, readonly) NSTextField *label;
+- (void)showRaw:(NSInteger)raw;
+@end
+
+@implementation QLMSignalCell
+
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        _dot = QLMDotView();
+        _label = [NSTextField labelWithString:@""];
+        _label.lineBreakMode = NSLineBreakByTruncatingTail;
+        NSStackView *stack = [NSStackView stackViewWithViews:@[_dot, _label]];
+        stack.spacing = 5;
+        stack.translatesAutoresizingMaskIntoConstraints = NO;
+        [self addSubview:stack];
+        [NSLayoutConstraint activateConstraints:@[
+            [stack.leadingAnchor constraintEqualToAnchor:self.leadingAnchor constant:2],
+            [stack.trailingAnchor constraintLessThanOrEqualToAnchor:self.trailingAnchor],
+            [stack.centerYAnchor constraintEqualToAnchor:self.centerYAnchor],
+        ]];
+    }
+    return self;
+}
+
+- (void)showRaw:(NSInteger)raw {
+    QLMInputSignal signal = QLMInputSignalOf(raw);
+    self.dot.hidden = signal == QLMInputSignalAbsent;
+    self.dot.contentTintColor = signal == QLMInputSignalPresent ? NSColor.controlAccentColor : NSColor.tertiaryLabelColor;
+    switch (signal) {
+    case QLMInputSignalPresent:
+        self.label.stringValue = @"Signal";
+        self.label.textColor = NSColor.labelColor;
+        break;
+    case QLMInputSignalNone:
+        self.label.stringValue = @"None";
+        self.label.textColor = NSColor.secondaryLabelColor;
+        break;
+    case QLMInputSignalAbsent:
+        self.label.stringValue = QLMEmDash;
+        self.label.textColor = NSColor.secondaryLabelColor;
+        break;
+    }
+    self.toolTip = signal == QLMInputSignalAbsent ? @"Not in the last telemetry" : [NSString stringWithFormat:@"Raw %ld (%02lX)", (long)raw, (long)raw];
 }
 
 @end
@@ -184,7 +233,7 @@ static const double QLMMeterBarCounts = 48;
     [self addColumn:QLMColumnSerial title:@"Serial" width:124 tip:nil];
     [self addColumn:QLMColumnFirmware title:@"Firmware" width:64 tip:nil];
     [self addColumn:QLMColumnTemperature title:@"Temp" width:48 tip:nil];
-    [self addColumn:QLMColumnInput title:@"Input" width:72 tip:@"Before the volume. Approximate: about 1 dB a count over the floor."];
+    [self addColumn:QLMColumnInput title:@"Input" width:72 tip:@"Whether a signal reaches the monitor's input, before the volume."];
     [self addColumn:QLMColumnHF title:@"HF out" width:72 tip:@"After the volume and mute. Approximate."];
     [self addColumn:QLMColumnLF title:@"LF out" width:72 tip:@"After the volume and mute. Approximate."];
     [self addColumn:QLMColumnSub title:@"Sub out" width:72 tip:@"Subwoofers only. Approximate."];
@@ -196,7 +245,7 @@ static const double QLMMeterBarCounts = 48;
     [scroll setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationVertical];
 
     NSTextField *note = QLMNoteLabel(
-        @"Meters are approximate: counts over each meter's floor, about 1 dB a count. The input meter is before the volume, and the outputs after it. A monitor System drops stays here, offline.",
+        @"The input says whether a signal arrives, before the volume. Each output bar is approximate: counts over its floor, about 1 dB a count, after the volume and mute. A monitor System drops stays here, offline.",
         0);
     [note setContentCompressionResistancePriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
 
@@ -317,8 +366,12 @@ static const double QLMMeterBarCounts = 48;
         cell.toolTip = [NSString stringWithFormat:@"Hardware ID %@, session %02X", [self hexOf:monitor.hardwareID], monitor.session];
         return cell;
     }
+    if ([identifier isEqualToString:QLMColumnInput]) {
+        QLMSignalCell *cell = [self cellOfClass:[QLMSignalCell class] identifier:identifier];
+        [cell showRaw:entry.tracked ? monitor.inputMeter : QLMMonitorValueAbsent];
+        return cell;
+    }
     NSNumber *meter = @{
-        QLMColumnInput: @(monitor.inputMeter),
         QLMColumnHF: @(monitor.hfMeter),
         QLMColumnLF: @(monitor.lfMeter),
         QLMColumnSub: @(monitor.subMeter),

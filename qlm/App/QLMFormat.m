@@ -108,6 +108,17 @@ NSInteger QLMMeterCounts(NSInteger raw) {
     return MAX(0, raw - 0x80);
 }
 
+const NSInteger QLMOutputMeterSpan = 0xFF - 0x80;
+
+const NSInteger QLMInputSignalThreshold = 0xB0;
+
+QLMInputSignal QLMInputSignalOf(NSInteger raw) {
+    if (raw == QLMMonitorValueAbsent) {
+        return QLMInputSignalAbsent;
+    }
+    return raw >= QLMInputSignalThreshold ? QLMInputSignalPresent : QLMInputSignalNone;
+}
+
 NSString *QLMReplyAgeText(NSDate *date) {
     if (date == nil) {
         return QLMEmDash;

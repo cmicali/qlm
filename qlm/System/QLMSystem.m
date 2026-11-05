@@ -74,6 +74,7 @@ BOOL QLMSystemErrorRefused(NSError *error) {
     copy.knownLeases = self.knownLeases;
     copy.knobRead = self.knobRead;
     copy.knobTenths = self.knobTenths;
+    copy.startsAtKnob = self.startsAtKnob;
     copy.allowsUnverifiedRates = self.allowsUnverifiedRates;
     copy.clock = self.clock;
     return copy;
@@ -319,6 +320,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     // and its tenths, nil with no knob in.
     BOOL _knobRead;
     NSNumber *_lastKnobTenths;
+    BOOL _knobReadSinceStart;
     BOOL _volumeSendPending;
     NSTimeInterval _lastVolumeSend;  // on the clock; -INFINITY before the first
     BOOL _dimmed;
@@ -461,6 +463,7 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     _stoppedHandBack = nil;
     _startLoweredFrom = nil;
     _levelAwaitsKnob = _volumeDecibels != nil;
+    _knobReadSinceStart = NO;
     _nextSession = QLMAddressSessionFirst;
     _quietProbeAt = NAN;
     [_adapter startOnQueue:_queue clock:_clock];
@@ -1309,7 +1312,10 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         adapter.lastReply = [NSDate date];
         if (self->_levelAwaitsKnob) {
             [self capLevelAtKnob:&status];
+        } else if (!self->_knobReadSinceStart && self.settings.startsAtKnob) {
+            [self startAtKnob:&status];
         }
+        self->_knobReadSinceStart = YES;
         self->_knobRead = YES;
         self->_lastKnobTenths = QLMKnobTenthsOf(&status);
         [self followKnob:&status];
@@ -1342,6 +1348,19 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _muteHeld = NO;
         [self sendMuteState];
     }
+}
+
+// The settings' startsAtKnob. The knob rests at this reading, so
+// followKnob: moves nothing for it.
+- (void)startAtKnob:(const QLMAdapterStatus *)status {
+    NSNumber *now = QLMKnobTenthsOf(status);
+    if (_volumeDecibels != nil || now == nil) {
+        return;
+    }
+    _volumeDecibels = [self underCeiling:QLMKnobStep(now.integerValue)];
+    _volumeFromKnob = YES;
+    _dirty = YES;
+    [self enqueueNext:@[[self volumeItem]]];
 }
 
 // A volume the knob sets goes out as GLM sends it: the level three times,

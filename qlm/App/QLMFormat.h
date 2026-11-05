@@ -55,9 +55,29 @@ NSString *_Nullable QLMMonitorLabel(QLMMonitorState *monitor, QLMSetup *_Nullabl
 // "38 °C", or an em dash when absent.
 NSString *QLMTemperatureText(NSInteger temperature);
 
-// A raw meter reading as counts above the meter's floor, 80. A count is
-// about 1 dB (docs/refused-frames.md). -1 when absent.
+// A raw output meter reading as counts above the meter's floor, 80. A
+// count is about 1 dB (docs/telemetry.md: The meters). -1 when absent.
 NSInteger QLMMeterCounts(NSInteger raw);
+
+// An output meter's counts from its floor, 80, to the byte's top, FF. With
+// music, the outputs rose about 100 counts over the floor, to 246 at most
+// (captures/qlm-poll-meters, captures/qlm-control-all).
+extern const NSInteger QLMOutputMeterSpan;
+
+typedef NS_ENUM(NSInteger, QLMInputSignal) {
+    QLMInputSignalAbsent,  // not in the last telemetry
+    QLMInputSignalNone,
+    QLMInputSignalPresent,
+};
+
+// The input meter's raw reading at or above this is a signal. With nothing
+// playing, every model's input rested at 161 or below. With music, it read
+// 199 or more, but for fades, and 252 on a digital input
+// (captures/qlm-poll-meters, docs/telemetry.md: The meters).
+extern const NSInteger QLMInputSignalThreshold;
+
+// Whether the input meter's raw reading is a signal.
+QLMInputSignal QLMInputSignalOf(NSInteger raw);
 
 // "0.4 s ago" within a minute, then the time of day. An em dash for nil.
 // On the main queue: it keeps one formatter.

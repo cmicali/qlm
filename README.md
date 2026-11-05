@@ -56,6 +56,8 @@ Over USB, `qlmctl` refuses the adapter while GLM runs, while another process hol
 
 Every command that drives the bus checks every argument before the bus opens. An unknown, repeated, or empty one is refused with exit 64, so a mistyped `--dry-run` can't send for real.
 
+`poll` prints each monitor's telemetry as it arrives, for `--seconds N`, 5 by default. Monitors that a host leases and sends no level fall silent within about 2.4 s, as an earlier `poll` showed with music playing ([docs/protocol.md](docs/protocol.md#a-host-that-sends-no-level)). So `poll` sends the knob's level, which is what the adapter ran the monitors at before it, and follows the knob. It caps that at a ceiling, as the controls do: −30 dB by default, `--ceiling dB` to set it, and above −30 dB only with `--allow-high-ceiling`. With no knob in, that level is unknown, so `poll` sends none, and says the outputs may fall silent. It prints which it does as it starts, and over USB, at exit, what its stop did.
+
 `info` and `poll` print the knob and the calibration mic. With the mic in, they add its two readings, `DE` and `DD`, as raw counts, like `mic in, DE 2301456, DD 2298770`. We don't know yet what the readings measure, so qlm shows no dB. `poll` prints the mic's line each time the readings change, which with the mic in is once a cycle, about every 0.57 s. With the mic in but no readings in the reply, the line says `in, no readings`. When the adapter misses a poll, the knob and mic lines keep the last reading and add `(stale, 3 polls missed)`. [docs/adapter-status.md](docs/adapter-status.md#the-mic-de-and-dd) has what we've seen of them.
 
 ### The controls over USB

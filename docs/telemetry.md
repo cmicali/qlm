@@ -12,13 +12,14 @@ Every monitor answers its `08` poll with a telemetry frame. hlm's spec lists mos
 | `88` | the 8351B | A steady reading, different on each monitor, that standby does not change. | Unknown |
 | `89` | the 8351B | A steady reading that falls 16 to 19 within a second of standby, and comes back at the wake. | Unknown |
 
-- **The meters work as approximate meters.** On the output meters, a count is about a dB, and the floor is `80`. `42` reads before the volume. `44` is the 8351B's midrange.
+- **The meters work as approximate meters.** On the output meters, a count is about a dB, and the floor is `80`. With music, they rose about 100 counts over it, to 246 at most. `42` reads before the volume. With music on a digital input, it read 252 in every frame of one run. `44` is the 8351B's midrange.
 - **A monitor sometimes splits a frame across two polls**, at a field. That explains the replies that lack the leading `41`: each is the second part of a split frame.
 - `QLMReplyTelemetry` decodes `49` as `wakeSeconds`, `8A` as `wakeSteps`, and `82` as `sensor82`. It steps over `88` and `89`.
 
 ## Sources
 
 - **The captures.** All 22 in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29, from 20:57 to 21:47. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, `qlm-control-all`, and, through the app, `qlm-app-first` on 2026-10-30. Only those last three have music playing.
+- **`qlm-poll-meters`.** Two runs of `qlmctl poll` on all six on 2026-11-05, one with nothing playing and one with music. It holds only what `qlmctl` printed, with no USB capture.
 - **hlm's spec**, `docs/Genelec GLM Protocol.13.md` in [robcazzaro/hlm](https://github.com/robcazzaro/hlm), revision 13. It is GPL-3.0. This page states its facts in its own words, and takes no text or code from it.
   - Section 4: multi-byte values are big-endian.
   - Section 8: a busy byte, `06` or `07`, may follow the `09`. A reply of `09` and a busy byte alone carries no telemetry this round.
@@ -161,15 +162,36 @@ The 8351B is a three-way model. It sends `44` in every frame while it is on, and
 
 No music plays in GLM's captures. A few short sounds do: in seven of them, `42` reads 236 or 237 on every monitor in the same frame (`startup-idle`, 28.68 s, for one). At rest, each output meter reads `80`, and now and then a count or four above it. `42` rests at `9D` to `A0` on the 8330A and the 8351B, and at `91` to `95` on the subwoofers. The spec has `89` on an 8320A. So the input's floor is its noise, and differs by model and input.
 
+### With music
+
+The output meters go far higher with music than the floors suggest. The first music runs played quietly. A later run of `qlmctl poll` played music over the monitors' digital input, with the knob at −42.7 dB:
+
+| Run | The outputs' highest | The input with music |
+| --- | --- | --- |
+| `qlm-control-first` | 211 | 199 to 232 |
+| `qlm-app-first` | 235 | up to 253 |
+| `qlm-control-all` | 246 | up to 254 |
+| `qlm-poll-meters` | 240 | 252 in every frame |
+
+- **The outputs rose about 100 counts over their floor.** The meter is a byte, so it can span 127 counts, from `80` to `FF`. The highest, 246, is 118 over it (`testTheMetersWithMusic`, `testWithMusicTheOutputsFallSilentWhileTheInputStaysAt252`).
+- **In `qlm-poll-meters`, the input read exactly 252 on every monitor, in every frame, for 10 s.** It read 252 even once every output had fallen to its floor. In the runs before, it moved with the music, from 199 to 254. **Guess:** the source played near full scale there, and 252 is where the meter tops out.
+- **With nothing playing, each input rests at its model's floor.** In `qlm-poll-meters`, the 8330As read 157 to 160, the 8351Bs 158 to 161, the 7370A 147 to 149, and the 7350A 146 to 148. Every output read `80`, but the first 8330A's HF, at 130 or 131 (`testWithNothingPlayingEachMeterRestsAtItsFloor`).
+
+So the input tells signal from none: every floor is 161 or below, and music read 199 or more but for fades. It can't yet say how loud.
+
 ### What the captures do not show
 
 - **`42`'s slope.** No capture changes the input by a known amount.
 - **The absolute scale.** **Guess:** each meter is a level in dB below full scale, as 255 less the count. That would put the outputs' floor at −127 dB, the inputs' floors near −97 and −109 dB, and the music near −25 dB. No capture pins it.
 - **`46`.** It never leaves `80`, even while the 7370A plays with `45` at 206 to 208 (`qlm-control-first`, 638 to 665 s).
 
-### Approximate meters
+### What the Monitors window shows
 
-Show each output as its count less `80`, in dB, over a window of about 60 dB, as section 8.1 suggests. Show the input the same way, above its model's floor. Hold a reading for about a second, since the frame changes once a second.
+- **Each output is a bar from its floor to the meter's top**, `80` to `FF`, 127 counts, with the count over the floor beside it. The bar has one fill, the system's accent colour, since these aren't clip meters (`QLMOutputMeterSpan`).
+- **The input says Signal or None**, not a bar. Signal is a raw reading of 176 or more: 15 counts over the highest floor, 161, and below every reading with music but fades (`QLMInputSignalThreshold`). Its tooltip has the raw reading.
+- **A dash** when the last frame lacks the meter.
+
+A reading holds until the next frame, about a second on.
 
 ### What the meters showed about the control run
 
@@ -180,7 +202,7 @@ Show each output as its count less `80`, in dB, over a window of about 60 dB, as
 
 - **`wakeSeconds`** tells a new frame from an old one, and shows how long ago a monitor woke, within 256 s.
 - **`wakeSteps`** × 256 + `wakeSeconds` is how long a monitor has been up, in seconds. `wakeSteps` arrives once in 30 s, so keep the last one. A lease's first frame may carry an old one.
-- **The meters** can drive the window's input and output bars.
+- **The meters** drive the window's output bars, and its signal or none for the input.
 - **The temperature** is unsettled for a minute after a wake.
 
 ## Open questions
@@ -188,6 +210,6 @@ Show each output as its count less `80`, in dB, over a window of about 60 dB, as
 These would settle them:
 
 - **`88` and `89`.** Poll an 8351B through standby for an hour, then wake it. Watch both against the temperature.
-- **`42`'s slope and the meters' scale.** Play a test tone at known levels, through one monitor.
+- **`42`'s slope and the meters' scale.** Play a test tone at known levels, through one monitor. Do it on the digital input too, to see where 252 begins.
 - **The wake and the level.** Wake with qlm while music plays, and send the level alone, with no pair. Check whether the outputs leave their floor.
 - **The bare `04`.** Switch a monitor on at its power switch, then apply the group with qlm. Check its first frame after.

@@ -68,6 +68,14 @@ BOOL QLMSystemErrorRefused(NSError *_Nullable error);
 // reading with it.
 @property (nonatomic) BOOL knobRead;                         // NO
 @property (nonatomic, copy, nullable) NSNumber *knobTenths;  // nil
+// YES: with no volume set, the start's first reading of the knob sets it
+// to the knob's step, under the ceiling, as a turn does, and it goes out
+// then. With no knob in at that reading, none is set, and no level goes
+// out. qlmctl's poll sets it, since a host that sends no level silences
+// the monitors (docs/protocol.md: A host that sends no level). The
+// take-over ran them at the knob, so that level is what the listener
+// heard.
+@property (nonatomic) BOOL startsAtKnob;  // NO
 // TRAP: AGENTS.md's Safety rule refuses a group apply for any model whose
 // filter design rate is unverified, such as the 8351B. Only qlmctl's
 // supervised test sets this, behind --unverified-rate. The app never does.

@@ -472,4 +472,75 @@ static uint8_t QLMSessionLeased(NSString *scenario, const uint8_t hardwareID[3],
     }
 }
 
+// The three runs with music. The outputs rose about 100 counts over their
+// floor at most, and the input ranged widely: it is no constant with
+// music. captures/qlm-poll-meters has the fourth.
+- (void)testTheMetersWithMusic {
+    struct {
+        NSString *scenario;
+        NSInteger output;  // the highest
+        NSInteger lowestInput;
+        NSInteger highestInput;
+    } runs[] = {
+        {@"qlm-control-first", 211, 199, 232},
+        {@"qlm-control-all", 246, 145, 254},
+        {@"qlm-app-first", 235, 145, 253},
+    };
+    for (size_t i = 0; i < sizeof runs / sizeof runs[0]; i++) {
+        NSInteger output = 0;
+        NSInteger lowest = 255;
+        NSInteger highest = 0;
+        for (NSArray<QLMTelemetryFrame *> *run in QLMTelemetryFrames(runs[i].scenario).allValues) {
+            for (QLMTelemetryFrame *frame in run) {
+                QLMTelemetry t = frame.telemetry;
+                for (NSNumber *meter in @[@(t.hfMeter), @(t.midMeter), @(t.lfMeter), @(t.subMeter)]) {
+                    output = MAX(output, meter.integerValue);
+                }
+                if (t.inputMeter != QLMTelemetryAbsent) {
+                    lowest = MIN(lowest, t.inputMeter);
+                    highest = MAX(highest, t.inputMeter);
+                }
+            }
+        }
+        XCTAssertEqual(output, runs[i].output, @"%@", runs[i].scenario);
+        XCTAssertEqual(lowest, runs[i].lowestInput, @"%@", runs[i].scenario);
+        XCTAssertEqual(highest, runs[i].highestInput, @"%@", runs[i].scenario);
+    }
+}
+
+// qlm-control-first: two qlmctl runs leased the monitors, and each sent
+// one of the level and a 2B, never both. The music played on through each.
+// `volume -60`, from 274.685 s, sent the level and no 2B, and the Right
+// 8351B, at 04, played. `mute on --serial`, from 638.634 s, sent rounds of
+// 2B and no level, and the 7370A, at 03, played. qlmctl poll, which sent
+// neither, silenced every monitor (QLMPollMetersTests).
+- (void)testALevelOrA2BKeepsALeasedMonitorPlaying {
+    struct {
+        NSTimeInterval from;
+        NSTimeInterval to;
+        uint8_t opcode;  // sent
+        uint8_t without;  // not sent
+        uint8_t session;
+    } runs[] = {
+        {274.685, 289.7, 0x1F, 0x2B, 0x04},
+        {638.634, 648.7, 0x2B, 0x1F, 0x03},
+    };
+    for (size_t i = 0; i < sizeof runs / sizeof runs[0]; i++) {
+        NSMutableSet<NSNumber *> *sent = [NSMutableSet set];
+        for (QLMCaptureExchange *exchange in QLMReadCapture(@"qlm-control-first", NULL).exchanges) {
+            if (exchange.time >= runs[i].from && exchange.time <= runs[i].to && QLMIsControl(exchange.message)) {
+                [sent addObject:@(exchange.message.payload[0])];
+            }
+        }
+        XCTAssertTrue([sent containsObject:@(runs[i].opcode)], @"from %.3f s", runs[i].from);
+        XCTAssertFalse([sent containsObject:@(runs[i].without)], @"from %.3f s", runs[i].from);
+        NSArray<QLMTelemetryFrame *> *run =
+            QLMFramesBetween(QLMTelemetryFrames(@"qlm-control-first")[@(runs[i].session)], runs[i].from + 1.5, runs[i].to);
+        XCTAssertGreaterThanOrEqual(run.count, 8u, @"from %.3f s", runs[i].from);
+        for (QLMTelemetryFrame *frame in run) {
+            XCTAssertGreaterThan(frame.telemetry.lfMeter, QLMTelemetryOutputSilent + 40, @"%.3f s", frame.time);
+        }
+    }
+}
+
 @end
