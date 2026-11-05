@@ -97,28 +97,28 @@ static const int64_t QLMFrameFallbackNanoseconds = 100 * NSEC_PER_MSEC;
         return;
     }
     NSUInteger generation = ++_generation;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, QLMFrameFallbackNanoseconds), dispatch_get_main_queue(), ^{
+    dispatch_block_t tick = ^{
         if (generation == self->_generation) {
             [self tick:nil];
         }
-    });
+    };
+    // TRAP: with no window on screen, as on a locked screen, each frame of
+    // the link asks the window server for the display's power state, which
+    // costs more than the draw it would time.
+    BOOL seen = (NSApp.occlusionState & NSApplicationOcclusionStateVisible) != 0;
     if (@available(macOS 14.0, *)) {
-        if (_link == nil) {
-            NSScreen *screen = NSScreen.mainScreen;
-            CADisplayLink *link = [screen displayLinkWithTarget:self selector:@selector(tick:)];
+        if (seen && _link == nil) {
+            CADisplayLink *link = [NSScreen.mainScreen displayLinkWithTarget:self selector:@selector(tick:)];
             [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
             _link = link;
         }
-        if (_link != nil) {
+        if (seen && _link != nil) {
             ((CADisplayLink *)_link).paused = NO;
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, QLMFrameFallbackNanoseconds), dispatch_get_main_queue(), tick);
             return;
         }
     }
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (generation == self->_generation) {
-            [self tick:nil];
-        }
-    });
+    dispatch_async(dispatch_get_main_queue(), tick);
 }
 
 - (void)tick:(id)sender {

@@ -25,9 +25,10 @@ typedef void (^QLMFrameRequest)(dispatch_block_t fire);
 
 @end
 
-// The main screen's frames, from its display link on macOS 14 and later,
-// else the next main-queue turn. TRAP: a display that sleeps or goes away
-// gives no frames, so a request waits at most 100 ms for one.
+// The main screen's frames, from its display link on macOS 14 and later
+// while any of the app's windows is on screen, else the next main-queue
+// turn. TRAP: a display that sleeps or goes away gives no frames, so a
+// request waits at most 100 ms for one.
 QLMFrameRequest QLMDisplayFrameRequest(void);
 
 NS_ASSUME_NONNULL_END
