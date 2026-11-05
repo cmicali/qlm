@@ -6,6 +6,7 @@
 #include "QLMReplies.h"
 #import "QLMReportLink.h"
 #import "QLMSetupReader.h"
+#import "QLMSkinLibrary.h"
 #import "QLMSnapshotInternal.h"
 
 NSData *QLMBytes(const uint8_t *bytes, size_t length) {
@@ -33,6 +34,16 @@ QLMSnapshot *QLMMakeRunningSnapshot(NSArray<QLMMonitorState *> *monitors) {
     QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
     snapshot.running = YES;
     snapshot.monitors = monitors;
+    return snapshot;
+}
+
+QLMSnapshot *QLMMakeTwoMonitorSnapshot(void) {
+    QLMSnapshot *snapshot = QLMMakeRunningSnapshot(@[QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusOn),
+                                                     QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusOn)]);
+    snapshot.anyOn = YES;
+    snapshot.volumeDecibels = @(-40);
+    snapshot.ceilingDecibels = -30;
+    snapshot.handBack = QLMMakeHandBack(QLMHandBackKnobLevel, @(-60), @(-40));
     return snapshot;
 }
 
@@ -88,6 +99,21 @@ NSURL *QLMBuiltInSkinsURL(void) {
 
 NSURL *QLMModernSkinURL(void) {
     return [QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"modern" isDirectory:YES];
+}
+
+static QLMSkinLibrary *QLMBuiltInLibrary(void) {
+    return [[QLMSkinLibrary alloc] initWithBuiltIn:QLMBuiltInSkinsURL() user:nil];
+}
+
+NSArray<NSString *> *QLMBuiltInSkinNames(void) {
+    return [QLMBuiltInLibrary() skinNames];
+}
+
+QLMSkin *QLMBuiltInSkin(NSString *name) {
+    NSString *refusal = nil;
+    QLMSkin *skin = [QLMBuiltInLibrary() loadSkinNamed:name refusal:&refusal];
+    NSCAssert(refusal == nil && [skin.name isEqualToString:name], @"%@: %@", name, refusal);
+    return skin;
 }
 
 NSURL *QLMFixtureSkinURL(void) {

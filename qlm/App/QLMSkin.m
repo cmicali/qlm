@@ -79,12 +79,16 @@ CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSiz
 }
 
 CGRect QLMSkinInsetRect(CGRect frame, NSEdgeInsets insets) {
-    return QLMSkinBoxFrame(frame, NSEdgeInsetsMake(-insets.top, -insets.left, -insets.bottom, -insets.right));
+    return QLMSkinGrowRect(frame, NSEdgeInsetsMake(-insets.top, -insets.left, -insets.bottom, -insets.right));
 }
 
-CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
+CGRect QLMSkinGrowRect(CGRect frame, NSEdgeInsets outset) {
     return CGRectMake(frame.origin.x - outset.left, frame.origin.y - outset.top, frame.size.width + outset.left + outset.right,
                       frame.size.height + outset.top + outset.bottom);
+}
+
+CGRect QLMSkinBoxedRect(QLMSkinElement *element, QLMSkinButton *button, CGRect frame) {
+    return element.columns > 0 ? QLMSkinInsetRect(frame, button.face) : frame;
 }
 
 #pragma mark - Values
@@ -971,7 +975,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     NSMutableArray<NSArray *> *radii = [NSMutableArray arrayWithArray:@[
         @[@"elements.knob.body.size", @(knob.bodySize / 2)],
         @[@"elements.knob.pointer.outer", @(knob.pointerOuter + knob.pointerWidth / 2)],
-        @[@"elements.knob.focus", @(knob.bodySize / 2 + knob.focus.outset + knob.focus.width)],
+        @[@"elements.knob.focus", @(knob.bodySize / 2 + QLMSkinFocusReach(knob.focus))],
     ]];
     if (knob.tickCount > 0) {
         [radii addObject:@[@"elements.knob.ticks.outer", @(knob.tickOuter + knob.tickWidth / 2)]];
@@ -1118,6 +1122,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
 
 - (QLMSkinMarkings *)markings:(id)value
                      elements:(NSDictionary<NSString *, QLMSkinElement *> *)elements
+                       button:(QLMSkinButton *)button
                        window:(CGSize)window {
     QLMSkinMarkings *markings = [[QLMSkinMarkings alloc] init];
     markings.lines = @[];
@@ -1185,7 +1190,8 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
             }
         }
         if (element) {
-            [self checkFrame:QLMSkinBoxFrame(element.frame, read.outset) inside:window named:@"window" at:path];
+            [self checkFrame:QLMSkinGrowRect(QLMSkinBoxedRect(element, button, element.frame), read.outset) inside:window
+                       named:@"window" at:path];
         }
         [boxes addObject:read];
     }
@@ -1328,7 +1334,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     skin.button = [self button:root[@"button"]
                           cell:CGSizeMake(MIN(groupCell.width, toggleCell.width), MIN(groupCell.height, toggleCell.height))];
     skin.led = [self led:root[@"led"]];
-    skin.markings = [self markings:root[@"markings"] elements:read window:window];
+    skin.markings = [self markings:root[@"markings"] elements:read button:skin.button window:window];
     skin.osd = [self osd:root[@"osd"]];
     skin.imageNames = self.imageNames.array ?: @[];
     return [self failed] ? nil : skin;

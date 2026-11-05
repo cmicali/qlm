@@ -229,10 +229,8 @@ static NSWindow *QLMTestOffscreenWindow(NSSize size) {
 @implementation QLMSkinLayersTests
 
 - (void)testEachSkinsWindowCompositesAsItDraws {
-    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
-        NSError *error = nil;
-        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:&error];
-        XCTAssertNotNil(skin, @"%@", error);
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
         for (NSValue *size in @[[NSValue valueWithSize:NSMakeSize(640, 480)], [NSValue valueWithSize:NSMakeSize(900, 640)]]) {
             for (QLMTestLook look = QLMTestLookHovered; look <= QLMTestLookDisabled; look++) {
                 QLMSkinView *view = QLMTestWindowView(skin, size.sizeValue, look);
@@ -247,8 +245,8 @@ static NSWindow *QLMTestOffscreenWindow(NSSize size) {
 }
 
 - (void)testEachSkinsOSDCompositesAsItDraws {
-    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
-        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
         QLMSkinOSDView *view = [[QLMSkinOSDView alloc] initWithSkin:skin];
         view.level = @"−59.0";
         view.title = @"Main monitors";
@@ -290,8 +288,8 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
     NSDictionary<NSString *, NSArray<NSString *> *> *osd = @{
         @"level": @[@"−100.0"], @"unit": @[@"dB"], @"title": names, @"subtitle": @[@"Muted · Dimmed"],
     };
-    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
-        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
         QLMSkinElement *element = [skin element:@"display"];
         for (NSNumber *scale in @[@1, @2]) {
             for (NSNumber *grow in @[@1, @1.7]) {
@@ -327,7 +325,7 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
 // and a move that keeps its pixels sets nothing. TRAP: out of a window,
 // AppKit keeps a view's layer due for display, so only a window shows it.
 - (void)testASizeChangeInAWindowSetsTheMaterialsAgain {
-    QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"retro"] error:NULL];
+    QLMSkin *skin = QLMBuiltInSkin(@"retro");
     QLMTestSpyButton *button = [[QLMTestSpyButton alloc] initWithSkin:skin];
     button.title = @"MUTE";
     QLMTestSpyDisplay *display = [[QLMTestSpyDisplay alloc] initWithSkin:skin];
@@ -354,8 +352,8 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
 // state puts it, and the grids' buttons take the layout's cells: within a
 // grid, each the same width, with the grid's gap between.
 - (void)testEachMaterialFollowsItsViewsSize {
-    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
-        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
         QLMSkinView *view = QLMTestWindowView(skin, skin.windowSize, QLMTestLookHovered);
         // Not deferred, as QLMSkinHostWindow's is, so it draws unshown.
         NSWindow *window = QLMTestOffscreenWindow(skin.windowSize);
@@ -452,8 +450,8 @@ static NSRect QLMTestDifference(NSBitmapImageRep *a, NSBitmapImageRep *b, int le
     QLMTestState states[] = {{NO, YES, NO, NO}, {NO, YES, NO, YES}, {NO, YES, YES, NO}, {YES, YES, NO, NO},
                              {YES, YES, NO, YES}, {YES, YES, YES, NO}, {NO, NO, NO, NO}, {YES, NO, NO, NO}};
     size_t count = sizeof(states) / sizeof(states[0]);
-    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
-        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
         [skin.led setValue:@0 forKey:@"glow"];
         for (NSValue *window in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(900, 640)],
                                   [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {

@@ -371,6 +371,21 @@ QLMSkinLabel QLMSkinLabelLayout(CGFloat faceWidth, CGFloat titleWidth, CGFloat l
     return label;
 }
 
+QLMSkinInk QLMSkinLabelInk(NSAttributedString *text) {
+    CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)text);
+    CGRect ink = CTLineGetBoundsWithOptions(line, kCTLineBoundsUseGlyphPathBounds);
+    CGFloat advance = CTLineGetTypographicBounds(line, NULL, NULL, NULL);
+    CFRelease(line);
+    QLMSkinInk measured = {CGRectGetMinX(ink), ink.size.width, ceil(advance) + 1 - ink.size.width};
+    return measured;
+}
+
+// TRAP: the draw cuts the text at its rect's width, so the rect takes the
+// ink's width and the advance past it.
+void QLMSkinDrawLabel(NSAttributedString *text, QLMSkinInk ink, CGFloat x, CGFloat width, NSRect frame) {
+    QLMSkinDrawCenteredCaps(text, NSMakeRect(x - ink.x, frame.origin.y, width + ink.bearings, frame.size.height));
+}
+
 // The caps' middle on the frame's: a label with no descenders, as most are,
 // looks centered only so. The line's box puts it a little high or low,
 // with the font's leading and descent.

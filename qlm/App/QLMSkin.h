@@ -177,6 +177,11 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) CGFloat outset;
 @end
 
+// How far past what it rings a focus ring reaches, with its stroke.
+static inline CGFloat QLMSkinFocusReach(QLMSkinFocus *focus) {
+    return focus.outset + focus.width;
+}
+
 // A button's title, centered in its face.
 @interface QLMSkinTitle : NSObject
 @property (nonatomic, readonly, copy, nullable) NSString *fontName;
@@ -290,10 +295,14 @@ NSInteger QLMSkinImageFileScale(CGFloat scale);
 // A grid's cell in `size`: the same for each, `gap` apart.
 CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSize gap);
 
-// A marking box's outer edge: its element's frame grown by `outset`.
-CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset);
-
 // `frame` shrunk by `insets`.
 CGRect QLMSkinInsetRect(CGRect frame, NSEdgeInsets insets);
+// `frame` grown by `outset`.
+CGRect QLMSkinGrowRect(CGRect frame, NSEdgeInsets outset);
+
+// What a marking box grows by its outset, in its element laid out in
+// `frame`: a button grid's face, past its buttons' shadow, or any other
+// element's frame.
+CGRect QLMSkinBoxedRect(QLMSkinElement *element, QLMSkinButton *button, CGRect frame);
 
 NS_ASSUME_NONNULL_END

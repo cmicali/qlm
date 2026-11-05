@@ -211,7 +211,9 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
         [path stroke];
     }
     for (QLMSkinBox *box in markings.boxes) {
-        NSRect outer = QLMSkinBoxFrame([self.skinLayout frameOfElement:box.element], box.outset);
+        NSRect boxed = QLMSkinBoxedRect([self.skin element:box.element], self.skin.button,
+                                        [self.skinLayout frameOfElement:box.element]);
+        NSRect outer = QLMSkinGrowRect(boxed, box.outset);
         if (!NSIntersectsRect(outer, dirty)) {
             continue;
         }
