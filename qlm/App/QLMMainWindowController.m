@@ -353,7 +353,8 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 // level. Not before a level is known.
 - (BOOL)canStepVolumeBy:(int)steps {
     self.model.snapshot = self.monitorList.snapshot;
-    return self.model.knobDecibels != nil && [self.skinView.knob canStepBy:steps];
+    QLMMainWindowModel *model = self.model;
+    return model.knobEnabled && model.knobDecibels != nil && [self.skinView.knob canStepBy:steps];
 }
 
 - (void)stepVolumeBy:(int)steps {
@@ -362,33 +363,33 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     }
 }
 
+// Each item's state and title follow the snapshot even while the menu
+// doesn't act, so a disabled item shows no stale check or title.
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
-    if (![self menuActs]) {
-        return NO;
-    }
+    BOOL acts = [self menuActs];
     QLMMainWindowModel *model = self.model;
     model.snapshot = self.monitorList.snapshot;
     SEL action = item.action;
     if (action == @selector(toggleMute:)) {
         item.state = model.muteOn ? NSControlStateValueOn : NSControlStateValueOff;
-        return model.muteEnabled;
+        return acts && model.muteEnabled;
     }
     if (action == @selector(toggleDim:)) {
         item.state = model.dimOn ? NSControlStateValueOn : NSControlStateValueOff;
-        return model.dimEnabled;
+        return acts && model.dimEnabled;
     }
     if (action == @selector(togglePower:)) {
         item.title = model.powerTitle;
-        return model.powerEnabled;
+        return acts && model.powerEnabled;
     }
     if (action == @selector(volumeUp:) || action == @selector(volumeDown:)) {
-        return [self canStepVolumeBy:action == @selector(volumeUp:) ? 1 : -1];
+        return acts && [self canStepVolumeBy:action == @selector(volumeUp:) ? 1 : -1];
     }
     if (action == @selector(chooseGroup:)) {
         NSArray<NSString *> *names = model.shownGroupNames;
         NSUInteger index = [item.representedObject unsignedIntegerValue];
         item.state = index == model.chosenGroupIndex ? NSControlStateValueOn : NSControlStateValueOff;
-        return index < names.count && [model refusalToClickGroupNamed:names[index]] == nil;
+        return acts && index < names.count && [model refusalToClickGroupNamed:names[index]] == nil;
     }
     return NO;
 }
@@ -469,6 +470,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
     QLMKnobControl *knob = view.knob;
     knob.enabled = model.knobEnabled;
+    knob.waitsForLevel = model.knobDecibels == nil;
     // With no level to show, the knob stays where it is.
     NSNumber *level = model.knobDecibels;
     if (level != nil && !held) {

@@ -3,6 +3,7 @@
 #import "QLMFakeBus.h"
 #import "QLMMainMenu.h"
 #import "QLMMainWindowController.h"
+#import "QLMSkinView.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMTestSupport.h"
 
@@ -12,10 +13,19 @@
 @interface QLMMainWindowControllerTests : XCTestCase <QLMMainMenuActions>
 @end
 
+// The controller's own, for what the test window can't reach: it never
+// becomes key, so the menu never acts.
+@interface QLMMainWindowController (QLMTesting)
+@property (nonatomic, readonly, nullable) QLMSkinView *skinView;
+- (BOOL)canStepVolumeBy:(int)steps;
+- (void)render;
+@end
+
 @implementation QLMMainWindowControllerTests {
     NSUserDefaults *_defaults;
     QLMMainWindowController *_controller;
     NSMenu *_controls;
+    QLMMonitorList *_monitors;
 }
 
 - (void)showMainWindow:(id)sender {
@@ -37,6 +47,7 @@
     // reaches a bus.
     QLMMonitorList *monitors = [[QLMMonitorList alloc] init];
     [monitors updateWithSnapshot:QLMMakeTwoMonitorSnapshot()];
+    _monitors = monitors;
     QLMSkin *skin = QLMBuiltInSkin(@"modern");
     _controller = [[QLMMainWindowController alloc] initWithPreferences:preferences monitorList:monitors skin:skin];
     _controller.system = [[QLMSystem alloc] initWithAdapter:[QLMFakeBus demoBusWithSubwoofer:NO]
@@ -109,6 +120,56 @@
     XCTAssertTrue(_controller.showing);
     XCTAssertFalse(window.isKeyWindow);
     [self assertEveryControlDisabled:@"with the window shown, not key"];
+}
+
+// The menu's Volume Up and Down step only from a level the monitors have:
+// not while the level waits for the knob's reading, before one is known, or
+// while System is stopped. The knob refuses the step too, by the same rule.
+- (void)testTheVolumeStepsOnlyFromAKnownLevel {
+    (void)_controller.window;
+    XCTAssertTrue([_controller canStepVolumeBy:1]);
+    XCTAssertTrue([_controller canStepVolumeBy:-1]);
+    NSArray<void (^)(QLMSnapshot *)> *changes = @[
+        ^(QLMSnapshot *snapshot) {
+            snapshot.levelAwaitsKnob = YES;
+        },
+        ^(QLMSnapshot *snapshot) {
+            snapshot.volumeDecibels = nil;
+        },
+        ^(QLMSnapshot *snapshot) {
+            snapshot.running = NO;
+        },
+    ];
+    for (NSUInteger i = 0; i < changes.count; i++) {
+        QLMSnapshot *snapshot = QLMMakeTwoMonitorSnapshot();
+        changes[i](snapshot);
+        [_monitors updateWithSnapshot:snapshot];
+        XCTAssertFalse([_controller canStepVolumeBy:1], @"change %lu", (unsigned long)i);
+        XCTAssertFalse([_controller canStepVolumeBy:-1], @"change %lu", (unsigned long)i);
+        [_controller render];
+        XCTAssertFalse([_controller.skinView.knob canStepBy:1], @"change %lu", (unsigned long)i);
+    }
+    [_monitors updateWithSnapshot:QLMMakeTwoMonitorSnapshot()];
+    [_controller render];
+    XCTAssertTrue([_controller.skinView.knob canStepBy:1]);
+}
+
+// A disabled item still shows the snapshot's state, so no stale check
+// shows while another window has the keys.
+- (void)testADisabledItemShowsTheSnapshotsState {
+    QLMSnapshot *snapshot = QLMMakeTwoMonitorSnapshot();
+    snapshot.allMuted = YES;
+    snapshot.anyOn = NO;
+    [_monitors updateWithSnapshot:snapshot];
+    for (NSMenuItem *item in [self controlItems]) {
+        XCTAssertFalse([_controller validateMenuItem:item], @"%@", item.title);
+        if (item.action == @selector(toggleMute:)) {
+            XCTAssertEqual(item.state, NSControlStateValueOn);
+        }
+        if (item.action == @selector(togglePower:)) {
+            XCTAssertEqualObjects(item.title, @"Wake");
+        }
+    }
 }
 
 @end

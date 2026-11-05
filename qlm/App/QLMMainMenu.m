@@ -91,7 +91,7 @@ void QLMMainMenuSetGroups(NSMenu *controls, NSArray<NSString *> *names, id<QLMMa
     separator.tag = QLMGroupItemTag - 1;
     [controls addItem:separator];
     for (NSUInteger i = 0; i < names.count; i++) {
-        NSString *key = [NSString stringWithFormat:@"%lu", (unsigned long)i + 1];
+        NSString *key = i < 9 ? [NSString stringWithFormat:@"%lu", (unsigned long)i + 1] : @"";
         NSMenuItem *item = QLMItem(controls, names[i], @selector(chooseGroup:), key, NSEventModifierFlagCommand, target);
         item.tag = QLMGroupItemTag + (NSInteger)i;
         item.representedObject = @(i);

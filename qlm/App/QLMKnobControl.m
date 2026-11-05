@@ -40,7 +40,7 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
 }
 
 - (BOOL)canStepBy:(int)steps {
-    return self.enabled && [self levelSteppedBy:steps] != QLMKnobSnap(_value, self.minValue, self.maxValue);
+    return self.enabled && !self.waitsForLevel && [self levelSteppedBy:steps] != QLMKnobSnap(_value, self.minValue, self.maxValue);
 }
 
 - (BOOL)stepBy:(int)steps {

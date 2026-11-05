@@ -30,7 +30,7 @@ NS_ASSUME_NONNULL_BEGIN
 NSMenu *QLMMainMenu(id<QLMMainMenuActions> app, id<QLMMainMenuControls> controls);
 
 // Puts one item per group in the Controls menu, in place of the last, on
-// Cmd-1 up. The window shows at most six.
+// Cmd-1 to Cmd-9. The window shows at most six.
 void QLMMainMenuSetGroups(NSMenu *controls, NSArray<NSString *> *names, id<QLMMainMenuControls> target);
 
 NS_ASSUME_NONNULL_END
