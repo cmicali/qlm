@@ -83,7 +83,8 @@ NS_ASSUME_NONNULL_BEGIN
 // What the popover's Window… button does.
 - (void)debugShowWindow;
 // Draws every open window's latest snapshot, even one covered or on another
-// Space, which skips snapshots. Runs before a verb that reads the windows.
+// Space, which skips snapshots, then ends every ease under way. Runs before
+// a verb that reads the windows.
 - (void)debugDrawWindows;
 // The skin that shows, and why the saved one does not, if it does not.
 @property (nonatomic, readonly) QLMSkinChoice *debugSkinChoice;

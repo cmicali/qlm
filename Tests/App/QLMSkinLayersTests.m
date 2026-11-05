@@ -205,23 +205,6 @@ static void QLMTestAssertMaterialsFollow(XCTestCase *test, NSView *view, NSStrin
     }
 }
 
-// What a window on the screen does at its next frame. TRAP: here, a
-// window's displayIfNeeded draws nothing. The transaction's commit draws.
-static void QLMTestPumpWindow(NSWindow *window) {
-    [window displayIfNeeded];
-    [CATransaction flush];
-    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
-}
-
-// An offscreen window, as the screen's: it draws without being shown.
-static NSWindow *QLMTestOffscreenWindow(NSSize size) {
-    NSWindow *window = [[NSWindow alloc] initWithContentRect:(NSRect){NSZeroPoint, size} styleMask:NSWindowStyleMaskBorderless
-                                                     backing:NSBackingStoreBuffered defer:NO];
-    window.releasedWhenClosed = NO;
-    window.contentView.wantsLayer = YES;  // as on the screen
-    return window;
-}
-
 @implementation QLMSkinLayersTests
 
 - (void)testEachSkinsWindowCompositesAsItDraws {

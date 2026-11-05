@@ -584,6 +584,8 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
 
 @implementation QLMSkinOSDView {
     QLMSkin *_skin;
+    CALayer *_fillClip;
+    CALayer *_fill;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -591,6 +593,13 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     if (self) {
         _skin = skin;
         self.clipsToBounds = YES;
+        _fillClip = [self.layers makeLayerOfClass:[CALayer class]];
+        _fillClip.masksToBounds = YES;
+        _fillClip.anchorPoint = CGPointZero;
+        _fill = [self.layers makeLayerOfClass:[CALayer class]];
+        _fill.contentsGravity = kCAGravityResize;
+        [_fillClip addSublayer:_fill];
+        self.layers.movingLayers = @[_fillClip];
     }
     return self;
 }
@@ -636,14 +645,73 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         return;
     }
     _fraction = fraction;
-    [self.layers setNeedsDisplayInRect:NSInsetRect(_skin.osd.bar.frame, -1, -1)];
+    [self showFractionEased:QLMSkinEases(self)];
+}
+
+static void QLMSkinOSDFillBar(QLMSkinBar *bar, QLMSkinColor color, NSRect rect) {
+    CGFloat radius = MIN(bar.radius, rect.size.height / 2);
+    [QLMSkinNSColor(color) setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:rect xRadius:radius yRadius:radius] fill];
+}
+
+- (QLMSkinMaterial *)barMaterialIn:(QLMSkinColor)color family:(NSString *)family layers:(QLMSkinLayers *)layers {
+    QLMSkinBar *bar = _skin.osd.bar;
+    return [QLMSkinMaterial materialPainting:^(NSRect rect) {
+        QLMSkinOSDFillBar(bar, color, rect);
+    }
+                                       frame:bar.frame
+                                      margin:0
+                                      family:family
+                                        skin:_skin
+                                      layers:layers];
 }
 
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
     QLMSkinElement *osd = _skin.osd;
+    NSMutableArray<QLMSkinMaterial *> *materials = [NSMutableArray array];
     QLMSkinMaterial *housing = [QLMSkinMaterial materialOfStyle:osd.style skin:_skin state:QLMSkinStateNormal frame:osd.frame
                                                          circle:NO overlay:QLMSkinColorClear layers:layers];
-    return housing ? @[housing] : @[];
+    if (housing != nil) {
+        [materials addObject:housing];
+    }
+    QLMSkinMaterial *track = [self barMaterialIn:osd.bar.track family:@"osd-track" layers:layers];
+    if (track != nil) {
+        [materials addObject:track];
+    }
+    return materials;
+}
+
+// The fill's width, in whole points, so it rests on the pixels.
+- (CGFloat)fillWidth {
+    return round(_skin.osd.bar.frame.size.width * self.fraction);
+}
+
+// The clip spans the fill's material in the view's layer's coordinates, so
+// the fill sits at its own frame inside it. Only its width moves.
+- (void)layoutSkinMovingLayers:(QLMSkinLayers *)layers {
+    QLMSkinMaterial *fill = [self barMaterialIn:_skin.osd.bar.fill family:@"osd-fill" layers:layers];
+    [layers showMaterial:fill inLayer:_fill];
+    NSRect frame = [self convertRectToLayer:fill.frame];
+    frame.origin.x = [self convertRectToLayer:_skin.osd.bar.frame].origin.x;
+    _fillClip.position = frame.origin;
+    _fillClip.bounds = (CGRect){frame.origin, CGSizeMake([self fillWidth], frame.size.height)};
+}
+
+// Only the width, so a layout that moves the clip mid-ease keeps it.
+- (void)showFractionEased:(BOOL)eases {
+    QLMSkinSetLayerValue(_fillClip, @"bounds.size.width", @([self fillWidth]), eases);
+}
+
+- (void)drawSkinMovingReference {
+    QLMSkinBar *bar = _skin.osd.bar;
+    if (self.fraction > 0) {
+        NSRect fill = bar.frame;
+        fill.size.width = [self fillWidth];
+        [NSGraphicsContext saveGraphicsState];
+        NSRectClip(fill);
+        QLMSkinOSDFillBar(bar, bar.fill, bar.frame);
+        [NSGraphicsContext restoreGraphicsState];
+    }
 }
 
 - (void)drawSkinContent:(NSRect)dirtyRect {
@@ -656,20 +724,6 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         if (NSIntersectsRect([self inkOfSlot:name], dirtyRect)) {
             QLMSkinDrawSlotInInk(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
         }
-    }
-
-    QLMSkinBar *bar = osd.bar;
-    CGFloat radius = MIN(bar.radius, bar.frame.size.height / 2);
-    [QLMSkinNSColor(bar.track) setFill];
-    [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
-    if (self.fraction > 0) {
-        NSRect fill = bar.frame;
-        fill.size.width = round(fill.size.width * self.fraction);
-        [NSGraphicsContext saveGraphicsState];
-        NSRectClip(fill);
-        [QLMSkinNSColor(bar.fill) setFill];
-        [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
-        [NSGraphicsContext restoreGraphicsState];
     }
 }
 

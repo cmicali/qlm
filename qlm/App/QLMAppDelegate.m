@@ -19,6 +19,7 @@
 #import "QLMSystem.h"
 #if DEBUG
 #import "QLMDebugChannel.h"
+#import "QLMSkinLayers.h"
 #import "QLMSkinPreview.h"
 #endif
 
@@ -674,6 +675,9 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     [self.monitorsController drawWhileOpen];
     [self.settingsController drawWhileOpen];
     [self.fakeBusController drawWhileOpen];
+    // TRAP: a screenshot renders the presentation tree, so within an ease
+    // it would catch the pointer or the OSD's bar on the way.
+    QLMSkinFinishEases();
 }
 
 - (QLMSkinChoice *)debugSkinChoice {

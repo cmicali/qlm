@@ -1,4 +1,5 @@
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 
 #import "QLMSkin.h"
 
@@ -53,6 +54,15 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers;
 // What the view draws over its material, in its flipped bounds.
 - (void)drawSkinContent:(NSRect)dirtyRect;
+@optional
+// NO while drawSkinContent: would draw nothing, so an update draws no
+// content. YES if not implemented.
+- (BOOL)drawsSkinContent;
+// Sets the moving layers' geometry and look for the view's state, with no
+// ease. Each update of the layers calls it, after the materials.
+- (void)layoutSkinMovingLayers:(QLMSkinLayers *)layers;
+// What the moving layers show at rest, drawn: the tests' reference.
+- (void)drawSkinMovingReference;
 @end
 
 // A view's material as its layer's contents, beneath the content it draws,
@@ -67,6 +77,11 @@ NS_ASSUME_NONNULL_BEGIN
 // and draws the content again, as each change of the view's size does.
 // The content draws no shadow: a layer's own context casts one apart from
 // a view's.
+//
+// What moves with a level, as the knob's pointer and the OSD's bar do, is
+// in moving layers between the material and the content. A change of the
+// level sets a property of one, which the render server eases, so a step
+// draws nothing.
 @interface QLMSkinLayers : NSObject <CALayerDelegate>
 
 - (instancetype)initWithView:(NSView<QLMSkinLayered> *)view NS_DESIGNATED_INITIALIZER;
@@ -84,7 +99,37 @@ NS_ASSUME_NONNULL_BEGIN
 // Draws only part of the content again, and sets no material.
 - (void)setNeedsDisplayInRect:(NSRect)rect;
 
+// A layer that takes no implicit animation, for a moving layer or one
+// inside it.
+- (__kindof CALayer *)makeLayerOfClass:(Class)layerClass;
+// The view's own layers, from makeLayerOfClass:, bottom first, over its
+// material. Set at the view's init: the next update puts them in.
+@property (nonatomic, copy) NSArray<CALayer *> *movingLayers;
+// Puts `material` in `layer`, at the material's frame in the view, in the
+// view's layer's coordinates.
+- (void)showMaterial:(nullable QLMSkinMaterial *)material inLayer:(CALayer *)layer;
+
 @end
+
+// How long a level's change eases, ending slow.
+extern const CFTimeInterval QLMSkinEaseSeconds;
+
+// Whether a change in `view` eases: its window is seen, the user hasn't
+// asked for less motion, and no QLMSkinWithoutEase is running.
+BOOL QLMSkinEases(NSView *view);
+// Runs `block` with no ease, as a window coming into view catches up.
+void QLMSkinWithoutEase(void (^block)(void));
+
+// Sets `value` at `keyPath`. With `eases`, it eases there from where the
+// layer shows now, so a change during an ease turns on from where it is,
+// rather than restart or queue. Without, it stops any ease.
+void QLMSkinSetLayerValue(CALayer *layer, NSString *keyPath, id value, BOOL eases);
+
+#if DEBUG
+// Ends every ease under way, so each layer shows its level, as a
+// screenshot of the presentation tree must.
+void QLMSkinFinishEases(void);
+#endif
 
 // A view with skin material, as the display, the OSD, and the panel are.
 @interface QLMSkinLayerView : NSView <QLMSkinLayered>

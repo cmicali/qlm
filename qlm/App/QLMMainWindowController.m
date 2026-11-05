@@ -138,7 +138,14 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 - (void)showWindow:(id)sender {
     [super showWindow:sender];
-    [self render];
+    [self renderAtOnce];
+}
+
+// What changed while the window was out of view shows at once.
+- (void)renderAtOnce {
+    QLMSkinWithoutEase(^{
+        [self render];
+    });
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
@@ -186,7 +193,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 // A window that comes into view catches up at once.
 - (void)windowDidChangeOcclusionState:(NSNotification *)notification {
     if (QLMWindowIsSeen(super.window)) {
-        [self render];
+        [self renderAtOnce];
     } else {
         [self stopBlink];
     }
