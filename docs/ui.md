@@ -153,21 +153,25 @@ The OSD went past them too, and needed no new image. Vintage's and retro's OSDs 
 
 ### What draws it
 
-These files in `qlm/App/`, over the resources. Those marked Foundation only compile into the hostless tests, and so does `QLMSkinDrawing`, which draws into a bitmap there.
+These files in `qlm/App/`, over the resources. Those marked Foundation only compile into the hostless tests. So do the drawing, the layers, and the element views, since a view out of any window draws, and its layers render into a bitmap. Only a window needs the app.
 
 - `QLMSkin` reads a skin's `skin.json` into values and refuses what it can't read. It loads no image itself. Foundation only.
 - `QLMSkinLibrary` finds the app's skins and the user's, by name, and falls back to modern for a refused one. Foundation only.
-- `QLMSkinChoice` holds the skin that shows, and why the saved one was refused, if it was. The app delegate hands its skin to the window, the OSD, and Settings. Foundation only.
+- `QLMSkinChoice` holds the skin that shows, and why the saved one was refused, if it was. The app delegate hands its skin to the window, the OSD, and Settings. It starts the decode of a skin's images as it loads it.
 - `QLMSkinLayout` is the resize pass: each element's and slot's frame at a window size, by its anchors. Foundation only.
 - `QLMSkinDrawing` draws a skin's colors, images, fonts, and the geometry the app draws itself: LEDs, rings, and focus rings.
+- `QLMSkinImages` keeps every image a skin's drawing reads or makes, for the skin's life: its decoded files, decoded on the skin's own queue, and what is drawn from them and from its styles.
+- `QLMSkinLayers` puts a view's material in its layer's contents, under one layer the view draws its content in.
 - `QLMSkinControls` holds the element views: the buttons, the footer's buttons, the status, the display, and the OSD's content.
-- `QLMSkinView` is the window's content view. It draws the panel, the nameplate, the markings, and the panel's own words, and lays out the element views, with no Auto Layout, since every frame is given.
+- `QLMSkinView` is the window's content view. It lays out the element views, with no Auto Layout, since every frame is given. A child view of its own, under the elements, draws the panel, the nameplate, the markings, and the panel's own words.
 - `QLMKnobControl` is the knob, an `NSControl` with a `doubleValue` in dB. Its math is a C header, `QLMKnobMath.h`: dB to angle, both drags, the step snap, and each tick's place.
 - `QLMMainWindowModel` turns the snapshot, the setup's groups, the range, and the window's last click into the window's texts and states. It holds the popover's rules for what is enabled, and why a group button takes no click. Foundation only.
 - `QLMMainWindowController` owns the window. It hands the model's outputs to the views and drives System.
 - `QLMOSDRule` says when a snapshot shows the OSD, why a show with no turn shows nothing, and where the OSD sits on the screen. Foundation only.
 - `QLMOSDController` owns the OSD's window, its timer, and its fade.
 - `QLMSkinPreview`, in a Debug build only, opens a look at a skin with sample text, for the `skin_preview` verb.
+
+A view's material, its images and its draw blocks, is its layer's contents, and the view draws only its content, the text and what moves, in one layer above. So a change of a level composites the glass, and draws no image again. A layered view is a leaf, since a subview's layer would sit among its own. A draw block is drawn narrow and stretched by the layer, so it must draw the same along each straight edge, as every key but the gradient does along its height. Every shadow is cast in a bitmap, in points, as it falls in a view on the screen, since a layer's own context casts one apart.
 
 `appkit/QLMSkinAssets.m` in the pack shows the button and knob drawing, and the engine took it as reference, not as code to compile: it loads from an asset catalog, and qlm loads from the skin's directory, so user skins load the same way.
 

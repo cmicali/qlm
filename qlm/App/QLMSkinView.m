@@ -3,18 +3,53 @@
 #include "QLMCommands.h"
 #import "QLMFormat.h"
 #import "QLMSkinDrawing.h"
+#import "QLMSkinLayers.h"
 
 // The panel's own words.
 static NSString *const QLMSkinLogo = @"qlm.";
 static NSString *const QLMSkinGroupsTitle = @"LISTENING SETUP";
 static NSString *const QLMSkinKnobCaption = @"VOLUME";
 
-@implementation QLMSkinView
+@interface QLMSkinView ()
+- (NSArray<QLMSkinMaterial *> *)panelMaterials:(QLMSkinLayers *)layers;
+- (void)drawPanel:(NSRect)dirtyRect;
+@end
+
+// The panel's material, markings, and text, under every element: a view
+// of its own, since a layered view is a leaf and the skin view hosts the
+// elements.
+@interface QLMSkinPanelView : QLMSkinLayerView
+@property (nonatomic, weak) QLMSkinView *owner;
+@end
+
+@implementation QLMSkinPanelView
+
+// A click on the panel is the skin view's, which moves the window.
+- (NSView *)hitTest:(NSPoint)point {
+    return nil;
+}
+
+- (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
+    return [self.owner panelMaterials:layers];
+}
+
+- (void)drawSkinContent:(NSRect)dirtyRect {
+    [self.owner drawPanel:dirtyRect];
+}
+
+@end
+
+@implementation QLMSkinView {
+    QLMSkinPanelView *_panel;
+}
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
     self = [super initWithFrame:NSMakeRect(0, 0, skin.windowSize.width, skin.windowSize.height)];
     if (self) {
         _skin = skin;
+        _panel = [[QLMSkinPanelView alloc] initWithFrame:self.bounds];
+        _panel.owner = self;
+        [self addSubview:_panel];
         _status = [[QLMSkinStatusView alloc] initWithSkin:skin];
         [self addSubview:_status];
 
@@ -79,6 +114,8 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
     }
     QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:self.skin size:self.bounds.size];
     _skinLayout = layout;
+    _panel.frame = self.bounds;
+    _panel.needsDisplay = YES;
     self.status.frame = [layout frameOfElement:@"status"];
 
     NSArray<NSValue *> *cells = [layout cellsOfElement:@"groups"];
@@ -99,7 +136,6 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
     NSRect power = [layout frameOfSlot:@"power" inElement:@"footer"];
     self.monitorsButton.frame = NSOffsetRect(monitors, footer.origin.x, footer.origin.y);
     self.powerButton.frame = NSOffsetRect(power, footer.origin.x, footer.origin.y);
-    self.needsDisplay = YES;
 }
 
 - (void)setGroupTitles:(NSArray<NSString *> *)titles prefixes:(NSArray<NSString *> *)prefixes {
@@ -120,7 +156,7 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
         return;
     }
     *ivar = [text copy];
-    [self setNeedsDisplayInRect:[self frameOfSlot:slot inElement:element]];
+    [_panel.layers setNeedsDisplayInRect:[self frameOfSlot:slot inElement:element]];
 }
 
 - (void)setGroupsMessage:(NSString *)groupsMessage {
@@ -198,15 +234,23 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
     }
 }
 
-// Only what the dirty rect touches, so a turn of the knob redraws little of
-// the panel.
-- (void)drawRect:(NSRect)dirtyRect {
-    QLMSkinDrawStyle(self.skin, [self.skin element:@"panel"].style, QLMSkinStateNormal,
-                     [self.skinLayout frameOfElement:@"panel"], NO);
-    NSRect nameplate = [self.skinLayout frameOfElement:@"nameplate"];
-    if (NSIntersectsRect(nameplate, dirtyRect)) {
-        QLMSkinDrawStyle(self.skin, [self.skin element:@"nameplate"].style, QLMSkinStateNormal, nameplate, NO);
+- (NSArray<QLMSkinMaterial *> *)panelMaterials:(QLMSkinLayers *)layers {
+    NSMutableArray<QLMSkinMaterial *> *materials = [NSMutableArray array];
+    for (NSString *name in @[@"panel", @"nameplate"]) {
+        QLMSkinMaterial *material = [QLMSkinMaterial materialOfStyle:[self.skin element:name].style skin:self.skin
+                                                               state:QLMSkinStateNormal
+                                                               frame:[self.skinLayout frameOfElement:name] circle:NO
+                                                             overlay:QLMSkinColorClear layers:layers];
+        if (material != nil) {
+            [materials addObject:material];
+        }
     }
+    return materials;
+}
+
+// Only what the dirty rect touches, so a change of one text redraws little
+// of the panel.
+- (void)drawPanel:(NSRect)dirtyRect {
     [self drawMarkingsIn:dirtyRect];
     [self drawSlot:@"logo" inElement:@"nameplate" text:QLMSkinLogo dirty:dirtyRect];
     [self drawSlot:@"groupsTitle" inElement:@"groups" text:QLMSkinGroupsTitle dirty:dirtyRect];

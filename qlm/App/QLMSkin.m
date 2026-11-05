@@ -65,8 +65,13 @@ static NSDictionary<NSString *, NSArray<NSString *> *> *QLMSkinIgnoredKeys(void)
     return @{@"elements.nameplate.text": @[@"tagline"], @"osd": @[@"disabledOverlay"]};
 }
 
+NSInteger QLMSkinImageFileScale(CGFloat scale) {
+    return scale > 1 ? 2 : 1;
+}
+
 NSString *QLMSkinImagePath(NSString *name, NSInteger scale) {
-    return [@"png" stringByAppendingPathComponent:[name stringByAppendingString:scale >= 2 ? @"@2x.png" : @".png"]];
+    NSString *suffix = QLMSkinImageFileScale(scale) == 2 ? @"@2x.png" : @".png";
+    return [@"png" stringByAppendingPathComponent:[name stringByAppendingString:suffix]];
 }
 
 CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSize gap) {
@@ -134,6 +139,14 @@ CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
     copy.rings = self.rings;
     copy.shadow = self.shadow;
     return copy;
+}
+
+- (BOOL)isUniformAlongWidth {
+    return YES;
+}
+
+- (BOOL)isUniformAlongHeight {
+    return !self.hasGradient;
 }
 
 @end
@@ -327,6 +340,7 @@ CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
 @property (nonatomic) QLMSkinKnob *knob;
 @property (nonatomic) QLMSkinLED *led;
 @property (nonatomic) QLMSkinMarkings *markings;
+@property (nonatomic, copy) NSArray<NSString *> *imageNames;
 - (instancetype)initPrivately;
 @end
 
@@ -339,6 +353,7 @@ CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
 @property (nonatomic, copy, nullable) NSString *failure;
 @property (nonatomic, copy) NSDictionary<NSString *, NSValue *> *palette;  // QLMSkinColor values
 @property (nonatomic) BOOL unreadable;  // no file, or not JSON
+@property (nonatomic) NSMutableOrderedSet<NSString *> *imageNames;
 - (void)fail:(NSString *)format, ... NS_FORMAT_FUNCTION(1, 2);
 @end
 
@@ -805,6 +820,10 @@ static BOOL QLMSkinParseHex(NSString *text, QLMSkinColor *color) {
 }
 
 - (void)checkImage:(NSString *)name at:(NSString *)path {
+    if (self.imageNames == nil) {
+        self.imageNames = [NSMutableOrderedSet orderedSet];
+    }
+    [self.imageNames addObject:name];
     for (NSNumber *scale in @[@1, @2]) {
         NSString *file = QLMSkinImagePath(name, scale.integerValue);
         if (![NSFileManager.defaultManager fileExistsAtPath:[self.directory URLByAppendingPathComponent:file].path]) {
@@ -1279,6 +1298,7 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     skin.led = [self led:root[@"led"]];
     skin.markings = [self markings:root[@"markings"] elements:read window:window];
     skin.osd = [self osd:root[@"osd"]];
+    skin.imageNames = self.imageNames.array ?: @[];
     return [self failed] ? nil : skin;
 }
 

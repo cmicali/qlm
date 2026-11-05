@@ -101,6 +101,11 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) CGFloat inset;
 @property (nonatomic, readonly) NSArray<QLMSkinRing *> *rings;
 @property (nonatomic, readonly, nullable) QLMSkinShadow *shadow;
+// Whether each row, or each column, between the corners draws as the next,
+// so a narrow draw stretches to any width, or height. Every key draws the
+// same along a straight edge but the gradient, which runs top to bottom.
+@property (nonatomic, readonly) BOOL isUniformAlongWidth;
+@property (nonatomic, readonly) BOOL isUniformAlongHeight;
 @end
 
 // An element's material: images, or a draw block per state.
@@ -259,6 +264,8 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) QLMSkinKnob *knob;
 @property (nonatomic, readonly) QLMSkinLED *led;
 @property (nonatomic, readonly) QLMSkinMarkings *markings;
+// Every image name the styles give, each once, as the reader checked them.
+@property (nonatomic, readonly, copy) NSArray<NSString *> *imageNames;
 
 // One of QLMSkinElementNames.
 - (QLMSkinElement *)element:(NSString *)name;
@@ -269,6 +276,8 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 
 // png/<name>.png, or png/<name>@2x.png at scale 2, in a skin's directory.
 NSString *QLMSkinImagePath(NSString *name, NSInteger scale);
+// The file, 1 or 2, that a display at `scale` shows.
+NSInteger QLMSkinImageFileScale(CGFloat scale);
 
 // A grid's cell in `size`: the same for each, `gap` apart.
 CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSize gap);

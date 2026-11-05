@@ -3,6 +3,8 @@
 #import <CoreText/CoreText.h>
 #import <objc/runtime.h>
 
+#import "QLMSkinImages.h"
+
 const CGFloat QLMSkinDisabledAlpha = 0.4;
 
 NSColor *QLMSkinNSColor(QLMSkinColor color) {
@@ -13,17 +15,8 @@ static BOOL QLMSkinColorIsClear(QLMSkinColor color) {
     return color.alpha <= 0;
 }
 
-static NSImageRep *_Nullable QLMSkinImageRep(NSURL *url, CGFloat scale) {
-    NSImageRep *rep = [NSBitmapImageRep imageRepWithContentsOfURL:url];
-    if (rep == nil || rep.pixelsWide <= 0) {
-        return nil;
-    }
-    rep.size = NSMakeSize(rep.pixelsWide / scale, rep.pixelsHigh / scale);
-    return rep;
-}
-
-// A value kept on an object, made the first time it's asked for. Keys are
-// by address. On the main queue, as all drawing is.
+// A value kept on an object, made the first time it's asked for. On the
+// main queue.
 static id QLMSkinAttached(id owner, const void *key, id (^make)(void)) {
     id value = objc_getAssociatedObject(owner, key);
     if (value == nil) {
@@ -33,33 +26,66 @@ static id QLMSkinAttached(id owner, const void *key, id (^make)(void)) {
     return value;
 }
 
-static char QLMSkinImagesKey;
 static char QLMSkinGradientKey;
+
+void QLMSkinWarmImages(QLMSkin *skin) {
+    [[QLMSkinImages imagesOfSkin:skin] warmAtScale:QLMSkinImageFileScale(NSScreen.mainScreen.backingScaleFactor)];
+}
+
+CGImageRef QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) {
+    size_t wide = (size_t)ceil(size.width * scale);
+    size_t high = (size_t)ceil(size.height * scale);
+    if (wide == 0 || high == 0) {
+        return NULL;
+    }
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef cg = CGBitmapContextCreate(NULL, wide, high, 8, 0, space,
+                                            (CGBitmapInfo)kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    CGColorSpaceRelease(space);
+    if (cg == NULL) {
+        return NULL;
+    }
+    CGContextScaleCTM(cg, scale, scale);
+    CGContextTranslateCTM(cg, 0, size.height);
+    CGContextScaleCTM(cg, 1, -1);
+    [NSGraphicsContext saveGraphicsState];
+    NSGraphicsContext.currentContext = QLMSkinBitmapGraphicsContext(cg, scale);
+    draw();
+    [NSGraphicsContext restoreGraphicsState];
+    CGImageRef image = CGBitmapContextCreateImage(cg);
+    CGContextRelease(cg);
+    return image;
+}
+
+static NSImageRep *_Nullable QLMSkinImageRep(QLMSkin *skin, NSString *name, NSInteger scale) {
+    CGImageRef image = [[QLMSkinImages imagesOfSkin:skin] decodedImage:name scale:scale];
+    if (image == NULL) {
+        return nil;
+    }
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:image];
+    rep.size = NSMakeSize(rep.pixelsWide / (CGFloat)scale, rep.pixelsHigh / (CGFloat)scale);
+    return rep;
+}
 
 // png/<name>.png with its @2x beside it, sized in points and stretched
 // through `insets`, or nil when either file won't load. Kept on the skin,
 // so a skin read again reads its files again.
 static NSImage *_Nullable QLMSkinStretchedImage(QLMSkin *skin, NSString *name, NSEdgeInsets insets) {
-    NSMutableDictionary<NSString *, id> *cache = QLMSkinAttached(skin, &QLMSkinImagesKey, ^id {
-        return [NSMutableDictionary dictionary];
-    });
-    NSString *key = [NSString stringWithFormat:@"%@|%g,%g,%g,%g", name, insets.top, insets.left, insets.bottom, insets.right];
-    id cached = cache[key];
-    if (cached != nil) {
-        return cached == NSNull.null ? nil : cached;
-    }
-    NSImageRep *one = QLMSkinImageRep([skin imageURLForName:name scale:1], 1);
-    NSImageRep *two = QLMSkinImageRep([skin imageURLForName:name scale:2], 2);
-    NSImage *image = nil;
-    if (one != nil && two != nil) {
-        image = [[NSImage alloc] initWithSize:one.size];
+    NSString *key = [NSString stringWithFormat:@"stretched|%@|%g,%g,%g,%g", name, insets.top, insets.left, insets.bottom,
+                                               insets.right];
+    return [[QLMSkinImages imagesOfSkin:skin] objectForKey:key make:^id {
+        NSImageRep *one = QLMSkinImageRep(skin, name, 1);
+        NSImageRep *two = QLMSkinImageRep(skin, name, 2);
+        if (one == nil || two == nil) {
+            return nil;
+        }
+        NSImage *image = [[NSImage alloc] initWithSize:one.size];
         [image addRepresentation:one];
         [image addRepresentation:two];
         image.capInsets = insets;
         image.resizingMode = NSImageResizingModeStretch;
-    }
-    cache[key] = image ?: NSNull.null;
-    return image;
+        return image;
+    }];
 }
 
 static NSBezierPath *QLMSkinShape(NSRect rect, CGFloat radius, BOOL circle) {
@@ -71,13 +97,28 @@ static NSBezierPath *QLMSkinShape(NSRect rect, CGFloat radius, BOOL circle) {
     return [NSBezierPath bezierPathWithRoundedRect:rect xRadius:radius yRadius:radius];
 }
 
-// TRAP: a shadow's offset is in the base space, whose y grows up, so a
-// flipped view's y-down offset changes sign.
+// A bitmap context's pixels per point. A context with none is in points.
+static char QLMSkinPixelsPerPointKey;
+
+NSGraphicsContext *QLMSkinBitmapGraphicsContext(CGContextRef context, CGFloat scale) {
+    NSGraphicsContext *graphics = [NSGraphicsContext graphicsContextWithCGContext:context flipped:YES];
+    objc_setAssociatedObject(graphics, &QLMSkinPixelsPerPointKey, @(scale), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return graphics;
+}
+
+// TRAP: a shadow's blur and offset are in the context's base space, which
+// the CTM doesn't scale. Measured with an offset of (0, -20) in a flipped
+// drawing: in a view's drawRect: on the screen, it falls 20 points down,
+// so that space is points with y up. In a 2x bitmap, it falls 10 points
+// down: pixels with y up. A layer's own context differs again, points with
+// y down, so the skin casts no shadow there: every one is cast in a bitmap.
 static void QLMSkinSetShadow(QLMSkinColor color, CGFloat blur, CGSize offset) {
+    NSNumber *pixels = objc_getAssociatedObject(NSGraphicsContext.currentContext, &QLMSkinPixelsPerPointKey);
+    CGFloat scale = pixels != nil ? pixels.doubleValue : 1;
     NSShadow *shadow = [[NSShadow alloc] init];
     shadow.shadowColor = QLMSkinNSColor(color);
-    shadow.shadowBlurRadius = blur;
-    shadow.shadowOffset = NSMakeSize(offset.width, -offset.height);
+    shadow.shadowBlurRadius = blur * scale;
+    shadow.shadowOffset = NSMakeSize(offset.width * scale, -offset.height * scale);
     [shadow set];
 }
 
@@ -302,13 +343,16 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
     };
 }
 
+static NSRect QLMSkinLineBox(NSFont *font, NSRect frame) {
+    CGFloat line = ceil(font.ascender - font.descender);
+    return NSMakeRect(frame.origin.x, frame.origin.y + (frame.size.height - line) / 2, frame.size.width, line);
+}
+
 static void QLMSkinDrawAttributed(NSAttributedString *text, NSRect frame) {
     if (text.length == 0) {
         return;
     }
-    NSFont *font = [text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
-    CGFloat line = ceil(font.ascender - font.descender);
-    NSRect box = NSMakeRect(frame.origin.x, frame.origin.y + (frame.size.height - line) / 2, frame.size.width, line);
+    NSRect box = QLMSkinLineBox([text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL], frame);
     [text drawWithRect:box options:NSStringDrawingUsesLineFragmentOrigin | NSStringDrawingTruncatesLastVisibleLine];
 }
 
@@ -338,6 +382,19 @@ void QLMSkinDrawCenteredCaps(NSAttributedString *text, NSRect frame) {
     // With no line fragment origin, the rect's origin is the baseline.
     NSRect baseline = NSMakeRect(frame.origin.x, NSMidY(frame) + font.capHeight / 2, frame.size.width, 0);
     [text drawWithRect:baseline options:0];
+}
+
+NSRect QLMSkinSlotInk(QLMSkinTextSlot *slot, NSRect frame, CGFloat scale) {
+    NSRect line = QLMSkinLineBox(QLMSkinSlotFont(slot, scale, NO), frame);
+    return NSInsetRect(NSUnionRect(frame, line), -2, -2);
+}
+
+void QLMSkinDrawSlotInInk(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits,
+                          CGFloat alpha) {
+    [NSGraphicsContext saveGraphicsState];
+    NSRectClip(QLMSkinSlotInk(slot, frame, scale));
+    QLMSkinDrawSlot(text, slot, frame, scale, monoDigits, alpha);
+    [NSGraphicsContext restoreGraphicsState];
 }
 
 void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits, CGFloat alpha) {
