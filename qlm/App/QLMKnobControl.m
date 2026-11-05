@@ -10,10 +10,14 @@ static const CGFloat QLMKnobScrollPointsPerStep = 12;
 // A drag within this part of the body's diameter from the center points
 // nowhere.
 static const CGFloat QLMKnobDeadFraction = 0.25;
+static NSString *const QLMKnobTurnKey = @"transform.rotation.z";
 
 @implementation QLMKnobControl {
     double _value;
     CGFloat _scrolled;
+    BOOL _dragging;
+    CAShapeLayer *_arc;  // nil for a skin with no arc
+    CAShapeLayer *_pointer;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -23,6 +27,11 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
         _maxValue = 0;
         _value = -80;
         self.accessibilityRole = NSAccessibilitySliderRole;
+        _pointer = [self.layers makeLayerOfClass:[CAShapeLayer class]];
+        if (skin.knob.hasArc) {
+            _arc = [self.layers makeLayerOfClass:[CAShapeLayer class]];
+        }
+        self.layers.movingLayers = _arc != nil ? @[_arc, _pointer] : @[_pointer];
     }
     return self;
 }
@@ -69,23 +78,35 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     return _value;
 }
 
+- (double)clamped:(double)value {
+    return isfinite(value) ? QLMKnobClamp(value, self.minValue, MAX(self.minValue, self.maxValue)) : self.minValue;
+}
+
 - (void)setDoubleValue:(double)value {
-    value = isfinite(value) ? QLMKnobClamp(value, self.minValue, MAX(self.minValue, self.maxValue)) : self.minValue;
+    value = [self clamped:value];
     if (value == _value) {
         return;
     }
     _value = value;
-    self.needsDisplay = YES;
+    [self showLevelEased:[self easesLevel]];
 }
 
+// A change of the range moves the pointer at once.
 - (void)setMinValue:(double)minValue {
     _minValue = minValue;
-    self.doubleValue = _value;
+    _value = [self clamped:_value];
+    [self showLevelEased:NO];
 }
 
 - (void)setMaxValue:(double)maxValue {
     _maxValue = maxValue;
-    self.doubleValue = _value;
+    _value = [self clamped:_value];
+    [self showLevelEased:NO];
+}
+
+// A drag tracks the pointer exactly.
+- (BOOL)easesLevel {
+    return !_dragging && QLMSkinEases(self);
 }
 
 // A move by the user: snapped, and sent when it changes the level's step.
@@ -97,7 +118,7 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
         return;
     }
     _value = snapped;
-    self.needsDisplay = YES;
+    [self showLevelEased:[self easesLevel]];
     [self sendAction:self.action to:self.target];
 }
 
@@ -127,9 +148,11 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     BOOL vertical = hypot(from.x - center.x, from.y - center.y) <= self.skin.knob.bodySize / 2;
     double fromAngle = [self angleAt:from];
     double level = QLMKnobSnap(_value, self.minValue, self.maxValue);
+    _dragging = YES;
     while (YES) {
         NSEvent *next = [self.window nextEventMatchingMask:NSEventMaskLeftMouseDragged | NSEventMaskLeftMouseUp];
         if (next.type == NSEventTypeLeftMouseUp) {
+            _dragging = NO;
             self.pressed = NO;
             return;
         }
@@ -197,8 +220,35 @@ static void QLMKnobStroke(NSBezierPath *path, CGFloat width, NSColor *color) {
     [path stroke];
 }
 
-// From `from` to `to`, in the knob's degrees. The path's angles run from
-// +x toward +y, which in a flipped view is clockwise, so up is -90.
+static double QLMKnobRadians(double degrees) {
+    return degrees * M_PI / 180.0;
+}
+
+// The arc's whole sweep, around `center`, in a space whose y grows down,
+// mapped by `transform`. Its angles run from +x toward +y, so up is -90.
+// TRAP: one arc of a few curves puts strokeEnd up to half a degree off its
+// share of the sweep. A curve per degree puts it on.
+static CGPathRef QLMKnobArcPath(NSPoint center, CGFloat radius, CGAffineTransform transform) {
+    CGMutablePathRef path = CGPathCreateMutable();
+    int count = (int)ceil(QLM_KNOB_SWEEP_DEGREES);
+    for (int i = 0; i < count; i++) {
+        double from = QLM_KNOB_START_DEGREES + i * QLM_KNOB_SWEEP_DEGREES / count;
+        double to = QLM_KNOB_START_DEGREES + (i + 1) * QLM_KNOB_SWEEP_DEGREES / count;
+        CGPathAddArc(path, &transform, center.x, center.y, radius, QLMKnobRadians(from - 90), QLMKnobRadians(to - 90), false);
+    }
+    return path;
+}
+
+// The pointer pointing up, from `center`, in a space whose y grows down,
+// mapped by `transform`.
+static CGPathRef QLMKnobPointerPath(NSPoint center, CGFloat inner, CGFloat outer, CGAffineTransform transform) {
+    CGMutablePathRef path = CGPathCreateMutable();
+    CGPathMoveToPoint(path, &transform, center.x, center.y - inner);
+    CGPathAddLineToPoint(path, &transform, center.x, center.y - outer);
+    return path;
+}
+
+// From `from` to `to`, in the knob's degrees, in the flipped view.
 static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, double to) {
     NSBezierPath *arc = [NSBezierPath bezierPath];
     [arc appendBezierPathWithArcWithCenter:center radius:radius startAngle:from - 90 endAngle:to - 90 clockwise:NO];
@@ -272,26 +322,84 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     return materials;
 }
 
-// The arc rings the body, so drawn over the body's material it shows as it
-// did beneath it.
-- (void)drawSkinContent:(NSRect)dirtyRect {
+- (NSColor *)arcFillColor {
+    NSColor *fill = QLMSkinNSColor(self.skin.knob.arcFill);
+    return self.enabled ? fill : VibeColorWithScaledAlpha(fill, QLMSkinDisabledAlpha);
+}
+
+- (NSColor *)pointerColor {
+    QLMSkinKnob *knob = self.skin.knob;
+    return QLMSkinNSColor(self.enabled ? knob.pointerColor : knob.pointerDisabledColor);
+}
+
+// Each moving layer spans the view, so its path is in the view's points.
+// TRAP: a layer's y grows up unless contentsAreFlipped, and its rotation
+// turns from +x toward +y, so both flip with it.
+- (void)layoutSkinMovingLayers:(QLMSkinLayers *)layers {
+    QLMSkinKnob *knob = self.skin.knob;
+    NSRect bounds = self.bounds;
+    NSRect frame = [self convertRectToLayer:bounds];
+    NSPoint center = [self center];
+    for (CAShapeLayer *layer in layers.movingLayers) {
+        layer.bounds = (CGRect){CGPointZero, frame.size};
+        layer.position = CGPointMake(NSMidX(frame), NSMidY(frame));
+        layer.contentsScale = layers.scale;
+        layer.fillColor = nil;
+        layer.lineCap = kCALineCapRound;
+    }
+    CGAffineTransform toLayer = _pointer.contentsAreFlipped ? CGAffineTransformIdentity
+                                                            : CGAffineTransformMake(1, 0, 0, -1, 0, bounds.size.height);
+    CGPathRef pointer = QLMKnobPointerPath(center, knob.pointerInner, knob.pointerOuter, toLayer);
+    _pointer.path = pointer;
+    CGPathRelease(pointer);
+    _pointer.lineWidth = knob.pointerWidth;
+    _pointer.strokeColor = [self pointerColor].CGColor;
+    if (_arc != nil) {
+        CGPathRef arc = QLMKnobArcPath(center, knob.arcRadius, toLayer);
+        _arc.path = arc;
+        CGPathRelease(arc);
+        _arc.lineWidth = knob.arcWidth;
+        _arc.strokeColor = [self arcFillColor].CGColor;
+        _arc.strokeEnd = [self arcEnd];
+    }
+    // An ease under way goes on.
+    [_pointer setValue:@([self pointerTurn]) forKeyPath:QLMKnobTurnKey];
+}
+
+- (double)pointerTurn {
+    double angle = QLMKnobRadians(QLMKnobAngleForDecibels(_value, self.minValue, self.maxValue));
+    return _pointer.contentsAreFlipped ? angle : -angle;
+}
+
+- (double)arcEnd {
+    return QLMKnobFraction(_value, self.minValue, self.maxValue);
+}
+
+// The pointer turns, and the arc's fill runs to it.
+- (void)showLevelEased:(BOOL)eases {
+    QLMSkinSetLayerValue(_pointer, QLMKnobTurnKey, @([self pointerTurn]), eases);
+    if (_arc != nil) {
+        QLMSkinSetLayerValue(_arc, @"strokeEnd", @([self arcEnd]), eases);
+    }
+}
+
+// As the layers show it at rest. The arc rings the body, so drawn over the
+// body's material it shows as it did beneath it.
+- (void)drawSkinMovingReference {
     QLMSkinKnob *knob = self.skin.knob;
     NSPoint center = [self center];
-    NSRect body = [self rectAround:knob.bodySize / 2];
     double angle = QLMKnobAngleForDecibels(_value, self.minValue, self.maxValue);
-
     if (knob.hasArc && angle > QLM_KNOB_START_DEGREES) {
-        NSColor *fill = QLMSkinNSColor(knob.arcFill);
-        QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, angle), knob.arcWidth,
-                      self.enabled ? fill : VibeColorWithScaledAlpha(fill, QLMSkinDisabledAlpha));
+        QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, angle), knob.arcWidth, [self arcFillColor]);
     }
-
     NSBezierPath *pointer = [NSBezierPath bezierPath];
     QLMKnobAppendRadial(pointer, center, knob.pointerInner, knob.pointerOuter, angle);
-    QLMKnobStroke(pointer, knob.pointerWidth, QLMSkinNSColor(self.enabled ? knob.pointerColor : knob.pointerDisabledColor));
+    QLMKnobStroke(pointer, knob.pointerWidth, [self pointerColor]);
+}
 
+- (void)drawSkinContent:(NSRect)dirtyRect {
     if (self.focused && self.enabled) {
-        QLMSkinDrawFocus(knob.focus, body, YES);
+        QLMSkinDrawFocus(self.skin.knob.focus, [self rectAround:self.skin.knob.bodySize / 2], YES);
     }
 }
 
