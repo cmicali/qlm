@@ -115,7 +115,6 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
     QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:self.skin size:self.bounds.size];
     _skinLayout = layout;
     _panel.frame = self.bounds;
-    _panel.needsDisplay = YES;
     self.status.frame = [layout frameOfElement:@"status"];
 
     NSArray<NSValue *> *cells = [layout cellsOfElement:@"groups"];

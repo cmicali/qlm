@@ -48,11 +48,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     [self.layers updateLayer];
 }
 
-- (void)setFrameOrigin:(NSPoint)origin {
-    [super setFrameOrigin:origin];
-    [self.layers viewDidMove];
-}
-
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
     self.needsDisplay = YES;

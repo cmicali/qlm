@@ -32,18 +32,23 @@ static void QLMTestEachView(NSView *view, void (^each)(NSView *view)) {
 // Out of a window, this view tree's content layers came back drawn whole
 // at the render, so a test here can't show what a partial redraw left. A
 // standalone layer's render showed its partial state.
-static NSBitmapImageRep *QLMTestComposite(NSView *view) {
-    view.wantsLayer = YES;  // as every view in a window is
-    QLMTestEachView(view, ^(NSView *each) {
-        each.layer.contentsScale = QLMTestScale;
-        each.needsDisplay = YES;
-    });
+// Each view's update, then each layer's drawing, where they are due.
+static void QLMTestDisplayIfNeeded(NSView *view) {
     [view displayIfNeeded];
     QLMTestEachView(view, ^(NSView *each) {
         QLMTestEachLayer(each.layer, ^(CALayer *layer) {
             [layer displayIfNeeded];
         });
     });
+}
+
+static NSBitmapImageRep *QLMTestComposite(NSView *view) {
+    view.wantsLayer = YES;  // as every view in a window is
+    QLMTestEachView(view, ^(NSView *each) {
+        each.layer.contentsScale = QLMTestScale;
+        each.needsDisplay = YES;
+    });
+    QLMTestDisplayIfNeeded(view);
     NSBitmapImageRep *bitmap = QLMTestBitmap(view.bounds.size);
     CGContextRef cg = [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap].CGContext;
     CGContextScaleCTM(cg, QLMTestScale, QLMTestScale);
@@ -251,6 +256,72 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
                         QLMSkinDrawSlotInInk(text, slot, slot.frame, 1, YES, 1);
                     });
                     XCTAssertEqual(outside, 0, @"%@ OSD %@ \"%@\", %@x", name, slotName, text, scale);
+                }
+            }
+        }
+    }
+}
+
+// A size change alone sets every material again, as a drag of the
+// window's corner makes. Each material's layer then sits where the view's
+// state puts it, and the grids' buttons take the layout's cells: within a
+// grid, each the same width, with the grid's gap between.
+- (void)testEachMaterialFollowsItsViewsSize {
+    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
+        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+        QLMSkinView *view = QLMTestWindowView(skin, skin.windowSize, QLMTestLookHovered);
+        (void)QLMTestComposite(view);
+        for (NSValue *size in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(900, 640)],
+                                [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {
+            NSMapTable<NSView *, NSValue *> *sizes = [NSMapTable strongToStrongObjectsMapTable];
+            QLMTestEachView(view, ^(NSView *each) {
+                [sizes setObject:[NSValue valueWithSize:each.bounds.size] forKey:each];
+            });
+            view.frame = (NSRect){NSZeroPoint, size.sizeValue};
+            NSString *at = [NSString stringWithFormat:@"%@ at %@", name, NSStringFromSize(size.sizeValue)];
+            // TRAP: out of a window, a view's layer stays due for display,
+            // so only this shows that a window would draw the new size.
+            QLMTestEachView(view, ^(NSView *each) {
+                if ([each respondsToSelector:@selector(layers)]
+                    && !NSEqualSizes([sizes objectForKey:each].sizeValue, each.bounds.size)) {
+                    XCTAssertTrue(each.needsDisplay, @"%@, %@", at, each);
+                }
+            });
+            QLMTestDisplayIfNeeded(view);
+            QLMTestEachView(view, ^(NSView *each) {
+                if (![each respondsToSelector:@selector(layers)] || each.hiddenOrHasHiddenAncestor) {
+                    return;
+                }
+                QLMSkinLayers *layers = [(id)each layers];
+                NSArray<QLMSkinMaterial *> *materials = [(id<QLMSkinLayered>)each skinMaterials:layers];
+                XCTAssertGreaterThan(each.layer.sublayers.count, materials.count, @"%@, %@", at, each);
+                for (NSUInteger i = 0; i < materials.count && i < each.layer.sublayers.count; i++) {
+                    NSRect want = [each convertRectToLayer:materials[i].frame];
+                    XCTAssertTrue(NSEqualRects(each.layer.sublayers[i].frame, want), @"%@, %@ material %lu: %@, not %@", at,
+                                  each, (unsigned long)i, NSStringFromRect(each.layer.sublayers[i].frame),
+                                  NSStringFromRect(want));
+                }
+            });
+            QLMSkinLayout *layout = view.skinLayout;
+            NSArray<NSArray<QLMSkinButtonView *> *> *grids = @[view.groupButtons, @[view.muteButton, view.dimButton]];
+            NSArray<NSString *> *elements = @[@"groups", @"toggles"];
+            for (NSUInteger g = 0; g < grids.count; g++) {
+                QLMSkinElement *element = [skin element:elements[g]];
+                NSArray<NSValue *> *cells = [layout cellsOfElement:elements[g]];
+                NSRect grid = [layout frameOfElement:elements[g]];
+                for (NSUInteger i = 0; i < grids[g].count; i++) {
+                    NSRect frame = grids[g][i].frame;
+                    XCTAssertTrue(NSEqualRects(frame, cells[i].rectValue), @"%@, %@ %lu", at, elements[g], (unsigned long)i);
+                    XCTAssertEqualWithAccuracy(frame.size.width, cells[0].rectValue.size.width, 0.001, @"%@", at);
+                    NSInteger column = (NSInteger)i % element.columns;
+                    if (column > 0) {
+                        XCTAssertEqualWithAccuracy(NSMinX(frame) - NSMaxX(grids[g][i - 1].frame), element.gap.width, 0.001,
+                                                   @"%@, %@ %lu", at, elements[g], (unsigned long)i);
+                    }
+                    if (column == element.columns - 1) {
+                        XCTAssertEqualWithAccuracy(NSMaxX(frame), NSMaxX(grid), 0.001, @"%@, %@ %lu", at, elements[g],
+                                                   (unsigned long)i);
+                    }
                 }
             }
         }

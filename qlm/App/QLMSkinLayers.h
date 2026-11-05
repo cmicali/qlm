@@ -36,6 +36,9 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)init NS_UNAVAILABLE;
 
+// Where its layer sits, in the view.
+@property (nonatomic, readonly) NSRect frame;
+
 @end
 
 // A view whose skin material is layer contents.
@@ -54,8 +57,8 @@ NS_ASSUME_NONNULL_BEGIN
 // The view's layer holds one sublayer per material, then one for the
 // drawn content on top. The view is a leaf: a subview's layer would sit
 // among them. It returns YES from wantsUpdateLayer, and calls updateLayer
-// and viewDidMove here from its own. Each setNeedsDisplay of the view sets
-// the material and draws the content again. The content draws no shadow:
+// here from its own. Each setNeedsDisplay of the view sets the material and
+// draws the content again, as each change of the view's size does. The content draws no shadow:
 // a layer's own context casts one apart from a view's.
 @interface QLMSkinLayers : NSObject <CALayerDelegate>
 
@@ -75,9 +78,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)drawReference:(NSRect)dirtyRect;
 // Draws only part of the content again, and sets no material.
 - (void)setNeedsDisplayInRect:(NSRect)rect;
-// From the view's setFrameOrigin:. A move off the pixels the content was
-// drawn on draws it again.
-- (void)viewDidMove;
 
 @end
 
