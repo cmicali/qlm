@@ -38,6 +38,9 @@ typedef CFMutableDictionaryRef _Nonnull (^QLMHIDMatching)(void);
 - (void)adapterChanged;
 // Opens the adapter's service if no host has it.
 - (void)openIfFree;
+// Whether a reopen could open: no device open, a service found, and a link
+// neither lost nor given up.
+- (BOOL)canReopen;
 
 // Opens the device once no other host has the adapter: seized, or not at
 // all. Consumes the device. Nil, or why it was refused.

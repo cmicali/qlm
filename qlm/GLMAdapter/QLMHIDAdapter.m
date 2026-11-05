@@ -99,6 +99,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     int _interestCount;
     NSTimeInterval _lastOpenTry;  // on the clock; -INFINITY before the first
     BOOL _reopenScheduled;
+    NSUInteger _reopenGeneration;  // a stop, a refusal, or a new service drops a scheduled reopen
     NSError *_problem;  // why a send fails while no device is open
     NSString *_deviceDescription;
 }
@@ -197,6 +198,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return;
     }
     _running = NO;
+    [self cancelReopen];
     [_hostWatch stop];
     _hostWatch = nil;
     if (_endLaunchWatch != nil) {
@@ -254,6 +256,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 }
 
 - (void)forgetService {
+    [self cancelReopen];
     [self unwatchService];
     if (_service != IO_OBJECT_NULL) {
         IOObjectRelease(_service);
@@ -300,6 +303,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 }
 
 - (void)refuse:(NSString *)host {
+    [self cancelReopen];
     [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, host) removed:NO];
 }
 
@@ -471,7 +475,22 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     }
 }
 
+- (void)cancelReopen {
+    _reopenGeneration += 1;
+    _reopenScheduled = NO;
+}
+
+// TRAP: openIfFree scans every process before it reads the link, so a
+// reopen that could not open goes no further. Else each second's client
+// check would run the scan on System's queue.
+- (BOOL)canReopen {
+    return _device == NULL && _service != IO_OBJECT_NULL && _link.failure == nil && !_link.gaveUp;
+}
+
 - (void)reopenIfFree {
+    if (![self canReopen]) {
+        return;
+    }
     NSTimeInterval wait = _lastOpenTry + QLMHIDReopenInterval - _clock.now;
     if (wait <= 0) {
         _lastOpenTry = _clock.now;
@@ -482,14 +501,16 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return;
     }
     _reopenScheduled = YES;
+    NSUInteger generation = _reopenGeneration;
     __weak QLMHIDAdapter *weakSelf = self;
     [_clock after:wait queue:_queue run:^{
         QLMHIDAdapter *strongSelf = weakSelf;
-        if (strongSelf != nil) {
-            strongSelf->_reopenScheduled = NO;
-            if (strongSelf->_running) {
-                [strongSelf reopenIfFree];
-            }
+        if (strongSelf == nil || generation != strongSelf->_reopenGeneration) {
+            return;
+        }
+        strongSelf->_reopenScheduled = NO;
+        if (strongSelf->_running) {
+            [strongSelf reopenIfFree];
         }
     }];
 }

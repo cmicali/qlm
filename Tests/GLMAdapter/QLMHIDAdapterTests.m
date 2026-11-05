@@ -9,15 +9,21 @@
 
 static NSString *const QLMGLMHost = @"GLM is running (pid 4242, /Applications/GLMv5.app/Contents/MacOS/GLMv5). Quit GLM first.";
 
-// Counts each try to open the adapter, which needs IOKit's service.
+// Counts each try to open the adapter, which needs IOKit's service. With
+// `reopenable` off, a reopen asks the real rule, which finds no service.
 @interface QLMCountingHIDAdapter : QLMHIDAdapter
 @property (nonatomic) QLMVirtualClock *clock;
 @property (nonatomic) NSMutableArray<NSNumber *> *openTimes;
+@property (nonatomic) BOOL reopenable;
 @end
 
 @implementation QLMCountingHIDAdapter
 - (void)openIfFree {
     [self.openTimes addObject:@(self.clock.now)];
+}
+
+- (BOOL)canReopen {
+    return self.reopenable || [super canReopen];
 }
 @end
 
@@ -32,6 +38,7 @@ static NSString *const QLMGLMHost = @"GLM is running (pid 4242, /Applications/GL
     QLMVirtualClock *_clock;
     QLMCountingHIDAdapter *_adapter;
     NSString *_host;
+    NSString *_clientHost;  // what the client check finds
     NSUInteger _hostChecks;
     NSUInteger _clientChecks;
     NSMutableArray<NSString *> *_events;
@@ -46,6 +53,7 @@ static NSString *const QLMGLMHost = @"GLM is running (pid 4242, /Applications/GL
     QLMCountingHIDAdapter *adapter = [[QLMCountingHIDAdapter alloc] init];
     adapter.clock = _clock;
     adapter.openTimes = [NSMutableArray array];
+    adapter.reopenable = YES;
     __weak QLMHIDAdapterTests *weakSelf = self;
     adapter.makeMatching = ^CFMutableDictionaryRef {
         return IOServiceMatching("QLMNoSuchService");
@@ -69,7 +77,7 @@ static NSString *const QLMGLMHost = @"GLM is running (pid 4242, /Applications/GL
     adapter.clientCheck = ^NSString * {
         QLMHIDAdapterTests *strongSelf = weakSelf;
         strongSelf->_clientChecks += 1;
-        return nil;
+        return strongSelf->_clientHost;
     };
     adapter.launchWatch = ^dispatch_block_t(void (^changed)(NSString *executablePath)) {
         QLMHIDAdapterTests *strongSelf = weakSelf;
@@ -201,6 +209,56 @@ static NSString *const QLMGLMHost = @"GLM is running (pid 4242, /Applications/GL
     for (NSUInteger i = 1; i < _adapter.openTimes.count; i++) {
         XCTAssertGreaterThanOrEqual(_adapter.openTimes[i].doubleValue - _adapter.openTimes[i - 1].doubleValue, 1 - 1e-9);
     }
+}
+
+// A holder the client check finds refuses the adapter at once.
+- (void)testAClientCheckThatFindsAHolderRefuses {
+    [self onQueue:^{
+        (void)[self->_adapter openDevice:(IOHIDDeviceRef)CFBridgingRetain([[NSObject alloc] init])];
+    }];
+    XCTAssertTrue(_adapter.seized);
+    _clientHost = @"MIDIServer (pid 906) holds the GLM adapter.";
+    [_clock advanceBy:QLMHostWatchClientInterval];
+    XCTAssertFalse(_adapter.seized);
+    XCTAssertEqualObjects(_events, (@[@"watch launches", @"close"]));
+    XCTAssertEqual(_hostChecks, 1u, @"only the open's check");
+}
+
+// TRAP: openIfFree scans every process first. With no service to open, as
+// with a link lost or given up, or a device open, a check's nil answer goes
+// no further, so no scan runs each second.
+- (void)testNoReopenWithNothingToOpen {
+    _adapter.reopenable = NO;
+    [_clock advanceBy:3 * QLMHostWatchClientInterval];
+    XCTAssertEqual(_clientChecks, 3u);
+    XCTAssertEqual(_adapter.openTimes.count, 0u);
+    XCTAssertEqual(_hostChecks, 0u);
+}
+
+// A reopen held back is dropped by a stop, so a wake's start doesn't run
+// it, and by a refusal.
+- (void)testAStopOrARefusalDropsAHeldReopen {
+    [self onQueue:^{
+        [self->_adapter finishCheck:nil];
+        [self->_adapter finishCheck:nil];
+        [self->_adapter stop];
+        [self->_adapter startOnQueue:self->_queue clock:self->_clock];
+    }];
+    [_adapter.openTimes removeAllObjects];
+    _clientHost = @"MIDIServer (pid 906) holds the GLM adapter.";
+    [_clock advanceBy:1.5];
+    XCTAssertEqual(_adapter.openTimes.count, 0u, @"after a stop");
+
+    _clientHost = nil;
+    [_clock advanceBy:1];
+    XCTAssertEqual(_adapter.openTimes.count, 1u);
+    [self onQueue:^{
+        [self->_adapter finishCheck:nil];
+        [self->_adapter finishCheck:QLMGLMHost];
+    }];
+    _clientHost = @"MIDIServer (pid 906) holds the GLM adapter.";
+    [_clock advanceBy:1.5];
+    XCTAssertEqual(_adapter.openTimes.count, 1u, @"after a refusal");
 }
 
 @end
