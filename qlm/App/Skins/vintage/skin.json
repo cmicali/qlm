@@ -93,6 +93,8 @@
   "button": {
     "image": "button",
     "capInsets": [8, 8, 9, 8],
+    "face": [1.5, 1.5, 4.5, 1.5],
+    "pressedFace": [3.5, 1.5, 2.5, 1.5],
     "title": {
       "size": 11,
       "color": "label",
@@ -110,8 +112,8 @@
       {"element": "footer", "y": -4}
     ],
     "boxes": [
-      {"element": "groups", "outset": [10.4, 8.4, 12.4, 6.4], "radius": 6, "gap": "groupsTitle"},
-      {"element": "toggles", "outset": 8.4, "radius": 5}
+      {"element": "groups", "outset": [10.4, 8.4, 7.4, 6.4], "radius": 6, "gap": "groupsTitle"},
+      {"element": "toggles", "outset": [9.9, 8.4, 6.9, 8.4], "radius": 5}
     ]
   },
   "osd": {

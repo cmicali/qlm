@@ -277,6 +277,26 @@
     XCTAssertTrue([error.localizedDescription containsString:@"is not JSON"], @"%@", error.localizedDescription);
 }
 
+// A button's face lies within its cap insets, so it holds at any size.
+// Pressed, it is the face's unless it says otherwise.
+- (void)testAButtonsFace {
+    QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"retro"] error:NULL];
+    XCTAssertEqual(skin.button.face.bottom, 7);
+    XCTAssertEqual(skin.button.pressedFace.top, 3.5);
+    CGRect face = [skin.button faceInBounds:CGRectMake(0, 0, 100, 40) pressed:NO];
+    XCTAssertTrue(CGRectEqualToRect(face, CGRectMake(3, 1.5, 93, 31.5)), @"%@", NSStringFromRect(face));
+    skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"modern"] error:NULL];
+    face = [skin.button faceInBounds:CGRectMake(0, 0, 100, 34) pressed:YES];
+    XCTAssertTrue(CGRectEqualToRect(face, CGRectMake(0, 0, 100, 34)));
+
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"button"][@"face"] = @[@1, @1, @10, @1];
+    } refusedWith:@"button.face reaches past button.capInsets"];
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"button"][@"pressedFace"] = @[@-1, @1, @1, @1];
+    } refusedWith:@"button.pressedFace is below 0"];
+}
+
 - (void)testAnotherFormatIsRefused {
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"format"] = @2;

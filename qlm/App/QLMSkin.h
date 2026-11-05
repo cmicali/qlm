@@ -197,6 +197,14 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) CGFloat ledSize;
 // The LED sits ledGap before the title, and the two center together.
 @property (nonatomic, readonly) CGFloat ledGap;
+// Where the face's edges sit inside the button's frame, past its shadow,
+// in points. The title and the LED center in the face. Zero by default.
+@property (nonatomic, readonly) NSEdgeInsets face;
+// The face while pressed, which a press may move down. The face's by
+// default.
+@property (nonatomic, readonly) NSEdgeInsets pressedFace;
+// The face in a button's bounds.
+- (CGRect)faceInBounds:(CGRect)bounds pressed:(BOOL)pressed;
 @end
 
 @interface QLMSkinKnob : NSObject
@@ -284,5 +292,8 @@ CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSiz
 
 // A marking box's outer edge: its element's frame grown by `outset`.
 CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset);
+
+// `frame` shrunk by `insets`.
+CGRect QLMSkinInsetRect(CGRect frame, NSEdgeInsets insets);
 
 NS_ASSUME_NONNULL_END

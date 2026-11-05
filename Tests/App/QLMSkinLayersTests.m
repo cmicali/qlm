@@ -165,6 +165,29 @@ static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, QLMTestLook lo
     return view;
 }
 
+// What a view asked of AppKit's display since the last reset.
+@interface QLMTestSpyButton : QLMSkinButtonView
+@property (nonatomic) BOOL marked;
+@end
+
+@implementation QLMTestSpyButton
+- (void)setNeedsDisplay:(BOOL)needsDisplay {
+    self.marked = self.marked || needsDisplay;
+    [super setNeedsDisplay:needsDisplay];
+}
+@end
+
+@interface QLMTestSpyDisplay : QLMSkinDisplayView
+@property (nonatomic) BOOL marked;
+@end
+
+@implementation QLMTestSpyDisplay
+- (void)setNeedsDisplay:(BOOL)needsDisplay {
+    self.marked = self.marked || needsDisplay;
+    [super setNeedsDisplay:needsDisplay];
+}
+@end
+
 @implementation QLMSkinLayersTests
 
 - (void)testEachSkinsWindowCompositesAsItDraws {
@@ -262,6 +285,26 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
     }
 }
 
+// A size change alone marks a layered view for display, so a window sets
+// its materials again, and a move within its pixels doesn't. TRAP: out of
+// a window, a view's layer stays due for display, and its needsDisplay
+// reads NO, so only a spy shows what a window would do.
+- (void)testASizeChangeMarksALayeredViewForDisplay {
+    QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"retro"] error:NULL];
+    QLMTestSpyButton *button = [[QLMTestSpyButton alloc] initWithSkin:skin];
+    QLMTestSpyDisplay *display = [[QLMTestSpyDisplay alloc] initWithSkin:skin];
+    NSArray<NSView *> *views = @[button, display];
+    for (NSView *view in views) {
+        view.frame = NSMakeRect(0, 0, 200, 120);
+        QLMTestDisplayIfNeeded(view);
+        [(id)view setMarked:NO];
+        view.frameOrigin = NSMakePoint(10, 10);
+        XCTAssertFalse([(id)view marked], @"%@ moved", view);
+        view.frameSize = NSMakeSize(300, 120);
+        XCTAssertTrue([(id)view marked], @"%@ grew", view);
+    }
+}
+
 // A size change alone sets every material again, as a drag of the
 // window's corner makes. Each material's layer then sits where the view's
 // state puts it, and the grids' buttons take the layout's cells: within a
@@ -273,20 +316,8 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
         (void)QLMTestComposite(view);
         for (NSValue *size in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(900, 640)],
                                 [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {
-            NSMapTable<NSView *, NSValue *> *sizes = [NSMapTable strongToStrongObjectsMapTable];
-            QLMTestEachView(view, ^(NSView *each) {
-                [sizes setObject:[NSValue valueWithSize:each.bounds.size] forKey:each];
-            });
             view.frame = (NSRect){NSZeroPoint, size.sizeValue};
             NSString *at = [NSString stringWithFormat:@"%@ at %@", name, NSStringFromSize(size.sizeValue)];
-            // TRAP: out of a window, a view's layer stays due for display,
-            // so only this shows that a window would draw the new size.
-            QLMTestEachView(view, ^(NSView *each) {
-                if ([each respondsToSelector:@selector(layers)]
-                    && !NSEqualSizes([sizes objectForKey:each].sizeValue, each.bounds.size)) {
-                    XCTAssertTrue(each.needsDisplay, @"%@, %@", at, each);
-                }
-            });
             QLMTestDisplayIfNeeded(view);
             QLMTestEachView(view, ^(NSView *each) {
                 if (![each respondsToSelector:@selector(layers)] || each.hiddenOrHasHiddenAncestor) {
@@ -322,6 +353,111 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
                         XCTAssertEqualWithAccuracy(NSMaxX(frame), NSMaxX(grid), 0.001, @"%@, %@ %lu", at, elements[g],
                                                    (unsigned long)i);
                     }
+                }
+            }
+        }
+    }
+}
+
+// The pixels' bounds where `pass` holds for a pixel of `a` and of `b`.
+static NSRect QLMTestPixelBounds(NSBitmapImageRep *a, NSBitmapImageRep *b, BOOL (^pass)(const uint8_t *u, const uint8_t *v)) {
+    NSInteger minX = NSIntegerMax, minY = NSIntegerMax, maxX = -1, maxY = -1;
+    for (NSInteger y = 0; y < a.pixelsHigh; y++) {
+        for (NSInteger x = 0; x < a.pixelsWide; x++) {
+            if (pass(a.bitmapData + y * a.bytesPerRow + x * 4, b.bitmapData + y * b.bytesPerRow + x * 4)) {
+                minX = MIN(minX, x);
+                minY = MIN(minY, y);
+                maxX = MAX(maxX, x);
+                maxY = MAX(maxY, y);
+            }
+        }
+    }
+    return maxX < 0 ? NSZeroRect : NSMakeRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
+}
+
+// A group's button, Mute's, or Dim's, with its title or none, and with its
+// LED, if it has one, or none.
+static QLMSkinButtonView *QLMTestButton(QLMSkin *skin, NSSize size, NSUInteger kind, BOOL titled, BOOL led) {
+    QLMSkinButtonView *button = [[QLMSkinButtonView alloc] initWithSkin:skin];
+    button.frame = (NSRect){NSZeroPoint, size};
+    button.layer.contentsScale = QLMTestScale;
+    NSArray<NSString *> *titles = @[@"MAIN 2X2", @"MUTE", @"DIM −20"];
+    button.title = titled ? titles[kind] : @"";
+    button.prefix = titled && kind == 0 ? @"B" : nil;
+    button.showsLED = led && kind == 1;
+    return button;
+}
+
+// The bounds of what differs between two drawings by more than `levels`.
+static NSRect QLMTestDifference(NSBitmapImageRep *a, NSBitmapImageRep *b, int levels) {
+    return QLMTestPixelBounds(a, b, ^BOOL(const uint8_t *u, const uint8_t *v) {
+        int most = 0;
+        for (int k = 0; k < 3; k++) {
+            most = MAX(most, abs((int)u[k] - (int)v[k]));
+        }
+        return most > levels;
+    });
+}
+
+// The label's ink centers on the button's face, its capitals on the face's
+// height, within a pixel at 2x: in every state, in each skin, at the
+// reference size and two larger. The face is where the material is at
+// least half its most opaque, so a shadow below it counts for nothing. A
+// lit LED with no glow inks its dot. A disabled LED is too faint to find,
+// so a disabled title must end where its enabled one does.
+- (void)testEachButtonsLabelCentersOnItsFace {
+    typedef struct {
+        BOOL selected, enabled, pressed, hovered;
+    } QLMTestState;
+    QLMTestState states[] = {{NO, YES, NO, NO}, {NO, YES, NO, YES}, {NO, YES, YES, NO}, {YES, YES, NO, NO},
+                             {YES, YES, NO, YES}, {YES, YES, YES, NO}, {NO, NO, NO, NO}, {YES, NO, NO, NO}};
+    size_t count = sizeof(states) / sizeof(states[0]);
+    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
+        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+        [skin.led setValue:@0 forKey:@"glow"];
+        for (NSValue *window in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(900, 640)],
+                                  [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {
+            QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:skin size:window.sizeValue];
+            NSArray<NSValue *> *toggles = [layout cellsOfElement:@"toggles"];
+            NSSize sizes[] = {[layout cellsOfElement:@"groups"][0].rectValue.size, toggles[0].rectValue.size,
+                              toggles[1].rectValue.size};
+            for (NSUInteger kind = 0; kind < 3; kind++) {
+                NSMutableArray<NSValue *> *inks = [NSMutableArray array];
+                for (size_t s = 0; s < count; s++) {
+                    // The face alone, then with its label.
+                    NSMutableArray<NSBitmapImageRep *> *bitmaps = [NSMutableArray array];
+                    for (NSNumber *labelled in @[@NO, @YES]) {
+                        QLMSkinButtonView *button = QLMTestButton(skin, sizes[kind], kind, labelled.boolValue,
+                                                                  labelled.boolValue);
+                        button.ledLit = YES;
+                        button.selected = states[s].selected;
+                        button.enabled = states[s].enabled;
+                        button.pressed = states[s].pressed;
+                        button.hovered = states[s].hovered;
+                        [bitmaps addObject:QLMTestDrawn(button)];
+                    }
+                    __block uint8_t most = 0;
+                    (void)QLMTestPixelBounds(bitmaps[0], bitmaps[0], ^BOOL(const uint8_t *u, const uint8_t *v) {
+                        most = MAX(most, u[3]);
+                        return NO;
+                    });
+                    NSRect face = QLMTestPixelBounds(bitmaps[0], bitmaps[0], ^BOOL(const uint8_t *u, const uint8_t *v) {
+                        return u[3] * 2 >= most;
+                    });
+                    NSRect ink = QLMTestDifference(bitmaps[0], bitmaps[1], 40);
+                    [inks addObject:[NSValue valueWithRect:ink]];
+                    NSString *at = [NSString stringWithFormat:@"%@ at %@, button %lu, state %zu: face %@, ink %@", name,
+                                                              NSStringFromSize(window.sizeValue), (unsigned long)kind, s,
+                                                              NSStringFromRect(face), NSStringFromRect(ink)];
+                    XCTAssertGreaterThan(ink.size.width, 0, @"%@", at);
+                    if (kind == 1 && !states[s].enabled) {
+                        NSRect enabled = inks[states[s].selected ? 3 : 0].rectValue;
+                        XCTAssertEqualWithAccuracy(NSMaxX(ink), NSMaxX(enabled), 1, @"%@", at);
+                        XCTAssertEqualWithAccuracy(NSMidY(ink), NSMidY(face), 1, @"%@", at);
+                        continue;
+                    }
+                    XCTAssertEqualWithAccuracy(NSMidX(ink), NSMidX(face), 1, @"%@", at);
+                    XCTAssertEqualWithAccuracy(NSMidY(ink), NSMidY(face), 1, @"%@", at);
                 }
             }
         }
