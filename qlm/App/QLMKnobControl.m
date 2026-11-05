@@ -14,7 +14,9 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
 @implementation QLMKnobControl {
     double _value;
     CGFloat _scrolled;
-    NSImage *_still;  // the shadow, ticks, and arc track, at the view's size
+    // A CGImage of the shadow, ticks, and arc track, at the view's size.
+    id _still;
+    CGFloat _stillScale;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -209,15 +211,16 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     return NSMakeRect(center.x - radius, center.y - radius, radius * 2, radius * 2);
 }
 
-// What no turn changes, drawn once per size.
-- (NSImage *)still {
-    if (_still != nil) {
-        return _still;
+// What no turn changes, drawn once per size and scale.
+- (nullable CGImageRef)stillAtScale:(CGFloat)scale {
+    if (_still != nil && _stillScale == scale) {
+        return (__bridge CGImageRef)_still;
     }
     QLMSkinKnob *knob = self.skin.knob;
     NSPoint center = [self center];
     NSRect disc = [self rectAround:knob.bodySize / 2 - 1];
-    _still = [NSImage imageWithSize:self.bounds.size flipped:YES drawingHandler:^BOOL(NSRect rect) {
+    _stillScale = scale;
+    _still = CFBridgingRelease(QLMSkinRenderImage(self.bounds.size, scale, ^{
         if (knob.shadow != nil) {
             NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:disc];
             QLMSkinDrawShadow(knob.shadow, path, NSColor.blackColor);
@@ -243,26 +246,40 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
             QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES), knob.arcWidth,
                           QLMSkinNSColor(knob.arcTrack));
         }
-        return YES;
-    }];
-    return _still;
+    }));
+    return (__bridge CGImageRef)_still;
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
+    NSMutableArray<QLMSkinMaterial *> *materials = [NSMutableArray array];
+    CGImageRef still = [self stillAtScale:layers.scale];
+    if (still != NULL) {
+        [materials addObject:[QLMSkinMaterial materialOfImage:still frame:self.bounds layers:layers]];
+    }
+    QLMSkinKnob *knob = self.skin.knob;
+    QLMSkinMaterial *body = [QLMSkinMaterial materialOfStyle:knob.body skin:self.skin
+                                                       state:QLMSkinButtonState(NO, self.enabled, self.pressed, self.hovered)
+                                                       frame:[self rectAround:knob.bodySize / 2] circle:YES
+                                                     overlay:QLMSkinColorClear layers:layers];
+    if (body != nil) {
+        [materials addObject:body];
+    }
+    return materials;
+}
+
+// The arc rings the body, so drawn over the body's material it shows as it
+// did beneath it.
+- (void)drawSkinContent:(NSRect)dirtyRect {
     QLMSkinKnob *knob = self.skin.knob;
     NSPoint center = [self center];
     NSRect body = [self rectAround:knob.bodySize / 2];
     double angle = QLMKnobAngleForDecibels(_value, self.minValue, self.maxValue);
-
-    QLMSkinDrawImage([self still], self.bounds);
 
     if (knob.hasArc && angle > QLM_KNOB_START_DEGREES) {
         NSColor *fill = QLMSkinNSColor(knob.arcFill);
         QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, angle), knob.arcWidth,
                       self.enabled ? fill : VibeColorWithScaledAlpha(fill, QLMSkinDisabledAlpha));
     }
-
-    QLMSkinDrawStyle(self.skin, knob.body, QLMSkinButtonState(NO, self.enabled, self.pressed, self.hovered), body, YES);
 
     NSBezierPath *pointer = [NSBezierPath bezierPath];
     QLMKnobAppendRadial(pointer, center, knob.pointerInner, knob.pointerOuter, angle);

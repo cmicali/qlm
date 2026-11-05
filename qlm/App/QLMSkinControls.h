@@ -1,6 +1,7 @@
 #import <Cocoa/Cocoa.h>
 
 #import "QLMSkin.h"
+#import "QLMSkinLayers.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -11,14 +12,18 @@ NS_ASSUME_NONNULL_BEGIN
 
 // A control that tracks hover, a press, and keyboard focus, and draws its
 // own focus ring. A click inside sends the action. Space and Return click
-// it while it has focus.
-@interface QLMSkinControl : NSControl
+// it while it has focus. Subclasses implement QLMSkinLayered, as a
+// QLMSkinLayerView's do.
+@interface QLMSkinControl : NSControl <QLMSkinLayered>
 - (instancetype)initWithSkin:(QLMSkin *)skin NS_DESIGNATED_INITIALIZER;
 - (instancetype)initWithFrame:(NSRect)frame NS_UNAVAILABLE;
 - (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;
 @property (nonatomic, readonly) QLMSkin *skin;
-// Set by the control's own tracking. Each change redraws it.
+@property (nonatomic, readonly) QLMSkinLayers *layers;
+// Set by the control's own tracking. Each change redraws it, but a change
+// of hover only where drawsHover says it shows.
 @property (nonatomic, getter=isHovered) BOOL hovered;
+- (BOOL)drawsHover;
 @property (nonatomic, getter=isPressed) BOOL pressed;
 // First responder in the key window.
 @property (nonatomic, readonly, getter=isFocused) BOOL focused;
@@ -42,7 +47,7 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 // The status: an LED and the online count, or a bus problem's title.
-@interface QLMSkinStatusView : NSView
+@interface QLMSkinStatusView : QLMSkinLayerView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
 @property (nonatomic, copy, nullable) NSString *text;
 @property (nonatomic) BOOL lit;
@@ -50,7 +55,7 @@ NS_ASSUME_NONNULL_BEGIN
 @end
 
 // The display: the group's caption, the level and its unit, OUTPUT, and MAX.
-@interface QLMSkinDisplayView : NSView
+@interface QLMSkinDisplayView : QLMSkinLayerView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
 @property (nonatomic, copy, nullable) NSString *caption;
 @property (nonatomic, copy, nullable) NSString *level;
@@ -62,7 +67,7 @@ NS_ASSUME_NONNULL_BEGIN
 // The OSD's content, at the skin's OSD size: the level and its unit, the
 // title, and the subtitle. The bar fills from its left by `fraction`, 0 to
 // 1.
-@interface QLMSkinOSDView : NSView
+@interface QLMSkinOSDView : QLMSkinLayerView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
 @property (nonatomic, copy, nullable) NSString *level;
 @property (nonatomic, copy, nullable) NSString *title;

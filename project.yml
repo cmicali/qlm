@@ -230,8 +230,8 @@ targets:
       - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md", "main.m"]
       # The app's debug verbs, and the app's code they and the tests read.
-      # TRAP: AppKit can't make a view here. Hostless, NSApplication won't
-      # start, and any view's layer asks for it.
+      # TRAP: AppKit can't make a window here. Hostless, NSApplication
+      # won't start, and a window asks for it.
       - qlm/App/QLMAlerts.m
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
@@ -245,6 +245,12 @@ targets:
       - qlm/App/QLMSkinDrawing.m
       - qlm/App/QLMSkinLayout.m
       - qlm/App/QLMSkinLibrary.m
+      # The skin's views. Out of any window, they draw, and their layers
+      # render into a bitmap.
+      - qlm/App/QLMKnobControl.m
+      - qlm/App/QLMSkinControls.m
+      - qlm/App/QLMSkinLayers.m
+      - qlm/App/QLMSkinView.m
     settings:
       base:
         PRODUCT_NAME: "$(TARGET_NAME)"

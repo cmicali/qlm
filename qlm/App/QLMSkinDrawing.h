@@ -27,6 +27,21 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
 // and cap insets. Every image the skin draws goes through here.
 void QLMSkinDrawImage(NSImage *_Nullable image, NSRect rect);
 
+// png/<name>.png at scale 1, or its @2x at 2, decoded once and kept on the
+// skin. NULL when the file won't load. Any queue.
+CGImageRef _Nullable QLMSkinDecodedImage(QLMSkin *skin, NSString *name, NSInteger scale) CF_RETURNS_NOT_RETAINED;
+
+// What `draw` draws in `size` points at `scale`, in a flipped context.
+CGImageRef _Nullable QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) CF_RETURNS_RETAINED;
+
+// A flipped context for a layer's own drawing, at its contents scale, in
+// which the skin's shadows fall as they do in a view.
+NSGraphicsContext *QLMSkinLayerGraphicsContext(CGContextRef context, CGFloat scale);
+
+// A value kept on `owner`, made the first time it's asked for. Keys are by
+// address. On the main queue.
+id QLMSkinAttached(id owner, const void *key, id (^make)(void));
+
 // The shadow `path` casts, filled with `fill`.
 void QLMSkinDrawShadow(QLMSkinShadow *shadow, NSBezierPath *path, NSColor *fill);
 

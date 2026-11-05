@@ -22,6 +22,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     self = [super initWithFrame:NSZeroRect];
     if (self) {
         _skin = skin;
+        _layers = [[QLMSkinLayers alloc] initWithView:self];
         self.focusRingType = NSFocusRingTypeNone;
         // A button unless its controller says otherwise.
         self.accessibilityRole = NSAccessibilityButtonRole;
@@ -37,6 +38,35 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return NO;
 }
 
+- (BOOL)wantsUpdateLayer {
+    return YES;
+}
+
+- (void)updateLayer {
+    [self.layers updateLayer];
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    [self.layers drawRect:dirtyRect];
+}
+
+- (void)setFrameOrigin:(NSPoint)origin {
+    [super setFrameOrigin:origin];
+    [self.layers viewDidMove];
+}
+
+- (void)viewDidChangeBackingProperties {
+    [super viewDidChangeBackingProperties];
+    self.needsDisplay = YES;
+}
+
+- (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
+    return @[];
+}
+
+- (void)drawSkinContent:(NSRect)dirtyRect {
+}
+
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];
     if (_tracking != nil) {
@@ -47,12 +77,18 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     [self addTrackingArea:_tracking];
 }
 
+- (BOOL)drawsHover {
+    return YES;
+}
+
 - (void)setHovered:(BOOL)hovered {
     if (hovered == _hovered) {
         return;
     }
     _hovered = hovered;
-    self.needsDisplay = YES;
+    if ([self drawsHover]) {
+        self.needsDisplay = YES;
+    }
 }
 
 - (void)setPressed:(BOOL)pressed {
@@ -155,6 +191,8 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     self = [super initWithSkin:skin];
     if (self) {
         _title = @"";
+        QLMSkinFocus *focus = skin.button.focus;
+        self.layers.contentOutset = MAX(0, ceil(focus.outset + focus.width));
     }
     return self;
 }
@@ -241,12 +279,16 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return string;
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
+    QLMSkinState state = QLMSkinButtonState(self.selected, self.enabled, self.pressed, self.hovered);
+    QLMSkinMaterial *face = [QLMSkinMaterial materialOfStyle:self.skin.button.style skin:self.skin state:state
+                                                       frame:self.bounds circle:NO overlay:QLMSkinColorClear layers:layers];
+    return face ? @[face] : @[];
+}
+
+- (void)drawSkinContent:(NSRect)dirtyRect {
     QLMSkinButton *button = self.skin.button;
     NSRect bounds = self.bounds;
-    QLMSkinState state = QLMSkinButtonState(self.selected, self.enabled, self.pressed, self.hovered);
-    QLMSkinDrawStyle(self.skin, button.style, state, bounds, NO);
-
     NSAttributedString *title = [self titleString];
     CGFloat led = self.showsLED ? button.ledSize : 0;
     QLMSkinLabel label = QLMSkinLabelLayout(bounds.size.width, _titleWidth, led, button.ledGap);
@@ -284,8 +326,16 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         _symbolName = [[NSImage availableSymbolName:symbol fallback:QLMSkinFallbackSymbol] copy];
         _symbols = [NSMutableDictionary dictionary];
         _title = @"";
+        // Its focus ring stands 4 points off each side.
+        QLMSkinFocus *focus = skin.button.focus;
+        self.layers.contentOutset = 4 + MAX(0, ceil(focus.outset + focus.width));
     }
     return self;
+}
+
+// Nothing it draws shows hover.
+- (BOOL)drawsHover {
+    return NO;
 }
 
 - (void)setTitle:(NSString *)title {
@@ -322,7 +372,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return symbol;
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (void)drawSkinContent:(NSRect)dirtyRect {
     CGFloat alpha = !self.enabled ? QLMSkinDisabledAlpha : self.pressed ? 0.6 : 1;
     NSColor *color = VibeColorWithScaledAlpha(QLMSkinNSColor(_slot.color), alpha);
     NSAttributedString *title = [self titleStringAtAlpha:alpha color:color];
@@ -359,12 +409,10 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     if (self) {
         _skin = skin;
         _enabled = YES;
+        // The LED's glow falls past the bounds.
+        self.layers.contentOutset = ceil(2 * skin.led.glow);
     }
     return self;
-}
-
-- (BOOL)isFlipped {
-    return YES;
 }
 
 - (void)setText:(NSString *)text {
@@ -391,7 +439,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     self.needsDisplay = YES;
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (void)drawSkinContent:(NSRect)dirtyRect {
     QLMSkinElement *element = [_skin element:@"status"];
     QLMSkinTextSlot *online = element.text[@"online"];
     QLMSkinDrawLED(_skin.led, element.ledFrame, self.lit, self.enabled);
@@ -418,10 +466,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
         self.clipsToBounds = YES;  // nothing draws over the knob column
     }
     return self;
-}
-
-- (BOOL)isFlipped {
-    return YES;
 }
 
 - (void)setCaption:(NSString *)caption {
@@ -464,11 +508,21 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     self.needsDisplay = YES;
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+// Dimmed, the overlay lays over the glass and over the text, each in its
+// own shape. Over both together, as source-atop, it comes to the same.
+- (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
+    QLMSkinElement *element = [_skin element:@"display"];
+    QLMSkinMaterial *glass = [QLMSkinMaterial materialOfStyle:element.style skin:_skin state:QLMSkinStateNormal
+                                                        frame:self.bounds circle:NO
+                                                      overlay:self.disabled ? element.disabledOverlay : QLMSkinColorClear
+                                                       layers:layers];
+    return glass ? @[glass] : @[];
+}
+
+- (void)drawSkinContent:(NSRect)dirtyRect {
     QLMSkinElement *element = [_skin element:@"display"];
     CGSize size = self.bounds.size;
     QLMSkinDrawDimmed(self.disabled, element.disabledOverlay, self.bounds, ^{
-        QLMSkinDrawStyle(self->_skin, element.style, QLMSkinStateNormal, self.bounds, NO);
         NSDictionary<NSString *, NSString *> *texts = @{
             @"caption": self.caption ?: @"", @"level": self.level ?: @"", @"unit": QLMSkinUnit,
             @"output": self.output ?: @"", @"max": self.max ?: @"",
@@ -510,14 +564,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return self;
 }
 
-- (BOOL)isFlipped {
-    return YES;
-}
-
-- (BOOL)isOpaque {
-    return NO;
-}
-
 - (void)setLevel:(NSString *)level {
     if (QLMSkinSameText(level, _level)) {
         return;
@@ -551,9 +597,15 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     self.needsDisplay = YES;
 }
 
-- (void)drawRect:(NSRect)dirtyRect {
+- (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
     QLMSkinElement *osd = _skin.osd;
-    QLMSkinDrawStyle(_skin, osd.style, QLMSkinStateNormal, osd.frame, NO);
+    QLMSkinMaterial *housing = [QLMSkinMaterial materialOfStyle:osd.style skin:_skin state:QLMSkinStateNormal frame:osd.frame
+                                                         circle:NO overlay:QLMSkinColorClear layers:layers];
+    return housing ? @[housing] : @[];
+}
+
+- (void)drawSkinContent:(NSRect)dirtyRect {
+    QLMSkinElement *osd = _skin.osd;
     NSDictionary<NSString *, NSString *> *texts = @{
         @"level": self.level ?: @"", @"unit": QLMSkinUnit, @"title": self.title ?: @"",
         @"subtitle": self.subtitle ?: QLMSkinOSDIdleSubtitle,

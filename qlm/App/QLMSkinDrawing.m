@@ -1,6 +1,7 @@
 #import "QLMSkinDrawing.h"
 
 #import <CoreText/CoreText.h>
+#import <ImageIO/ImageIO.h>
 #import <objc/runtime.h>
 
 const CGFloat QLMSkinDisabledAlpha = 0.4;
@@ -13,18 +14,9 @@ static BOOL QLMSkinColorIsClear(QLMSkinColor color) {
     return color.alpha <= 0;
 }
 
-static NSImageRep *_Nullable QLMSkinImageRep(NSURL *url, CGFloat scale) {
-    NSImageRep *rep = [NSBitmapImageRep imageRepWithContentsOfURL:url];
-    if (rep == nil || rep.pixelsWide <= 0) {
-        return nil;
-    }
-    rep.size = NSMakeSize(rep.pixelsWide / scale, rep.pixelsHigh / scale);
-    return rep;
-}
-
 // A value kept on an object, made the first time it's asked for. Keys are
 // by address. On the main queue, as all drawing is.
-static id QLMSkinAttached(id owner, const void *key, id (^make)(void)) {
+id QLMSkinAttached(id owner, const void *key, id (^make)(void)) {
     id value = objc_getAssociatedObject(owner, key);
     if (value == nil) {
         value = make();
@@ -33,8 +25,90 @@ static id QLMSkinAttached(id owner, const void *key, id (^make)(void)) {
     return value;
 }
 
+static char QLMSkinDecodedKey;
 static char QLMSkinImagesKey;
 static char QLMSkinGradientKey;
+
+// Made once, on whichever queue asks first, and kept for the skin's life.
+static NSMutableDictionary *QLMSkinDecodedCache(QLMSkin *skin) {
+    @synchronized(skin) {
+        NSMutableDictionary *cache = objc_getAssociatedObject(skin, &QLMSkinDecodedKey);
+        if (cache == nil) {
+            cache = [NSMutableDictionary dictionary];
+            objc_setAssociatedObject(skin, &QLMSkinDecodedKey, cache, OBJC_ASSOCIATION_RETAIN);
+        }
+        return cache;
+    }
+}
+
+static CGImageRef _Nullable QLMSkinDecode(NSURL *url) CF_RETURNS_RETAINED {
+    CGImageSourceRef source = CGImageSourceCreateWithURL((__bridge CFURLRef)url, NULL);
+    if (source == NULL) {
+        return NULL;
+    }
+    NSDictionary *options = @{(id)kCGImageSourceShouldCacheImmediately: @YES};
+    CGImageRef image = CGImageSourceCreateImageAtIndex(source, 0, (__bridge CFDictionaryRef)options);
+    CFRelease(source);
+    return image;
+}
+
+CGImageRef QLMSkinDecodedImage(QLMSkin *skin, NSString *name, NSInteger scale) {
+    NSMutableDictionary *cache = QLMSkinDecodedCache(skin);
+    NSString *key = [NSString stringWithFormat:@"%@@%ldx", name, (long)scale];
+    @synchronized(cache) {
+        id cached = cache[key];
+        if (cached != nil) {
+            return cached == NSNull.null ? NULL : (__bridge CGImageRef)cached;
+        }
+    }
+    // Decoded outside the lock, so a warm on another queue never holds up
+    // the main queue's draw of an image it has done.
+    id image = CFBridgingRelease(QLMSkinDecode([skin imageURLForName:name scale:scale]));
+    @synchronized(cache) {
+        id cached = cache[key];
+        if (cached == nil) {
+            cache[key] = image ?: NSNull.null;
+            cached = cache[key];
+        }
+        return cached == NSNull.null ? NULL : (__bridge CGImageRef)cached;
+    }
+}
+
+
+CGImageRef QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) {
+    size_t wide = (size_t)ceil(size.width * scale);
+    size_t high = (size_t)ceil(size.height * scale);
+    if (wide == 0 || high == 0) {
+        return NULL;
+    }
+    CGColorSpaceRef space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    CGContextRef cg = CGBitmapContextCreate(NULL, wide, high, 8, 0, space,
+                                            (CGBitmapInfo)kCGImageAlphaPremultipliedFirst | kCGBitmapByteOrder32Host);
+    CGColorSpaceRelease(space);
+    if (cg == NULL) {
+        return NULL;
+    }
+    CGContextScaleCTM(cg, scale, scale);
+    CGContextTranslateCTM(cg, 0, size.height);
+    CGContextScaleCTM(cg, 1, -1);
+    [NSGraphicsContext saveGraphicsState];
+    NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:cg flipped:YES];
+    draw();
+    [NSGraphicsContext restoreGraphicsState];
+    CGImageRef image = CGBitmapContextCreateImage(cg);
+    CGContextRelease(cg);
+    return image;
+}
+
+static NSImageRep *_Nullable QLMSkinImageRep(QLMSkin *skin, NSString *name, NSInteger scale) {
+    CGImageRef image = QLMSkinDecodedImage(skin, name, scale);
+    if (image == NULL) {
+        return nil;
+    }
+    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithCGImage:image];
+    rep.size = NSMakeSize(rep.pixelsWide / (CGFloat)scale, rep.pixelsHigh / (CGFloat)scale);
+    return rep;
+}
 
 // png/<name>.png with its @2x beside it, sized in points and stretched
 // through `insets`, or nil when either file won't load. Kept on the skin,
@@ -48,8 +122,8 @@ static NSImage *_Nullable QLMSkinStretchedImage(QLMSkin *skin, NSString *name, N
     if (cached != nil) {
         return cached == NSNull.null ? nil : cached;
     }
-    NSImageRep *one = QLMSkinImageRep([skin imageURLForName:name scale:1], 1);
-    NSImageRep *two = QLMSkinImageRep([skin imageURLForName:name scale:2], 2);
+    NSImageRep *one = QLMSkinImageRep(skin, name, 1);
+    NSImageRep *two = QLMSkinImageRep(skin, name, 2);
     NSImage *image = nil;
     if (one != nil && two != nil) {
         image = [[NSImage alloc] initWithSize:one.size];
@@ -71,13 +145,33 @@ static NSBezierPath *QLMSkinShape(NSRect rect, CGFloat radius, BOOL circle) {
     return [NSBezierPath bezierPathWithRoundedRect:rect xRadius:radius yRadius:radius];
 }
 
-// TRAP: a shadow's offset is in the base space, whose y grows up, so a
-// flipped view's y-down offset changes sign.
+static char QLMSkinLayerScaleKey;
+
+NSGraphicsContext *QLMSkinLayerGraphicsContext(CGContextRef context, CGFloat scale) {
+    NSGraphicsContext *graphics = [NSGraphicsContext graphicsContextWithCGContext:context flipped:YES];
+    objc_setAssociatedObject(graphics, &QLMSkinLayerScaleKey, @(scale), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+    return graphics;
+}
+
+// TRAP: a shadow's blur and offset are in the context's base space, which
+// the CTM doesn't scale. A bitmap's is in pixels with y up, so a flipped
+// drawing's y-down offset changes sign. A layer's own context's is in
+// points with y down, so there a shadow would blur twice as wide. A view's
+// backing store's has y down too: drawn there, modern's button shadows
+// fell upward. So no shadow draws in a view's drawRect: on the screen.
 static void QLMSkinSetShadow(QLMSkinColor color, CGFloat blur, CGSize offset) {
+    NSNumber *layerScale = objc_getAssociatedObject(NSGraphicsContext.currentContext, &QLMSkinLayerScaleKey);
     NSShadow *shadow = [[NSShadow alloc] init];
     shadow.shadowColor = QLMSkinNSColor(color);
-    shadow.shadowBlurRadius = blur;
-    shadow.shadowOffset = NSMakeSize(offset.width, -offset.height);
+    if (layerScale != nil) {
+        CGFloat scale = layerScale.doubleValue;
+        shadow.shadowBlurRadius = blur / scale;
+        shadow.shadowOffset = NSMakeSize(offset.width / scale, offset.height / scale);
+    }
+    else {
+        shadow.shadowBlurRadius = blur;
+        shadow.shadowOffset = NSMakeSize(offset.width, -offset.height);
+    }
     [shadow set];
 }
 
