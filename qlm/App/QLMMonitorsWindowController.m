@@ -121,7 +121,7 @@ static const double QLMMeterBarCounts = 48;
 
 @end
 
-@interface QLMMonitorsWindowController () <NSTableViewDataSource, NSTableViewDelegate>
+@interface QLMMonitorsWindowController () <NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate>
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) QLMBannerView *banner;
 @property (nonatomic) NSTextField *adapterLabel;
@@ -145,6 +145,7 @@ static const double QLMMeterBarCounts = 48;
     self = [super initWithWindow:window];
     if (self) {
         _monitorList = monitorList;
+        window.delegate = self;
         [self buildContent];
         [window center];
     }
@@ -240,9 +241,22 @@ static const double QLMMeterBarCounts = 48;
 }
 
 - (void)refresh {
+    if (QLMWindowIsSeen(self.window)) {
+        [self render];
+    }
+}
+
+#if DEBUG
+- (void)drawWhileOpen {
     if (self.window.visible) {
         [self render];
     }
+}
+#endif
+
+// A window that comes into view catches up at once.
+- (void)windowDidChangeOcclusionState:(NSNotification *)notification {
+    [self refresh];
 }
 
 - (void)render {

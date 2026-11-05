@@ -50,7 +50,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
 @property (nonatomic, nullable) QLMSetupWatcher *setupWatcher;
-// What the status item shows, so an unchanged snapshot does not redraw it.
+// What the status item shows, so an unchanged snapshot changes nothing.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
 @property (nonatomic) QLMOSDController *osdController;
@@ -75,6 +75,25 @@ static OSType QLMQuitReason(void) {
     }
     NSAppleEventDescriptor *reason = [event attributeDescriptorForKeyword:kAEQuitReason] ?: [event paramDescriptorForKeyword:kAEQuitReason];
     return reason.typeCodeValue;
+}
+
+// The adapter's host watch checks again as GLM launches or quits.
+// NSWorkspace posts both for every app with a Dock icon, as GLM is.
+static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePath)) {
+    NSNotificationCenter *center = NSWorkspace.sharedWorkspace.notificationCenter;
+    void (^take)(NSNotification *) = ^(NSNotification *notification) {
+        NSRunningApplication *app = notification.userInfo[NSWorkspaceApplicationKey];
+        NSString *path = app.executableURL.path;
+        if (path != nil) {
+            changed(path);
+        }
+    };
+    id launched = [center addObserverForName:NSWorkspaceDidLaunchApplicationNotification object:nil queue:nil usingBlock:take];
+    id quit = [center addObserverForName:NSWorkspaceDidTerminateApplicationNotification object:nil queue:nil usingBlock:take];
+    return ^{
+        [center removeObserver:launched];
+        [center removeObserver:quit];
+    };
 }
 
 @implementation QLMAppDelegate
@@ -185,7 +204,11 @@ static OSType QLMQuitReason(void) {
     id<QLMAdapter> adapter = nil;
     QLMFakeBus *bus = nil;
     if (self.preferences.usesAdapter) {
-        adapter = [[QLMHIDAdapter alloc] init];
+        QLMHIDAdapter *hid = [[QLMHIDAdapter alloc] init];
+        hid.launchWatch = ^dispatch_block_t(void (^changed)(NSString *executablePath)) {
+            return QLMWatchLaunches(changed);
+        };
+        adapter = hid;
     } else {
         bus = [QLMFakeBus demoBusWithSubwoofer:YES];
         bus.recordsSentMessages = NO;
@@ -273,6 +296,8 @@ static OSType QLMQuitReason(void) {
             [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
         }
     }
+    // A raise of the level or the knob reading waits up to a second.
+    [self.preferences flushKept];
 }
 
 // The same System starts again. It keeps the volume, dim, the mutes, and
@@ -293,6 +318,7 @@ static OSType QLMQuitReason(void) {
 - (void)restartSystem {
     QLMSystem *old = self.system;
     [old setSnapshotHandler:nil queue:dispatch_get_main_queue()];
+    [self.preferences flushKept];
     __weak QLMAppDelegate *weakSelf = self;
     [old stopWithCompletion:^{
         QLMAppDelegate *strongSelf = weakSelf;
@@ -329,15 +355,20 @@ static OSType QLMQuitReason(void) {
     } else if (snapshot.volumeDecibels != nil) {
         tip = [NSString stringWithFormat:@"qlm: %@%@", QLMDecibelsText(snapshot.volumeDecibels.doubleValue), snapshot.dimmed ? @", dimmed" : @""];
     }
-    if ([symbol isEqualToString:self.statusSymbol] && [tip isEqualToString:self.statusTip]) {
-        return;
+    NSStatusBarButton *button = self.statusItem.button;
+    // TRAP: a new image redraws the item on every display, about 5 ms each.
+    // A tooltip or a label redraws nothing.
+    if (![symbol isEqualToString:self.statusSymbol]) {
+        self.statusSymbol = symbol;
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil];
+        image.template = YES;
+        button.image = image;
     }
-    self.statusSymbol = symbol;
-    self.statusTip = tip;
-    NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:tip];
-    image.template = YES;
-    self.statusItem.button.image = image;
-    self.statusItem.button.toolTip = tip;
+    if (![tip isEqualToString:self.statusTip]) {
+        self.statusTip = tip;
+        button.toolTip = tip;
+        button.accessibilityLabel = tip;
+    }
 }
 
 #pragma mark - The setup file
@@ -636,6 +667,13 @@ static OSType QLMQuitReason(void) {
 
 - (void)debugShowWindow {
     [self showMainWindow:nil];
+}
+
+- (void)debugDrawWindows {
+    [self.mainWindowController drawWhileOpen];
+    [self.monitorsController drawWhileOpen];
+    [self.settingsController drawWhileOpen];
+    [self.fakeBusController drawWhileOpen];
 }
 
 - (QLMSkinChoice *)debugSkinChoice {

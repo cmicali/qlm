@@ -256,6 +256,8 @@ targets:
       - qlm/App/QLMSkinControls.m
       - qlm/App/QLMSkinLayers.m
       - qlm/App/QLMSkinView.m
+      # The main window asks it whether it is seen.
+      - qlm/App/QLMViews.m
     settings:
       base:
         PRODUCT_NAME: "$(TARGET_NAME)"

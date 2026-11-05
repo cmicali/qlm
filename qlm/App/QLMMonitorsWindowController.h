@@ -11,9 +11,14 @@ NS_ASSUME_NONNULL_BEGIN
 
 - (instancetype)initWithMonitorList:(QLMMonitorList *)monitorList;
 
-// Draws the monitor list's snapshot while the window is open. It draws again
-// when it next opens.
+// Draws the monitor list's snapshot while any of the window is on screen.
+// It draws again when it next comes into view.
 - (void)refresh;
+#if DEBUG
+// Draws the latest snapshot while the window is open, seen or not, for a
+// debug verb that reads what the window shows.
+- (void)drawWhileOpen;
+#endif
 
 @end
 

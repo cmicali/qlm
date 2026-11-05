@@ -32,9 +32,14 @@ NS_ASSUME_NONNULL_BEGIN
 // The loaded setup, the file's name, and why it did not read.
 - (void)showSetup:(nullable QLMSetup *)setup fileName:(nullable NSString *)fileName error:(nullable NSError *)error;
 
-// Draws the monitor list's snapshot while the window shows. It draws again
-// when it next shows.
+// Draws the monitor list's snapshot while any of the window is on screen.
+// It draws again when it next comes into view.
 - (void)refresh;
+#if DEBUG
+// Draws the latest snapshot while the window is open, seen or not, for a
+// debug verb that reads what the window shows.
+- (void)drawWhileOpen;
+#endif
 // Reads the volume range from the preferences again.
 - (void)reloadVolumeRange;
 // Draws the window in the skin, from now on.

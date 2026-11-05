@@ -71,6 +71,7 @@ These rules protect the monitors and the listener. They outrank any feature.
 - **Every reply of qlm's own verbs carries `at`**, the Mac's local time to the millisecond, for a run's `notes.md`. vibe-libs' standard verbs carry none.
 - **`.claude/skills/app-hardware-run` runs a supervised test on the real monitors** through these verbs, one step at a time. Follow it for any run on the hardware.
 - **The standard verbs are vibe-libs'**: `dump_build`, `dump_view_tree`, `dump_screenshot -`, `dump_health`, `quit`, and the input verbs, such as `click <x> <y>` and `key <key>`. The mouse verbs aim at the popover's window while it shows, else the key window. Coordinates are content-view points with a top-left origin. `dump_screenshot -` writes the PNG to stdout.
+- **A window that isn't seen draws no snapshot**: closed, minimized, on another Space, or covered, as by the Terminal in a hardware run. So `dump_screenshot -` and `dump_view_tree` draw every open window first.
 - **Drive the app through the channel, never through System Events or AppleScript UI scripting.**
 - **TRAP: vibe-libs' `quit` terminates inside a main-queue block.** There the app's wait for System's stop can only time out, 3 s later, so the hand-back may not finish. Quit with `quit_answering`.
 - **The channel ships in no Release build.** `make check-release` builds the app in both configurations. It fails if a symbol or string of the channel, qlm's or the pieces', is in the Release app. It first finds each one in the Debug app, so it can't go stale.

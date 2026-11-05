@@ -546,6 +546,11 @@ NSString *QLMDebugRun(NSArray<NSString *> *args, NSString *commandId, id<QLMDebu
     if (app == nil) {
         return VibeErrorJSON(@"the app isn't running");
     }
+    // TRAP: a window behind the Terminal, as in a hardware run, draws no
+    // snapshot, so these would read stale content.
+    if ([@[@"dump_screenshot", @"dump_view_tree"] containsObject:verb]) {
+        [app debugDrawWindows];
+    }
     return ((VibeDebugCommandHandler)spec[@"handler"])(args, commandId, app);
 }
 

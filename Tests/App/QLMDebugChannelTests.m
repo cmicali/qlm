@@ -220,6 +220,10 @@
     [self.actions addObject:@"show window"];
 }
 
+- (void)debugDrawWindows {
+    [self.actions addObject:@"draw windows"];
+}
+
 - (NSString *)debugChooseSkin:(NSString *)name {
     NSString *refusal = [self.debugSkinChoice chooseSkinNamed:name];
     if (refusal == nil) {
@@ -371,6 +375,15 @@
     NSString *channel = NSBundle.mainBundle.bundleIdentifier;
     XCTAssertGreaterThan(channel.length, 0u);
     XCTAssertFalse([channel hasPrefix:@"com.commonwealthrecordings.qlm"], @"%@", channel);
+}
+
+// A covered window draws no snapshot, so the two verbs that read the
+// windows draw them first. No other verb does.
+- (void)testTheVerbsThatReadTheWindowsDrawThemFirst {
+    (void)[self replyTo:@[@"dump_build"]];
+    XCTAssertFalse([_app.actions containsObject:@"draw windows"]);
+    (void)[self replyTo:@[@"dump_view_tree"]];
+    XCTAssertEqualObjects(_app.actions, @[@"draw windows"]);
 }
 
 - (void)testNoVerbIsInTwoTables {

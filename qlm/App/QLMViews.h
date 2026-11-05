@@ -15,4 +15,9 @@ NSImageView *QLMDotView(void);
 // Pins the view to the container's four edges.
 void QLMPinToEdges(NSView *view, NSView *container);
 
+// Whether any of the window is on screen: not closed, minimized, on another
+// Space, or behind other windows. A window seen nowhere draws no snapshot.
+// AppKit posts NSWindowDidChangeOcclusionStateNotification as this changes.
+BOOL QLMWindowIsSeen(NSWindow *_Nullable window);
+
 NS_ASSUME_NONNULL_END

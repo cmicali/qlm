@@ -13,6 +13,10 @@ static NSData *QLMID(uint8_t last) {
     return QLMBytes(bytes, sizeof bytes);
 }
 
+@interface QLMBusPreferences (QLMTesting)
+- (void)keepKnobTenths:(nullable NSNumber *)knobTenths;
+@end
+
 // The app's preferences, over a defaults domain of the test's own.
 @interface QLMPreferencesTests : XCTestCase
 @end
@@ -20,6 +24,7 @@ static NSData *QLMID(uint8_t last) {
 @implementation QLMPreferencesTests {
     NSUserDefaults *_defaults;
     QLMPreferences *_preferences;
+    QLMPreferences *_relaunched;  // the bus preferences hold it weakly
 }
 
 - (void)setUp {
@@ -543,6 +548,149 @@ static BOOL QLMAllHeard(QLMFakeBus *bus, uint8_t value) {
     XCTAssertEqual(kept.mutedHardwareIDs.count, 0u);
     XCTAssertEqual(kept.volumeDecibels, -40);
     [self stop:system clock:time muting:NO];
+}
+
+#pragma mark - Writes per knob reading
+
+// A running System's snapshot at the level, with the knob read at `knob`.
+static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
+    QLMSnapshot *snapshot = [[QLMSnapshot alloc] init];
+    snapshot.running = YES;
+    snapshot.volumeDecibels = @(volume);
+    QLMAdapterState *adapter = [[QLMAdapterState alloc] init];
+    adapter.hasStatus = YES;
+    adapter.knobTenths = knob;
+    snapshot.adapter = adapter;
+    return snapshot;
+}
+
+// What a crash now would leave for the next launch: only what is written.
+- (QLMBusPreferences *)written {
+    _relaunched = [[QLMPreferences alloc] initWithDefaults:_defaults];
+    return _relaunched.adapterBus;
+}
+
+// The flushes a bus scheduled, which the test runs.
+- (NSMutableArray<dispatch_block_t> *)holdFlushesOf:(QLMBusPreferences *)kept {
+    NSMutableArray<dispatch_block_t> *flushes = [NSMutableArray array];
+    kept.scheduler = ^(NSTimeInterval delay, dispatch_block_t block) {
+        XCTAssertEqual(delay, QLMKeptRaiseDelay);
+        [flushes addObject:block];
+    };
+    return flushes;
+}
+
+// A raise of the level and the knob waits, and a second's raises write
+// once, the latest. Reads see what waits.
+- (void)testRaisesWriteOnceASecond {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-40, @(-400))];
+    XCTAssertEqualObjects(self.written.knobTenths, @(-400), @"a first reading writes at once");
+    XCTAssertEqual(flushes.count, 0u);
+
+    for (NSNumber *level in @[@(-39), @(-38), @(-37)]) {
+        [kept keepFromSnapshot:QLMKnobSnapshot(level.doubleValue, @(level.integerValue * 10))];
+    }
+    XCTAssertEqual(flushes.count, 1u);
+    XCTAssertEqual(kept.volumeDecibels, -37);
+    XCTAssertEqualObjects(kept.knobTenths, @(-370));
+    XCTAssertEqual(self.written.volumeDecibels, -40);
+    XCTAssertEqualObjects(self.written.knobTenths, @(-400));
+
+    flushes.firstObject();
+    XCTAssertEqual(self.written.volumeDecibels, -37);
+    XCTAssertEqualObjects(self.written.knobTenths, @(-370));
+    [kept keepFromSnapshot:QLMKnobSnapshot(-36, @(-360))];
+    XCTAssertEqual(flushes.count, 2u, @"the next raise waits again");
+}
+
+// AGENTS.md's Safety: a crash can't leave the next launch louder than the
+// last level heard. A level or a knob reading lower than the one written
+// writes both at once, with a raise waiting or none.
+- (void)testALoweringWritesAtOnce {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-40, @(-400))];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-45, @(-450))];
+    XCTAssertEqual(self.written.volumeDecibels, -45);
+    XCTAssertEqualObjects(self.written.knobTenths, @(-450));
+
+    [kept keepFromSnapshot:QLMKnobSnapshot(-30, @(-300))];
+    XCTAssertEqual(self.written.volumeDecibels, -45);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-50, @(-300))];
+    XCTAssertEqual(self.written.volumeDecibels, -50, @"a lower level writes at once");
+    XCTAssertEqualObjects(self.written.knobTenths, @(-300), @"and the reading with it");
+
+    [kept keepFromSnapshot:QLMKnobSnapshot(-50, @(-500))];
+    XCTAssertEqualObjects(self.written.knobTenths, @(-500), @"a lower reading writes at once");
+    [kept keepFromSnapshot:QLMKnobSnapshot(-50, nil)];
+    XCTAssertTrue(self.written.knobRead);
+    XCTAssertNil(self.written.knobTenths, @"a knob taken out writes at once");
+    [kept keepFromSnapshot:QLMKnobSnapshot(-50, @(-500))];
+    XCTAssertEqualObjects(self.written.knobTenths, @(-500), @"a knob put in writes at once");
+    XCTAssertEqual(flushes.count, 1u);
+}
+
+// Every stop writes what waits: a stopped System's snapshot, and the app's
+// flush at quit, sleep, and a change of the adapter setting.
+- (void)testEveryStopWritesWhatWaits {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    QLMBusPreferences *fake = _preferences.fakeBus;
+    (void)[self holdFlushesOf:kept];
+    (void)[self holdFlushesOf:fake];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-40, @(-400))];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-35, @(-350))];
+    QLMSnapshot *stopped = [[QLMSnapshot alloc] init];
+    stopped.volumeDecibels = @(-35);
+    [kept keepFromSnapshot:stopped];
+    XCTAssertEqual(self.written.volumeDecibels, -35);
+    XCTAssertEqualObjects(self.written.knobTenths, @(-350));
+
+    [kept keepFromSnapshot:QLMKnobSnapshot(-32, @(-320))];
+    [fake keepFromSnapshot:QLMKnobSnapshot(-45, @(-450))];
+    [fake keepFromSnapshot:QLMKnobSnapshot(-38, @(-380))];
+    [_preferences flushKept];
+    XCTAssertEqual(self.written.volumeDecibels, -32);
+    XCTAssertEqualObjects(self.written.knobTenths, @(-320));
+    QLMBusPreferences *writtenFake = self.written;
+    writtenFake = _relaunched.fakeBus;
+    XCTAssertEqual(writtenFake.volumeDecibels, -38);
+    XCTAssertEqualObjects(writtenFake.knobTenths, @(-380));
+}
+
+// A turn up on the fake bus while System runs, then its stop, plain or
+// muting, as at quit and sleep. The scheduled flush never runs, so only
+// the stop's snapshot writes the raise.
+- (void)testASystemsStopWritesARaise {
+    for (NSNumber *mutes in @[@NO, @YES]) {
+        [_defaults removePersistentDomainForName:NSStringFromClass([self class])];
+        QLMPreferences *preferences = [[QLMPreferences alloc] initWithDefaults:_defaults];
+        QLMBusPreferences *kept = preferences.fakeBus;
+        kept.scheduler = ^(NSTimeInterval delay, dispatch_block_t block) {
+        };
+        QLMVirtualClock *time = [[QLMVirtualClock alloc] init];
+        QLMFakeBus *bus = [self fakeBusFor:kept];
+        [bus perform:^{
+            bus.knobTenths = @(-400);
+        }];
+        QLMSystem *system = [self systemOn:bus clock:time keeping:kept];
+        [self settle:system clock:time until:nil];
+        [bus perform:^{
+            bus.knobTenths = @(-300);
+        }];
+        [self settle:system clock:time until:^BOOL(QLMSnapshot *snapshot) {
+            return [snapshot.volumeDecibels isEqual:@(-30)] && [kept.knobTenths isEqual:@(-300)];
+        }];
+        (void)self.written;
+        QLMBusPreferences *written = _relaunched.fakeBus;
+        XCTAssertNotEqual(written.volumeDecibels, -30, @"the raise waits");
+        [self stop:system clock:time muting:mutes.boolValue];
+        (void)self.written;
+        written = _relaunched.fakeBus;
+        XCTAssertEqual(written.volumeDecibels, -30, @"muting %@", mutes);
+        XCTAssertEqualObjects(written.knobTenths, @(-300), @"muting %@", mutes);
+    }
 }
 
 @end

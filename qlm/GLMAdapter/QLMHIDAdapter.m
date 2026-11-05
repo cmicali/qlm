@@ -5,9 +5,17 @@
 #import <IOKit/hid/IOHIDKeys.h>
 
 #import "QLMHostCheck.h"
+#import "QLMHostWatch.h"
 #import "QLMReportLink.h"
 
-static const NSTimeInterval QLMHIDWatchInterval = 1.0;
+// The adapter's HID device, its interface, and its USB device: an open of
+// any of them is an open of the adapter.
+enum { QLMHIDWatchedEntries = 8 };
+// TRAP: qlm's own open and close send interest messages too, so a check
+// that finds no host could reopen in a loop: after a write error that
+// closes the device, or a seize that fails with no host to see. A reopen
+// waits this long after the last try.
+static const NSTimeInterval QLMHIDReopenInterval = 1;
 
 @interface QLMHIDAdapter ()
 - (void)takeArrivals;
@@ -33,6 +41,12 @@ static void QLMHIDInput(void *context, IOReturn result, void *sender, IOHIDRepor
 
 static void QLMHIDRemoved(void *context, IOReturn result, void *sender) {
     [(__bridge QLMHIDAdapter *)context removed:sender];
+}
+
+// Any message: an open, an attempt at one while qlm holds the seize, a
+// close, or a termination.
+static void QLMHIDInterest(void *context, io_service_t service, natural_t type, void *argument) {
+    [(__bridge QLMHIDAdapter *)context adapterChanged];
 }
 
 NSError *QLMHIDWriteError(IOReturn result) {
@@ -64,9 +78,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 @implementation QLMHIDAdapter {
     dispatch_queue_t _queue;
-    dispatch_queue_t _checkQueue;
     BOOL _running;
-    BOOL _checking;
     // Keeps self alive while IOKit holds it as a callback context.
     const void *_runningSelf;
     IONotificationPortRef _port;
@@ -81,7 +93,13 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     id<QLMClock> _clock;
     uint64_t _linkEntry;
     uint8_t _input[QLMReportLength];
-    id<QLMTimer> _watch;
+    QLMHostWatch *_hostWatch;
+    dispatch_block_t _endLaunchWatch;
+    io_object_t _interests[QLMHIDWatchedEntries];
+    int _interestCount;
+    NSTimeInterval _lastOpenTry;  // on the clock; -INFINITY before the first
+    BOOL _reopenScheduled;
+    NSUInteger _reopenGeneration;  // a stop, a refusal, or a new service drops a scheduled reopen
     NSError *_problem;  // why a send fails while no device is open
     NSString *_deviceDescription;
 }
@@ -90,11 +108,30 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     self = [super init];
     if (self) {
         _replyTimeout = 0.1;
-        _checkQueue = dispatch_queue_create("com.commonwealthrecordings.qlm.hostcheck", DISPATCH_QUEUE_SERIAL);
         _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
         _deviceDescription = @"the GLM adapter over USB, not open";
+        _lastOpenTry = -INFINITY;
         _open = ^IOReturn(IOHIDDeviceRef device, IOOptionBits options) {
             return IOHIDDeviceOpen(device, options);
+        };
+        __weak QLMHIDAdapter *weakSelf = self;
+        _attach = ^NSString *(IOHIDDeviceRef device) {
+            return [weakSelf attachDevice:device];
+        };
+        _close = ^(IOHIDDeviceRef device, BOOL removed) {
+            if (!removed) {
+                IOHIDDeviceClose(device, kIOHIDOptionsTypeSeizeDevice);
+            }
+            IOHIDDeviceCancel(device);
+        };
+        _hostCheck = ^NSString * {
+            return QLMHostCheckOtherHost();
+        };
+        _clientCheck = ^NSString * {
+            return QLMHostCheckAdapterClients();
+        };
+        _makeMatching = ^CFMutableDictionaryRef {
+            return QLMHostCheckCreateHIDMatching();
         };
     }
     return self;
@@ -125,9 +162,22 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     _runningSelf = CFBridgingRetain(self);
     _problem = QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"No GLM adapter is connected.");
 
+    __weak QLMHIDAdapter *weakSelf = self;
+    QLMHostWatch *watch = [[QLMHostWatch alloc] initWithQueue:queue clock:clock check:_hostCheck clientCheck:_clientCheck
+                                                        found:^(NSString *host) {
+        [weakSelf finishCheck:host];
+    }];
+    _hostWatch = watch;
+    [watch start];
+    if (_launchWatch != nil) {
+        _endLaunchWatch = _launchWatch(^(NSString *executablePath) {
+            [watch appChangedAtPath:executablePath];
+        });
+    }
+
     _port = IONotificationPortCreate(kIOMainPortDefault);
     IONotificationPortSetDispatchQueue(_port, queue);
-    kern_return_t result = IOServiceAddMatchingNotification(_port, kIOFirstMatchNotification, QLMHostCheckCreateHIDMatching(),
+    kern_return_t result = IOServiceAddMatchingNotification(_port, kIOFirstMatchNotification, _makeMatching(),
                                                             QLMHIDArrived, (__bridge void *)self, &_arrivals);
     if (result == KERN_SUCCESS) {
         [self takeArrivals];
@@ -137,15 +187,10 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     }
     // The removal callback needs an open device. After a reopen that failed,
     // none is open.
-    if (IOServiceAddMatchingNotification(_port, kIOTerminatedNotification, QLMHostCheckCreateHIDMatching(), QLMHIDTerminated,
+    if (IOServiceAddMatchingNotification(_port, kIOTerminatedNotification, _makeMatching(), QLMHIDTerminated,
                                          (__bridge void *)self, &_terminations) == KERN_SUCCESS) {
         [self takeTerminations];
     }
-
-    __weak QLMHIDAdapter *weakSelf = self;
-    _watch = [_clock every:QLMHIDWatchInterval queue:queue run:^{
-        [weakSelf checkHosts];
-    }];
 }
 
 - (void)stop {
@@ -153,8 +198,13 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return;
     }
     _running = NO;
-    [_watch cancel];
-    _watch = nil;
+    [self cancelReopen];
+    [_hostWatch stop];
+    _hostWatch = nil;
+    if (_endLaunchWatch != nil) {
+        _endLaunchWatch();
+        _endLaunchWatch = nil;
+    }
     [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is stopped.") removed:NO];
     if (_arrivals != IO_OBJECT_NULL) {
         IOObjectRelease(_arrivals);
@@ -164,9 +214,9 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         IOObjectRelease(_terminations);
         _terminations = IO_OBJECT_NULL;
     }
+    [self forgetService];
     IONotificationPortDestroy(_port);
     _port = NULL;
-    [self forgetService];
     const void *runningSelf = _runningSelf;
     _runningSelf = NULL;
     dispatch_async(_queue, ^{
@@ -183,6 +233,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         if (_device == NULL) {
             [self forgetService];
             _service = service;
+            [self watchService];
         } else {
             IOObjectRelease(service);
         }
@@ -205,13 +256,54 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 }
 
 - (void)forgetService {
+    [self cancelReopen];
+    [self unwatchService];
     if (_service != IO_OBJECT_NULL) {
         IOObjectRelease(_service);
         _service = IO_OBJECT_NULL;
     }
 }
 
+// IOKit sends an interest message to a service each time a process opens it,
+// tries to, or closes it. An open of the adapter goes through its HID
+// device, its USB interface, or its USB device, so each is watched, from the
+// HID device up to the USB device.
+- (void)watchService {
+    [self unwatchService];
+    io_registry_entry_t entry = _service;
+    IOObjectRetain(entry);
+    while (entry != IO_OBJECT_NULL && _interestCount < QLMHIDWatchedEntries) {
+        io_object_t interest = IO_OBJECT_NULL;
+        if (IOServiceAddInterestNotification(_port, entry, kIOGeneralInterest, QLMHIDInterest, (__bridge void *)self, &interest)
+            == KERN_SUCCESS) {
+            _interests[_interestCount++] = interest;
+        }
+        io_registry_entry_t parent = IO_OBJECT_NULL;
+        BOOL top = IOObjectConformsTo(entry, "IOUSBHostDevice");
+        if (top || IORegistryEntryGetParentEntry(entry, kIOServicePlane, &parent) != KERN_SUCCESS) {
+            parent = IO_OBJECT_NULL;
+        }
+        IOObjectRelease(entry);
+        entry = parent;
+    }
+    if (entry != IO_OBJECT_NULL) {
+        IOObjectRelease(entry);
+    }
+}
+
+- (void)unwatchService {
+    for (int i = 0; i < _interestCount; i++) {
+        IOObjectRelease(_interests[i]);
+    }
+    _interestCount = 0;
+}
+
+- (void)adapterChanged {
+    [_hostWatch adapterChanged];
+}
+
 - (void)refuse:(NSString *)host {
+    [self cancelReopen];
     [self closeWithError:QLMAdapterErrorMake(QLMAdapterErrorBusy, host) removed:NO];
 }
 
@@ -219,7 +311,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     if (!_running || _device != NULL || _service == IO_OBJECT_NULL) {
         return;
     }
-    NSString *host = QLMHostCheckOtherHost();
+    NSString *host = _hostCheck();
     if (host != nil) {
         [self refuse:host];
         return;
@@ -258,6 +350,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 // Nil once the device is open, or why not.
 - (nullable NSError *)openService {
+    _lastOpenTry = _clock.now;
     IOHIDDeviceRef device = IOHIDDeviceCreate(kCFAllocatorDefault, _service);
     if (device == NULL) {
         return QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"IOKit did not make a HID device of the GLM adapter.");
@@ -273,7 +366,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     if (!_link.gaveUp || _service == IO_OBJECT_NULL) {
         return QLMReconnectNotNeeded;
     }
-    NSString *host = QLMHostCheckOtherHost();
+    NSString *host = _hostCheck();
     if (host == nil) {
         if (_device != NULL) {
             [self releaseDevice:NO];
@@ -284,7 +377,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
             return QLMReconnectReopened;
         }
         _problem = refusal;
-        host = QLMHostCheckOtherHost();
+        host = _hostCheck();
     }
     if (host != nil) {
         [self refuse:host];
@@ -307,13 +400,20 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return QLMAdapterErrorMake(QLMAdapterErrorBusy, description);
     }
     // GLM may have started between the check and the open.
-    NSString *host = QLMHostCheckOtherHost();
+    NSString *host = _hostCheck();
     if (host != nil) {
         IOHIDDeviceClose(device, kIOHIDOptionsTypeSeizeDevice);
         CFRelease(device);
         return QLMAdapterErrorMake(QLMAdapterErrorBusy, host);
     }
 
+    _deviceDescription = _attach(device);
+    _device = device;
+    _problem = nil;
+    return nil;
+}
+
+- (NSString *)attachDevice:(IOHIDDeviceRef)device {
     const void *context = CFBridgingRetain(self);
     IOHIDDeviceSetDispatchQueue(device, _queue);
     IOHIDDeviceRegisterInputReportCallback(device, _input, sizeof _input, QLMHIDInput, (void *)context);
@@ -323,15 +423,11 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         CFRelease(context);
     });
     IOHIDDeviceActivate(device);
-
-    _device = device;
-    _problem = nil;
     NSNumber *location = QLMHIDNumberProperty(device, CFSTR(kIOHIDLocationIDKey));
-    _deviceDescription = [NSString stringWithFormat:@"%@ by %@ over USB, serial %@, location 0x%08x, seized",
-                          QLMHIDStringProperty(device, CFSTR(kIOHIDProductKey)) ?: @"?",
-                          QLMHIDStringProperty(device, CFSTR(kIOHIDManufacturerKey)) ?: @"?",
-                          QLMHIDStringProperty(device, CFSTR(kIOHIDSerialNumberKey)) ?: @"?", location.unsignedIntValue];
-    return nil;
+    return [NSString stringWithFormat:@"%@ by %@ over USB, serial %@, location 0x%08x, seized",
+                                      QLMHIDStringProperty(device, CFSTR(kIOHIDProductKey)) ?: @"?",
+                                      QLMHIDStringProperty(device, CFSTR(kIOHIDManufacturerKey)) ?: @"?",
+                                      QLMHIDStringProperty(device, CFSTR(kIOHIDSerialNumberKey)) ?: @"?", location.unsignedIntValue];
 }
 
 // A link that gave up stays open across a failed reopen, so it closes here
@@ -352,10 +448,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     IOHIDDeviceRef device = _device;
     _device = NULL;
     _deviceDescription = removed ? @"the GLM adapter over USB, unplugged" : @"the GLM adapter over USB, closed";
-    if (!removed) {
-        IOHIDDeviceClose(device, kIOHIDOptionsTypeSeizeDevice);
-    }
-    IOHIDDeviceCancel(device);
+    _close(device, removed);
 }
 
 - (void)removed:(void *)sender {
@@ -368,32 +461,58 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
 
 #pragma mark - Watching for another host
 
-// The process scan takes milliseconds, so it runs off System's queue.
-- (void)checkHosts {
-    if (!_running || _checking) {
-        return;
-    }
-    _checking = YES;
-    dispatch_queue_t queue = _queue;
-    __weak QLMHIDAdapter *weakSelf = self;
-    dispatch_async(_checkQueue, ^{
-        NSString *host = QLMHostCheckOtherHost();
-        dispatch_async(queue, ^{
-            [weakSelf finishCheck:host];
-        });
-    });
-}
-
+// The host watch's answer. TRAP: the seize keeps GLM from opening the
+// adapter while qlm holds it, so the watch is the rule that qlm lets go
+// when GLM launches, and a net under the seize.
 - (void)finishCheck:(nullable NSString *)host {
-    _checking = NO;
     if (!_running) {
         return;
     }
     if (host != nil) {
         [self refuse:host];
     } else {
-        [self openIfFree];
+        [self reopenIfFree];
     }
+}
+
+- (void)cancelReopen {
+    _reopenGeneration += 1;
+    _reopenScheduled = NO;
+}
+
+// TRAP: openIfFree scans every process before it reads the link, so a
+// reopen that could not open goes no further. Else each second's client
+// check would run the scan on System's queue.
+- (BOOL)canReopen {
+    return _device == NULL && _service != IO_OBJECT_NULL && _link.failure == nil && !_link.gaveUp;
+}
+
+- (void)reopenIfFree {
+    if (![self canReopen]) {
+        return;
+    }
+    NSTimeInterval wait = _lastOpenTry + QLMHIDReopenInterval - _clock.now;
+    if (wait <= 0) {
+        _lastOpenTry = _clock.now;
+        [self openIfFree];
+        return;
+    }
+    if (_reopenScheduled) {
+        return;
+    }
+    _reopenScheduled = YES;
+    NSUInteger generation = _reopenGeneration;
+    __weak QLMHIDAdapter *weakSelf = self;
+    [_clock after:wait queue:_queue run:^{
+        QLMHIDAdapter *strongSelf = weakSelf;
+        if (strongSelf == nil || generation != strongSelf->_reopenGeneration) {
+            return;
+        }
+        strongSelf->_reopenScheduled = NO;
+        if (strongSelf->_running) {
+            [strongSelf reopenIfFree];
+        }
+    }];
 }
 
 #pragma mark - Reports

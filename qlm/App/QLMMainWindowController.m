@@ -4,6 +4,7 @@
 #import "QLMFormat.h"
 #import "QLMMainWindowModel.h"
 #import "QLMSkinView.h"
+#import "QLMViews.h"
 
 static NSString *const QLMMainWindowAutosaveName = @"QLMMainWindow";
 // A blink's half: about two a second.
@@ -169,8 +170,25 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 }
 
 - (void)refresh {
+    if (_windowMade && QLMWindowIsSeen(super.window)) {
+        [self render];
+    }
+}
+
+#if DEBUG
+- (void)drawWhileOpen {
     if (self.showing) {
         [self render];
+    }
+}
+#endif
+
+// A window that comes into view catches up at once.
+- (void)windowDidChangeOcclusionState:(NSNotification *)notification {
+    if (QLMWindowIsSeen(super.window)) {
+        [self render];
+    } else {
+        [self stopBlink];
     }
 }
 
@@ -223,7 +241,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 // In the common modes, so it blinks on through a live resize.
 - (void)startBlink {
-    if (self.blinkTimer != nil || !self.showing) {
+    if (self.blinkTimer != nil || !QLMWindowIsSeen(super.window)) {
         return;
     }
     self.model.blinkOn = YES;

@@ -89,8 +89,8 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // is closed from qlm's close to its open: one turn of the queue, or the
 // waits between tries when an open fails. Another host would have to open
 // the adapter, write, and close it in that time, unseen by the host checks,
-// which run before and after each open and every second. GLM keeps running
-// once it opens the adapter, so they find it.
+// which run before and after each open, and as IOKit tells of each open.
+// GLM keeps running once it opens the adapter, so they find it.
 - (void)resync;
 
 // Why the link lost track, QLMAdapterErrorLostTrack, or nil. It never
