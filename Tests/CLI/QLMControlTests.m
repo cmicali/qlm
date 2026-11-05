@@ -597,6 +597,112 @@ static NSArray<NSData *> *QLMPair(void) {
     }
 }
 
+// poll sends the knob's level, so it takes a ceiling as a control does:
+// QLMCeilingLimit unstated, and above it only with --allow-high-ceiling.
+- (void)testPollTakesACeilingAsAControlDoes {
+    QLMSystemSettings *settings = [self pollSettings:@[]];
+    XCTAssertEqual(settings.ceilingDecibels, QLMCeilingLimit);
+    XCTAssertTrue(settings.startsAtKnob);
+    XCTAssertEqual(([self pollSettings:@[@"--ceiling", @"-45", @"--fake"]].ceilingDecibels), -45.0);
+    XCTAssertEqual(([self pollSettings:@[@"--ceiling", @"-20", @"--allow-high-ceiling"]].ceilingDecibels), -20.0);
+    XCTAssertEqual(([self pollSettings:@[@"--allow-high-ceiling"]].ceilingDecibels), QLMCeilingLimit);
+    XCTAssertFalse([[QLMSystemSettings alloc] init].startsAtKnob);
+
+    NSString *problem = nil;
+    NSDictionary<NSString *, NSArray<NSString *> *> *refused = @{
+        @"--allow-high-ceiling": @[@"--ceiling", @"-29.5"],
+        @"0 dB": @[@"--ceiling", @"0.5", @"--allow-high-ceiling"],
+        @"a ceiling": @[@"--ceiling", @"loud"],
+    };
+    for (NSString *reason in refused) {
+        problem = nil;
+        NSDictionary<NSString *, NSString *> *given = QLMQueryArguments(@"poll", refused[reason], &problem);
+        XCTAssertNotNil(given, @"%@", problem);
+        XCTAssertNil(QLMPollSettings(given, &problem), @"%@", refused[reason]);
+        XCTAssertTrue([problem containsString:reason], @"%@", problem);
+    }
+    NSDictionary<NSString *, NSArray<NSString *> *> *unread = @{
+        @"needs a value": @[@"--ceiling"],
+        @"unknown": @[@"--dry-run"],
+    };
+    for (NSString *reason in unread) {
+        problem = nil;
+        XCTAssertNil(QLMQueryArguments(@"poll", unread[reason], &problem), @"%@", unread[reason]);
+        XCTAssertTrue([problem containsString:reason], @"%@", problem);
+    }
+    for (NSString *command in @[@"info", @"discover"]) {
+        XCTAssertNil(QLMQueryArguments(command, @[@"--ceiling", @"-40"], &problem), @"%@", command);
+        XCTAssertNil(QLMQueryArguments(command, @[@"--allow-high-ceiling"], &problem), @"%@", command);
+    }
+}
+
+// poll's settings from its arguments, which both reads pass.
+- (QLMSystemSettings *)pollSettings:(NSArray<NSString *> *)arguments {
+    NSString *problem = nil;
+    NSDictionary<NSString *, NSString *> *given = QLMQueryArguments(@"poll", arguments, &problem);
+    XCTAssertNotNil(given, @"%@", problem);
+    QLMSystemSettings *settings = given == nil ? nil : QLMPollSettings(given, &problem);
+    XCTAssertNotNil(settings, @"%@", problem);
+    return settings;
+}
+
+// Every volume frame poll sends on the fake bus over 3 s, with the knob at
+// `tenths`, or nil with no knob in, and the arguments given. `text` gets
+// what poll prints once it reads the knob.
+- (NSArray<NSData *> *)pollLevelsWithKnob:(nullable NSNumber *)tenths arguments:(NSArray<NSString *> *)arguments text:(NSString **)text {
+    QLMSystemSettings *settings = [self pollSettings:[@[@"--fake"] arrayByAddingObjectsFromArray:arguments]];
+    settings.clock = _time;
+    QLMFakeBus *bus = [QLMFakeBus demoBusWithSubwoofer:NO];
+    [bus perform:^{
+        bus.knobTenths = tenths;
+    }];
+    QLMSystem *system = [[QLMSystem alloc] initWithAdapter:bus settings:settings];
+    [system start];
+    [_time runUntil:^BOOL {
+        return NO;
+    } within:3];
+    *text = QLMPollLevelText(system.snapshot);
+    [system stop];
+    [_time settle];
+    return QLMSentWithOpcode(bus.sentMessages, 0x1F, 0);
+}
+
+// poll sends the knob's level, capped at the ceiling, and nothing louder.
+// The stop sends the knob's level too, when that is no louder.
+- (void)testPollSendsTheKnobsLevelUnderTheCeiling {
+    NSString *text = nil;
+    NSArray<NSData *> *levels = [self pollLevelsWithKnob:@(-427) arguments:@[] text:&text];
+    XCTAssertGreaterThan(levels.count, 3u);
+    NSData *knob = QLMRecord(QLMCommandVolume(-42.5, QLMCeilingLimit));
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, knob);
+    }
+    XCTAssertEqualObjects(text, @"poll sends -42.5 dB, the knob's level.");
+
+    levels = [self pollLevelsWithKnob:@(-200) arguments:@[] text:&text];
+    XCTAssertGreaterThan(levels.count, 3u);
+    NSData *ceiling = QLMRecord(QLMCommandVolume(QLMCeilingLimit, QLMCeilingLimit));
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, ceiling);
+    }
+    XCTAssertEqualObjects(text, @"poll sends -30.0 dB, the ceiling, which is under the knob's level.");
+
+    levels = [self pollLevelsWithKnob:@(-200) arguments:@[@"--ceiling", @"-50"] text:&text];
+    XCTAssertGreaterThan(levels.count, 3u);
+    for (NSData *level in levels) {
+        XCTAssertEqualObjects(level, QLMRecord(QLMCommandVolume(-50, -50)));
+    }
+}
+
+// With no knob in, the take-over's level is unknown, so poll sends none,
+// and says the outputs may fall silent.
+- (void)testPollWithNoKnobSendsNoLevel {
+    NSString *text = nil;
+    XCTAssertEqual([self pollLevelsWithKnob:nil arguments:@[] text:&text].count, 0u);
+    XCTAssertEqualObjects(text, @"No knob is in, so poll sends no level until one is. The monitors' outputs may fall silent until a knob is in.");
+    XCTAssertTrue([QLMPollStartText([self pollSettings:@[]]) containsString:@"-30.0 dB ceiling"]);
+}
+
 // Without --adapter-poll, the settings are System's own: GLM's pair every
 // 0.107 s (docs/adapter-status.md). With it, one poll a round.
 - (void)testAdapterPollSetsOnePollARound {
