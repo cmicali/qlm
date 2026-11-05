@@ -13,10 +13,12 @@ NS_ASSUME_NONNULL_BEGIN
 // another process holding the device. Then every send fails with
 // QLMAdapterErrorBusy, whose description names the host, and nothing goes
 // out. It checks before it opens, and again just after. While it runs, it
-// checks again when GLM launches or quits, as the launch watch tells it,
-// and when a process opens the adapter, tries to, or closes it, as IOKit
-// tells it. It checks every 30 s too, in case an event never comes. When a
-// host appears, it closes the device at once. It opens the device only
+// reads the adapter's own part of the IORegistry each second, for a process
+// that holds it. It scans every process for GLM only when GLM launches or
+// quits, as the launch watch tells it, when a process opens the adapter,
+// tries to, or closes it, as IOKit tells it, and every 30 s, in case an
+// event never comes. When a host appears, it closes the device at once. A
+// check that finds none reopens a free adapter, at most once a second. It opens the device only
 // seized, so GLM cannot open it meanwhile. When IOKit will not let it seize
 // the device, that too is a refusal.
 //
