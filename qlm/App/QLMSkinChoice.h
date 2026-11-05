@@ -8,7 +8,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 // The skin that shows: the saved name's, or the default in place of a
 // refused one. It loads each choice once, so the window, the OSD, and
-// Settings show the same skin. Foundation only. On the main queue.
+// Settings show the same skin, and decodes its images off the main queue
+// as it loads it. On the main queue.
 @interface QLMSkinChoice : NSObject
 
 // Loads the saved name's skin.

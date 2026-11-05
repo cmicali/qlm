@@ -31,6 +31,10 @@ void QLMSkinDrawImage(NSImage *_Nullable image, NSRect rect);
 // skin. NULL when the file won't load. Any queue.
 CGImageRef _Nullable QLMSkinDecodedImage(QLMSkin *skin, NSString *name, NSInteger scale) CF_RETURNS_NOT_RETAINED;
 
+// Decodes every image the skin's styles name on a background queue, so the
+// first show finds them decoded.
+void QLMSkinWarmImages(QLMSkin *skin);
+
 // What `draw` draws in `size` points at `scale`, in a flipped context.
 CGImageRef _Nullable QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) CF_RETURNS_RETAINED;
 

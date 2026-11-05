@@ -74,6 +74,31 @@ CGImageRef QLMSkinDecodedImage(QLMSkin *skin, NSString *name, NSInteger scale) {
     }
 }
 
+// Every image file the skin's styles name.
+static NSArray<NSString *> *QLMSkinImageNames(QLMSkin *skin) {
+    NSMutableOrderedSet<NSString *> *names = [NSMutableOrderedSet orderedSet];
+    void (^add)(QLMSkinStyle *, NSInteger) = ^(QLMSkinStyle *style, NSInteger states) {
+        for (NSInteger state = 0; style.imageName != nil && state < states; state++) {
+            [names addObject:[style imageNameForState:(QLMSkinState)state]];
+        }
+    };
+    for (NSString *element in QLMSkinElementNames()) {
+        add([skin element:element].style, 1);
+    }
+    add(skin.osd.style, 1);
+    add(skin.button.style, QLMSkinStateSelectedDisabled + 1);
+    add(skin.knob.body, QLMSkinStateDisabled + 1);
+    return names.array;
+}
+
+void QLMSkinWarmImages(QLMSkin *skin) {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        for (NSString *name in QLMSkinImageNames(skin)) {
+            QLMSkinDecodedImage(skin, name, 1);
+            QLMSkinDecodedImage(skin, name, 2);
+        }
+    });
+}
 
 CGImageRef QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) {
     size_t wide = (size_t)ceil(size.width * scale);
