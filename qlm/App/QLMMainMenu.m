@@ -7,7 +7,6 @@
 @end
 
 static NSString *const QLMControlsTitle = @"Controls";
-// The groups' items, after the controls'.
 static const NSInteger QLMGroupItemTag = 1000;
 
 static NSMenuItem *QLMItem(NSMenu *menu, NSString *title, SEL action, NSString *key, NSEventModifierFlags modifiers,
@@ -99,6 +98,6 @@ void QLMMainMenuSetGroups(NSMenu *controls, NSArray<NSString *> *names, id<QLMMa
         NSString *key = i < 9 ? [NSString stringWithFormat:@"%lu", (unsigned long)i + 1] : @"";
         NSMenuItem *item = QLMItem(controls, names[i], @selector(chooseGroup:), key, NSEventModifierFlagCommand, target);
         item.tag = QLMGroupItemTag + (NSInteger)i;
-        item.representedObject = names[i];
+        item.representedObject = @(i);
     }
 }

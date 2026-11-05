@@ -57,9 +57,10 @@ NS_ASSUME_NONNULL_BEGIN
 // The view's layer holds one sublayer per material, then one for the
 // drawn content on top. The view is a leaf: a subview's layer would sit
 // among them. It returns YES from wantsUpdateLayer, and calls updateLayer
-// here from its own. Each setNeedsDisplay of the view sets the material and
-// draws the content again, as each change of the view's size does. The content draws no shadow:
-// a layer's own context casts one apart from a view's.
+// here from its own. Each setNeedsDisplay of the view sets the material
+// and draws the content again, as each change of the view's size does.
+// The content draws no shadow: a layer's own context casts one apart from
+// a view's.
 @interface QLMSkinLayers : NSObject <CALayerDelegate>
 
 - (instancetype)initWithView:(NSView<QLMSkinLayered> *)view NS_DESIGNATED_INITIALIZER;

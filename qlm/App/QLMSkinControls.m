@@ -180,7 +180,9 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
 @implementation QLMSkinButtonView {
     NSAttributedString *_titleString;  // nil until drawn, and after a change
     NSRect _titleInk;  // from the title's origin on its baseline
-    CGFloat _titleWidth;  // its advance, which its draw takes
+    // The advance past the ink. TRAP: the draw cuts the title at its rect's
+    // width, so the rect takes the ink's width and this.
+    CGFloat _titleBearings;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -272,7 +274,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)string);
     _titleInk = CTLineGetBoundsWithOptions(line, kCTLineBoundsUseGlyphPathBounds);
     CFRelease(line);
-    _titleWidth = ceil(string.size.width) + 1;
+    _titleBearings = ceil(string.size.width) + 1 - _titleInk.size.width;
     return string;
 }
 
@@ -280,7 +282,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     return [self.skin.button faceInBounds:self.bounds pressed:self.pressed];
 }
 
-// In the view.
 - (QLMSkinLabel)label {
     [self titleString];
     QLMSkinButton *button = self.skin.button;
@@ -318,9 +319,8 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     NSAttributedString *title = [self titleString];
     QLMSkinLabel label = [self label];
     NSRect face = [self face];
-    CGFloat bearings = _titleWidth - _titleInk.size.width;
-    QLMSkinDrawCenteredCaps(title, NSMakeRect(label.textX - NSMinX(_titleInk), face.origin.y, label.textWidth + bearings,
-                                              face.size.height));
+    QLMSkinDrawCenteredCaps(title, NSMakeRect(label.textX - NSMinX(_titleInk), face.origin.y,
+                                              label.textWidth + _titleBearings, face.size.height));
 
     if (self.focused && self.enabled) {
         QLMSkinDrawFocus(button.focus, bounds, NO);

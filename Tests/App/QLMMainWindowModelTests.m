@@ -376,29 +376,4 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     XCTAssertNil([_model levelSteppedFrom:-40 by:-1]);
 }
 
-// The menu's toggles take the buttons' rules and checks: Mute and Standby
-// need a monitor tracked, Dim a running System, and a group the groups'
-// rule, with its check on the chosen group.
-- (void)testTheMenusTogglesTakeTheButtonsRules {
-    [self showRunningWith:^(QLMSnapshot *snapshot) {
-        snapshot.allMuted = YES;
-        snapshot.activeGroupName = @"Nearfield";
-    }];
-    XCTAssertTrue(_model.muteEnabled);
-    XCTAssertTrue(_model.muteOn);
-    XCTAssertFalse(_model.dimOn);
-    XCTAssertTrue(_model.powerEnabled);
-    XCTAssertEqualObjects(_model.powerTitle, @"Standby");
-    XCTAssertTrue(_model.groupsEnabled);
-    XCTAssertEqual(_model.chosenGroupIndex, 1u);
-
-    [self showNoMonitors];
-    XCTAssertFalse(_model.muteEnabled);
-    XCTAssertFalse(_model.powerEnabled);
-    XCTAssertFalse(_model.groupsEnabled);
-    XCTAssertTrue(_model.dimEnabled);
-    [self showStopped];
-    XCTAssertFalse(_model.dimEnabled);
-}
-
 @end

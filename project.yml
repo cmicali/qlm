@@ -232,11 +232,13 @@ targets:
       - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md", "main.m"]
       # The app's debug verbs, and the app's code they and the tests read.
-      # TRAP: AppKit can't make a window here. Hostless, NSApplication
-      # won't start, and a window asks for it.
+      # TRAP: NSApplication won't start here, hostless. A window still
+      # draws offscreen, but never becomes key.
       - qlm/App/QLMAlerts.m
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
+      - qlm/App/QLMMainMenu.m
+      - qlm/App/QLMMainWindowController.m
       - qlm/App/QLMMainWindowModel.m
       - qlm/App/QLMMonitorList.m
       - qlm/App/QLMOSDRule.m

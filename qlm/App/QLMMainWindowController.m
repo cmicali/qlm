@@ -329,15 +329,23 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 }
 
 - (void)chooseGroup:(NSMenuItem *)sender {
-    (void)[self clickGroupNamed:sender.representedObject];
+    NSArray<NSString *> *names = self.model.shownGroupNames;
+    NSUInteger index = [sender.representedObject unsignedIntegerValue];
+    if (index < names.count) {
+        (void)[self clickGroup:names[index] atIndex:index];
+    }
 }
 
-// Where a step of the knob goes, or nil where it takes none. Not while a
-// text field has the keys, where Cmd-Up and Cmd-Down move its insertion
-// point.
+// The menu acts on the window it names, so not while another of qlm's
+// windows, or none, has the keys.
+- (BOOL)menuActs {
+    return self.showing && NSApp.keyWindow == super.window;
+}
+
+// Where a step of the knob goes, or nil where it takes none.
 - (nullable NSNumber *)levelSteppedBy:(int)steps {
     QLMKnobControl *knob = self.skinView.knob;
-    if (!self.showing || knob == nil || [NSApp.keyWindow.firstResponder isKindOfClass:NSText.class]) {
+    if (![self menuActs] || knob == nil) {
         return nil;
     }
     self.model.snapshot = self.monitorList.snapshot;
@@ -352,11 +360,10 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     }
 }
 
-// The controls' rules, and their states as checks.
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
     QLMMainWindowModel *model = self.model;
     model.snapshot = self.monitorList.snapshot;
-    BOOL running = self.system != nil;
+    BOOL running = self.system != nil && [self menuActs];
     SEL action = item.action;
     if (action == @selector(toggleMute:)) {
         item.state = model.muteOn ? NSControlStateValueOn : NSControlStateValueOff;
@@ -374,12 +381,12 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
         return [self levelSteppedBy:action == @selector(volumeUp:) ? 1 : -1] != nil;
     }
     if (action == @selector(chooseGroup:)) {
-        NSString *name = item.representedObject;
-        NSUInteger index = [model.shownGroupNames indexOfObject:name];
-        item.state = index != NSNotFound && index == model.chosenGroupIndex ? NSControlStateValueOn : NSControlStateValueOff;
-        return running && [model refusalToClickGroupNamed:name] == nil;
+        NSArray<NSString *> *names = model.shownGroupNames;
+        NSUInteger index = [item.representedObject unsignedIntegerValue];
+        item.state = index == model.chosenGroupIndex ? NSControlStateValueOn : NSControlStateValueOff;
+        return running && index < names.count && [model refusalToClickGroupNamed:names[index]] == nil;
     }
-    return YES;
+    return NO;
 }
 
 #pragma mark - Drawing

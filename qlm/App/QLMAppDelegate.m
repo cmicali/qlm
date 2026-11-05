@@ -406,8 +406,8 @@ static OSType QLMQuitReason(void) {
     [self.popover showRelativeToRect:self.statusItem.button.bounds ofView:self.statusItem.button preferredEdge:NSRectEdgeMinY];
 }
 
-// The app has no Dock icon but while the main window is open, so a window
-// or alert comes forward only if the app does.
+// While the main window is closed, the app has no Dock icon, so a window or
+// alert comes forward only if the app does.
 - (void)activateApp {
     if (@available(macOS 14.0, *)) {
         [NSApp activate];
@@ -426,12 +426,38 @@ static OSType QLMQuitReason(void) {
 // as a regular app's does, until it closes. The policy goes first, so the
 // activation that follows brings the window to the front.
 - (void)showMainWindow:(id)sender {
-    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    [self becomeRegular];
     [self bringForward:self.mainWindowController];
 }
 
+// TRAP: an app that turns regular while it is active shows no menu bar
+// until it activates again. So it lets go and activates on the next turn.
+- (void)becomeRegular {
+    if (NSApp.activationPolicy == NSApplicationActivationPolicyRegular) {
+        return;
+    }
+    BOOL active = NSApp.isActive;
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    if (active) {
+        [NSApp deactivate];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self activateApp];
+        });
+    }
+}
+
+// TRAP: turning accessory can deactivate the app, which would leave a
+// Settings or Monitors window still open behind other apps. So that
+// window comes back to the front.
 - (void)mainWindowControllerWillClose:(QLMMainWindowController *)controller {
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    for (NSWindow *window in NSApp.orderedWindows) {
+        if (window != controller.window && window.visible && (window.styleMask & NSWindowStyleMaskTitled) != 0) {
+            [self activateApp];
+            [window makeKeyAndOrderFront:nil];
+            return;
+        }
+    }
 }
 
 // A click on the Dock icon, or an open of the app while it runs.

@@ -1,4 +1,5 @@
 #import <XCTest/XCTest.h>
+#import <QuartzCore/QuartzCore.h>
 
 #import "QLMSkinControls.h"
 #import "QLMSkinDrawing.h"
@@ -165,28 +166,65 @@ static QLMSkinView *QLMTestWindowView(QLMSkin *skin, NSSize size, QLMTestLook lo
     return view;
 }
 
-// What a view asked of AppKit's display since the last reset.
+// How often a window has had a view set its layers since the last reset.
 @interface QLMTestSpyButton : QLMSkinButtonView
-@property (nonatomic) BOOL marked;
+@property (nonatomic) NSInteger updates;
 @end
 
 @implementation QLMTestSpyButton
-- (void)setNeedsDisplay:(BOOL)needsDisplay {
-    self.marked = self.marked || needsDisplay;
-    [super setNeedsDisplay:needsDisplay];
+- (void)updateLayer {
+    self.updates++;
+    [super updateLayer];
 }
 @end
 
 @interface QLMTestSpyDisplay : QLMSkinDisplayView
-@property (nonatomic) BOOL marked;
+@property (nonatomic) NSInteger updates;
 @end
 
 @implementation QLMTestSpyDisplay
-- (void)setNeedsDisplay:(BOOL)needsDisplay {
-    self.marked = self.marked || needsDisplay;
-    [super setNeedsDisplay:needsDisplay];
+- (void)updateLayer {
+    self.updates++;
+    [super updateLayer];
 }
 @end
+
+// Each material's layer sits where the view's state puts it.
+static void QLMTestAssertMaterialsFollow(XCTestCase *test, NSView *view, NSString *at) {
+    QLMSkinLayers *layers = [(id)view layers];
+    NSArray<QLMSkinMaterial *> *materials = [(id<QLMSkinLayered>)view skinMaterials:layers];
+    NSArray<CALayer *> *sublayers = view.layer.sublayers;
+    if (sublayers.count <= materials.count) {
+        [test recordIssue:[[XCTIssue alloc] initWithType:XCTIssueTypeAssertionFailure
+                                      compactDescription:[NSString stringWithFormat:@"%@, %@ has no material layers", at, view]]];
+        return;
+    }
+    for (NSUInteger i = 0; i < materials.count; i++) {
+        NSRect want = [view convertRectToLayer:materials[i].frame];
+        if (!NSEqualRects(sublayers[i].frame, want)) {
+            NSString *issue = [NSString stringWithFormat:@"%@, %@ material %lu: %@, not %@", at, view, (unsigned long)i,
+                                                         NSStringFromRect(sublayers[i].frame), NSStringFromRect(want)];
+            [test recordIssue:[[XCTIssue alloc] initWithType:XCTIssueTypeAssertionFailure compactDescription:issue]];
+        }
+    }
+}
+
+// What a window on the screen does at its next frame. TRAP: here, a
+// window's displayIfNeeded draws nothing. The transaction's commit draws.
+static void QLMTestPumpWindow(NSWindow *window) {
+    [window displayIfNeeded];
+    [CATransaction flush];
+    [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+}
+
+// An offscreen window, as the screen's: it draws without being shown.
+static NSWindow *QLMTestOffscreenWindow(NSSize size) {
+    NSWindow *window = [[NSWindow alloc] initWithContentRect:(NSRect){NSZeroPoint, size} styleMask:NSWindowStyleMaskBorderless
+                                                     backing:NSBackingStoreBuffered defer:NO];
+    window.releasedWhenClosed = NO;
+    window.contentView.wantsLayer = YES;  // as on the screen
+    return window;
+}
 
 @implementation QLMSkinLayersTests
 
@@ -285,23 +323,29 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
     }
 }
 
-// A size change alone marks a layered view for display, so a window sets
-// its materials again, and a move within its pixels doesn't. TRAP: out of
-// a window, a view's layer stays due for display, and its needsDisplay
-// reads NO, so only a spy shows what a window would do.
-- (void)testASizeChangeMarksALayeredViewForDisplay {
+// In a window, a size change alone sets a layered view's materials again,
+// and a move that keeps its pixels sets nothing. TRAP: out of a window,
+// AppKit keeps a view's layer due for display, so only a window shows it.
+- (void)testASizeChangeInAWindowSetsTheMaterialsAgain {
     QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:@"retro"] error:NULL];
     QLMTestSpyButton *button = [[QLMTestSpyButton alloc] initWithSkin:skin];
+    button.title = @"MUTE";
     QLMTestSpyDisplay *display = [[QLMTestSpyDisplay alloc] initWithSkin:skin];
-    NSArray<NSView *> *views = @[button, display];
-    for (NSView *view in views) {
-        view.frame = NSMakeRect(0, 0, 200, 120);
-        QLMTestDisplayIfNeeded(view);
-        [(id)view setMarked:NO];
-        view.frameOrigin = NSMakePoint(10, 10);
-        XCTAssertFalse([(id)view marked], @"%@ moved", view);
-        view.frameSize = NSMakeSize(300, 120);
-        XCTAssertTrue([(id)view marked], @"%@ grew", view);
+    display.level = @"−40.0";
+    for (NSView *view in @[button, display]) {
+        NSWindow *window = QLMTestOffscreenWindow(NSMakeSize(800, 400));
+        view.frame = NSMakeRect(10, 10, 200, 120);
+        [window.contentView addSubview:view];
+        QLMTestPumpWindow(window);
+        [(id)view setUpdates:0];
+        view.frameOrigin = NSMakePoint(20, 10);
+        QLMTestPumpWindow(window);
+        XCTAssertEqual([(id)view updates], 0, @"%@ moved", view);
+        view.frameSize = NSMakeSize(300, 160);
+        QLMTestPumpWindow(window);
+        XCTAssertEqual([(id)view updates], 1, @"%@ grew", view);
+        QLMTestAssertMaterialsFollow(self, view, @"grown");
+        [window close];
     }
 }
 
@@ -313,24 +357,19 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
     for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
         QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
         QLMSkinView *view = QLMTestWindowView(skin, skin.windowSize, QLMTestLookHovered);
-        (void)QLMTestComposite(view);
+        // Not deferred, as QLMSkinHostWindow's is, so it draws unshown.
+        NSWindow *window = QLMTestOffscreenWindow(skin.windowSize);
+        QLMSkinHost(window, view);
+        QLMTestPumpWindow(window);
         for (NSValue *size in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(900, 640)],
                                 [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {
-            view.frame = (NSRect){NSZeroPoint, size.sizeValue};
+            [window setContentSize:size.sizeValue];
+            QLMTestPumpWindow(window);
             NSString *at = [NSString stringWithFormat:@"%@ at %@", name, NSStringFromSize(size.sizeValue)];
-            QLMTestDisplayIfNeeded(view);
+            XCTAssertTrue(NSEqualSizes(view.bounds.size, size.sizeValue), @"%@", at);
             QLMTestEachView(view, ^(NSView *each) {
-                if (![each respondsToSelector:@selector(layers)] || each.hiddenOrHasHiddenAncestor) {
-                    return;
-                }
-                QLMSkinLayers *layers = [(id)each layers];
-                NSArray<QLMSkinMaterial *> *materials = [(id<QLMSkinLayered>)each skinMaterials:layers];
-                XCTAssertGreaterThan(each.layer.sublayers.count, materials.count, @"%@, %@", at, each);
-                for (NSUInteger i = 0; i < materials.count && i < each.layer.sublayers.count; i++) {
-                    NSRect want = [each convertRectToLayer:materials[i].frame];
-                    XCTAssertTrue(NSEqualRects(each.layer.sublayers[i].frame, want), @"%@, %@ material %lu: %@, not %@", at,
-                                  each, (unsigned long)i, NSStringFromRect(each.layer.sublayers[i].frame),
-                                  NSStringFromRect(want));
+                if ([each respondsToSelector:@selector(layers)] && !each.hiddenOrHasHiddenAncestor) {
+                    QLMTestAssertMaterialsFollow(self, each, at);
                 }
             });
             QLMSkinLayout *layout = view.skinLayout;
@@ -356,6 +395,7 @@ static NSInteger QLMTestInkOutside(NSSize size, CGFloat scale, NSRect rect, void
                 }
             }
         }
+        [window close];
     }
 }
 

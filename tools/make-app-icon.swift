@@ -54,16 +54,16 @@ let logoFont: (CGFloat) -> NSFont = { size in
     return NSFontManager.shared.convert(base, toHaveTrait: [.boldFontMask, .italicFontMask])
 }
 
-// On Apple's 1024 grid: an 824 point body with a 185 point radius.
+// On Apple's 1024 grid: an 824 point body with a 185 point radius. In
+// sRGB, so the output is the same on any Mac.
 func draw(pixels: Int) -> Data {
-    guard let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: pixels, pixelsHigh: pixels, bitsPerSample: 8,
-                                     samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
-                                     bytesPerRow: 0, bitsPerPixel: 0) else {
+    guard let space = CGColorSpace(name: CGColorSpace.sRGB),
+          let bitmap = CGContext(data: nil, width: pixels, height: pixels, bitsPerComponent: 8, bytesPerRow: 0,
+                                 space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
         fail("can't make a bitmap")
     }
-    rep.size = NSSize(width: pixels, height: pixels)
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    NSGraphicsContext.current = NSGraphicsContext(cgContext: bitmap, flipped: false)
     let unit = CGFloat(pixels) / 1024
 
     let body = NSRect(x: 100 * unit, y: 100 * unit, width: 824 * unit, height: 824 * unit)
@@ -94,7 +94,8 @@ func draw(pixels: Int) -> Data {
     context.textPosition = CGPoint(x: slot.midX - glyphs.midX, y: slot.midY - glyphs.midY)
     CTLineDraw(line, context)
     NSGraphicsContext.restoreGraphicsState()
-    guard let png = rep.representation(using: .png, properties: [:]) else {
+    guard let image = bitmap.makeImage(),
+          let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
         fail("can't encode a PNG")
     }
     return png
