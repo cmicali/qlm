@@ -508,7 +508,7 @@
     XCTAssertEqualObjects(state[@"skinName"], @"modern");
     XCTAssertEqualObjects(state[@"windowSkin"], @"modern");
     XCTAssertEqualObjects(state[@"skinRefusal"], NSNull.null);
-    XCTAssertEqualObjects(state[@"opensWindowAtLaunch"], @NO);
+    XCTAssertEqualObjects(state[@"opensWindowAtLaunch"], @YES);
 
     NSDictionary *snapshot = state[@"snapshot"];
     XCTAssertEqualObjects(snapshot[@"running"], @YES);

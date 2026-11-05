@@ -265,7 +265,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         [defaults registerDefaults:@{
             QLMWakesAtLaunchKey: @NO,
             QLMUsesAdapterKey: @NO,
-            QLMOpensWindowAtLaunchKey: @NO,
+            QLMOpensWindowAtLaunchKey: @YES,
             QLMShowsOSDKey: @YES,
         }];
     }

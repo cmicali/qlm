@@ -54,15 +54,15 @@ static NSData *QLMID(uint8_t last) {
 
 #pragma mark - The window
 
-// docs/ui.md: the menu bar item is still the app, so the window opens at
-// launch only when asked, and modern is the skin until one is chosen.
-- (void)testTheWindowsChoicesStartOffAndModern {
-    XCTAssertFalse(_preferences.opensWindowAtLaunch);
+// docs/ui.md: the window opens at launch until the user turns that off,
+// and modern is the skin until one is chosen.
+- (void)testTheWindowsChoicesStartOnAndModern {
+    XCTAssertTrue(_preferences.opensWindowAtLaunch);
     XCTAssertEqualObjects(_preferences.skinName, @"modern");
-    _preferences.opensWindowAtLaunch = YES;
+    _preferences.opensWindowAtLaunch = NO;
     _preferences.skinName = @"vintage";
     QLMPreferences *relaunched = [[QLMPreferences alloc] initWithDefaults:_defaults];
-    XCTAssertTrue(relaunched.opensWindowAtLaunch);
+    XCTAssertFalse(relaunched.opensWindowAtLaunch);
     XCTAssertEqualObjects(relaunched.skinName, @"vintage");
 }
 
