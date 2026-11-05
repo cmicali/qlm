@@ -25,10 +25,25 @@ extern const NSTimeInterval QLMOSDSecondsMin;
 extern const NSTimeInterval QLMOSDSecondsMax;
 extern const NSTimeInterval QLMOSDSecondsStep;
 
+// How long a raise of the kept level or knob reading may wait to be written.
+extern const NSTimeInterval QLMKeptRaiseDelay;
+
+// Runs the block once, after the delay, on the main queue.
+typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
+
 // What one bus keeps across launches: the app's level, System's mute record,
 // and the leases. The real monitors and the fake bus each keep their own, so
 // nothing set on the fake bus reaches the real monitors. On the main queue.
 @interface QLMBusPreferences : NSObject
+
+// Each snapshot's level and knob reading are written at most once each
+// QLMKeptRaiseDelay. TRAP: a level or a reading lower than the one written
+// writes both at once, so what a crash leaves can only be quieter than what
+// was heard. A stopped System's snapshot writes them at once too. Reads see
+// what waits. dispatch_after on the main queue until set.
+@property (nonatomic, copy) QLMKeptScheduler scheduler;
+// Writes what waits now. Call at every stop.
+- (void)flush;
 
 // The app's own level. At connect System keeps it until the knob turns.
 // Never above the ceiling.
@@ -88,6 +103,8 @@ extern const NSTimeInterval QLMOSDSecondsStep;
 // What the real monitors keep, and what the fake bus keeps.
 @property (nonatomic, readonly) QLMBusPreferences *adapterBus;
 @property (nonatomic, readonly) QLMBusPreferences *fakeBus;
+// Flushes both buses.
+- (void)flushKept;
 // A file name in QLMSetupDirectory(). Nil takes the first by name.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
 // On by default. Turned off, the menu bar item alone shows at launch.

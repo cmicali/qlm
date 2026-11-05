@@ -273,6 +273,8 @@ static OSType QLMQuitReason(void) {
             [NSRunLoop.currentRunLoop runMode:NSDefaultRunLoopMode beforeDate:deadline];
         }
     }
+    // A raise of the level or the knob reading waits up to a second.
+    [self.preferences flushKept];
 }
 
 // The same System starts again. It keeps the volume, dim, the mutes, and
@@ -293,6 +295,7 @@ static OSType QLMQuitReason(void) {
 - (void)restartSystem {
     QLMSystem *old = self.system;
     [old setSnapshotHandler:nil queue:dispatch_get_main_queue()];
+    [self.preferences flushKept];
     __weak QLMAppDelegate *weakSelf = self;
     [old stopWithCompletion:^{
         QLMAppDelegate *strongSelf = weakSelf;
