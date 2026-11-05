@@ -349,4 +349,56 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     XCTAssertFalse(_model.powerEnabled);
 }
 
+#pragma mark - The menu
+
+// The menu's Volume Up and Down step the knob as its arrow keys do: one
+// 0.5 dB step, inside the range, so never past the ceiling. They take
+// nothing while the knob takes nothing, before a level is known, or at an
+// end.
+- (void)testTheMenusVolumeStepsTheKnob {
+    XCTAssertEqualObjects([_model levelSteppedFrom:-40 by:1], @(-39.5));
+    XCTAssertEqualObjects([_model levelSteppedFrom:-40 by:-1], @(-40.5));
+    XCTAssertEqualObjects([_model levelSteppedFrom:-40.2 by:1], @(-39.5));
+    XCTAssertEqualObjects([_model levelSteppedFrom:-30.5 by:1], @(-30));
+    XCTAssertNil([_model levelSteppedFrom:-30 by:1]);
+    XCTAssertNil([_model levelSteppedFrom:-60 by:-1]);
+    XCTAssertEqualObjects([_model levelSteppedFrom:-60 by:1], @(-59.5));
+
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.levelAwaitsKnob = YES;
+    }];
+    XCTAssertNil([_model levelSteppedFrom:-40 by:1]);
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.volumeDecibels = nil;
+    }];
+    XCTAssertNil([_model levelSteppedFrom:-40 by:1]);
+    [self showStopped];
+    XCTAssertNil([_model levelSteppedFrom:-40 by:-1]);
+}
+
+// The menu's toggles take the buttons' rules and checks: Mute and Standby
+// need a monitor tracked, Dim a running System, and a group the groups'
+// rule, with its check on the chosen group.
+- (void)testTheMenusTogglesTakeTheButtonsRules {
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.allMuted = YES;
+        snapshot.activeGroupName = @"Nearfield";
+    }];
+    XCTAssertTrue(_model.muteEnabled);
+    XCTAssertTrue(_model.muteOn);
+    XCTAssertFalse(_model.dimOn);
+    XCTAssertTrue(_model.powerEnabled);
+    XCTAssertEqualObjects(_model.powerTitle, @"Standby");
+    XCTAssertTrue(_model.groupsEnabled);
+    XCTAssertEqual(_model.chosenGroupIndex, 1u);
+
+    [self showNoMonitors];
+    XCTAssertFalse(_model.muteEnabled);
+    XCTAssertFalse(_model.powerEnabled);
+    XCTAssertFalse(_model.groupsEnabled);
+    XCTAssertTrue(_model.dimEnabled);
+    [self showStopped];
+    XCTAssertFalse(_model.dimEnabled);
+}
+
 @end

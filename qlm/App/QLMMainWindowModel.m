@@ -3,6 +3,7 @@
 #include <math.h>
 
 #import "QLMFormat.h"
+#import "QLMKnobMath.h"
 #import "QLMSystem.h"
 
 NSString *const QLMWindowClosedRefusal = @"the window is closed";
@@ -218,6 +219,15 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
 
 - (BOOL)knobEnabled {
     return self.snapshot.running;
+}
+
+- (NSNumber *)levelSteppedFrom:(double)level by:(int)steps {
+    if (!self.knobEnabled || self.knobDecibels == nil) {
+        return nil;
+    }
+    double from = QLMKnobSnap(level, self.lowestDecibels, self.ceilingDecibels);
+    double to = QLMKnobStep(level, steps, self.lowestDecibels, self.ceilingDecibels);
+    return to == from ? nil : @(to);
 }
 
 #pragma mark - The footer

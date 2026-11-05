@@ -78,6 +78,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     self.skin = skin;
     self.model.groupCapacity = QLMSkinGroupButtonCount(skin);
     if (!_windowMade) {
+        [self renderGroups];
         return;
     }
     super.window.contentMinSize = skin.windowSize;
@@ -141,6 +142,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 - (void)windowWillClose:(NSNotification *)notification {
     [self stopBlink];
+    [self.delegate mainWindowControllerWillClose:self];
 }
 
 // Escape closes it, as Cmd-W does. The window sends it here as Escape's
@@ -299,12 +301,96 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     }
 }
 
+#pragma mark - The menu
+
+- (void)setControlsMenu:(NSMenu *)controlsMenu {
+    _controlsMenu = controlsMenu;
+    [self renderGroups];
+}
+
+- (void)toggleMute:(id)sender {
+    [self muteClicked:sender];
+}
+
+- (void)toggleDim:(id)sender {
+    [self dimClicked:sender];
+}
+
+- (void)togglePower:(id)sender {
+    [self powerClicked:sender];
+}
+
+- (void)volumeUp:(id)sender {
+    [self stepVolumeBy:1];
+}
+
+- (void)volumeDown:(id)sender {
+    [self stepVolumeBy:-1];
+}
+
+- (void)chooseGroup:(NSMenuItem *)sender {
+    (void)[self clickGroupNamed:sender.representedObject];
+}
+
+// Where a step of the knob goes, or nil where it takes none. Not while a
+// text field has the keys, where Cmd-Up and Cmd-Down move its insertion
+// point.
+- (nullable NSNumber *)levelSteppedBy:(int)steps {
+    QLMKnobControl *knob = self.skinView.knob;
+    if (!self.showing || knob == nil || [NSApp.keyWindow.firstResponder isKindOfClass:NSText.class]) {
+        return nil;
+    }
+    self.model.snapshot = self.monitorList.snapshot;
+    return [self.model levelSteppedFrom:knob.doubleValue by:steps];
+}
+
+// Through the knob, as its arrow keys turn it, so its action sends the level.
+- (void)stepVolumeBy:(int)steps {
+    NSNumber *level = [self levelSteppedBy:steps];
+    if (level != nil) {
+        [self.skinView.knob moveTo:level.doubleValue];
+    }
+}
+
+// The controls' rules, and their states as checks.
+- (BOOL)validateMenuItem:(NSMenuItem *)item {
+    QLMMainWindowModel *model = self.model;
+    model.snapshot = self.monitorList.snapshot;
+    BOOL running = self.system != nil;
+    SEL action = item.action;
+    if (action == @selector(toggleMute:)) {
+        item.state = model.muteOn ? NSControlStateValueOn : NSControlStateValueOff;
+        return running && model.muteEnabled;
+    }
+    if (action == @selector(toggleDim:)) {
+        item.state = model.dimOn ? NSControlStateValueOn : NSControlStateValueOff;
+        return running && model.dimEnabled;
+    }
+    if (action == @selector(togglePower:)) {
+        item.title = model.powerTitle;
+        return running && model.powerEnabled;
+    }
+    if (action == @selector(volumeUp:) || action == @selector(volumeDown:)) {
+        return [self levelSteppedBy:action == @selector(volumeUp:) ? 1 : -1] != nil;
+    }
+    if (action == @selector(chooseGroup:)) {
+        NSString *name = item.representedObject;
+        NSUInteger index = [model.shownGroupNames indexOfObject:name];
+        item.state = index != NSNotFound && index == model.chosenGroupIndex ? NSControlStateValueOn : NSControlStateValueOff;
+        return running && [model refusalToClickGroupNamed:name] == nil;
+    }
+    return YES;
+}
+
 #pragma mark - Drawing
 
 // What changes only with the setup or the skin.
 - (void)renderGroups {
     QLMSkinView *view = self.skinView;
     QLMMainWindowModel *model = self.model;
+    if (self.controlsMenu != nil) {
+        QLMMainMenuSetGroups(self.controlsMenu, model.shownGroupNames, self);
+    }
     [view setGroupTitles:model.groupTitles prefixes:model.groupPrefixes];
     NSArray<NSString *> *names = model.shownGroupNames;
     for (NSUInteger i = 0; i < names.count && i < view.groupButtons.count; i++) {

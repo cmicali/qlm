@@ -1,5 +1,6 @@
 #import <Cocoa/Cocoa.h>
 
+#import "QLMMainMenu.h"
 #import "QLMMonitorList.h"
 #import "QLMPreferences.h"
 #import "QLMSetup.h"
@@ -15,16 +16,20 @@ NS_ASSUME_NONNULL_BEGIN
 
 @protocol QLMMainWindowControllerDelegate <NSObject>
 - (void)mainWindowControllerShowMonitors:(QLMMainWindowController *)controller;
+- (void)mainWindowControllerWillClose:(QLMMainWindowController *)controller;
 @end
 
 // The main window, in the skin it is handed. It reads the monitor list's
 // snapshots and drives System, never the adapter, by the popover's rules
-// for what is enabled when. On the main queue.
-@interface QLMMainWindowController : NSWindowController
+// for what is enabled when. It answers the Controls menu by the same
+// rules, through the same calls its controls make. On the main queue.
+@interface QLMMainWindowController : NSWindowController <QLMMainMenuControls>
 
 - (instancetype)initWithPreferences:(QLMPreferences *)preferences monitorList:(QLMMonitorList *)monitorList skin:(QLMSkin *)skin;
 
 @property (nonatomic, weak, nullable) id<QLMMainWindowControllerDelegate> delegate;
+// The menu that lists the groups the window shows.
+@property (nonatomic, weak, nullable) NSMenu *controlsMenu;
 @property (nonatomic, nullable) QLMSystem *system;
 // The loaded setup, the file's name, and why it did not read.
 - (void)showSetup:(nullable QLMSetup *)setup fileName:(nullable NSString *)fileName error:(nullable NSError *)error;
