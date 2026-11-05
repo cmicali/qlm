@@ -42,16 +42,47 @@ func panelColor() -> NSColor {
     return NSColor(srgbRed: red / count, green: green / count, blue: blue / count, alpha: 1)
 }
 
+// skin.json's nameplate and its logo slot: the plate's frame, and the
+// logo's frame in it, font, size, and color.
+guard let data = try? Data(contentsOf: skin.appendingPathComponent("skin.json")),
+      let manifest = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+      let palette = manifest["palette"] as? [String: String],
+      let elements = manifest["elements"] as? [String: Any],
+      let nameplate = elements["nameplate"] as? [String: Any],
+      let plateFrame = nameplate["frame"] as? [Double],
+      let logo = (nameplate["text"] as? [String: Any])?["logo"] as? [String: Any],
+      let logoFrame = logo["frame"] as? [Double],
+      let logoSize = logo["size"] as? Double,
+      let logoColor = logo["color"] as? String else {
+    fail("can't read the nameplate's logo in \(skin.path)/skin.json")
+}
+
+// "#rrggbb" or "#rrggbbaa", or a palette name for one.
+func color(_ value: String) -> NSColor {
+    let hex = (palette[value] ?? value).dropFirst()
+    guard hex.count == 6 || hex.count == 8, let word = UInt64(hex, radix: 16) else {
+        fail("can't read the color \(value)")
+    }
+    let rgba = hex.count == 6 ? word << 8 | 0xff : word
+    let part = { (shift: UInt64) in CGFloat((rgba >> shift) & 0xff) / 255 }
+    return NSColor(srgbRed: part(24), green: part(16), blue: part(8), alpha: part(0))
+}
+
 let panel = panelColor()
 guard let plate = NSImage(contentsOf: skin.appendingPathComponent("masters/nameplate.png")) else {
     fail("no nameplate master")
 }
-// skin.json's logo slot: Helvetica Neue, bold, italic, 24 points in a 78
-// point plate, in badgeInk.
-let ink = NSColor(srgbRed: 0x34 / 255.0, green: 0x35 / 255.0, blue: 0x2b / 255.0, alpha: 1)
+let ink = color(logoColor)
 let logoFont: (CGFloat) -> NSFont = { size in
-    let base = NSFont(name: "Helvetica Neue", size: size) ?? NSFont.systemFont(ofSize: size)
-    return NSFontManager.shared.convert(base, toHaveTrait: [.boldFontMask, .italicFontMask])
+    let base = (logo["font"] as? String).flatMap { NSFont(name: $0, size: size) } ?? NSFont.systemFont(ofSize: size)
+    var traits: NSFontTraitMask = []
+    if logo["weight"] as? String == "bold" {
+        traits.insert(.boldFontMask)
+    }
+    if logo["italic"] as? Bool == true {
+        traits.insert(.italicFontMask)
+    }
+    return NSFontManager.shared.convert(base, toHaveTrait: traits)
 }
 
 // On Apple's 1024 grid: an 824 point body with a 185 point radius. In
@@ -83,13 +114,15 @@ func draw(pixels: Int) -> Data {
     plate.draw(in: plateRect, from: .zero, operation: .sourceOver, fraction: 1)
     NSGraphicsContext.restoreGraphicsState()
 
-    // The logo's ink centers in the slot's frame: 3 points down the 38
-    // point plate, 32 high.
-    let scale = plateWidth / 78
-    let text = NSAttributedString(string: "qlm.", attributes: [.font: logoFont(24 * scale), .foregroundColor: ink])
+    // The logo's ink centers in the slot's frame, which is y down.
+    let scale = plateWidth / CGFloat(plateFrame[2])
+    let font = logoFont(CGFloat(logoSize) * scale)
+    let text = NSAttributedString(string: "qlm.", attributes: [.font: font, .foregroundColor: ink])
     let line = CTLineCreateWithAttributedString(text)
     let glyphs = CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
-    let slot = NSRect(x: plateRect.minX, y: plateRect.maxY - (3 + 32) * scale, width: plateWidth, height: 32 * scale)
+    let slot = NSRect(x: plateRect.minX + CGFloat(logoFrame[0]) * scale,
+                      y: plateRect.maxY - CGFloat(logoFrame[1] + logoFrame[3]) * scale,
+                      width: CGFloat(logoFrame[2]) * scale, height: CGFloat(logoFrame[3]) * scale)
     let context = NSGraphicsContext.current!.cgContext
     context.textPosition = CGPoint(x: slot.midX - glyphs.midX, y: slot.midY - glyphs.midY)
     CTLineDraw(line, context)

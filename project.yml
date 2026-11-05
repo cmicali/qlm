@@ -250,8 +250,8 @@ targets:
       - qlm/App/QLMSkinImages.m
       - qlm/App/QLMSkinLayout.m
       - qlm/App/QLMSkinLibrary.m
-      # The skin's views. Out of any window, they draw, and their layers
-      # render into a bitmap.
+      # The skin's views. They draw, and their layers render into a bitmap,
+      # out of any window and in an offscreen one.
       - qlm/App/QLMKnobControl.m
       - qlm/App/QLMSkinControls.m
       - qlm/App/QLMSkinLayers.m

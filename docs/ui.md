@@ -1,6 +1,6 @@
 # The UI pass: a main window, an OSD, and skins
 
-**Status, 2026-11-04.** Built in #75 to #85, then tidied in one more PR, and run on the fake bus only. The monitors see it first in the week of daily use. The popover changed only by a `Window…` button, and stays as it is until its own redesign, later. What the assets don't settle yet is listed under that heading below.
+**Status, 2026-11-05.** Built in #75 to #85, then tidied in #86. #87 moved the skins' images into their views' layers, #88 added the Dock icon, the menu bar, and the faces, and one more PR tidied both. Run on the fake bus only. The monitors see it first in the week of daily use. The popover changed only by a `Window…` button, and stays as it is until its own redesign, later. What the assets don't settle yet is listed under that heading below.
 
 qlm has run on all six monitors through a plain AppKit popover. That was enough to prove the protocol. This doc plans the first real UI: a main window that can be opened and left open, an on-screen display that shows the level when the knob turns, and a skin system that draws both. Three skins come with it: modern, vintage, and retro. The mockups and the assets are in [`qlm/App/Skins/`](../qlm/App/Skins/), one directory per skin, and this doc refers to them by name.
 
@@ -78,7 +78,7 @@ What the app draws, from the skin's colors and metrics:
 
 | Drawn | From the skin |
 | --- | --- |
-| The panel's markings: the separator lines and the box around the groups and the mute and dim pair | A line color and width. The boxes follow the elements' frames. |
+| The panel's markings: the separator lines and the box around the groups and the mute and dim pair | A line color and width. The boxes follow the elements' frames, and a box around buttons follows their face. |
 | LEDs, on, off, and disabled | Two colors and a glow radius |
 | The knob's tick ring, pointer, shadow, and focus ring | The ticks' count, lengths, and color, the pointer's length, width, and color, the shadow's blur, the focus color |
 | Modern's knob arc | The track and fill colors |
@@ -115,8 +115,9 @@ So a qlm skin is one self-contained directory:
 1. **The sizes and the palette.** The window's and the OSD's sizes in points, with the origin at the top left, and the colors the drawn geometry and the text use.
 2. **The elements.** Each with its frame at the reference size, its anchors and whether it stretches, and an image name or a `draw` block. The images' cap insets sit with the element, so a user's skin edits nothing outside its directory. The pack's `asset_catalog_name` goes, with the asset catalog.
 3. **A grid for the groups, not three buttons.** The pack places three setup buttons by role. The skin gives one `groups` element: a frame, the columns and rows, and the gap. The app lays as many buttons in it as it has cells, up to six, in the file's order, and leaves the rest of the grid empty. A file with more groups shows the first ones. Modern's grid is two rows of three. Vintage's and retro's is one row of four, since their setup box has room for one row of 40-point buttons.
-4. **The knob's metrics.** Its frame, the ticks, the pointer, the shadow, and the sweep, −135° to +135° clockwise from straight up, as the pack has it. Only the pointer rotates. The body's highlight stays where the light is.
-5. **Text slots, not sample text.** The pack's layout lists sample strings at sample frames, `LEVEL` and `MAIN · ACTIVE` among them. The skin instead names each slot the app fills, with its frame, font, size, weight, alignment, and color: the nameplate's `logo`, `online`, the groups' `groupsTitle` and `message`, the display's `caption`, `level`, `unit`, `output`, and `max`, the knob's `min`, `max`, and `caption`, the footer's `monitors` and `power`, and the OSD's `level`, `unit`, `title`, and `subtitle`. The strings are the app's. A skin can't put words on the panel, and the app can't put text where the skin left no slot. Fonts name a face the Mac has, and a face it lacks falls back to the system font, or the system monospaced font for a slot marked `mono`. The display's digits are monospaced in every skin.
+4. **The buttons' face.** A button's `face` and `pressedFace` say where its face sits inside its frame, past the image's shadow. The label, the focus ring, and the box around the buttons all go by the face. `qlm/App/Skins/README.md` gives the keys.
+5. **The knob's metrics.** Its frame, the ticks, the pointer, the shadow, and the sweep, −135° to +135° clockwise from straight up, as the pack has it. Only the pointer rotates. The body's highlight stays where the light is.
+6. **Text slots, not sample text.** The pack's layout lists sample strings at sample frames, `LEVEL` and `MAIN · ACTIVE` among them. The skin instead names each slot the app fills, with its frame, font, size, weight, alignment, and color: the nameplate's `logo`, `online`, the groups' `groupsTitle` and `message`, the display's `caption`, `level`, `unit`, `output`, and `max`, the knob's `min`, `max`, and `caption`, the footer's `monitors` and `power`, and the OSD's `level`, `unit`, `title`, and `subtitle`. The strings are the app's. A skin can't put words on the panel, and the app can't put text where the skin left no slot. Fonts name a face the Mac has, and a face it lacks falls back to the system font, or the system monospaced font for a slot marked `mono`. The display's digits are monospaced in every skin.
 
 The state rules are the pack's: disabled first, then pressed, then hover, then normal, with selection independent and focus an overlay. The symbol names are the pack's too.
 
@@ -157,20 +158,21 @@ The OSD went past them too, and needed no new image. Vintage's and retro's OSDs 
 
 ### What draws it
 
-These files in `qlm/App/`, over the resources. Those marked Foundation only compile into the hostless tests. So do the drawing, the layers, and the element views, since a view out of any window draws, and its layers render into a bitmap. Only a window needs the app.
+These files in `qlm/App/`, over the resources. Those marked Foundation only compile into the hostless tests. So do the drawing, the layers, the element views, the menu, and the window's controller. A view draws out of any window, and its layers render into a bitmap. A window draws offscreen in the tests, but never becomes key.
 
 - `QLMSkin` reads a skin's `skin.json` into values and refuses what it can't read. It loads no image itself. Foundation only.
 - `QLMSkinLibrary` finds the app's skins and the user's, by name, and falls back to modern for a refused one. Foundation only.
 - `QLMSkinChoice` holds the skin that shows, and why the saved one was refused, if it was. The app delegate hands its skin to the window, the OSD, and Settings. It starts the decode of a skin's images as it loads it.
 - `QLMSkinLayout` is the resize pass: each element's and slot's frame at a window size, by its anchors. Foundation only.
 - `QLMSkinDrawing` draws a skin's colors, images, fonts, and the geometry the app draws itself: LEDs, rings, and focus rings.
-- `QLMSkinImages` keeps every image a skin's drawing reads or makes, for the skin's life: its decoded files, decoded on the skin's own queue, and what is drawn from them and from its styles.
+- `QLMSkinImages` keeps every image a skin's drawing reads or makes, for the skin's life: its decoded files, decoded on the skin's own queue, what is drawn from them and from its styles, and its gradients.
 - `QLMSkinLayers` puts a view's material in its layer's contents, under one layer the view draws its content in. A change of the view's size sets the material again: in a window, AppKit calls no `updateLayer` for one.
 - `QLMSkinControls` holds the element views: the buttons, the footer's buttons, the status, the display, and the OSD's content.
 - `QLMSkinView` is the window's content view. It lays out the element views, with no Auto Layout, since every frame is given. A child view of its own, under the elements, draws the panel, the nameplate, the markings, and the panel's own words.
 - `QLMKnobControl` is the knob, an `NSControl` with a `doubleValue` in dB. Its math is a C header, `QLMKnobMath.h`: dB to angle, both drags, the step snap, and each tick's place.
 - `QLMMainWindowModel` turns the snapshot, the setup's groups, the range, and the window's last click into the window's texts and states. It holds the popover's rules for what is enabled, and why a group button takes no click. Foundation only.
-- `QLMMainWindowController` owns the window. It hands the model's outputs to the views and drives System.
+- `QLMMainWindowController` owns the window. It hands the model's outputs to the views and drives System. It answers the Controls menu, by the model's rules, through the calls its controls make.
+- `QLMMainMenu` builds the menu bar: qlm, File, Edit, Controls, Window, and Help. It hands the Controls menu to the window's controller, which lists the groups in it.
 - `QLMOSDRule` says when a snapshot shows the OSD, why a show with no turn shows nothing, and where the OSD sits on the screen. Foundation only.
 - `QLMOSDController` owns the OSD's window, its timer, and its fade.
 - `QLMSkinPreview`, in a Debug build only, opens a look at a skin with sample text, for the `skin_preview` verb.
@@ -221,7 +223,7 @@ These are the owner's calls. Each has a default the work takes until it's made.
 | More groups than the skin's grid holds: show the first ones, or scroll, or a popup for the rest? | Show the first ones, and say so in Settings |
 | Should the OSD also show on the window's knob, or on `qlmctl volume`? | No. The adapter's knob only. |
 | Should the OSD say `MUTED` or `DIM` when the knob turns under them? | Yes, in the subtitle's place, since the number alone would mislead |
-| Does the window open at launch by default? | No. The menu bar item is still the app. |
+| Does the window open at launch by default? | Yes, since #88. Settings can turn it off, and the menu bar item stays. |
 | A fourth button per group row for a group's calibration state? | No. The display's caption names the group, and that's enough. |
 | A window scale setting, 100%, 150%, or 200%, since the mockups were rendered at about twice the reference size? | Not now. The window resizes instead, and the 2x assets keep it crisp on a Retina display. |
 | Should the popover and the window show each other's apply errors? Both disable their group controls for any apply, and the window blinks its button, from the snapshot. But each keeps its own last error. | Not until the popover's redesign, which can move the error onto the shared model. |
