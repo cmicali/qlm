@@ -50,7 +50,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic, nullable) NSError *setupError;
 @property (nonatomic) NSUInteger setupLoads;  // the latest load wins
 @property (nonatomic, nullable) QLMSetupWatcher *setupWatcher;
-// What the status item shows, so an unchanged snapshot does not redraw it.
+// What the status item shows, so an unchanged snapshot changes nothing.
 @property (nonatomic, copy, nullable) NSString *statusSymbol;
 @property (nonatomic, copy, nullable) NSString *statusTip;
 @property (nonatomic) QLMOSDController *osdController;
@@ -329,15 +329,20 @@ static OSType QLMQuitReason(void) {
     } else if (snapshot.volumeDecibels != nil) {
         tip = [NSString stringWithFormat:@"qlm: %@%@", QLMDecibelsText(snapshot.volumeDecibels.doubleValue), snapshot.dimmed ? @", dimmed" : @""];
     }
-    if ([symbol isEqualToString:self.statusSymbol] && [tip isEqualToString:self.statusTip]) {
-        return;
+    NSStatusBarButton *button = self.statusItem.button;
+    // TRAP: a new image redraws the item on every display, about 5 ms each.
+    // A tooltip or a label redraws nothing.
+    if (![symbol isEqualToString:self.statusSymbol]) {
+        self.statusSymbol = symbol;
+        NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil];
+        image.template = YES;
+        button.image = image;
     }
-    self.statusSymbol = symbol;
-    self.statusTip = tip;
-    NSImage *image = [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:tip];
-    image.template = YES;
-    self.statusItem.button.image = image;
-    self.statusItem.button.toolTip = tip;
+    if (![tip isEqualToString:self.statusTip]) {
+        self.statusTip = tip;
+        button.toolTip = tip;
+        button.accessibilityLabel = tip;
+    }
 }
 
 #pragma mark - The setup file
