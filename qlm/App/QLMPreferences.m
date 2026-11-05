@@ -113,10 +113,15 @@ static dispatch_queue_t QLMKeptWrites(void) {
     BOOL _knobWaits;
     NSNumber *_waitingKnob;
     BOOL _flushScheduled;
-    // What this bus last wrote, so a decision reads no defaults. Nil until
-    // read or written.
-    NSNumber *_writtenVolume;
-    NSNumber *_writtenKnob;  // NSNull for no knob
+    // What the defaults hold, as stored, read once and then kept with each
+    // write, so a decision reads no defaults. Only this bus writes its keys.
+    // TRAP: the level as stored, not as the ceiling bounds it. Bounded, a
+    // level above a lowered ceiling read as the level that plays, so it was
+    // never written, and showed again once the ceiling rose.
+    BOOL _writtenLoaded;
+    double _writtenVolume;
+    BOOL _writtenKnobRead;
+    NSNumber *_writtenKnob;
     // The last snapshot's values, so an unchanged one compares nothing
     // with the defaults. A write by any other path clears them.
     NSNumber *_seenVolume;
@@ -158,8 +163,30 @@ static dispatch_queue_t QLMKeptWrites(void) {
     });
 }
 
+// The queue's blocks never wait on the main queue, so this can't deadlock.
+- (void)writeNow:(void (^)(NSUserDefaults *defaults))write {
+    NSUserDefaults *defaults = _defaults;
+    dispatch_sync(QLMKeptWrites(), ^{
+        write(defaults);
+    });
+}
+
+- (double)storedVolume {
+    return QLMKeptLevel(self.read, [self key:QLMVolumeName], QLMDefaultVolumeDecibels);
+}
+
 - (double)writtenVolume {
-    return [_preferences boundedVolume:QLMKeptLevel(self.read, [self key:QLMVolumeName], QLMDefaultVolumeDecibels)];
+    return [_preferences boundedVolume:[self storedVolume]];
+}
+
+- (void)loadWritten {
+    if (_writtenLoaded) {
+        return;
+    }
+    _writtenLoaded = YES;
+    _writtenVolume = [self storedVolume];
+    _writtenKnobRead = self.writtenKnobRead;
+    _writtenKnob = self.writtenKnobTenths;
 }
 
 - (double)volumeDecibels {
@@ -283,63 +310,66 @@ static dispatch_queue_t QLMKeptWrites(void) {
     [self flush];
 }
 
-- (double)lastWrittenVolume {
-    if (_writtenVolume == nil) {
-        _writtenVolume = @([self writtenVolume]);
-    }
-    return _writtenVolume.doubleValue;
-}
-
-- (nullable NSNumber *)lastWrittenKnob {
-    if (_writtenKnob == nil) {
-        _writtenKnob = self.writtenKnobTenths ?: (id)NSNull.null;
-    }
-    return _writtenKnob == (id)NSNull.null ? nil : _writtenKnob;
-}
-
-// Whether what waits is lower than what is written. A knob put in or taken
+// Whether what waits is lower than what is stored. A knob put in or taken
 // out counts.
 - (BOOL)waitingLowers {
-    if (_volumeWaits && [_preferences boundedVolume:_waitingVolume] < [self lastWrittenVolume]) {
+    [self loadWritten];
+    if (_volumeWaits && [_preferences boundedVolume:_waitingVolume] < _writtenVolume) {
         return YES;
     }
     if (!_knobWaits) {
         return NO;
     }
-    NSNumber *written = [self lastWrittenKnob];
-    return written == nil || _waitingKnob == nil || _waitingKnob.integerValue < written.integerValue;
+    return !_writtenKnobRead || _writtenKnob == nil || _waitingKnob == nil || _waitingKnob.integerValue < _writtenKnob.integerValue;
 }
 
-// Queues what waits, without waiting for it to land.
-- (void)writeWaiting {
-    if (_volumeWaits) {
-        _volumeWaits = NO;
-        double volume = [_preferences boundedVolume:_waitingVolume];
-        _writtenVolume = @(volume);
-        NSString *key = [self key:QLMVolumeName];
-        [self write:^(NSUserDefaults *defaults) {
-            [defaults setDouble:volume forKey:key];
-        }];
+// Writes what waits. A lowering and a stop wait until it has landed, so a
+// crash just after can't lose it. A raise is queued.
+- (void)writeWaitingAndWait:(BOOL)waits {
+    if (!_volumeWaits && !_knobWaits) {
+        if (waits) {
+            [self writeNow:^(NSUserDefaults *defaults) {
+            }];
+        }
+        return;
     }
-    if (_knobWaits) {
+    [self loadWritten];
+    BOOL volumeWaits = _volumeWaits;
+    BOOL knobWaits = _knobWaits;
+    double volume = [_preferences boundedVolume:_waitingVolume];
+    NSNumber *knob = _waitingKnob;
+    if (volumeWaits) {
+        _volumeWaits = NO;
+        _writtenVolume = volume;
+    }
+    if (knobWaits) {
         _knobWaits = NO;
-        NSNumber *knob = _waitingKnob;
-        _writtenKnob = knob ?: (id)NSNull.null;
-        NSString *key = [self key:QLMKnobName];
-        NSString *readKey = [self key:QLMKnobReadName];
-        [self write:^(NSUserDefaults *defaults) {
-            [defaults setObject:knob forKey:key];
+        _writtenKnobRead = YES;
+        _writtenKnob = knob;
+    }
+    NSString *volumeKey = [self key:QLMVolumeName];
+    NSString *knobKey = [self key:QLMKnobName];
+    NSString *readKey = [self key:QLMKnobReadName];
+    void (^write)(NSUserDefaults *) = ^(NSUserDefaults *defaults) {
+        if (volumeWaits) {
+            [defaults setDouble:volume forKey:volumeKey];
+        }
+        if (knobWaits) {
+            [defaults setObject:knob forKey:knobKey];
             if (![[defaults objectForKey:readKey] isEqual:@YES]) {
                 [defaults setBool:YES forKey:readKey];
             }
-        }];
+        }
+    };
+    if (waits) {
+        [self writeNow:write];
+    } else {
+        [self write:write];
     }
 }
 
 - (void)flush {
-    [self writeWaiting];
-    dispatch_sync(QLMKeptWrites(), ^{
-    });
+    [self writeWaitingAndWait:YES];
 }
 
 - (void)scheduleFlush {
@@ -352,7 +382,7 @@ static dispatch_queue_t QLMKeptWrites(void) {
         QLMBusPreferences *strongSelf = weakSelf;
         if (strongSelf != nil) {
             strongSelf->_flushScheduled = NO;
-            [strongSelf writeWaiting];
+            [strongSelf writeWaitingAndWait:NO];
         }
     });
 }
@@ -374,10 +404,12 @@ static dispatch_queue_t QLMKeptWrites(void) {
 - (void)keepFromSnapshot:(QLMSnapshot *)snapshot {
     // The knob moves the volume too. Keep whichever set it last. System
     // never reports one above 0 dB.
+    [self loadWritten];
     NSNumber *volume = snapshot.volumeDecibels;
     if (volume != nil && ![volume isEqual:_seenVolume]) {
         _seenVolume = volume;
-        if (QLMIsSavableLevel(volume.doubleValue) && [_preferences boundedVolume:volume.doubleValue] != self.volumeDecibels) {
+        double kept = _volumeWaits ? [_preferences boundedVolume:_waitingVolume] : _writtenVolume;
+        if (QLMIsSavableLevel(volume.doubleValue) && [_preferences boundedVolume:volume.doubleValue] != kept) {
             _volumeWaits = YES;
             _waitingVolume = volume.doubleValue;
         }
@@ -386,7 +418,7 @@ static dispatch_queue_t QLMKeptWrites(void) {
         [self keepRecordFromSnapshot:snapshot];
     }
     if (!snapshot.running || [self waitingLowers]) {
-        [self writeWaiting];
+        [self writeWaitingAndWait:YES];
     } else if (_volumeWaits || _knobWaits) {
         [self scheduleFlush];
     }
@@ -425,7 +457,9 @@ static dispatch_queue_t QLMKeptWrites(void) {
     }
     id knob = snapshot.adapter.knobTenths ?: NSNull.null;
     if (![knob isEqual:_seenKnob]) {
-        if (!self.knobRead || ![knob isEqual:(self.knobTenths ?: NSNull.null)]) {
+        BOOL read = _knobWaits || _writtenKnobRead;
+        NSNumber *kept = _knobWaits ? _waitingKnob : _writtenKnob;
+        if (!read || ![knob isEqual:(kept ?: NSNull.null)]) {
             _knobWaits = YES;
             _waitingKnob = knob == NSNull.null ? nil : knob;
         }

@@ -242,6 +242,7 @@ targets:
       - qlm/App/QLMMainWindowController.m
       - qlm/App/QLMMainWindowModel.m
       - qlm/App/QLMMonitorList.m
+      - qlm/App/QLMOSDController.m
       - qlm/App/QLMOSDRule.m
       - qlm/App/QLMPreferences.m
       - qlm/App/QLMReadoutThrottle.m

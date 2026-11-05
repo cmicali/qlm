@@ -81,7 +81,9 @@
     QLMFrameCoalescer<NSString *> *coalescer = [[QLMFrameCoalescer alloc] initWithApply:^(NSString *value) {
         [self->_applied addObject:value];
     }];
-    coalescer.requestFrame = QLMDisplayFrameRequest();
+    coalescer.requestFrame = QLMDisplayFrameRequest(^NSScreen *_Nullable {
+        return nil;
+    });
     [coalescer submit:@"a"];
     [coalescer submit:@"b"];
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];

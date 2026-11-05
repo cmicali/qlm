@@ -148,6 +148,9 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
         [self hostSkin];
     }
     self.shown = snapshot;
+    // TRAP: taken before the fade is undone below. A fade's timer is its
+    // hide's, which a step must replace, not move.
+    BOOL holding = self.timer != nil && !self.fading;
     // A show from hidden shows its level at once.
     if (!self.window.visible || self.fading) {
         [self.levelReadout reset];
@@ -165,7 +168,7 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     }
     // A turn that goes on moves the hold's end, rather than make a timer
     // a step.
-    if (self.timer != nil && !self.fading) {
+    if (holding) {
         self.timer.fireDate = [NSDate dateWithTimeIntervalSinceNow:self.preferences.osdSeconds];
         return;
     }

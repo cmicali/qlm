@@ -41,7 +41,8 @@ typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
 // writes both at once, so what a crash leaves can only be quieter than what
 // was heard. A stopped System's snapshot writes them at once too. Reads see
 // what waits. dispatch_after on the main queue until set. Every write goes
-// out in order on a queue of its own, and every read waits for those
+// out in order on a queue of its own. A lowering and a stop wait for theirs
+// to land. A raise and the record don't. Every read waits for the writes
 // queued before it.
 @property (nonatomic, copy) QLMKeptScheduler scheduler;
 // Writes what waits now, and waits for every write to land. Call at every

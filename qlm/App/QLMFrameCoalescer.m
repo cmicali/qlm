@@ -60,6 +60,7 @@ static const int64_t QLMFrameFallbackNanoseconds = 100 * NSEC_PER_MSEC;
 
 @implementation QLMDisplayFrames {
     id _link;  // a CADisplayLink, on macOS 14 and later
+    __weak NSScreen *_linkScreen;
     NSMutableArray<dispatch_block_t> *_waiting;
     NSUInteger _generation;
 }
@@ -77,9 +78,12 @@ static const int64_t QLMFrameFallbackNanoseconds = 100 * NSEC_PER_MSEC;
     self = [super init];
     if (self) {
         _waiting = [NSMutableArray array];
-        // A new main screen takes a new link.
+        // A window moved to another display, or a display changed, takes a
+        // new link.
         [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(screensDidChange:)
                                                    name:NSApplicationDidChangeScreenParametersNotification object:nil];
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(screensDidChange:)
+                                                   name:NSWindowDidChangeScreenNotification object:nil];
     }
     return self;
 }
@@ -91,7 +95,7 @@ static const int64_t QLMFrameFallbackNanoseconds = 100 * NSEC_PER_MSEC;
     _link = nil;
 }
 
-- (void)request:(dispatch_block_t)fire {
+- (void)request:(dispatch_block_t)fire onScreen:(nullable NSScreen *)screen {
     [_waiting addObject:fire];
     if (_waiting.count > 1) {
         return;
@@ -107,10 +111,15 @@ static const int64_t QLMFrameFallbackNanoseconds = 100 * NSEC_PER_MSEC;
     // costs more than the draw it would time.
     BOOL seen = (NSApp.occlusionState & NSApplicationOcclusionStateVisible) != 0;
     if (@available(macOS 14.0, *)) {
-        if (seen && _link == nil) {
-            CADisplayLink *link = [NSScreen.mainScreen displayLinkWithTarget:self selector:@selector(tick:)];
+        if (_link != nil && screen != _linkScreen) {
+            [(CADisplayLink *)_link invalidate];
+            _link = nil;
+        }
+        if (seen && _link == nil && screen != nil) {
+            CADisplayLink *link = [screen displayLinkWithTarget:self selector:@selector(tick:)];
             [link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
             _link = link;
+            _linkScreen = screen;
         }
         if (seen && _link != nil) {
             ((CADisplayLink *)_link).paused = NO;
@@ -135,8 +144,8 @@ static const int64_t QLMFrameFallbackNanoseconds = 100 * NSEC_PER_MSEC;
 
 @end
 
-QLMFrameRequest QLMDisplayFrameRequest(void) {
+QLMFrameRequest QLMDisplayFrameRequest(NSScreen *_Nullable (^screen)(void)) {
     return ^(dispatch_block_t fire) {
-        [[QLMDisplayFrames shared] request:fire];
+        [[QLMDisplayFrames shared] request:fire onScreen:screen() ?: NSScreen.mainScreen];
     };
 }

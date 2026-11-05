@@ -648,6 +648,39 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertEqualObjects(self.written.mutedHardwareIDs, [NSSet setWithObject:QLMID(0xEA)]);
 }
 
+// A level kept above a lowered ceiling is written down to the level that
+// plays, so a ceiling raised again can't bring the louder one back at the
+// next launch. The review's probe.
+- (void)testALevelAboveALoweredCeilingIsWrittenDown {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
+    XCTAssertTrue([_preferences saveCeilingDecibels:0]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-5, @(-50))];
+    for (dispatch_block_t flush in flushes) {
+        flush();
+    }
+    [kept flush];
+    XCTAssertEqual(self.written.volumeDecibels, -5);
+    XCTAssertTrue([_preferences saveCeilingDecibels:-10]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-10, @(-50))];
+    XCTAssertTrue([_preferences saveCeilingDecibels:0]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-10, @(-50))];
+    XCTAssertEqual(self.written.volumeDecibels, -10);
+}
+
+// What a relaunch reads, under a ceiling raised since, decides a lowering.
+// A level under the stored one is written at once, not a second later.
+- (void)testALoweringUnderAStoredLevelAboveTheCeilingWritesAtOnce {
+    [_defaults setDouble:-5 forKey:@"QLMVolumeDecibels"];
+    XCTAssertTrue([_preferences saveCeilingDecibels:-10]);
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
+    XCTAssertTrue([_preferences saveCeilingDecibels:0]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-8, @(-80))];
+    XCTAssertEqual(flushes.count, 0u, @"a lowering never waits");
+    XCTAssertEqual(self.written.volumeDecibels, -8);
+}
+
 // The writes go out off the main queue, in order, and a read anywhere waits
 // for those queued before it: a turn down writes each lower level, and a
 // relaunch reads the last.

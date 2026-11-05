@@ -131,7 +131,12 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     self.frames = [[QLMFrameCoalescer alloc] initWithApply:^(QLMSnapshot *snapshot) {
         [weakSelf drawSnapshot:snapshot];
     }];
-    self.frames.requestFrame = QLMDisplayFrameRequest();
+    // The main window's display, where the frames that matter show. The
+    // OSD shows on the main screen.
+    self.frames.requestFrame = QLMDisplayFrameRequest(^NSScreen *_Nullable {
+        QLMMainWindowController *window = weakSelf.mainWindowController;
+        return window.showing ? window.window.screen : nil;
+    });
 
     [self startSystemDimmed:NO];
     if (self.preferences.wakesAtLaunch) {
@@ -607,7 +612,10 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 
 @implementation QLMAppDelegate (Debug)
 
+// A verb reads the windows as they are, so what waits for a frame draws
+// first.
 - (QLMSnapshot *)debugSnapshot {
+    [self.frames flush];
     return self.monitorList.snapshot;
 }
 

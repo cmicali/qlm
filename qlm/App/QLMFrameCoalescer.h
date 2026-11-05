@@ -1,4 +1,4 @@
-#import <Foundation/Foundation.h>
+#import <Cocoa/Cocoa.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -25,10 +25,11 @@ typedef void (^QLMFrameRequest)(dispatch_block_t fire);
 
 @end
 
-// The main screen's frames, from its display link on macOS 14 and later
-// while any of the app's windows is on screen, else the next main-queue
-// turn. TRAP: a display that sleeps or goes away gives no frames, so a
-// request waits at most 100 ms for one.
-QLMFrameRequest QLMDisplayFrameRequest(void);
+// The frames of the display `screen` names at each request, else the main
+// screen's, from its display link on macOS 14 and later while any of the
+// app's windows is on screen, else the next main-queue turn. A window moved
+// to another display takes a new link. TRAP: a display that sleeps or goes
+// away gives no frames, so a request waits at most 100 ms for one.
+QLMFrameRequest QLMDisplayFrameRequest(NSScreen *_Nullable (^screen)(void));
 
 NS_ASSUME_NONNULL_END
