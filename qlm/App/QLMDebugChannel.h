@@ -82,6 +82,9 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) id<QLMDebugOSD> debugOSD;
 // What the popover's Window… button does.
 - (void)debugShowWindow;
+// Draws every open window's latest snapshot, even one covered or on another
+// Space, which skips snapshots. Runs before a verb that reads the windows.
+- (void)debugDrawWindows;
 // The skin that shows, and why the saved one does not, if it does not.
 @property (nonatomic, readonly) QLMSkinChoice *debugSkinChoice;
 // What Settings' skin picker does. Returns the library's refusal.

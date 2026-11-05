@@ -216,7 +216,8 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     return _knobWaits ? _waitingKnob : self.writtenKnobTenths;
 }
 
-- (void)keepKnobTenths:(NSNumber *)knobTenths {
+// Writes a reading at once. Only the tests call it.
+- (void)keepKnobTenths:(nullable NSNumber *)knobTenths {
     _knobWaits = YES;
     _waitingKnob = knobTenths;
     [self flush];

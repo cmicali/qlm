@@ -39,9 +39,12 @@ NS_ASSUME_NONNULL_BEGIN
 // The setup file in use, or why it did not read. Both nil: none was found.
 - (void)showSetup:(nullable QLMSetup *)setup error:(nullable NSError *)error;
 
-// Draws the hand-back from the monitor list's snapshot while the window is
-// open.
+// Draws the hand-back from the monitor list's snapshot while any of the
+// window is on screen. It draws again when it next comes into view.
 - (void)refresh;
+// Draws the latest snapshot while the window is open, seen or not, for a
+// debug verb that reads what the window shows.
+- (void)drawWhileOpen;
 
 // The skin that shows, and why the saved one does not, if it does not. It
 // draws the skin's picker, its note, and the groups note while the window

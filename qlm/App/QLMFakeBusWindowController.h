@@ -14,9 +14,12 @@ NS_ASSUME_NONNULL_BEGIN
 // Setting it rebuilds the controls.
 @property (nonatomic, nullable) QLMFakeBus *bus;
 
-// Reads the bus again while the window shows: System's power steps change
-// the monitors too. A show reads it too.
+// Reads the bus again while any of the window is on screen: System's power
+// steps change the monitors too. A show, or a return into view, reads it too.
 - (void)refresh;
+// Draws the latest snapshot while the window is open, seen or not, for a
+// debug verb that reads what the window shows.
+- (void)drawWhileOpen;
 
 @end
 

@@ -175,6 +175,12 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     }
 }
 
+- (void)drawWhileOpen {
+    if (self.showing) {
+        [self render];
+    }
+}
+
 // A window that comes into view catches up at once.
 - (void)windowDidChangeOcclusionState:(NSNotification *)notification {
     if (QLMWindowIsSeen(super.window)) {

@@ -64,7 +64,6 @@ typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
 // reading kept wrong reads as no knob, so the next start can only cap.
 @property (nonatomic, readonly) BOOL knobRead;
 @property (nonatomic, readonly, nullable) NSNumber *knobTenths;
-- (void)keepKnobTenths:(nullable NSNumber *)knobTenths;
 // Puts a fresh fake bus's knob where the last one read, so a relaunch on
 // the fake bus finds it unmoved.
 - (void)restoreKnobOn:(QLMFakeBus *)bus;

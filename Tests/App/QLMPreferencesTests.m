@@ -13,6 +13,10 @@ static NSData *QLMID(uint8_t last) {
     return QLMBytes(bytes, sizeof bytes);
 }
 
+@interface QLMBusPreferences (QLMTesting)
+- (void)keepKnobTenths:(nullable NSNumber *)knobTenths;
+@end
+
 // The app's preferences, over a defaults domain of the test's own.
 @interface QLMPreferencesTests : XCTestCase
 @end

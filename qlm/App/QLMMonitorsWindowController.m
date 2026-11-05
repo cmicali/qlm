@@ -246,6 +246,12 @@ static const double QLMMeterBarCounts = 48;
     }
 }
 
+- (void)drawWhileOpen {
+    if (self.window.visible) {
+        [self render];
+    }
+}
+
 // A window that comes into view catches up at once.
 - (void)windowDidChangeOcclusionState:(NSNotification *)notification {
     [self refresh];

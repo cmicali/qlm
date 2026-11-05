@@ -155,6 +155,12 @@ static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applicat
     }
 }
 
+- (void)drawWhileOpen {
+    if (self.window.visible) {
+        [self change:nil];
+    }
+}
+
 // A window that comes into view catches up at once.
 - (void)windowDidChangeOcclusionState:(NSNotification *)notification {
     [self refresh];

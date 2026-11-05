@@ -669,6 +669,13 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     [self showMainWindow:nil];
 }
 
+- (void)debugDrawWindows {
+    [self.mainWindowController drawWhileOpen];
+    [self.monitorsController drawWhileOpen];
+    [self.settingsController drawWhileOpen];
+    [self.fakeBusController drawWhileOpen];
+}
+
 - (QLMSkinChoice *)debugSkinChoice {
     return self.skinChoice;
 }
