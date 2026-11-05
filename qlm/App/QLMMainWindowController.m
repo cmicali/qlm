@@ -176,9 +176,18 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 #pragma mark - Actions
 
+- (void)setSystem:(QLMSystem *)system {
+    _system = system;
+    self.model.hasSystem = system != nil;
+    [self refresh];
+}
+
 - (void)groupClicked:(QLMSkinButtonView *)button {
+    [self clickGroupAtIndex:(NSUInteger)button.tag];
+}
+
+- (void)clickGroupAtIndex:(NSUInteger)index {
     NSArray<NSString *> *names = self.model.shownGroupNames;
-    NSUInteger index = (NSUInteger)button.tag;
     if (index < names.count) {
         (void)[self clickGroup:names[index] atIndex:index];
     }
@@ -193,8 +202,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 - (nullable NSString *)clickGroup:(NSString *)name atIndex:(NSUInteger)index {
     QLMMainWindowModel *model = self.model;
     model.snapshot = self.monitorList.snapshot;
-    QLMSystem *system = self.system;
-    NSString *refusal = [model refusalToClickGroupNamed:name] ?: (system == nil ? @"System is not running" : nil);
+    NSString *refusal = [model refusalToClickGroupNamed:name];
     if (refusal != nil) {
         return refusal;
     }
@@ -204,7 +212,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     model.applyError = nil;
     [self refresh];
     __weak QLMMainWindowController *weakSelf = self;
-    [system applyGroup:group completion:^(NSError *error) {
+    [self.system applyGroup:group completion:^(NSError *error) {
         QLMMainWindowController *strongSelf = weakSelf;
         strongSelf.model.applyPending = NO;
         strongSelf.model.applyError = error;
@@ -303,6 +311,9 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
 #pragma mark - The menu
 
+@synthesize controlsMenu = _controlsMenu;
+
+// It lists the groups the window shows.
 - (void)setControlsMenu:(NSMenu *)controlsMenu {
     _controlsMenu = controlsMenu;
     [self renderGroups];
@@ -329,11 +340,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 }
 
 - (void)chooseGroup:(NSMenuItem *)sender {
-    NSArray<NSString *> *names = self.model.shownGroupNames;
-    NSUInteger index = [sender.representedObject unsignedIntegerValue];
-    if (index < names.count) {
-        (void)[self clickGroup:names[index] atIndex:index];
-    }
+    [self clickGroupAtIndex:[sender.representedObject unsignedIntegerValue]];
 }
 
 // The menu acts on the window it names, so not while another of qlm's
@@ -342,49 +349,46 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     return self.showing && NSApp.keyWindow == super.window;
 }
 
-// Where a step of the knob goes, or nil where it takes none.
-- (nullable NSNumber *)levelSteppedBy:(int)steps {
-    QLMKnobControl *knob = self.skinView.knob;
-    if (![self menuActs] || knob == nil) {
-        return nil;
-    }
+// Through the knob, as its arrow keys turn it, so its action sends the
+// level. Not before a level is known.
+- (BOOL)canStepVolumeBy:(int)steps {
     self.model.snapshot = self.monitorList.snapshot;
-    return [self.model levelSteppedFrom:knob.doubleValue by:steps];
+    return self.model.knobDecibels != nil && [self.skinView.knob canStepBy:steps];
 }
 
-// Through the knob, as its arrow keys turn it, so its action sends the level.
 - (void)stepVolumeBy:(int)steps {
-    NSNumber *level = [self levelSteppedBy:steps];
-    if (level != nil) {
-        [self.skinView.knob moveTo:level.doubleValue];
+    if ([self menuActs] && [self canStepVolumeBy:steps]) {
+        [self.skinView.knob stepBy:steps];
     }
 }
 
 - (BOOL)validateMenuItem:(NSMenuItem *)item {
+    if (![self menuActs]) {
+        return NO;
+    }
     QLMMainWindowModel *model = self.model;
     model.snapshot = self.monitorList.snapshot;
-    BOOL running = self.system != nil && [self menuActs];
     SEL action = item.action;
     if (action == @selector(toggleMute:)) {
         item.state = model.muteOn ? NSControlStateValueOn : NSControlStateValueOff;
-        return running && model.muteEnabled;
+        return model.muteEnabled;
     }
     if (action == @selector(toggleDim:)) {
         item.state = model.dimOn ? NSControlStateValueOn : NSControlStateValueOff;
-        return running && model.dimEnabled;
+        return model.dimEnabled;
     }
     if (action == @selector(togglePower:)) {
         item.title = model.powerTitle;
-        return running && model.powerEnabled;
+        return model.powerEnabled;
     }
     if (action == @selector(volumeUp:) || action == @selector(volumeDown:)) {
-        return [self levelSteppedBy:action == @selector(volumeUp:) ? 1 : -1] != nil;
+        return [self canStepVolumeBy:action == @selector(volumeUp:) ? 1 : -1];
     }
     if (action == @selector(chooseGroup:)) {
         NSArray<NSString *> *names = model.shownGroupNames;
         NSUInteger index = [item.representedObject unsignedIntegerValue];
         item.state = index == model.chosenGroupIndex ? NSControlStateValueOn : NSControlStateValueOff;
-        return running && index < names.count && [model refusalToClickGroupNamed:names[index]] == nil;
+        return index < names.count && [model refusalToClickGroupNamed:names[index]] == nil;
     }
     return NO;
 }

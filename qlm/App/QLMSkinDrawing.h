@@ -27,11 +27,6 @@ void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NS
 // and cap insets. Every image the skin draws goes through here.
 void QLMSkinDrawImage(NSImage *_Nullable image, NSRect rect);
 
-// Decodes every image the skin's styles name, at the main screen's scale,
-// on a background queue, so the first show finds them decoded. The other
-// scale decodes when first asked for.
-void QLMSkinWarmImages(QLMSkin *skin);
-
 // What `draw` draws in `size` points at `scale`, in a flipped context.
 CGImageRef _Nullable QLMSkinRenderImage(NSSize size, CGFloat scale, void (^draw)(void)) CF_RETURNS_RETAINED;
 

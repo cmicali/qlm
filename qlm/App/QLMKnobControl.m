@@ -4,7 +4,6 @@
 #import "QLMFormat.h"
 #import "QLMKnobMath.h"
 #import "QLMSkinDrawing.h"
-#import "QLMSkinImages.h"
 
 // A trackpad's scroll moves a step per this many points.
 static const CGFloat QLMKnobScrollPointsPerStep = 12;
@@ -36,11 +35,19 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     return QLMDecibelsText(_value);
 }
 
+- (double)levelSteppedBy:(int)steps {
+    return QLMKnobStep(_value, steps, self.minValue, self.maxValue);
+}
+
+- (BOOL)canStepBy:(int)steps {
+    return self.enabled && [self levelSteppedBy:steps] != QLMKnobSnap(_value, self.minValue, self.maxValue);
+}
+
 - (BOOL)stepBy:(int)steps {
-    if (!self.enabled) {
+    if (![self canStepBy:steps]) {
         return NO;
     }
-    [self moveTo:QLMKnobStep(_value, steps, self.minValue, self.maxValue)];
+    [self moveTo:[self levelSteppedBy:steps]];
     return YES;
 }
 
@@ -167,10 +174,12 @@ static const CGFloat QLMKnobDeadFraction = 0.25;
     int steps = key == NSUpArrowFunctionKey || key == NSRightArrowFunctionKey ? 1
                 : key == NSDownArrowFunctionKey || key == NSLeftArrowFunctionKey ? -1 : 0;
     // Not QLMSkinControl's, whose Space and Return send the action with no
-    // change.
-    if (steps == 0 || ![self stepBy:steps]) {
+    // change. An arrow at an end of the range is still the knob's.
+    if (steps == 0 || !self.enabled) {
         [self.nextResponder keyDown:event];
+        return;
     }
+    [self stepBy:steps];
 }
 
 static void QLMKnobAppendRadial(NSBezierPath *path, NSPoint center, CGFloat inner, CGFloat outer, double degrees) {
@@ -202,51 +211,55 @@ static NSBezierPath *QLMKnobArc(NSPoint center, CGFloat radius, double from, dou
     return NSMakeRect(center.x - radius, center.y - radius, radius * 2, radius * 2);
 }
 
-// What no turn changes, drawn once per size and scale, and kept on the
-// skin, so a new window draws it again.
-- (nullable CGImageRef)stillAtScale:(CGFloat)scale {
+// What no turn changes: the body's cast shadow, the ticks, and the arc's
+// track, centered in `rect`.
+- (void)drawStillIn:(NSRect)rect {
     QLMSkinKnob *knob = self.skin.knob;
-    NSSize size = self.bounds.size;
-    NSPoint center = [self center];
-    NSRect disc = [self rectAround:knob.bodySize / 2 - 1];
-    NSString *key = [NSString stringWithFormat:@"still|%@|%g", NSStringFromSize(size), scale];
-    id still = [[QLMSkinImages imagesOfSkin:self.skin] objectForKey:key make:^id {
-        return CFBridgingRelease(QLMSkinRenderImage(size, scale, ^{
-            if (knob.shadow != nil) {
-                NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:disc];
-                QLMSkinDrawShadow(knob.shadow, path, NSColor.blackColor);
-                // Only the cast shadow stays, so a body that isn't opaque, as a
-                // disabled image body, shows no disc through it. TRAP: the
-                // erase is safe only because the still is its own fresh image.
-                // In a view's context, as in QLMSkinDrawShadow, it would punch
-                // a hole in the panel under every button.
-                [NSGraphicsContext saveGraphicsState];
-                NSGraphicsContext.currentContext.compositingOperation = NSCompositingOperationDestinationOut;
-                [NSColor.blackColor setFill];
-                [path fill];
-                [NSGraphicsContext restoreGraphicsState];
-            }
-            if (knob.tickCount > 0) {
-                NSBezierPath *ticks = [NSBezierPath bezierPath];
-                for (int i = 0; i < knob.tickCount; i++) {
-                    QLMKnobAppendRadial(ticks, center, knob.tickInner, knob.tickOuter, QLMKnobTickAngle(i, (int)knob.tickCount));
-                }
-                QLMKnobStroke(ticks, knob.tickWidth, QLMSkinNSColor(knob.tickColor));
-            }
-            if (knob.hasArc) {
-                QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES), knob.arcWidth,
-                              QLMSkinNSColor(knob.arcTrack));
-            }
-        }));
-    }];
-    return (__bridge CGImageRef)still;
+    NSPoint center = NSMakePoint(NSMidX(rect), NSMidY(rect));
+    if (knob.shadow != nil) {
+        CGFloat radius = knob.bodySize / 2 - 1;
+        NSBezierPath *path = [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(center.x - radius, center.y - radius,
+                                                                               radius * 2, radius * 2)];
+        // Only the cast shadow stays, so a body that isn't opaque, as a
+        // disabled image body, shows no disc through it. TRAP: the erase
+        // must stay inside its own transparency layer, or it would punch a
+        // hole in whatever is under the knob.
+        CGContextRef context = NSGraphicsContext.currentContext.CGContext;
+        CGContextBeginTransparencyLayer(context, NULL);
+        QLMSkinDrawShadow(knob.shadow, path, NSColor.blackColor);
+        [NSGraphicsContext saveGraphicsState];
+        NSGraphicsContext.currentContext.compositingOperation = NSCompositingOperationDestinationOut;
+        [NSColor.blackColor setFill];
+        [path fill];
+        [NSGraphicsContext restoreGraphicsState];
+        CGContextEndTransparencyLayer(context);
+    }
+    if (knob.tickCount > 0) {
+        NSBezierPath *ticks = [NSBezierPath bezierPath];
+        for (int i = 0; i < knob.tickCount; i++) {
+            QLMKnobAppendRadial(ticks, center, knob.tickInner, knob.tickOuter, QLMKnobTickAngle(i, (int)knob.tickCount));
+        }
+        QLMKnobStroke(ticks, knob.tickWidth, QLMSkinNSColor(knob.tickColor));
+    }
+    if (knob.hasArc) {
+        QLMKnobStroke(QLMKnobArc(center, knob.arcRadius, QLM_KNOB_START_DEGREES, QLM_KNOB_END_DEGREES), knob.arcWidth,
+                      QLMSkinNSColor(knob.arcTrack));
+    }
 }
 
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
     NSMutableArray<QLMSkinMaterial *> *materials = [NSMutableArray array];
-    CGImageRef still = [self stillAtScale:layers.scale];
-    if (still != NULL) {
-        [materials addObject:[QLMSkinMaterial materialOfImage:still frame:self.bounds layers:layers]];
+    __weak QLMKnobControl *weakSelf = self;
+    QLMSkinMaterial *still = [QLMSkinMaterial materialPainting:^(NSRect rect) {
+        [weakSelf drawStillIn:rect];
+    }
+                                                          frame:self.bounds
+                                                         margin:0
+                                                         family:@"knob-still"
+                                                           skin:self.skin
+                                                         layers:layers];
+    if (still != nil) {
+        [materials addObject:still];
     }
     QLMSkinKnob *knob = self.skin.knob;
     QLMSkinMaterial *body = [QLMSkinMaterial materialOfStyle:knob.body skin:self.skin

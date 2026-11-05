@@ -3,7 +3,6 @@
 #include <math.h>
 
 #import "QLMFormat.h"
-#import "QLMKnobMath.h"
 #import "QLMSystem.h"
 
 NSString *const QLMWindowClosedRefusal = @"the window is closed";
@@ -111,7 +110,7 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
 }
 
 - (BOOL)groupsEnabled {
-    return self.groupNames != nil && QLMSnapshotTracksMonitors(self.snapshot) && !self.applying;
+    return self.hasSystem && self.groupNames != nil && QLMSnapshotTracksMonitors(self.snapshot) && !self.applying;
 }
 
 - (NSString *)groupsMessage {
@@ -139,8 +138,9 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
         return [NSString stringWithFormat:@"no group button reads %@. They read: %@", name, [names componentsJoinedByString:@", "]];
     }
     if (!self.groupsEnabled) {
-        return self.applying ? @"the group buttons are disabled while an apply runs"
-                             : @"the group buttons are disabled until System tracks a monitor";
+        return self.applying     ? @"the group buttons are disabled while an apply runs"
+               : !self.hasSystem ? @"System is not running"
+                                 : @"the group buttons are disabled until System tracks a monitor";
     }
     return nil;
 }
@@ -190,7 +190,7 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
 }
 
 - (BOOL)muteEnabled {
-    return QLMSnapshotTracksMonitors(self.snapshot);
+    return self.hasSystem && QLMSnapshotTracksMonitors(self.snapshot);
 }
 
 - (BOOL)dimOn {
@@ -198,7 +198,7 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
 }
 
 - (BOOL)dimEnabled {
-    return self.snapshot.running;
+    return self.hasSystem && self.snapshot.running;
 }
 
 #pragma mark - The knob
@@ -218,16 +218,7 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
 }
 
 - (BOOL)knobEnabled {
-    return self.snapshot.running;
-}
-
-- (NSNumber *)levelSteppedFrom:(double)level by:(int)steps {
-    if (!self.knobEnabled || self.knobDecibels == nil) {
-        return nil;
-    }
-    double from = QLMKnobSnap(level, self.lowestDecibels, self.ceilingDecibels);
-    double to = QLMKnobStep(level, steps, self.lowestDecibels, self.ceilingDecibels);
-    return to == from ? nil : @(to);
+    return self.hasSystem && self.snapshot.running;
 }
 
 #pragma mark - The footer
@@ -241,7 +232,7 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
 }
 
 - (BOOL)powerEnabled {
-    return QLMSnapshotTracksMonitors(self.snapshot);
+    return self.hasSystem && QLMSnapshotTracksMonitors(self.snapshot);
 }
 
 @end

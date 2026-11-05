@@ -101,10 +101,10 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) CGFloat inset;
 @property (nonatomic, readonly) NSArray<QLMSkinRing *> *rings;
 @property (nonatomic, readonly, nullable) QLMSkinShadow *shadow;
-// Whether each row, or each column, between the corners draws as the next,
-// so a narrow draw stretches to any width, or height. Every key draws the
-// same along a straight edge but the gradient, which runs top to bottom.
-@property (nonatomic, readonly) BOOL isUniformAlongWidth;
+// Whether each row between the corners draws as the next, so a narrow draw
+// stretches to any height. Every key draws the same along a straight edge
+// but the gradient, which runs top to bottom. Each column draws as the next
+// in every draw.
 @property (nonatomic, readonly) BOOL isUniformAlongHeight;
 @end
 

@@ -291,7 +291,7 @@
     } refusedWith:@"button.face reaches past button.capInsets"];
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"button"][@"pressedFace"] = @[@-1, @1, @1, @1];
-    } refusedWith:@"button.pressedFace is below 0"];
+    } refusedWith:@"button.pressedFace has an inset below 0"];
     // A drawn button has no cap insets, so only its cell bounds its face.
     [self assertChangeTo:QLMModernSkinURL() change:^(NSMutableDictionary *json) {
         json[@"button"][@"face"] = @[@20, @0, @20, @0];

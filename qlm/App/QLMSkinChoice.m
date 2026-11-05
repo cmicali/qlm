@@ -1,6 +1,6 @@
 #import "QLMSkinChoice.h"
 
-#import "QLMSkinDrawing.h"
+#import "QLMSkinImages.h"
 
 @implementation QLMSkinChoice {
     QLMPreferences *_preferences;
@@ -16,7 +16,7 @@
         _skin = [library loadSkinNamed:preferences.skinName refusal:&refusal];
         _refusal = [refusal copy];
         NSAssert(_skin != nil, @"the default skin is refused");
-        QLMSkinWarmImages(_skin);
+        [[QLMSkinImages imagesOfSkin:_skin] warm];
     }
     return self;
 }
@@ -29,7 +29,7 @@
     }
     _skin = skin;
     _refusal = nil;
-    QLMSkinWarmImages(skin);
+    [[QLMSkinImages imagesOfSkin:skin] warm];
     _preferences.skinName = name;
     return nil;
 }

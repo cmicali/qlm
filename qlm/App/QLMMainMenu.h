@@ -12,6 +12,8 @@ NS_ASSUME_NONNULL_BEGIN
 // The Controls menu's actions, which the main window's controller answers
 // by its controls' rules, only while the main window is key.
 @protocol QLMMainMenuControls <NSMenuItemValidation>
+// The Controls menu, which QLMMainMenu sets as it builds it.
+@property (nonatomic, weak, nullable) NSMenu *controlsMenu;
 - (void)toggleMute:(nullable id)sender;
 - (void)toggleDim:(nullable id)sender;
 - (void)togglePower:(nullable id)sender;
@@ -27,11 +29,8 @@ NS_ASSUME_NONNULL_BEGIN
 // key equivalents work while any of qlm's windows is key.
 NSMenu *QLMMainMenu(id<QLMMainMenuActions> app, id<QLMMainMenuControls> controls);
 
-// The Controls menu in the bar.
-NSMenu *QLMMainMenuControlsMenu(NSMenu *bar);
-
-// Puts one item per group in the Controls menu, in place of the last. The
-// window shows at most six, on Cmd-1 to Cmd-6.
+// Puts one item per group in the Controls menu, in place of the last, on
+// Cmd-1 up. The window shows at most six.
 void QLMMainMenuSetGroups(NSMenu *controls, NSArray<NSString *> *names, id<QLMMainMenuControls> target);
 
 NS_ASSUME_NONNULL_END

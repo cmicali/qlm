@@ -35,18 +35,15 @@
     // Every control's own rule would enable it: two monitors on, a level
     // set, and a System. TRAP: the System is never started, so nothing
     // reaches a bus.
-    QLMSnapshot *snapshot = QLMMakeRunningSnapshot(@[QLMMakeMonitor(0x11, 0x02, QLMMonitorStatusOn),
-                                                     QLMMakeMonitor(0x11, 0x03, QLMMonitorStatusOn)]);
-    snapshot.anyOn = YES;
-    snapshot.volumeDecibels = @(-40);
     QLMMonitorList *monitors = [[QLMMonitorList alloc] init];
-    [monitors updateWithSnapshot:snapshot];
-    QLMSkin *skin = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
+    [monitors updateWithSnapshot:QLMMakeTwoMonitorSnapshot()];
+    QLMSkin *skin = QLMBuiltInSkin(@"modern");
     _controller = [[QLMMainWindowController alloc] initWithPreferences:preferences monitorList:monitors skin:skin];
     _controller.system = [[QLMSystem alloc] initWithAdapter:[QLMFakeBus demoBusWithSubwoofer:NO]
                                                    settings:[[QLMSystemSettings alloc] init]];
-    _controls = QLMMainMenuControlsMenu(QLMMainMenu(self, _controller));
-    _controller.controlsMenu = _controls;
+    NSMenu *bar = QLMMainMenu(self, _controller);
+    _controls = _controller.controlsMenu;
+    XCTAssertEqualObjects([bar itemWithTitle:@"Controls"].submenu, _controls);
     QLMSetup *setup = QLMReadFixtureSetup();
     [_controller showSetup:setup fileName:@"fixture.sam" error:nil];
 }

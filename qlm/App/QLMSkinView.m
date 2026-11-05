@@ -149,13 +149,13 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
 
 #pragma mark - The panel's text
 
-// Redraws only the slot's frame, and only on a change.
+// Redraws only the slot's ink, and only on a change.
 - (void)setText:(NSString *)text of:(NSString *__strong *)ivar slot:(NSString *)slot inElement:(NSString *)element {
     if (QLMSkinSameText(text, *ivar)) {
         return;
     }
     *ivar = [text copy];
-    [_panel.layers setNeedsDisplayInRect:[self frameOfSlot:slot inElement:element]];
+    [_panel.layers setNeedsDisplayInRect:[self inkOfSlot:slot inElement:element]];
 }
 
 - (void)setGroupsMessage:(NSString *)groupsMessage {
@@ -178,17 +178,22 @@ static NSString *const QLMSkinKnobCaption = @"VOLUME";
     return NSOffsetRect([self.skinLayout frameOfSlot:slot inElement:element], frame.origin.x, frame.origin.y);
 }
 
-// The nameplate's logo is its one optional slot.
-- (void)drawSlot:(NSString *)slot inElement:(NSString *)element text:(nullable NSString *)text dirty:(NSRect)dirty {
+// Where a slot may ink, in the window. The nameplate's logo is its one
+// optional slot, which inks nowhere when absent.
+- (NSRect)inkOfSlot:(NSString *)slot inElement:(NSString *)element {
     QLMSkinTextSlot *style = [self.skin element:element].text[slot];
-    if (style == nil || text.length == 0) {
+    if (style == nil) {
+        return NSZeroRect;
+    }
+    return QLMSkinSlotInk(style, [self frameOfSlot:slot inElement:element], [self.skinLayout scaleOfSlot:slot inElement:element]);
+}
+
+- (void)drawSlot:(NSString *)slot inElement:(NSString *)element text:(nullable NSString *)text dirty:(NSRect)dirty {
+    if (text.length == 0 || !NSIntersectsRect([self inkOfSlot:slot inElement:element], dirty)) {
         return;
     }
-    NSRect frame = [self frameOfSlot:slot inElement:element];
-    if (!NSIntersectsRect(frame, dirty)) {
-        return;
-    }
-    QLMSkinDrawSlot(text, style, frame, [self.skinLayout scaleOfSlot:slot inElement:element], NO, 1);
+    QLMSkinDrawSlotInInk(text, [self.skin element:element].text[slot], [self frameOfSlot:slot inElement:element],
+                         [self.skinLayout scaleOfSlot:slot inElement:element], NO, 1);
 }
 
 - (void)drawMarkingsIn:(NSRect)dirty {

@@ -11,9 +11,9 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMSkinMaterial : NSObject
 
 // The style's material for `state` in `frame`. An image style's is its
-// file, decoded once. A drawn style's is drawn into a bitmap once per size,
-// state, scale, and place on the pixels, and kept on the skin. A clear
-// overlay lays nothing over it.
+// file, decoded once. A drawn style's is drawn into a bitmap per size,
+// state, scale, and place on the pixels, and kept among its family's last
+// 4. A clear overlay lays nothing over it.
 + (nullable instancetype)materialOfStyle:(QLMSkinStyle *)style
                                     skin:(QLMSkin *)skin
                                    state:(QLMSkinState)state
@@ -31,8 +31,14 @@ NS_ASSUME_NONNULL_BEGIN
                                  frame:(NSRect)frame
                                 layers:(QLMSkinLayers *)layers;
 
-// An image made at the layers' scale to fill `frame`.
-+ (instancetype)materialOfImage:(CGImageRef)image frame:(NSRect)frame layers:(QLMSkinLayers *)layers;
+// What `paint` draws in the rect it is handed, `frame` grown by `margin`,
+// drawn into a bitmap on the window's pixels, among `family`'s last 4.
++ (nullable instancetype)materialPainting:(void (^)(NSRect rect))paint
+                                    frame:(NSRect)frame
+                                   margin:(CGFloat)margin
+                                   family:(NSString *)family
+                                     skin:(QLMSkin *)skin
+                                   layers:(QLMSkinLayers *)layers;
 
 - (instancetype)init NS_UNAVAILABLE;
 
@@ -51,8 +57,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 // A view's material as its layer's contents, beneath the content it draws,
 // so a change of its text composites the material rather than drawing it
-// again. On the screen, an image drawn in drawRect: costs 50 to 100 times
-// its draw offscreen, most of all a stretched one.
+// again. No image draws in drawRect:, which on the screen costs far more
+// than a composite.
 //
 // The view's layer holds one sublayer per material, then one for the
 // drawn content on top. The view is a leaf: a subview's layer would sit
@@ -70,12 +76,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) CGFloat scale;
 // How far past the view's bounds its content draws, as a focus ring does.
 @property (nonatomic) CGFloat contentOutset;
-// `rect`, grown to the window's pixels, in the view.
-- (NSRect)pixelRect:(NSRect)rect;
 
 - (void)updateLayer;
-// The material, drawn as drawRect: drew it before the layers, then the
-// content: the tests' reference for what the layers composite.
+// Each material's own drawing, then the content, into the current context:
+// the tests' reference for what the layers composite.
 - (void)drawReference:(NSRect)dirtyRect;
 // Draws only part of the content again, and sets no material.
 - (void)setNeedsDisplayInRect:(NSRect)rect;

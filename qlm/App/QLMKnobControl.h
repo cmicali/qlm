@@ -14,6 +14,10 @@ NS_ASSUME_NONNULL_BEGIN
 // A turn by the user, to the nearest step in the range, as a drag's. It
 // sends the action when the step changes.
 - (void)moveTo:(double)decibels;
+// A turn of `steps` of GLM's steps, as the arrow keys make, while enabled.
+// NO where it moves nothing: disabled, or at an end of the range.
+- (BOOL)canStepBy:(int)steps;
+- (BOOL)stepBy:(int)steps;
 @end
 
 NS_ASSUME_NONNULL_END

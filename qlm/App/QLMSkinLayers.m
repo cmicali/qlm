@@ -3,6 +3,11 @@
 #import "QLMSkinDrawing.h"
 #import "QLMSkinImages.h"
 
+@interface QLMSkinLayers ()
+// `rect`, grown to the window's pixels, in the view.
+- (NSRect)pixelRect:(NSRect)rect;
+@end
+
 @interface QLMSkinMaterial ()
 @property (nonatomic) id image;  // a CGImage
 @property (nonatomic) CGFloat scale;
@@ -10,10 +15,6 @@
 @property (nonatomic) NSRect frame;
 @property (nonatomic, copy) void (^draw)(void);
 @end
-
-static NSString *QLMSkinColorKey(QLMSkinColor color) {
-    return [NSString stringWithFormat:@"%g,%g,%g,%g", color.red, color.green, color.blue, color.alpha];
-}
 
 // To an eighth of a pixel, so a key holds through a float's noise.
 static NSString *QLMSkinRectKey(NSRect rect, CGFloat scale) {
@@ -158,8 +159,18 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
     CGFloat margin = shadow ? ceil(2 * shadow.blur + MAX(fabs(shadow.offset.width), fabs(shadow.offset.height))) : 0;
     NSString *family = [NSString stringWithFormat:@"style|%p|%ld|%d|%@", style, (long)state, circle, QLMSkinColorKey(overlay)];
     return [self materialPainting:paint frame:frame margin:margin corner:draw.inset + draw.radius + margin
-                            width:!circle && draw.isUniformAlongWidth height:!circle && draw.isUniformAlongHeight
+                            width:!circle height:!circle && draw.isUniformAlongHeight
                            family:family images:images layers:layers];
+}
+
++ (instancetype)materialPainting:(void (^)(NSRect rect))paint
+                           frame:(NSRect)frame
+                          margin:(CGFloat)margin
+                          family:(NSString *)family
+                            skin:(QLMSkin *)skin
+                          layers:(QLMSkinLayers *)layers {
+    return [self materialPainting:paint frame:frame margin:margin corner:0 width:NO height:NO family:family
+                           images:[QLMSkinImages imagesOfSkin:skin] layers:layers];
 }
 
 + (instancetype)materialOfLED:(QLMSkinLED *)led
@@ -168,30 +179,14 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
                       enabled:(BOOL)enabled
                         frame:(NSRect)frame
                        layers:(QLMSkinLayers *)layers {
-    NSString *family = [NSString stringWithFormat:@"led|%d|%d", lit, enabled];
     return [self materialPainting:^(NSRect rect) {
         QLMSkinDrawLED(led, rect, lit, enabled);
     }
                             frame:frame
                            margin:ceil(2 * led.glow)
-                           corner:0
-                            width:NO
-                           height:NO
-                           family:family
-                           images:[QLMSkinImages imagesOfSkin:skin]
+                           family:[NSString stringWithFormat:@"led|%d|%d", lit, enabled]
+                             skin:skin
                            layers:layers];
-}
-
-+ (instancetype)materialOfImage:(CGImageRef)image frame:(NSRect)frame layers:(QLMSkinLayers *)layers {
-    QLMSkinMaterial *material = [[QLMSkinMaterial alloc] init];
-    material.image = (__bridge id)image;
-    material.scale = layers.scale;
-    material.center = CGRectMake(0, 0, 1, 1);
-    material.frame = frame;
-    material.draw = ^{
-        QLMSkinDrawImage([[NSImage alloc] initWithCGImage:image size:frame.size], frame);
-    };
-    return material;
 }
 
 @end
@@ -200,8 +195,8 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
     __weak NSView<QLMSkinLayered> *_view;
     NSMutableArray<CALayer *> *_materials;
     CALayer *_content;
-    NSPoint _contentOrigin;  // the content layer's origin, in the view
-    NSSize _size;            // the view's size at the last update
+    NSRect _contentFrame;  // the content layer's frame, in the view, at the last update
+    NSSize _size;          // the view's size at the last update
 }
 
 - (instancetype)initWithView:(NSView<QLMSkinLayered> *)view {
@@ -262,9 +257,8 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
         layer.contentsCenter = material.center;
         layer.frame = [view convertRectToLayer:material.frame];
     }
-    NSRect frame = [self contentFrame];
-    _contentOrigin = frame.origin;
-    _content.frame = [view convertRectToLayer:frame];
+    _contentFrame = [self contentFrame];
+    _content.frame = [view convertRectToLayer:_contentFrame];
     _content.contentsScale = self.scale;
     [_content setNeedsDisplay];
 }
@@ -278,7 +272,7 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
 }
 
 - (void)setNeedsDisplayInRect:(NSRect)rect {
-    CGRect inLayer = NSOffsetRect(rect, -_contentOrigin.x, -_contentOrigin.y);
+    CGRect inLayer = NSOffsetRect(rect, -_contentFrame.origin.x, -_contentFrame.origin.y);
     if (!_content.contentsAreFlipped) {
         inLayer.origin.y = _content.bounds.size.height - CGRectGetMaxY(inLayer);
     }
@@ -286,11 +280,15 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
 }
 
 // A new size sets the materials again. A move off the pixels the content
-// was drawn on draws it again.
+// was drawn on draws it again. A hidden view waits for viewDidUnhide.
+// TRAP: a size change within a pixel keeps the content's frame, but not
+// the materials', so the size is checked too.
 - (void)viewFrameDidChange:(NSNotification *)notification {
     NSView *view = _view;
-    if (!NSEqualSizes(view.bounds.size, _size)
-        || (view.window != nil && !NSEqualPoints([self contentFrame].origin, _contentOrigin))) {
+    if (view.isHiddenOrHasHiddenAncestor) {
+        return;
+    }
+    if (!NSEqualSizes(view.bounds.size, _size) || !NSEqualRects([self contentFrame], _contentFrame)) {
         view.needsDisplay = YES;
     }
 }
@@ -312,17 +310,10 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
         CGContextTranslateCTM(context, 0, layer.bounds.size.height);
         CGContextScaleCTM(context, 1, -1);
     }
-    CGContextTranslateCTM(context, -_contentOrigin.x, -_contentOrigin.y);
+    CGContextTranslateCTM(context, -_contentFrame.origin.x, -_contentFrame.origin.y);
+    // Core Animation clears a partial redraw's rect first, as a test checks
+    // in a window, so no old text shows under the new.
     NSRect dirty = CGContextGetClipBoundingBox(context);
-    // A guard for a window, which no one could check: in a standalone 2x
-    // layer, Core Animation cleared a partial redraw's rect itself, but if
-    // it ever doesn't, the old text would show under the new. A whole
-    // redraw starts clear, and a clear here would cost a live resize a
-    // frame's fill of the window.
-    NSRect whole = NSMakeRect(_contentOrigin.x, _contentOrigin.y, layer.bounds.size.width, layer.bounds.size.height);
-    if (!NSContainsRect(dirty, whole)) {
-        CGContextClearRect(context, dirty);
-    }
     [NSGraphicsContext saveGraphicsState];
     NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithCGContext:context flipped:YES];
     [view drawSkinContent:dirty];
@@ -361,6 +352,11 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
 
 - (void)viewDidChangeBackingProperties {
     [super viewDidChangeBackingProperties];
+    self.needsDisplay = YES;
+}
+
+- (void)viewDidUnhide {
+    [super viewDidUnhide];
     self.needsDisplay = YES;
 }
 

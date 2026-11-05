@@ -55,6 +55,11 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     self.needsDisplay = YES;
 }
 
+- (void)viewDidUnhide {
+    [super viewDidUnhide];
+    self.needsDisplay = YES;
+}
+
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
     return @[];
 }
@@ -367,9 +372,7 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
 // Kept on the skin: building one costs most of a first show's drawing.
 - (nullable NSImage *)symbolAtAlpha:(CGFloat)alpha color:(NSColor *)color {
     CGFloat size = round(_slot.size * 1.25);
-    NSColor *srgb = [color colorUsingColorSpace:NSColorSpace.sRGBColorSpace] ?: color;
-    NSString *key = [NSString stringWithFormat:@"symbol|%@|%g|%g,%g,%g,%g", _symbolName, size, srgb.redComponent,
-                                               srgb.greenComponent, srgb.blueComponent, srgb.alphaComponent];
+    NSString *key = [NSString stringWithFormat:@"symbol|%@|%g|%@|%g", _symbolName, size, QLMSkinColorKey(_slot.color), alpha];
     NSString *name = _symbolName;
     return [[QLMSkinImages imagesOfSkin:self.skin] objectForKey:key make:^id {
         NSImageSymbolConfiguration *configuration =
