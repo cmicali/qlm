@@ -668,6 +668,63 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertEqual(self.written.volumeDecibels, -10);
 }
 
+// A raise that waits while the ceiling falls and rises again is kept as it
+// played: System capped its level for good, and a repeat of that snapshot
+// compares nothing. The second review's probes.
+- (void)testAWaitingRaiseIsKeptAsItPlaysThroughACeilingsFallAndRise {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
+    XCTAssertTrue([_preferences saveCeilingDecibels:0]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-10, @(-100))];
+    [kept flush];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-5, @(-100))];
+    XCTAssertTrue([_preferences saveCeilingDecibels:-8]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-8, @(-100))];
+    XCTAssertTrue([_preferences saveCeilingDecibels:0]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-8, @(-100))];
+    for (dispatch_block_t flush in flushes) {
+        flush();
+    }
+    [kept flush];
+    XCTAssertLessThanOrEqual(self.written.volumeDecibels, -8);
+
+    XCTAssertTrue([_preferences saveCeilingDecibels:-6]);
+    [kept keepFromSnapshot:QLMKnobSnapshot(-8, @(-100))];
+    [_preferences flushKept];
+    XCTAssertLessThanOrEqual(self.written.volumeDecibels, -8);
+}
+
+// Every stop writes the level kept, changed or not, so a louder one put in
+// the defaults from outside can't outlast a stop.
+- (void)testAStopRestatesTheLevelKept {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    (void)[self holdFlushesOf:kept];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-60, @(-600))];
+    [kept flush];
+    [_defaults removeObjectForKey:@"QLMVolumeDecibels"];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-60, @(-600))];
+    [_preferences flushKept];
+    XCTAssertEqual([_defaults doubleForKey:@"QLMVolumeDecibels"], -60);
+    XCTAssertEqual(self.written.volumeDecibels, -60);
+
+    [_defaults setDouble:-10 forKey:@"QLMVolumeDecibels"];
+    QLMSnapshot *stopped = [[QLMSnapshot alloc] init];
+    stopped.volumeDecibels = @(-60);
+    [kept keepFromSnapshot:stopped];
+    XCTAssertEqual(self.written.volumeDecibels, -60, @"a stopped System's snapshot restates it too");
+}
+
+// The mute record's keys land together, before the snapshot's keep returns.
+- (void)testTheMuteRecordLandsAtOnce {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    (void)[self holdFlushesOf:kept];
+    [kept keepFromSnapshot:self.runningSnapshot];
+    QLMBusPreferences *written = self.written;
+    XCTAssertEqualObjects(written.mutedHardwareIDs, [NSSet setWithObject:QLMID(0xEA)]);
+    XCTAssertTrue(written.mutingAll);
+    XCTAssertEqualObjects(written.liftedHardwareIDs, [NSSet setWithObject:QLMID(0xAB)]);
+}
+
 // What a relaunch reads, under a ceiling raised since, decides a lowering.
 // A level under the stored one is written at once, not a second later.
 - (void)testALoweringUnderAStoredLevelAboveTheCeilingWritesAtOnce {

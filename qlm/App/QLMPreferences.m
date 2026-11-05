@@ -223,7 +223,7 @@ static dispatch_queue_t QLMKeptWrites(void) {
     _seenMuted = nil;
     NSArray<NSData *> *list = mutedHardwareIDs.allObjects;
     NSString *key = [self key:QLMMutedName];
-    [self write:^(NSUserDefaults *defaults) {
+    [self writeNow:^(NSUserDefaults *defaults) {
         [defaults setObject:list forKey:key];
     }];
 }
@@ -235,7 +235,7 @@ static dispatch_queue_t QLMKeptWrites(void) {
 - (void)setMutingAll:(BOOL)mutingAll {
     _seenMutingAll = nil;
     NSString *key = [self key:QLMMutingAllName];
-    [self write:^(NSUserDefaults *defaults) {
+    [self writeNow:^(NSUserDefaults *defaults) {
         [defaults setBool:mutingAll forKey:key];
     }];
 }
@@ -248,7 +248,7 @@ static dispatch_queue_t QLMKeptWrites(void) {
     _seenLifted = nil;
     NSArray<NSData *> *list = liftedHardwareIDs.allObjects;
     NSString *key = [self key:QLMLiftedName];
-    [self write:^(NSUserDefaults *defaults) {
+    [self writeNow:^(NSUserDefaults *defaults) {
         [defaults setObject:list forKey:key];
     }];
 }
@@ -314,7 +314,7 @@ static dispatch_queue_t QLMKeptWrites(void) {
 // out counts.
 - (BOOL)waitingLowers {
     [self loadWritten];
-    if (_volumeWaits && [_preferences boundedVolume:_waitingVolume] < _writtenVolume) {
+    if (_volumeWaits && _waitingVolume < _writtenVolume) {
         return YES;
     }
     if (!_knobWaits) {
@@ -368,7 +368,23 @@ static dispatch_queue_t QLMKeptWrites(void) {
     }
 }
 
+// A stop writes the level and the reading kept, changed or not, so a
+// louder one put in the defaults from outside, by a hand edit or another
+// copy of the app, can't outlast it.
+- (void)restateKept {
+    [self loadWritten];
+    if (!_volumeWaits) {
+        _volumeWaits = YES;
+        _waitingVolume = _writtenVolume;
+    }
+    if (!_knobWaits && _writtenKnobRead) {
+        _knobWaits = YES;
+        _waitingKnob = _writtenKnob;
+    }
+}
+
 - (void)flush {
+    [self restateKept];
     [self writeWaitingAndWait:YES];
 }
 
@@ -408,14 +424,20 @@ static dispatch_queue_t QLMKeptWrites(void) {
     NSNumber *volume = snapshot.volumeDecibels;
     if (volume != nil && ![volume isEqual:_seenVolume]) {
         _seenVolume = volume;
-        double kept = _volumeWaits ? [_preferences boundedVolume:_waitingVolume] : _writtenVolume;
-        if (QLMIsSavableLevel(volume.doubleValue) && [_preferences boundedVolume:volume.doubleValue] != kept) {
+        // TRAP: kept as it plays. Kept raw, a raise waiting while the
+        // ceiling fell and rose was written above the level System had
+        // capped for good.
+        double kept = _volumeWaits ? _waitingVolume : _writtenVolume;
+        double plays = [_preferences boundedVolume:volume.doubleValue];
+        if (QLMIsSavableLevel(volume.doubleValue) && plays != kept) {
             _volumeWaits = YES;
-            _waitingVolume = volume.doubleValue;
+            _waitingVolume = plays;
         }
     }
     if (snapshot.running) {
         [self keepRecordFromSnapshot:snapshot];
+    } else {
+        [self restateKept];
     }
     if (!snapshot.running || [self waitingLowers]) {
         [self writeWaitingAndWait:YES];
@@ -424,25 +446,30 @@ static dispatch_queue_t QLMKeptWrites(void) {
     }
 }
 
+// The mute record's three keys go in one write, which lands before this
+// returns, so a crash just after a mute can't lose it, or keep part of it.
 - (void)keepRecordFromSnapshot:(QLMSnapshot *)snapshot {
     NSSet<NSData *> *muted = snapshot.mutedHardwareIDs;
-    if (![muted isEqual:_seenMuted]) {
-        if (![muted isEqualToSet:self.mutedHardwareIDs]) {
-            self.mutedHardwareIDs = muted;
+    NSSet<NSData *> *lifted = snapshot.liftedHardwareIDs;
+    BOOL mutingAll = snapshot.mutingAll;
+    BOOL seen = [muted isEqual:_seenMuted] && [lifted isEqual:_seenLifted] && _seenMutingAll != nil
+                && mutingAll == _seenMutingAll.boolValue;
+    if (!seen) {
+        if (![muted isEqualToSet:self.mutedHardwareIDs] || mutingAll != self.mutingAll
+            || ![lifted isEqualToSet:self.liftedHardwareIDs]) {
+            NSArray<NSData *> *mutedList = muted.allObjects;
+            NSArray<NSData *> *liftedList = lifted.allObjects;
+            NSString *mutedKey = [self key:QLMMutedName];
+            NSString *mutingAllKey = [self key:QLMMutingAllName];
+            NSString *liftedKey = [self key:QLMLiftedName];
+            [self writeNow:^(NSUserDefaults *defaults) {
+                [defaults setObject:mutedList forKey:mutedKey];
+                [defaults setBool:mutingAll forKey:mutingAllKey];
+                [defaults setObject:liftedList forKey:liftedKey];
+            }];
         }
         _seenMuted = muted;
-    }
-    if (_seenMutingAll == nil || snapshot.mutingAll != _seenMutingAll.boolValue) {
-        if (snapshot.mutingAll != self.mutingAll) {
-            self.mutingAll = snapshot.mutingAll;
-        }
-        _seenMutingAll = @(snapshot.mutingAll);
-    }
-    NSSet<NSData *> *lifted = snapshot.liftedHardwareIDs;
-    if (![lifted isEqual:_seenLifted]) {
-        if (![lifted isEqualToSet:self.liftedHardwareIDs]) {
-            self.liftedHardwareIDs = lifted;
-        }
+        _seenMutingAll = @(mutingAll);
         _seenLifted = lifted;
     }
     NSArray<QLMKnownLease *> *leases = snapshot.knownLeases;

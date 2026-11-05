@@ -42,8 +42,11 @@ typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
 // was heard. A stopped System's snapshot writes them at once too. Reads see
 // what waits. dispatch_after on the main queue until set. Every write goes
 // out in order on a queue of its own. A lowering and a stop wait for theirs
-// to land. A raise and the record don't. Every read waits for the writes
-// queued before it.
+// to land, and so does the mute record. A raise and the leases don't. Every
+// read waits for the writes queued before it. Every stop writes the level
+// and the reading kept, changed or not. The level kept is the level as it
+// plays, never above it. "In storage" means this process's NSUserDefaults,
+// as on the main queue.
 @property (nonatomic, copy) QLMKeptScheduler scheduler;
 // Writes what waits now, and waits for every write to land. Call at every
 // stop.
