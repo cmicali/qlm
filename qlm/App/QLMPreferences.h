@@ -90,7 +90,7 @@ extern const NSTimeInterval QLMOSDSecondsStep;
 @property (nonatomic, readonly) QLMBusPreferences *fakeBus;
 // A file name in QLMSetupDirectory(). Nil takes the first by name.
 @property (nonatomic, copy, nullable) NSString *setupFileName;
-// Off by default: the menu bar item is the app.
+// On by default. Turned off, the menu bar item alone shows at launch.
 @property (nonatomic) BOOL opensWindowAtLaunch;
 // The main window's skin, as QLMSkinLibrary names it. QLMSkinDefaultName
 // until set. A skin that no longer loads falls back at the load, not here.

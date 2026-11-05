@@ -201,6 +201,7 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
     NSMutableArray<CALayer *> *_materials;
     CALayer *_content;
     NSPoint _contentOrigin;  // the content layer's origin, in the view
+    NSSize _size;            // the view's size at the last update
 }
 
 - (instancetype)initWithView:(NSView<QLMSkinLayered> *)view {
@@ -211,7 +212,12 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
         _content = [CALayer layer];
         _content.delegate = self;
         view.wantsLayer = YES;
-        view.layerContentsRedrawPolicy = NSViewLayerContentsRedrawDuringViewResize;
+        view.layerContentsRedrawPolicy = NSViewLayerContentsRedrawOnSetNeedsDisplay;
+        // TRAP: in a window, a size change alone calls no updateLayer under
+        // any redraw policy, so the materials would keep their old frames.
+        view.postsFrameChangedNotifications = YES;
+        [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(viewFrameDidChange:)
+                                                   name:NSViewFrameDidChangeNotification object:view];
     }
     return self;
 }
@@ -236,6 +242,7 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
     // A subview's layer would sit among the view's own sublayers.
     NSAssert(view.subviews.count == 0, @"a layered view is a leaf");
     CALayer *host = view.layer;
+    _size = view.bounds.size;
     NSArray<QLMSkinMaterial *> *materials = [view skinMaterials:self];
     while (_materials.count < materials.count) {
         CALayer *layer = [CALayer layer];
@@ -278,9 +285,12 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
     [_content setNeedsDisplayInRect:inLayer];
 }
 
-- (void)viewDidMove {
+// A new size sets the materials again. A move off the pixels the content
+// was drawn on draws it again.
+- (void)viewFrameDidChange:(NSNotification *)notification {
     NSView *view = _view;
-    if (view.window != nil && !NSEqualPoints([self contentFrame].origin, _contentOrigin)) {
+    if (!NSEqualSizes(view.bounds.size, _size)
+        || (view.window != nil && !NSEqualPoints([self contentFrame].origin, _contentOrigin))) {
         view.needsDisplay = YES;
     }
 }
@@ -347,11 +357,6 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
 
 - (void)updateLayer {
     [self.layers updateLayer];
-}
-
-- (void)setFrameOrigin:(NSPoint)origin {
-    [super setFrameOrigin:origin];
-    [self.layers viewDidMove];
 }
 
 - (void)viewDidChangeBackingProperties {

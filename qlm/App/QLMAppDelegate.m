@@ -80,8 +80,6 @@ static OSType QLMQuitReason(void) {
 @implementation QLMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
-    NSApp.mainMenu = QLMMainMenu();
-    NSApp.windowsMenu = [NSApp.mainMenu itemWithTitle:@"Window"].submenu;
     self.preferences = [[QLMPreferences alloc] initWithDefaults:NSUserDefaults.standardUserDefaults];
     self.monitorList = [[QLMMonitorList alloc] init];
     self.skinChoice = [[QLMSkinChoice alloc] initWithPreferences:self.preferences library:[QLMSkinLibrary standardLibrary]];
@@ -97,6 +95,10 @@ static OSType QLMQuitReason(void) {
     self.mainWindowController = [[QLMMainWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList
                                                                                 skin:self.skinChoice.skin];
     self.mainWindowController.delegate = self;
+    NSApp.mainMenu = QLMMainMenu(self, self.mainWindowController);
+    NSApp.windowsMenu = [NSApp.mainMenu itemWithTitle:@"Window"].submenu;
+    NSApp.helpMenu = [NSApp.mainMenu itemWithTitle:@"Help"].submenu;
+    self.mainWindowController.controlsMenu = QLMMainMenuControlsMenu(NSApp.mainMenu);
 
     self.statusItem = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
     self.statusItem.button.target = self;
@@ -404,8 +406,8 @@ static OSType QLMQuitReason(void) {
     [self.popover showRelativeToRect:self.statusItem.button.bounds ofView:self.statusItem.button preferredEdge:NSRectEdgeMinY];
 }
 
-// The app has no Dock icon, so a window or alert comes forward only if the
-// app does.
+// While the main window is closed, the app has no Dock icon, so a window or
+// alert comes forward only if the app does.
 - (void)activateApp {
     if (@available(macOS 14.0, *)) {
         [NSApp activate];
@@ -420,8 +422,48 @@ static OSType QLMQuitReason(void) {
     [controller showWindow:self];
 }
 
+// The window takes a Dock icon, the Cmd-Tab switcher, and the menu bar,
+// as a regular app's does, until it closes. The policy goes first, so the
+// activation that follows brings the window to the front.
 - (void)showMainWindow:(id)sender {
+    [self becomeRegular];
     [self bringForward:self.mainWindowController];
+}
+
+// TRAP: an app that turns regular while it is active shows no menu bar
+// until it activates again. So it lets go and activates on the next turn.
+- (void)becomeRegular {
+    if (NSApp.activationPolicy == NSApplicationActivationPolicyRegular) {
+        return;
+    }
+    BOOL active = NSApp.isActive;
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+    if (active) {
+        [NSApp deactivate];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self activateApp];
+        });
+    }
+}
+
+// TRAP: turning accessory can deactivate the app, which would leave a
+// Settings or Monitors window still open behind other apps. So that
+// window comes back to the front.
+- (void)mainWindowControllerWillClose:(QLMMainWindowController *)controller {
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    for (NSWindow *window in NSApp.orderedWindows) {
+        if (window != controller.window && window.visible && (window.styleMask & NSWindowStyleMaskTitled) != 0) {
+            [self activateApp];
+            [window makeKeyAndOrderFront:nil];
+            return;
+        }
+    }
+}
+
+// A click on the Dock icon, or an open of the app while it runs.
+- (BOOL)applicationShouldHandleReopen:(NSApplication *)sender hasVisibleWindows:(BOOL)visible {
+    [self showMainWindow:nil];
+    return NO;
 }
 
 - (void)popoverControllerShowWindow:(QLMPopoverController *)controller {
@@ -429,14 +471,14 @@ static OSType QLMQuitReason(void) {
 }
 
 - (void)mainWindowControllerShowMonitors:(QLMMainWindowController *)controller {
-    [self showMonitors];
+    [self showMonitors:nil];
 }
 
 - (void)popoverControllerShowMonitors:(QLMPopoverController *)controller {
-    [self showMonitors];
+    [self showMonitors:nil];
 }
 
-- (void)showMonitors {
+- (void)showMonitors:(id)sender {
     if (self.monitorsController == nil) {
         self.monitorsController = [[QLMMonitorsWindowController alloc] initWithMonitorList:self.monitorList];
     }
@@ -444,6 +486,10 @@ static OSType QLMQuitReason(void) {
 }
 
 - (void)popoverControllerShowSettings:(QLMPopoverController *)controller {
+    [self showSettings:nil];
+}
+
+- (void)showSettings:(id)sender {
     if (self.settingsController == nil) {
         self.settingsController = [[QLMSettingsWindowController alloc] initWithPreferences:self.preferences monitorList:self.monitorList];
         self.settingsController.delegate = self;
@@ -527,7 +573,7 @@ static OSType QLMQuitReason(void) {
 }
 
 - (void)debugShowMonitors {
-    [self showMonitors];
+    [self showMonitors:nil];
 }
 
 - (void)debugShowSettings {

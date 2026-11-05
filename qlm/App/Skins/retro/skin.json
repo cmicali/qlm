@@ -49,7 +49,7 @@
       "frame": [48, 184, 356, 132],
       "anchors": ["left", "right", "top", "bottom"],
       "image": "display-glass",
-      "capInsets": [12, 12, 12, 12],
+      "capInsets": [13, 16, 22, 12],
       "disabledOverlay": "overlay",
       "text": {
         "caption": {"frame": [19, 13, 90, 16], "font": "Menlo", "mono": true, "size": 10, "color": "display"},
@@ -93,6 +93,8 @@
   "button": {
     "image": "button",
     "capInsets": [9, 12, 10, 12],
+    "face": [1.5, 3, 7, 4],
+    "pressedFace": [3.5, 3, 6.5, 4],
     "title": {
       "size": 11,
       "color": "label",
@@ -110,8 +112,8 @@
       {"element": "footer", "y": -4}
     ],
     "boxes": [
-      {"element": "groups", "outset": [10.4, 8.4, 12.4, 6.4], "radius": 6, "gap": "groupsTitle"},
-      {"element": "toggles", "outset": 8.4, "radius": 5}
+      {"element": "groups", "outset": [10.4, 8.4, 4.9, 6.4], "radius": 6, "gap": "groupsTitle"},
+      {"element": "toggles", "outset": [11.15, 8.4, 5.65, 8.4], "radius": 5}
     ]
   },
   "osd": {

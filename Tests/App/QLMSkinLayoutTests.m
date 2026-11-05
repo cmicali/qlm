@@ -171,4 +171,45 @@ static CGRect QLMCell(NSArray<NSValue *> *cells, NSUInteger index) {
     XCTAssertEqual(QLMCell(cells, 4).origin.y, 144);
 }
 
+// A marking box leaves the same room above its buttons' face as below it,
+// at the reference size and larger, since the box follows its element.
+- (void)testEachBoxCentersItsButtonsFace {
+    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
+        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+        for (NSValue *size in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {
+            QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:skin size:size.sizeValue];
+            for (QLMSkinBox *box in skin.markings.boxes) {
+                CGRect frame = [layout frameOfElement:box.element];
+                CGRect outer = QLMSkinBoxFrame(frame, box.outset);
+                NSEdgeInsets face = skin.button.face;
+                CGFloat above = CGRectGetMinY(frame) + face.top - CGRectGetMinY(outer);
+                CGFloat below = CGRectGetMaxY(outer) - (CGRectGetMaxY(frame) - face.bottom);
+                XCTAssertEqualWithAccuracy(above, below, 0.001, @"%@'s %@ box at %@", name, box.element,
+                                           NSStringFromSize(size.sizeValue));
+            }
+        }
+    }
+}
+
+// The display's bottom line stays on its glass's flat part, inside its cap
+// insets, at every size: the glass's bezel doesn't stretch, so it can't
+// grow under the text.
+- (void)testTheDisplaysTextStaysOffItsBezel {
+    for (NSString *name in @[@"modern", @"vintage", @"retro"]) {
+        QLMSkin *skin = [QLMSkin skinAtURL:[QLMBuiltInSkinsURL() URLByAppendingPathComponent:name] error:NULL];
+        QLMSkinElement *display = [skin element:@"display"];
+        for (NSValue *size in @[[NSValue valueWithSize:skin.windowSize], [NSValue valueWithSize:NSMakeSize(900, 640)],
+                                [NSValue valueWithSize:NSMakeSize(1200, 900)]]) {
+            QLMSkinLayout *layout = [[QLMSkinLayout alloc] initWithSkin:skin size:size.sizeValue];
+            CGRect frame = [layout frameOfElement:@"display"];
+            CGRect flat = QLMSkinInsetRect((CGRect){CGPointZero, frame.size}, display.style.capInsets);
+            for (NSString *slot in display.text) {
+                CGRect text = [layout frameOfSlot:slot inElement:@"display"];
+                XCTAssertTrue(CGRectContainsRect(flat, text), @"%@'s %@ at %@: %@ is off %@", name, slot,
+                              NSStringFromSize(size.sizeValue), NSStringFromRect(text), NSStringFromRect(flat));
+            }
+        }
+    }
+}
+
 @end

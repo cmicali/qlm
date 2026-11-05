@@ -99,6 +99,11 @@ NS_ASSUME_NONNULL_BEGIN
 // the knob's reading.
 @property (nonatomic, readonly, nullable) NSNumber *knobDecibels;
 @property (nonatomic, readonly) BOOL knobEnabled;
+// Where the menu's Volume Up or Down takes the knob from `level`: `steps`
+// of GLM's 0.5 dB steps, in the range, as the knob's arrow keys go. Nil
+// while the knob is disabled, before a level is known, or where the step
+// moves nothing, at an end of the range.
+- (nullable NSNumber *)levelSteppedFrom:(double)level by:(int)steps;
 
 // Standby while a monitor is on, Wake while none is.
 @property (nonatomic, readonly) NSString *powerTitle;

@@ -78,6 +78,10 @@ CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSiz
     return CGSizeMake((size.width - gap.width * (columns - 1)) / columns, (size.height - gap.height * (rows - 1)) / rows);
 }
 
+CGRect QLMSkinInsetRect(CGRect frame, NSEdgeInsets insets) {
+    return QLMSkinBoxFrame(frame, NSEdgeInsetsMake(-insets.top, -insets.left, -insets.bottom, -insets.right));
+}
+
 CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
     return CGRectMake(frame.origin.x - outset.left, frame.origin.y - outset.top, frame.size.width + outset.left + outset.right,
                       frame.size.height + outset.top + outset.bottom);
@@ -261,9 +265,16 @@ CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset) {
 @property (nonatomic) QLMSkinFocus *focus;
 @property (nonatomic) CGFloat ledSize;
 @property (nonatomic) CGFloat ledGap;
+@property (nonatomic) NSEdgeInsets face;
+@property (nonatomic) NSEdgeInsets pressedFace;
 @end
 
 @implementation QLMSkinButton
+
+- (CGRect)faceInBounds:(CGRect)bounds pressed:(BOOL)pressed {
+    return QLMSkinInsetRect(bounds, pressed ? self.pressedFace : self.face);
+}
+
 @end
 
 @interface QLMSkinKnob ()
@@ -981,15 +992,36 @@ static CGSize QLMSkinCellSize(QLMSkinElement *grid) {
     }
 }
 
+// A face's insets. Each lies within the image's cap insets, so it holds at
+// any size, and the face keeps room in `cell`.
+- (NSEdgeInsets)face:(id)value of:(QLMSkinStyle *)style cell:(CGSize)cell at:(NSString *)path {
+    NSEdgeInsets face = [self insets:value at:path];
+    NSEdgeInsets caps = style.imageName != nil ? style.capInsets : NSEdgeInsetsMake(INFINITY, INFINITY, INFINITY, INFINITY);
+    if (face.top < 0 || face.left < 0 || face.bottom < 0 || face.right < 0) {
+        [self fail:@"%@ is below 0", path];
+    }
+    else if (face.top > caps.top || face.left > caps.left || face.bottom > caps.bottom || face.right > caps.right) {
+        [self fail:@"%@ reaches past button.capInsets", path];
+    }
+    else if (face.top + face.bottom >= cell.height || face.left + face.right >= cell.width) {
+        [self fail:@"%@ leaves the face no room in the button, %g by %g", path, cell.width, cell.height];
+    }
+    return face;
+}
+
 // The button, its face fitting `cell`, the smallest grid cell.
 - (QLMSkinButton *)button:(id)value cell:(CGSize)cell {
     QLMSkinButton *button = [[QLMSkinButton alloc] init];
     NSDictionary *object = [self object:value at:@"button"];
-    if (![self checkKeys:object at:@"button" allowed:@[@"image", @"draw", @"capInsets", @"title", @"focus", @"led"]
-                required:@[@"title", @"focus"]]) {
+    NSArray *keys = @[@"image", @"draw", @"capInsets", @"title", @"focus", @"led", @"face", @"pressedFace"];
+    if (![self checkKeys:object at:@"button" allowed:keys required:@[@"title", @"focus"]]) {
         return button;
     }
     button.style = [self style:object states:8 fits:cell at:@"button"];
+    button.face = [self face:object[@"face"] of:button.style cell:cell at:@"button.face"];
+    button.pressedFace = object[@"pressedFace"]
+                             ? [self face:object[@"pressedFace"] of:button.style cell:cell at:@"button.pressedFace"]
+                             : button.face;
     button.focus = [self focus:object[@"focus"] at:@"button.focus"];
 
     NSString *titlePath = @"button.title";

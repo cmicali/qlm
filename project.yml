@@ -189,7 +189,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         LSApplicationCategoryType: "public.app-category.music"
         LSMinimumSystemVersion: "$(MACOSX_DEPLOYMENT_TARGET)"
-        LSUIElement: true                   # a menu bar item, no Dock icon
+        LSUIElement: true                   # a menu bar item; the Dock icon shows while the window does
         NSDocumentsFolderUsageDescription: "qlm reads GLM's setup files, which GLM saves in Documents/Genelec."
         NSHumanReadableCopyright: "Copyright © 2026 Christopher Micali. All rights reserved."
         NSPrincipalClass: NSApplication
@@ -198,6 +198,8 @@ targets:
       base:
         PRODUCT_NAME: qlm
         PRODUCT_BUNDLE_IDENTIFIER: com.commonwealthrecordings.qlm
+        # tools/make-app-icon.swift draws it.
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         # Not sandboxed: the plan's first build is a direct download.
         ENABLE_HARDENED_RUNTIME: YES
 
@@ -230,11 +232,13 @@ targets:
       - path: qlm/CLI
         excludes: ["**/.DS_Store", "**/*.md", "main.m"]
       # The app's debug verbs, and the app's code they and the tests read.
-      # TRAP: AppKit can't make a window here. Hostless, NSApplication
-      # won't start, and a window asks for it.
+      # TRAP: NSApplication won't start here, hostless. A window still
+      # draws offscreen, but never becomes key.
       - qlm/App/QLMAlerts.m
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
+      - qlm/App/QLMMainMenu.m
+      - qlm/App/QLMMainWindowController.m
       - qlm/App/QLMMainWindowModel.m
       - qlm/App/QLMMonitorList.m
       - qlm/App/QLMOSDRule.m

@@ -1,5 +1,7 @@
 #import "QLMSkinControls.h"
 
+#import <CoreText/CoreText.h>
+
 #import "NSImage+Util.h"
 #import "PlatformColor.h"
 #import "QLMSkinDrawing.h"
@@ -46,11 +48,6 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
 
 - (void)updateLayer {
     [self.layers updateLayer];
-}
-
-- (void)setFrameOrigin:(NSPoint)origin {
-    [super setFrameOrigin:origin];
-    [self.layers viewDidMove];
 }
 
 - (void)viewDidChangeBackingProperties {
@@ -182,7 +179,10 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
 
 @implementation QLMSkinButtonView {
     NSAttributedString *_titleString;  // nil until drawn, and after a change
-    CGFloat _titleWidth;
+    NSRect _titleInk;  // from the title's origin on its baseline
+    // The advance past the ink. TRAP: the draw cuts the title at its rect's
+    // width, so the rect takes the ink's width and this.
+    CGFloat _titleBearings;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -268,19 +268,29 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
                                        initWithString:self.title
                                            attributes:QLMSkinTextAttributes(font, QLMSkinNSColor(color),
                                                                             QLMSkinAlignmentLeft, style.tracking)]];
-    // The last character's tracking would push the title off center.
-    if (string.length > 0) {
-        [string removeAttribute:NSKernAttributeName range:NSMakeRange(string.length - 1, 1)];
-    }
     _titleString = string;
-    _titleWidth = ceil(string.size.width) + 1;
+    // The ink centers, not the advance, which a glyph's side bearings and
+    // the last one's tracking would push off center.
+    CTLineRef line = CTLineCreateWithAttributedString((__bridge CFAttributedStringRef)string);
+    _titleInk = CTLineGetBoundsWithOptions(line, kCTLineBoundsUseGlyphPathBounds);
+    CFRelease(line);
+    _titleBearings = ceil(string.size.width) + 1 - _titleInk.size.width;
     return string;
+}
+
+- (NSRect)face {
+    return [self.skin.button faceInBounds:self.bounds pressed:self.pressed];
 }
 
 - (QLMSkinLabel)label {
     [self titleString];
     QLMSkinButton *button = self.skin.button;
-    return QLMSkinLabelLayout(self.bounds.size.width, _titleWidth, self.showsLED ? button.ledSize : 0, button.ledGap);
+    NSRect face = [self face];
+    QLMSkinLabel label = QLMSkinLabelLayout(face.size.width, _titleInk.size.width, self.showsLED ? button.ledSize : 0,
+                                            button.ledGap);
+    label.ledX += face.origin.x;
+    label.textX += face.origin.x;
+    return label;
 }
 
 - (NSArray<QLMSkinMaterial *> *)skinMaterials:(QLMSkinLayers *)layers {
@@ -293,7 +303,7 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     }
     if (self.showsLED) {
         CGFloat led = self.skin.button.ledSize;
-        NSRect frame = NSMakeRect([self label].ledX, round(NSMidY(self.bounds) - led / 2), led, led);
+        NSRect frame = NSMakeRect([self label].ledX, round(NSMidY([self face]) - led / 2), led, led);
         QLMSkinMaterial *dot = [QLMSkinMaterial materialOfLED:self.skin.led skin:self.skin lit:self.ledLit
                                                       enabled:self.enabled frame:frame layers:layers];
         if (dot != nil) {
@@ -308,7 +318,9 @@ static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
     NSRect bounds = self.bounds;
     NSAttributedString *title = [self titleString];
     QLMSkinLabel label = [self label];
-    QLMSkinDrawCenteredCaps(title, NSMakeRect(label.textX, 0, label.textWidth, bounds.size.height));
+    NSRect face = [self face];
+    QLMSkinDrawCenteredCaps(title, NSMakeRect(label.textX - NSMinX(_titleInk), face.origin.y,
+                                              label.textWidth + _titleBearings, face.size.height));
 
     if (self.focused && self.enabled) {
         QLMSkinDrawFocus(button.focus, bounds, NO);

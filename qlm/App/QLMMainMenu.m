@@ -6,30 +6,98 @@
 - (void)redo:(nullable id)sender;
 @end
 
-NSMenu *QLMMainMenu(void) {
-    NSMenu *app = [[NSMenu alloc] initWithTitle:@"qlm"];
-    [app addItemWithTitle:@"Quit qlm" action:@selector(terminate:) keyEquivalent:@"q"];
+static NSString *const QLMControlsTitle = @"Controls";
+static const NSInteger QLMGroupItemTag = 1000;
+
+static NSMenuItem *QLMItem(NSMenu *menu, NSString *title, SEL action, NSString *key, NSEventModifierFlags modifiers,
+                           id _Nullable target) {
+    NSMenuItem *item = [menu addItemWithTitle:title action:action keyEquivalent:key];
+    item.keyEquivalentModifierMask = modifiers;
+    item.target = target;
+    return item;
+}
+
+static NSString *QLMArrowKey(unichar arrow) {
+    return [NSString stringWithCharacters:&arrow length:1];
+}
+
+NSMenu *QLMMainMenu(id<QLMMainMenuActions> app, id<QLMMainMenuControls> controls) {
+    NSEventModifierFlags command = NSEventModifierFlagCommand;
+    NSEventModifierFlags shift = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+
+    NSMenu *qlm = [[NSMenu alloc] initWithTitle:@"qlm"];
+    QLMItem(qlm, @"About qlm", @selector(orderFrontStandardAboutPanel:), @"", 0, nil);
+    [qlm addItem:NSMenuItem.separatorItem];
+    QLMItem(qlm, @"Settings…", @selector(showSettings:), @",", command, app);
+    [qlm addItem:NSMenuItem.separatorItem];
+    QLMItem(qlm, @"Hide qlm", @selector(hide:), @"h", command, nil);
+    QLMItem(qlm, @"Hide Others", @selector(hideOtherApplications:), @"h", command | NSEventModifierFlagOption, nil);
+    QLMItem(qlm, @"Show All", @selector(unhideAllApplications:), @"", 0, nil);
+    [qlm addItem:NSMenuItem.separatorItem];
+    // Through applicationShouldTerminate:, so the louder hand-back still asks.
+    QLMItem(qlm, @"Quit qlm", @selector(terminate:), @"q", command, nil);
 
     NSMenu *file = [[NSMenu alloc] initWithTitle:@"File"];
-    [file addItemWithTitle:@"Close" action:@selector(performClose:) keyEquivalent:@"w"];
+    QLMItem(file, @"Close", @selector(performClose:), @"w", command, nil);
 
     NSMenu *edit = [[NSMenu alloc] initWithTitle:@"Edit"];
-    [edit addItemWithTitle:@"Undo" action:@selector(undo:) keyEquivalent:@"z"];
-    [edit addItemWithTitle:@"Redo" action:@selector(redo:) keyEquivalent:@"Z"];
+    QLMItem(edit, @"Undo", @selector(undo:), @"z", command, nil);
+    QLMItem(edit, @"Redo", @selector(redo:), @"z", shift, nil);
     [edit addItem:NSMenuItem.separatorItem];
-    [edit addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
-    [edit addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
-    [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
-    [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+    QLMItem(edit, @"Cut", @selector(cut:), @"x", command, nil);
+    QLMItem(edit, @"Copy", @selector(copy:), @"c", command, nil);
+    QLMItem(edit, @"Paste", @selector(paste:), @"v", command, nil);
+    QLMItem(edit, @"Delete", @selector(delete:), @"", 0, nil);
+    QLMItem(edit, @"Select All", @selector(selectAll:), @"a", command, nil);
+
+    // Cmd-M is Minimize's, so Mute and Dim take Shift too.
+    NSMenu *controlsMenu = [[NSMenu alloc] initWithTitle:QLMControlsTitle];
+    QLMItem(controlsMenu, @"Mute", @selector(toggleMute:), @"m", shift, controls);
+    QLMItem(controlsMenu, @"Dim", @selector(toggleDim:), @"d", shift, controls);
+    QLMItem(controlsMenu, @"Standby", @selector(togglePower:), @"", 0, controls);
+    [controlsMenu addItem:NSMenuItem.separatorItem];
+    QLMItem(controlsMenu, @"Volume Up", @selector(volumeUp:), QLMArrowKey(NSUpArrowFunctionKey), command, controls);
+    QLMItem(controlsMenu, @"Volume Down", @selector(volumeDown:), QLMArrowKey(NSDownArrowFunctionKey), command, controls);
 
     NSMenu *window = [[NSMenu alloc] initWithTitle:@"Window"];
-    [window addItemWithTitle:@"Minimize" action:@selector(performMiniaturize:) keyEquivalent:@"m"];
+    QLMItem(window, @"Minimize", @selector(performMiniaturize:), @"m", command, nil);
+    QLMItem(window, @"Zoom", @selector(performZoom:), @"", 0, nil);
     [window addItem:NSMenuItem.separatorItem];
-    [window addItemWithTitle:@"qlm" action:@selector(showMainWindow:) keyEquivalent:@"1"];
+    QLMItem(window, @"qlm", @selector(showMainWindow:), @"0", command, app);
+    QLMItem(window, @"Monitors", @selector(showMonitors:), @"", 0, app);
+    [window addItem:NSMenuItem.separatorItem];
+    QLMItem(window, @"Bring All to Front", @selector(arrangeInFront:), @"", 0, nil);
+
+    // AppKit puts its search field in the Help menu.
+    NSMenu *help = [[NSMenu alloc] initWithTitle:@"Help"];
 
     NSMenu *bar = [[NSMenu alloc] init];
-    for (NSMenu *menu in @[app, file, edit, window]) {
+    for (NSMenu *menu in @[qlm, file, edit, controlsMenu, window, help]) {
         [bar addItemWithTitle:menu.title action:NULL keyEquivalent:@""].submenu = menu;
     }
     return bar;
+}
+
+NSMenu *QLMMainMenuControlsMenu(NSMenu *bar) {
+    return [bar itemWithTitle:QLMControlsTitle].submenu;
+}
+
+void QLMMainMenuSetGroups(NSMenu *controls, NSArray<NSString *> *names, id<QLMMainMenuControls> target) {
+    for (NSMenuItem *item in [controls.itemArray copy]) {
+        if (item.tag >= QLMGroupItemTag || (item.isSeparatorItem && item.tag == QLMGroupItemTag - 1)) {
+            [controls removeItem:item];
+        }
+    }
+    if (names.count == 0) {
+        return;
+    }
+    NSMenuItem *separator = NSMenuItem.separatorItem;
+    separator.tag = QLMGroupItemTag - 1;
+    [controls addItem:separator];
+    for (NSUInteger i = 0; i < names.count; i++) {
+        NSString *key = i < 9 ? [NSString stringWithFormat:@"%lu", (unsigned long)i + 1] : @"";
+        NSMenuItem *item = QLMItem(controls, names[i], @selector(chooseGroup:), key, NSEventModifierFlagCommand, target);
+        item.tag = QLMGroupItemTag + (NSInteger)i;
+        item.representedObject = @(i);
+    }
 }
