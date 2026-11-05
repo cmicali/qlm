@@ -9,9 +9,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 // The main window's content view, in one skin. It draws the panel, the
 // nameplate, the markings, and the panel's own text, and hosts one view per
-// element, laid out by the resize pass with no Auto Layout. A controller
-// hands each its state and text. It reads no snapshot and drives nothing:
-// each control sends its action to the target the controller sets.
+// element, laid out by the resize pass with no Auto Layout. It writes the
+// words that are the same in every skin itself: the logo, the titles, the
+// unit, MUTE, DIM, and Monitors. A controller hands each view its state and
+// the rest of its text. It reads no snapshot and drives nothing: each
+// control sends its action to the target the controller sets.
 @interface QLMSkinView : NSView
 
 - (instancetype)initWithSkin:(QLMSkin *)skin NS_DESIGNATED_INITIALIZER;
@@ -21,20 +23,14 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) QLMSkin *skin;
 @property (nonatomic, readonly) QLMSkinLayout *skinLayout;  // for the view's size
 
-// The panel's text.
-@property (nonatomic, copy, nullable) NSString *logo;
-@property (nonatomic, copy, nullable) NSString *tagline;
-@property (nonatomic, copy, nullable) NSString *groupsTitle;
 // In the groups' place while none show: the setup file's name, or its
 // error.
 @property (nonatomic, copy, nullable) NSString *groupsMessage;
 @property (nonatomic, copy, nullable) NSString *knobMin;
 @property (nonatomic, copy, nullable) NSString *knobMax;
-@property (nonatomic, copy, nullable) NSString *knobCaption;
 
 @property (nonatomic, readonly) QLMSkinStatusView *status;
-// One per cell of the groups grid, as QLMSkinGroupButtonCount counts. Those past
-// the titles set are hidden.
+// One per cell of the groups grid. Those past the titles set are hidden.
 @property (nonatomic, readonly) NSArray<QLMSkinButtonView *> *groupButtons;
 @property (nonatomic, readonly) QLMSkinDisplayView *display;
 @property (nonatomic, readonly) QLMSkinButtonView *muteButton;
@@ -43,17 +39,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) QLMSkinTextButton *monitorsButton;
 @property (nonatomic, readonly) QLMSkinTextButton *powerButton;
 
-// Shows a button per title, in order, each with its prefix if given, and
-// hides the rest.
-- (void)setGroupTitles:(NSArray<NSString *> *)titles prefixes:(nullable NSArray<NSString *> *)prefixes;
+// Shows a button per title, in order, each with its prefix, and hides the
+// rest.
+- (void)setGroupTitles:(NSArray<NSString *> *)titles prefixes:(NSArray<NSString *> *)prefixes;
 
 @end
-
-// The panel's own words, the same in every skin.
-extern NSString *const QLMSkinLogo;
-extern NSString *const QLMSkinTagline;
-extern NSString *const QLMSkinGroupsTitle;
-extern NSString *const QLMSkinKnobCaption;
 
 // A window in the main window's chrome: its title bar transparent and its
 // title hidden, with the content under it, dragged by its background, and

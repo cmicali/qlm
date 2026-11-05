@@ -117,7 +117,6 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 
 // A text the app fills. The skin says where and how; the app says what.
 @interface QLMSkinTextSlot : NSObject
-@property (nonatomic, readonly, copy) NSString *name;
 @property (nonatomic, readonly) CGRect frame;  // in its element
 @property (nonatomic, readonly) QLMSkinAnchors anchors;
 // Scales its frame and its size with its element, from the element's
@@ -226,7 +225,7 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @end
 
 // A placed element. Its extras are its kind's: a grid's cells, the status
-// LED, the footer's symbols, the display's and the OSD's overlay.
+// LED, the footer's symbols, the display's overlay, and the OSD's bar.
 @interface QLMSkinElement : NSObject
 @property (nonatomic, readonly, copy) NSString *name;
 @property (nonatomic, readonly) CGRect frame;
@@ -238,7 +237,7 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly) CGSize gap;
 @property (nonatomic, readonly) CGRect ledFrame;  // status, in the element
 @property (nonatomic, readonly) NSDictionary<NSString *, NSString *> *symbols;  // footer: slot to SF Symbol
-@property (nonatomic, readonly) QLMSkinColor disabledOverlay;  // display and osd
+@property (nonatomic, readonly) QLMSkinColor disabledOverlay;  // display
 @property (nonatomic, readonly, nullable) QLMSkinBar *bar;  // osd
 @end
 
@@ -253,20 +252,28 @@ QLMSkinState QLMSkinButtonState(BOOL selected, BOOL enabled, BOOL pressed, BOOL 
 @property (nonatomic, readonly, copy) NSString *name;  // the directory's
 @property (nonatomic, readonly) NSURL *directory;
 @property (nonatomic, readonly) CGSize windowSize;  // the reference, and the least
-// By QLMSkinElementNames.
-@property (nonatomic, readonly) NSDictionary<NSString *, QLMSkinElement *> *elements;
-// Its frame is the OSD's size, at the origin. The OSD has no layout, so its
-// slots have neither anchors nor scales.
+// Its frame is the OSD's size, at the origin. The OSD has no layout, so it
+// and its slots have neither anchors nor scales.
 @property (nonatomic, readonly) QLMSkinElement *osd;
 @property (nonatomic, readonly) QLMSkinButton *button;
 @property (nonatomic, readonly) QLMSkinKnob *knob;
 @property (nonatomic, readonly) QLMSkinLED *led;
 @property (nonatomic, readonly) QLMSkinMarkings *markings;
 
+// One of QLMSkinElementNames.
 - (QLMSkinElement *)element:(NSString *)name;
-// png/<name>.png, or png/<name>@2x.png at scale 2.
+// The image file in the skin's directory, by QLMSkinImagePath.
 - (NSURL *)imageURLForName:(NSString *)name scale:(NSInteger)scale;
 
 @end
+
+// png/<name>.png, or png/<name>@2x.png at scale 2, in a skin's directory.
+NSString *QLMSkinImagePath(NSString *name, NSInteger scale);
+
+// A grid's cell in `size`: the same for each, `gap` apart.
+CGSize QLMSkinGridCellSize(CGSize size, NSInteger columns, NSInteger rows, CGSize gap);
+
+// A marking box's outer edge: its element's frame grown by `outset`.
+CGRect QLMSkinBoxFrame(CGRect frame, NSEdgeInsets outset);
 
 NS_ASSUME_NONNULL_END

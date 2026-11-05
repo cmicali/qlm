@@ -18,14 +18,9 @@ static inline CGSize QLMSizeAtLeast(CGSize size, CGSize minimum) {
 // edge. To neither, it keeps centered.
 CGRect QLMSkinSpring(CGRect frame, QLMSkinAnchors anchors, CGSize extra);
 
-// The group buttons a window shows at most, whatever its grid holds.
-extern const NSUInteger QLMSkinMaxGroups;
-
-// The group buttons the skin's grid holds: its cells, up to QLMSkinMaxGroups.
+// The cells of the skin's groups grid. The window shows at most six
+// groups, as QLMShownGroupButtons gives.
 NSUInteger QLMSkinGroupButtonCount(QLMSkin *skin);
-
-// A grid's cells, row by row, each the same size, `gap` apart.
-NSArray<NSValue *> *QLMSkinGridCells(CGRect frame, NSInteger columns, NSInteger rows, CGSize gap);
 
 // What a slot's font size is multiplied by in its element laid out at
 // `size`: 1, or for a slot that scales, the smaller of the element's height
@@ -49,7 +44,7 @@ CGRect QLMSkinSlotFrame(QLMSkinElement *element, QLMSkinTextSlot *slot, CGSize s
 // In the element's laid-out frame.
 - (CGRect)frameOfSlot:(NSString *)slot inElement:(NSString *)element;
 - (CGFloat)scaleOfSlot:(NSString *)slot inElement:(NSString *)element;
-// A grid element's cells, in the window.
+// A grid element's cells, in the window, row by row, each the same size.
 - (NSArray<NSValue *> *)cellsOfElement:(NSString *)name;
 
 @end

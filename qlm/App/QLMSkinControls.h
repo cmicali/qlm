@@ -39,8 +39,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithSkin:(QLMSkin *)skin slot:(QLMSkinTextSlot *)slot symbol:(NSString *)symbol;
 - (instancetype)initWithSkin:(QLMSkin *)skin NS_UNAVAILABLE;
 @property (nonatomic, copy) NSString *title;
-// The skin's symbol, or a stand-in where this macOS lacks it.
-@property (nonatomic, readonly, copy) NSString *symbolName;
 @end
 
 // The status: an LED and the online count, or a bus problem's title.
@@ -56,22 +54,21 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithSkin:(QLMSkin *)skin;
 @property (nonatomic, copy, nullable) NSString *caption;
 @property (nonatomic, copy, nullable) NSString *level;
-@property (nonatomic, copy, nullable) NSString *unit;
 @property (nonatomic, copy, nullable) NSString *output;
 @property (nonatomic, copy, nullable) NSString *max;
 @property (nonatomic) BOOL disabled;
 @end
 
-// The OSD's content, at the skin's OSD size. The bar fills from its left by
-// `fraction`, 0 to 1.
+// The OSD's content, at the skin's OSD size: the level and its unit, the
+// title, and the subtitle. The bar fills from its left by `fraction`, 0 to
+// 1.
 @interface QLMSkinOSDView : NSView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
 @property (nonatomic, copy, nullable) NSString *level;
-@property (nonatomic, copy, nullable) NSString *unit;
 @property (nonatomic, copy, nullable) NSString *title;
+// Nil shows the idle subtitle, "qlm · Output level".
 @property (nonatomic, copy, nullable) NSString *subtitle;
 @property (nonatomic) double fraction;
-@property (nonatomic) BOOL disabled;
 @end
 
 NS_ASSUME_NONNULL_END

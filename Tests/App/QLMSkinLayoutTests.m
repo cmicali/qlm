@@ -159,8 +159,11 @@ static CGRect QLMCell(NSArray<NSValue *> *cells, NSUInteger index) {
                   10, 20, 130, 90);
 }
 
+// Modern's groups: 584 by 70 at 28, 106, in three columns and two rows, 8
+// and 6 apart.
 - (void)testTwoRowsOfThree {
-    NSArray<NSValue *> *cells = QLMSkinGridCells(CGRectMake(28, 106, 584, 70), 3, 2, CGSizeMake(8, 6));
+    QLMSkin *modern = [QLMSkin skinAtURL:QLMModernSkinURL() error:NULL];
+    NSArray<NSValue *> *cells = [[[QLMSkinLayout alloc] initWithSkin:modern size:CGSizeMake(640, 480)] cellsOfElement:@"groups"];
     XCTAssertEqual(cells.count, 6u);
     QLMAssertRect(QLMCell(cells, 0), 28, 106, 189.33333333333334, 32);
     XCTAssertEqualWithAccuracy(QLMCell(cells, 4).origin.x, 28 + 568.0 / 3 + 8, 1e-9);

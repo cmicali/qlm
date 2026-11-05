@@ -1,10 +1,13 @@
 #import "QLMSkinView.h"
 
+#include "QLMCommands.h"
+#import "QLMFormat.h"
 #import "QLMSkinDrawing.h"
 
-static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
-    return a == b || [a isEqualToString:b];
-}
+// The panel's own words.
+static NSString *const QLMSkinLogo = @"qlm.";
+static NSString *const QLMSkinGroupsTitle = @"LISTENING SETUP";
+static NSString *const QLMSkinKnobCaption = @"VOLUME";
 
 @implementation QLMSkinView
 
@@ -30,8 +33,10 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
 
         _muteButton = [[QLMSkinButtonView alloc] initWithSkin:skin];
         _muteButton.showsLED = YES;
+        _muteButton.title = @"MUTE";
         [self addSubview:_muteButton];
         _dimButton = [[QLMSkinButtonView alloc] initWithSkin:skin];
+        _dimButton.title = [@"DIM " stringByAppendingString:QLMDecibelsNumberText(-QLMDimDecibels, 0)];
         [self addSubview:_dimButton];
 
         _knob = [[QLMKnobControl alloc] initWithSkin:skin];
@@ -40,6 +45,7 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
         QLMSkinElement *footer = [skin element:@"footer"];
         _monitorsButton = [[QLMSkinTextButton alloc] initWithSkin:skin slot:footer.text[@"monitors"]
                                                            symbol:footer.symbols[@"monitors"]];
+        _monitorsButton.title = @"Monitors";
         [self addSubview:_monitorsButton];
         _powerButton = [[QLMSkinTextButton alloc] initWithSkin:skin slot:footer.text[@"power"]
                                                         symbol:footer.symbols[@"power"]];
@@ -102,7 +108,7 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
         QLMSkinButtonView *button = self.groupButtons[i];
         button.hidden = i >= shown;
         button.title = i < shown ? titles[i] : @"";
-        button.prefix = i < prefixes.count ? prefixes[i] : nil;
+        button.prefix = i < shown ? prefixes[i] : nil;
     }
 }
 
@@ -114,21 +120,7 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
         return;
     }
     *ivar = [text copy];
-    if ([self.skin element:element].text[slot] != nil) {
-        [self setNeedsDisplayInRect:[self frameOfSlot:slot inElement:element]];
-    }
-}
-
-- (void)setLogo:(NSString *)logo {
-    [self setText:logo of:&_logo slot:@"logo" inElement:@"nameplate"];
-}
-
-- (void)setTagline:(NSString *)tagline {
-    [self setText:tagline of:&_tagline slot:@"tagline" inElement:@"nameplate"];
-}
-
-- (void)setGroupsTitle:(NSString *)groupsTitle {
-    [self setText:groupsTitle of:&_groupsTitle slot:@"groupsTitle" inElement:@"groups"];
+    [self setNeedsDisplayInRect:[self frameOfSlot:slot inElement:element]];
 }
 
 - (void)setGroupsMessage:(NSString *)groupsMessage {
@@ -143,10 +135,6 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
     [self setText:knobMax of:&_knobMax slot:@"max" inElement:@"knob"];
 }
 
-- (void)setKnobCaption:(NSString *)knobCaption {
-    [self setText:knobCaption of:&_knobCaption slot:@"caption" inElement:@"knob"];
-}
-
 #pragma mark - Drawing
 
 // A slot's frame in the window.
@@ -155,6 +143,7 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
     return NSOffsetRect([self.skinLayout frameOfSlot:slot inElement:element], frame.origin.x, frame.origin.y);
 }
 
+// The nameplate's logo is its one optional slot.
 - (void)drawSlot:(NSString *)slot inElement:(NSString *)element text:(nullable NSString *)text dirty:(NSRect)dirty {
     QLMSkinTextSlot *style = [self.skin element:element].text[slot];
     if (style == nil || text.length == 0) {
@@ -187,11 +176,7 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
         [path stroke];
     }
     for (QLMSkinBox *box in markings.boxes) {
-        NSRect frame = [self.skinLayout frameOfElement:box.element];
-        NSEdgeInsets outset = box.outset;
-        NSRect outer = NSMakeRect(frame.origin.x - outset.left, frame.origin.y - outset.top,
-                                  frame.size.width + outset.left + outset.right,
-                                  frame.size.height + outset.top + outset.bottom);
+        NSRect outer = QLMSkinBoxFrame([self.skinLayout frameOfElement:box.element], box.outset);
         if (!NSIntersectsRect(outer, dirty)) {
             continue;
         }
@@ -223,21 +208,15 @@ static BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
         QLMSkinDrawStyle(self.skin, [self.skin element:@"nameplate"].style, QLMSkinStateNormal, nameplate, NO);
     }
     [self drawMarkingsIn:dirtyRect];
-    [self drawSlot:@"logo" inElement:@"nameplate" text:self.logo dirty:dirtyRect];
-    [self drawSlot:@"tagline" inElement:@"nameplate" text:self.tagline dirty:dirtyRect];
-    [self drawSlot:@"groupsTitle" inElement:@"groups" text:self.groupsTitle dirty:dirtyRect];
+    [self drawSlot:@"logo" inElement:@"nameplate" text:QLMSkinLogo dirty:dirtyRect];
+    [self drawSlot:@"groupsTitle" inElement:@"groups" text:QLMSkinGroupsTitle dirty:dirtyRect];
     [self drawSlot:@"message" inElement:@"groups" text:self.groupsMessage dirty:dirtyRect];
     [self drawSlot:@"min" inElement:@"knob" text:self.knobMin dirty:dirtyRect];
     [self drawSlot:@"max" inElement:@"knob" text:self.knobMax dirty:dirtyRect];
-    [self drawSlot:@"caption" inElement:@"knob" text:self.knobCaption dirty:dirtyRect];
+    [self drawSlot:@"caption" inElement:@"knob" text:QLMSkinKnobCaption dirty:dirtyRect];
 }
 
 @end
-
-NSString *const QLMSkinLogo = @"qlm.";
-NSString *const QLMSkinTagline = @"REFERENCE CONTROL";
-NSString *const QLMSkinGroupsTitle = @"LISTENING SETUP";
-NSString *const QLMSkinKnobCaption = @"VOLUME";
 
 NSWindow *QLMSkinHostWindow(QLMSkin *skin, NSWindowStyleMask style) {
     NSRect frame = NSMakeRect(0, 0, skin.windowSize.width, skin.windowSize.height);

@@ -299,6 +299,10 @@
     [self assertChange:^(NSMutableDictionary *json) {
         json[@"elements"][@"logo"] = json[@"elements"][@"nameplate"];
     } refusedWith:@"elements has an unknown key, logo"];
+    // The OSD shows only while System runs, so it is never disabled.
+    [self assertChange:^(NSMutableDictionary *json) {
+        json[@"osd"][@"disabledOverlay"] = @"#00000080";
+    } refusedWith:@"osd has an unknown key, disabledOverlay"];
 }
 
 - (void)testAMissingElementIsRefused {

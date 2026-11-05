@@ -9,7 +9,7 @@ NSColor *QLMSkinNSColor(QLMSkinColor color) {
     return [NSColor colorWithSRGBRed:color.red green:color.green blue:color.blue alpha:color.alpha];
 }
 
-BOOL QLMSkinColorIsClear(QLMSkinColor color) {
+static BOOL QLMSkinColorIsClear(QLMSkinColor color) {
     return color.alpha <= 0;
 }
 
@@ -257,12 +257,16 @@ static NSFont *QLMSkinMakeFont(NSString *_Nullable name, BOOL mono, CGFloat size
 }
 
 // Each face, once: building one through descriptors costs more than a draw.
+// A scaled slot's size follows a live resize, so it goes to the half point
+// first, or each frame would make two new fonts.
 NSFont *QLMSkinFont(NSString *name, BOOL mono, CGFloat size, QLMSkinWeight weight, BOOL italic, BOOL monoDigits) {
     static NSCache<NSString *, NSFont *> *cache;
     static dispatch_once_t once;
     dispatch_once(&once, ^{
         cache = [[NSCache alloc] init];
+        cache.countLimit = 64;
     });
+    size = round(size * 2) / 2;
     NSString *key = [NSString stringWithFormat:@"%@|%d|%g|%ld|%d|%d", name ?: @"", mono, size, (long)weight, italic, monoDigits];
     NSFont *font = [cache objectForKey:key];
     if (font == nil) {

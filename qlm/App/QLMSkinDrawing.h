@@ -10,13 +10,17 @@ NS_ASSUME_NONNULL_BEGIN
 // What a disabled control's drawn geometry and text keep of their alpha.
 extern const CGFloat QLMSkinDisabledAlpha;
 
+// Two texts read the same, both nil included, so a setter given the text
+// it has redraws nothing.
+static inline BOOL QLMSkinSameText(NSString *_Nullable a, NSString *_Nullable b) {
+    return a == b || [a isEqualToString:b];
+}
+
 NSColor *QLMSkinNSColor(QLMSkinColor color);
-BOOL QLMSkinColorIsClear(QLMSkinColor color);
 
 // An element's material in `rect`: its image for the state, stretched
 // through its cap insets, or its draw block. A circle draws the block as
-// the rect's inscribed circle, as a knob's body. Images are kept on the
-// skin, so a skin read again loads its files again.
+// the rect's inscribed circle, as a knob's body.
 void QLMSkinDrawStyle(QLMSkin *skin, QLMSkinStyle *style, QLMSkinState state, NSRect rect, BOOL circle);
 
 // An image in `rect`, right side up in a flipped view, whatever its size

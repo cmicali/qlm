@@ -5,12 +5,12 @@
 #import "QLMSkinDrawing.h"
 #import "QLMSkinLayout.h"
 
-static BOOL QLMSkinSame(NSString *_Nullable a, NSString *_Nullable b) {
-    return a == b || [a isEqualToString:b];
-}
-
 // The symbol a footer button draws where this macOS lacks the skin's.
 static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
+// The level's unit, on the display and the OSD.
+static NSString *const QLMSkinUnit = @"dB";
+// The OSD's subtitle while nothing is muted or dimmed.
+static NSString *const QLMSkinOSDIdleSubtitle = @"qlm · Output level";
 
 #pragma mark - The control
 
@@ -165,7 +165,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setTitle:(NSString *)title {
-    if (QLMSkinSame(title, _title)) {
+    if (QLMSkinSameText(title, _title)) {
         return;
     }
     _title = [title copy];
@@ -173,7 +173,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setPrefix:(NSString *)prefix {
-    if (QLMSkinSame(prefix, _prefix)) {
+    if (QLMSkinSameText(prefix, _prefix)) {
         return;
     }
     _prefix = [prefix copy];
@@ -267,9 +267,14 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 
 @implementation QLMSkinTextButton {
     QLMSkinTextSlot *_slot;
-    NSAttributedString *_titleString;  // nil until drawn, and after a change
+    NSString *_symbolName;  // the skin's, or a stand-in where this macOS lacks it
+    // Each nil until drawn, and after a change of the title.
+    NSAttributedString *_titleString;
     CGFloat _titleAlpha;
     CGFloat _titleWidth;
+    // By alpha, of which there are three. Building one costs most of a
+    // repaint, which shows in a live resize.
+    NSMutableDictionary<NSNumber *, NSImage *> *_symbols;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin slot:(QLMSkinTextSlot *)slot symbol:(NSString *)symbol {
@@ -277,17 +282,19 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
     if (self) {
         _slot = slot;
         _symbolName = [[NSImage availableSymbolName:symbol fallback:QLMSkinFallbackSymbol] copy];
+        _symbols = [NSMutableDictionary dictionary];
         _title = @"";
     }
     return self;
 }
 
 - (void)setTitle:(NSString *)title {
-    if (QLMSkinSame(title, _title)) {
+    if (QLMSkinSameText(title, _title)) {
         return;
     }
     _title = [title copy];
     _titleString = nil;
+    [_symbols removeAllObjects];
     self.needsDisplay = YES;
 }
 
@@ -302,16 +309,24 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
     return _titleString;
 }
 
+- (nullable NSImage *)symbolAtAlpha:(CGFloat)alpha color:(NSColor *)color {
+    NSImage *symbol = _symbols[@(alpha)];
+    if (symbol == nil) {
+        NSImageSymbolConfiguration *configuration =
+            [[NSImageSymbolConfiguration configurationWithPointSize:round(_slot.size * 1.25) weight:NSFontWeightRegular]
+                configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:color]];
+        symbol = [[NSImage imageWithSystemSymbolName:_symbolName accessibilityDescription:nil]
+            imageWithSymbolConfiguration:configuration];
+        _symbols[@(alpha)] = symbol;
+    }
+    return symbol;
+}
+
 - (void)drawRect:(NSRect)dirtyRect {
     CGFloat alpha = !self.enabled ? QLMSkinDisabledAlpha : self.pressed ? 0.6 : 1;
     NSColor *color = VibeColorWithScaledAlpha(QLMSkinNSColor(_slot.color), alpha);
     NSAttributedString *title = [self titleStringAtAlpha:alpha color:color];
-
-    NSImageSymbolConfiguration *configuration =
-        [[NSImageSymbolConfiguration configurationWithPointSize:round(_slot.size * 1.25) weight:NSFontWeightRegular]
-            configurationByApplyingConfiguration:[NSImageSymbolConfiguration configurationWithHierarchicalColor:color]];
-    NSImage *symbol = [[NSImage imageWithSystemSymbolName:self.symbolName accessibilityDescription:nil]
-        imageWithSymbolConfiguration:configuration];
+    NSImage *symbol = [self symbolAtAlpha:alpha color:color];
 
     NSRect bounds = self.bounds;
     CGFloat gap = symbol ? round(_slot.size * 0.7) : 0;
@@ -353,7 +368,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setText:(NSString *)text {
-    if (QLMSkinSame(text, _text)) {
+    if (QLMSkinSameText(text, _text)) {
         return;
     }
     _text = [text copy];
@@ -410,7 +425,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setCaption:(NSString *)caption {
-    if (QLMSkinSame(caption, _caption)) {
+    if (QLMSkinSameText(caption, _caption)) {
         return;
     }
     _caption = [caption copy];
@@ -418,23 +433,15 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setLevel:(NSString *)level {
-    if (QLMSkinSame(level, _level)) {
+    if (QLMSkinSameText(level, _level)) {
         return;
     }
     _level = [level copy];
     self.needsDisplay = YES;
 }
 
-- (void)setUnit:(NSString *)unit {
-    if (QLMSkinSame(unit, _unit)) {
-        return;
-    }
-    _unit = [unit copy];
-    self.needsDisplay = YES;
-}
-
 - (void)setOutput:(NSString *)output {
-    if (QLMSkinSame(output, _output)) {
+    if (QLMSkinSameText(output, _output)) {
         return;
     }
     _output = [output copy];
@@ -442,7 +449,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setMax:(NSString *)max {
-    if (QLMSkinSame(max, _max)) {
+    if (QLMSkinSameText(max, _max)) {
         return;
     }
     _max = [max copy];
@@ -463,7 +470,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
     QLMSkinDrawDimmed(self.disabled, element.disabledOverlay, self.bounds, ^{
         QLMSkinDrawStyle(self->_skin, element.style, QLMSkinStateNormal, self.bounds, NO);
         NSDictionary<NSString *, NSString *> *texts = @{
-            @"caption": self.caption ?: @"", @"level": self.level ?: @"", @"unit": self.unit ?: @"",
+            @"caption": self.caption ?: @"", @"level": self.level ?: @"", @"unit": QLMSkinUnit,
             @"output": self.output ?: @"", @"max": self.max ?: @"",
         };
         for (NSString *name in texts) {
@@ -476,7 +483,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 
 // The slots, as they read, then the tooltip's reason, if any.
 - (id)accessibilityValue {
-    NSString *level = self.level.length > 0 ? [NSString stringWithFormat:@"%@ %@", self.level, self.unit ?: @""] : nil;
+    NSString *level = self.level.length > 0 ? [NSString stringWithFormat:@"%@ %@", self.level, QLMSkinUnit] : nil;
     NSMutableArray<NSString *> *parts = [NSMutableArray array];
     for (NSString *part in @[self.caption ?: @"", level ?: @"", self.output ?: @"", self.max ?: @"", self.toolTip ?: @""]) {
         if (part.length > 0) {
@@ -512,23 +519,15 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setLevel:(NSString *)level {
-    if (QLMSkinSame(level, _level)) {
+    if (QLMSkinSameText(level, _level)) {
         return;
     }
     _level = [level copy];
     self.needsDisplay = YES;
 }
 
-- (void)setUnit:(NSString *)unit {
-    if (QLMSkinSame(unit, _unit)) {
-        return;
-    }
-    _unit = [unit copy];
-    self.needsDisplay = YES;
-}
-
 - (void)setTitle:(NSString *)title {
-    if (QLMSkinSame(title, _title)) {
+    if (QLMSkinSameText(title, _title)) {
         return;
     }
     _title = [title copy];
@@ -536,7 +535,7 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
 }
 
 - (void)setSubtitle:(NSString *)subtitle {
-    if (QLMSkinSame(subtitle, _subtitle)) {
+    if (QLMSkinSameText(subtitle, _subtitle)) {
         return;
     }
     _subtitle = [subtitle copy];
@@ -552,41 +551,30 @@ static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
     self.needsDisplay = YES;
 }
 
-- (void)setDisabled:(BOOL)disabled {
-    if (disabled == _disabled) {
-        return;
-    }
-    _disabled = disabled;
-    self.needsDisplay = YES;
-}
-
 - (void)drawRect:(NSRect)dirtyRect {
     QLMSkinElement *osd = _skin.osd;
-    NSRect bounds = osd.frame;
-    QLMSkinDrawDimmed(self.disabled, osd.disabledOverlay, bounds, ^{
-        QLMSkinDrawStyle(self->_skin, osd.style, QLMSkinStateNormal, bounds, NO);
-        NSDictionary<NSString *, NSString *> *texts = @{
-            @"level": self.level ?: @"", @"unit": self.unit ?: @"", @"title": self.title ?: @"",
-            @"subtitle": self.subtitle ?: @"",
-        };
-        for (NSString *name in texts) {
-            QLMSkinDrawSlot(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
-        }
+    QLMSkinDrawStyle(_skin, osd.style, QLMSkinStateNormal, osd.frame, NO);
+    NSDictionary<NSString *, NSString *> *texts = @{
+        @"level": self.level ?: @"", @"unit": QLMSkinUnit, @"title": self.title ?: @"",
+        @"subtitle": self.subtitle ?: QLMSkinOSDIdleSubtitle,
+    };
+    for (NSString *name in texts) {
+        QLMSkinDrawSlot(texts[name], osd.text[name], osd.text[name].frame, 1, YES, 1);
+    }
 
-        QLMSkinBar *bar = osd.bar;
-        CGFloat radius = MIN(bar.radius, bar.frame.size.height / 2);
-        [QLMSkinNSColor(bar.track) setFill];
+    QLMSkinBar *bar = osd.bar;
+    CGFloat radius = MIN(bar.radius, bar.frame.size.height / 2);
+    [QLMSkinNSColor(bar.track) setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
+    if (self.fraction > 0) {
+        NSRect fill = bar.frame;
+        fill.size.width = round(fill.size.width * self.fraction);
+        [NSGraphicsContext saveGraphicsState];
+        NSRectClip(fill);
+        [QLMSkinNSColor(bar.fill) setFill];
         [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
-        if (self.fraction > 0) {
-            NSRect fill = bar.frame;
-            fill.size.width = round(fill.size.width * self.fraction);
-            [NSGraphicsContext saveGraphicsState];
-            NSRectClip(fill);
-            [QLMSkinNSColor(bar.fill) setFill];
-            [[NSBezierPath bezierPathWithRoundedRect:bar.frame xRadius:radius yRadius:radius] fill];
-            [NSGraphicsContext restoreGraphicsState];
-        }
-    });
+        [NSGraphicsContext restoreGraphicsState];
+    }
 }
 
 @end
