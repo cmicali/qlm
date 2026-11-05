@@ -204,7 +204,7 @@ Each new control gets a verb, so `.claude/skills/app-hardware-run` can drive the
 | `skin_preview <name> <window\|disabled\|osd>` | Opens a look at a skin, with sample text, without choosing it: its window, its window with every control disabled, or its OSD. Skin authors screenshot it |
 | `fake_knob <tenths>` | Turns the fake bus's knob, as its window's slider does, so the OSD can be seen on a turn |
 
-`dump_state` gains the skin's name and why it is refused, if it is, the OSD's settings, and whether the window and the OSD are showing. `dump_screenshot -` already captures the key window, so each skin's rendering can be checked by eye from a script.
+`dump_state` gains the skin's name and why it is refused, if it is, the OSD's settings, and whether the window and the OSD are showing. `dump_screenshot -` already captures the key window, so each skin's rendering can be checked by eye from a script. It ends any ease first, so it shows the level, not the way there.
 
 ## The work, in order
 

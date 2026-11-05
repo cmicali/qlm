@@ -2,11 +2,27 @@
 
 #import "QLMSkinDrawing.h"
 #import "QLMSkinImages.h"
+#import "QLMSkinLayersTesting.h"
 #import "QLMViews.h"
 
 const CFTimeInterval QLMSkinEaseSeconds = 0.14;
 
 static NSInteger QLMSkinEaseHolds;
+
+#if DEBUG
+static NSHashTable<CALayer *> *QLMSkinEasedLayers;
+
+void QLMSkinFinishEases(void) {
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    for (CALayer *layer in QLMSkinEasedLayers) {
+        [layer removeAllAnimations];
+    }
+    [CATransaction commit];
+    [QLMSkinEasedLayers removeAllObjects];
+    [CATransaction flush];
+}
+#endif
 
 static BOOL QLMSkinMotionIsReduced(void) {
     return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
@@ -39,6 +55,12 @@ void QLMSkinSetLayerValue(CALayer *layer, NSString *keyPath, id value, BOOL ease
         ease.duration = QLMSkinEaseSeconds;
         ease.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
         [layer addAnimation:ease forKey:keyPath];
+#if DEBUG
+        if (QLMSkinEasedLayers == nil) {
+            QLMSkinEasedLayers = [NSHashTable weakObjectsHashTable];
+        }
+        [QLMSkinEasedLayers addObject:layer];
+#endif
     } else {
         [layer removeAnimationForKey:keyPath];
     }
@@ -327,9 +349,6 @@ static QLMSkinNarrowing QLMSkinNarrow(CGFloat start, CGFloat length, CGFloat tot
 
 - (void)setMovingLayers:(NSArray<CALayer *> *)movingLayers {
     _movingLayers = [movingLayers copy];
-    for (CALayer *layer in _movingLayers) {
-        layer.delegate = self;
-    }
     _view.needsDisplay = YES;
 }
 

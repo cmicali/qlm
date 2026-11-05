@@ -698,10 +698,9 @@ static void QLMSkinOSDFillBar(QLMSkinBar *bar, QLMSkinColor color, NSRect rect) 
     _fillClip.bounds = (CGRect){frame.origin, CGSizeMake([self fillWidth], frame.size.height)};
 }
 
+// Only the width, so a layout that moves the clip mid-ease keeps it.
 - (void)showFractionEased:(BOOL)eases {
-    CGRect bounds = _fillClip.bounds;
-    bounds.size.width = [self fillWidth];
-    QLMSkinSetLayerValue(_fillClip, @"bounds", [NSValue valueWithRect:bounds], eases);
+    QLMSkinSetLayerValue(_fillClip, @"bounds.size.width", @([self fillWidth]), eases);
 }
 
 - (void)drawSkinMovingReference {

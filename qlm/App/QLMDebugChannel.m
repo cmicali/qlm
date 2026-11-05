@@ -15,6 +15,7 @@
 #import "QLMFormat.h"
 #import "QLMPreferences.h"
 #import "QLMSkinChoice.h"
+#import "QLMSkinLayers.h"
 #import "QLMSnapshot.h"
 #import "QLMSystem.h"
 
@@ -550,6 +551,11 @@ NSString *QLMDebugRun(NSArray<NSString *> *args, NSString *commandId, id<QLMDebu
     // snapshot, so these would read stale content.
     if ([@[@"dump_screenshot", @"dump_view_tree"] containsObject:verb]) {
         [app debugDrawWindows];
+    }
+    // TRAP: a screenshot renders the presentation tree, so within an ease
+    // of a level change it would catch the pointer or the bar on the way.
+    if ([verb isEqualToString:@"dump_screenshot"]) {
+        QLMSkinFinishEases();
     }
     return ((VibeDebugCommandHandler)spec[@"handler"])(args, commandId, app);
 }

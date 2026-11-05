@@ -104,7 +104,7 @@ static NSString *const QLMKnobTurnKey = @"transform.rotation.z";
     [self showLevelEased:NO];
 }
 
-// A drag tracks the pointer exactly.
+// A drag tracks the mouse exactly.
 - (BOOL)easesLevel {
     return !_dragging && QLMSkinEases(self);
 }

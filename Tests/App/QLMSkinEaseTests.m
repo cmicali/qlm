@@ -5,6 +5,8 @@
 #import "QLMKnobMath.h"
 #import "QLMSkinControls.h"
 #import "QLMSkinLayers.h"
+#import "QLMSkinLayersTesting.h"
+#import "QLMSkinTestBitmaps.h"
 #import "QLMTestSupport.h"
 
 // The knob's pointer and arc, and the OSD's bar, ease to each new level in
@@ -197,15 +199,101 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
     osd.fraction = 0.25;
     QLMTestPump(window);
     CALayer *clip = osd.layers.movingLayers.firstObject;
-    XCTAssertNil([clip animationForKey:@"bounds"]);
+    XCTAssertNil([clip animationForKey:@"bounds.size.width"]);
     osd.fraction = 0.42;
     XCTAssertEqual(clip.bounds.size.width, round(skin.osd.bar.frame.size.width * 0.42));
-    XCTAssertNotNil([clip animationForKey:@"bounds"]);
+    XCTAssertNotNil([clip animationForKey:@"bounds.size.width"]);
     QLMTestSeen = NO;
     osd.fraction = 0.5;
-    XCTAssertNil([clip animationForKey:@"bounds"]);
+    XCTAssertNil([clip animationForKey:@"bounds.size.width"]);
     XCTAssertEqual(clip.bounds.size.width, round(skin.osd.bar.frame.size.width * 0.5));
     [window close];
+}
+
+// A screenshot shows the level, not the way there.
+- (void)testFinishingTheEasesShowsTheLevel {
+    XCTAssertTrue([_knob stepBy:1]);
+    XCTAssertNotNil([QLMTestPointer(_knob) animationForKey:QLMTestTurn]);
+    QLMSkinFinishEases();
+    XCTAssertNil([QLMTestPointer(_knob) animationForKey:QLMTestTurn]);
+    XCTAssertEqualWithAccuracy([[QLMTestPointer(_knob).presentationLayer valueForKeyPath:QLMTestTurn] doubleValue],
+                               [self turnAt:-58.5], 1e-9);
+}
+
+// How many of the layer's pixels show ink, as it renders alone.
+static NSInteger QLMTestInk(CALayer *layer) {
+    NSBitmapImageRep *bitmap = QLMTestBitmap(layer.bounds.size);
+    CGContextRef cg = [NSGraphicsContext graphicsContextWithBitmapImageRep:bitmap].CGContext;
+    CGContextScaleCTM(cg, QLMTestScale, QLMTestScale);
+    [layer renderInContext:cg];
+    NSRect ink = QLMTestPixelBounds(bitmap, bitmap, ^BOOL(const uint8_t *u, const uint8_t *v) {
+        return u[3] > 0;
+    });
+    return (NSInteger)(ink.size.width * ink.size.height);
+}
+
+// At the range's bottom, the lit arc draws nothing, not even its round
+// cap. A step up draws some.
+- (void)testTheArcDrawsNothingAtTheBottom {
+    QLMTestSeen = NO;
+    CAShapeLayer *arc = (CAShapeLayer *)_knob.layers.movingLayers.firstObject;
+    _knob.doubleValue = -80;
+    QLMTestPump(_window);
+    XCTAssertEqual(arc.lineCap, kCALineCapRound);
+    XCTAssertEqual(QLMTestInk(arc), 0);
+    _knob.doubleValue = -79.5;
+    QLMTestPump(_window);
+    XCTAssertGreaterThan(QLMTestInk(arc), 0);
+}
+
+// The middle of the pointer's ink, in points from the knob's center, y
+// down, as AppKit draws the view: what the pointer adds to the knob without
+// it. AppKit's own drawing, not the layers' flip rule, places it.
+- (NSPoint)pointerInkAt:(double)decibels {
+    _knob.doubleValue = decibels;
+    QLMTestPump(_window);
+    NSBitmapImageRep *(^draw)(void) = ^NSBitmapImageRep * {
+        NSBitmapImageRep *bitmap = [self->_knob bitmapImageRepForCachingDisplayInRect:self->_knob.bounds];
+        [self->_knob cacheDisplayInRect:self->_knob.bounds toBitmapImageRep:bitmap];
+        return bitmap;
+    };
+    NSBitmapImageRep *with = draw();
+    QLMTestPointer(_knob).hidden = YES;
+    NSBitmapImageRep *without = draw();
+    QLMTestPointer(_knob).hidden = NO;
+    double sumX = 0, sumY = 0, count = 0;
+    for (NSInteger y = 0; y < with.pixelsHigh; y++) {
+        for (NSInteger x = 0; x < with.pixelsWide; x++) {
+            NSColor *a = [with colorAtX:x y:y], *b = [without colorAtX:x y:y];
+            double d = fabs(a.redComponent - b.redComponent) + fabs(a.greenComponent - b.greenComponent)
+                       + fabs(a.blueComponent - b.blueComponent) + fabs(a.alphaComponent - b.alphaComponent);
+            if (d > 0.1) {
+                sumX += x;
+                sumY += y;
+                count++;
+            }
+        }
+    }
+    if (count == 0) {
+        return NSMakePoint(NAN, NAN);
+    }
+    CGFloat scale = with.pixelsWide / _knob.bounds.size.width;
+    return NSMakePoint((sumX / count + 0.5) / scale - NSMidX(_knob.bounds), (sumY / count + 0.5) / scale - NSMidY(_knob.bounds));
+}
+
+// The bottom of the range points down and left, its middle up, and its
+// top down and right.
+- (void)testThePointerPointsWhereTheLevelIs {
+    QLMTestSeen = NO;
+    NSPoint bottom = [self pointerInkAt:-80];
+    NSPoint middle = [self pointerInkAt:-55];
+    NSPoint top = [self pointerInkAt:-30];
+    XCTAssertLessThan(bottom.x, -10, @"%@", NSStringFromPoint(bottom));
+    XCTAssertGreaterThan(bottom.y, 10, @"%@", NSStringFromPoint(bottom));
+    XCTAssertEqualWithAccuracy(middle.x, 0, 2, @"%@", NSStringFromPoint(middle));
+    XCTAssertLessThan(middle.y, -10, @"%@", NSStringFromPoint(middle));
+    XCTAssertGreaterThan(top.x, 10, @"%@", NSStringFromPoint(top));
+    XCTAssertGreaterThan(top.y, 10, @"%@", NSStringFromPoint(top));
 }
 
 @end
