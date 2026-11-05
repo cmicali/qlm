@@ -30,3 +30,7 @@ void QLMPinToEdges(NSView *view, NSView *container) {
         [view.bottomAnchor constraintEqualToAnchor:container.bottomAnchor],
     ]];
 }
+
+BOOL QLMWindowIsSeen(NSWindow *window) {
+    return window.visible && (window.occlusionState & NSWindowOcclusionStateVisible) != 0;
+}

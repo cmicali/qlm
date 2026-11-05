@@ -19,7 +19,7 @@ static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applicat
 @property (nonatomic, readonly) NSArray<NSView *> *views;
 @end
 
-@interface QLMFakeBusWindowController ()
+@interface QLMFakeBusWindowController () <NSWindowDelegate>
 @property (nonatomic) NSButton *knobCheckbox;
 @property (nonatomic) NSSlider *knobSlider;
 @property (nonatomic) NSTextField *knobLabel;
@@ -75,6 +75,7 @@ static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applicat
     self = [super initWithWindow:panel];
     if (self) {
         _rows = @[];
+        panel.delegate = self;
         [self buildContent];
         [panel center];
     }
@@ -149,9 +150,14 @@ static NSString *const QLMFakeBusyReason = @"GLM is running (pid 4242, /Applicat
 }
 
 - (void)refresh {
-    if (self.window.visible) {
+    if (QLMWindowIsSeen(self.window)) {
         [self change:nil];
     }
+}
+
+// A window that comes into view catches up at once.
+- (void)windowDidChangeOcclusionState:(NSNotification *)notification {
+    [self refresh];
 }
 
 // Runs the change on the bus's queue, reads the bus back in the same visit,

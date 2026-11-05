@@ -217,9 +217,14 @@ static const CGFloat QLMSettingsTextWidth = 360;
 // The live line changes with every turn of the knob, so the window refits
 // only when the line's height does.
 - (void)refresh {
-    if (self.window.visible && [self renderHandBack]) {
+    if (QLMWindowIsSeen(self.window) && [self renderHandBack]) {
         [self fitWindow];
     }
+}
+
+// A window that comes into view catches up at once.
+- (void)windowDidChangeOcclusionState:(NSNotification *)notification {
+    [self refresh];
 }
 
 // The field's action saves it, and it goes as the field ends editing.
