@@ -20,6 +20,8 @@ captures/
     └── setups/*.sam            for a setup-* capture, the setup at each step, redacted
 ```
 
+`qlm-poll-meters` is the exception: two runs of `qlmctl poll` with no USB capture, saved as `qlmctl` printed them, with its `notes.md`.
+
 `reports.txt` is what the tests read. One line per HID report: the time in seconds from the first packet, `out` or `in`, then the bytes in hex. Lines starting with `#` are comments.
 
 ## Recording

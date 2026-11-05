@@ -8,6 +8,7 @@
 #import "QLMAdapter.h"
 #include "QLMCommands.h"
 #import "QLMFakeBus.h"
+#import "QLMKnob.h"
 #include "QLMReplies.h"
 
 // 10 dB under System's default ceiling, for the first runs on the monitors.
@@ -88,14 +89,75 @@ static NSDictionary<NSString *, NSString *> *_Nullable QLMReadArguments(NSArray<
     return given;
 }
 
+// --ceiling, or QLMCeilingLimit when not given. NO, with the reason, for a
+// ceiling above 0 dB, or above QLMCeilingLimit without --allow-high-ceiling.
+static BOOL QLMReadCeiling(NSDictionary<NSString *, NSString *> *given, double *ceiling, NSString **problem) {
+    *ceiling = QLMCeilingLimit;
+    NSString *text = given[@"--ceiling"];
+    if (text == nil) {
+        return YES;
+    }
+    double number = 0;
+    if (!QLMReadNumber(text, @"a ceiling in dB", &number, problem)) {
+        return NO;
+    }
+    if (number > QLMVolumeDecibelsMax) {
+        *problem = @"the ceiling may not be above 0 dB";
+        return NO;
+    }
+    if (number > QLMCeilingLimit && given[@"--allow-high-ceiling"] == nil) {
+        *problem = [NSString stringWithFormat:@"a ceiling above %.0f dB takes --allow-high-ceiling", QLMCeilingLimit];
+        return NO;
+    }
+    *ceiling = number;
+    return YES;
+}
+
 NSDictionary<NSString *, NSString *> *QLMQueryArguments(NSString *command, NSArray<NSString *> *arguments, NSString **problem) {
     NSDictionary<NSString *, NSArray<NSString *> *> *options = @{
         @"info": @[@"--replay"],
         @"discover": @[@"--replay", @"--setup", @"--seconds"],
-        @"poll": @[@"--replay", @"--seconds"],
+        @"poll": @[@"--replay", @"--seconds", @"--ceiling"],
+    };
+    NSDictionary<NSString *, NSArray<NSString *> *> *flags = @{
+        @"info": @[@"--fake"],
+        @"discover": @[@"--fake"],
+        @"poll": @[@"--fake", @"--allow-high-ceiling"],
     };
     NSCParameterAssert(options[command] != nil);
-    return QLMReadArguments(arguments, [NSSet setWithObject:@"--fake"], [NSSet setWithArray:options[command]], NULL, problem);
+    return QLMReadArguments(arguments, [NSSet setWithArray:flags[command]], [NSSet setWithArray:options[command]], NULL, problem);
+}
+
+QLMSystemSettings *QLMPollSettings(NSDictionary<NSString *, NSString *> *given, NSString **problem) {
+    double ceiling = 0;
+    if (!QLMReadCeiling(given, &ceiling, problem)) {
+        return nil;
+    }
+    QLMSystemSettings *settings = [[QLMSystemSettings alloc] init];
+    settings.ceilingDecibels = ceiling;
+    settings.startsAtKnob = YES;
+    return settings;
+}
+
+NSString *QLMPollStartText(QLMSystemSettings *settings) {
+    return [NSString stringWithFormat:@"poll sends the knob's level, at most the %.1f dB ceiling, once it reads the knob, and "
+                                      @"follows the knob. With no knob in, it sends no level until one is.",
+                                      settings.ceilingDecibels];
+}
+
+NSString *_Nullable QLMPollLevelText(QLMSnapshot *snapshot) {
+    if (!snapshot.adapter.hasStatus) {
+        return nil;
+    }
+    double volume = snapshot.volumeDecibels.doubleValue;
+    NSNumber *knob = snapshot.adapter.knobTenths;
+    if (snapshot.volumeDecibels != nil && knob != nil && QLMKnobStep(knob.integerValue) > snapshot.ceilingDecibels) {
+        return [NSString stringWithFormat:@"poll sends %.1f dB, the ceiling, which is under the knob's level.", volume];
+    }
+    if (snapshot.volumeDecibels != nil) {
+        return [NSString stringWithFormat:@"poll sends %.1f dB, the knob's level.", volume];
+    }
+    return @"No knob is in, so poll sends no level until one is. The monitors' outputs may fall silent until a knob is in.";
 }
 
 NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *arguments, NSString **problem) {
@@ -219,22 +281,12 @@ NSDictionary<NSString *, NSString *> *QLMCompareArguments(NSArray<NSString *> *a
         options.adapterPollSeconds = @(number);
     }
 
-    options.ceilingDecibels = QLMCeilingLimit;
-    NSString *ceiling = given[@"--ceiling"];
-    if (ceiling != nil) {
-        if (!QLMReadNumber(ceiling, @"a ceiling in dB", &number, problem)) {
-            return nil;
-        }
-        if (number > QLMVolumeDecibelsMax) {
-            *problem = @"the ceiling may not be above 0 dB";
-            return nil;
-        }
-        if (number > QLMCeilingLimit && given[@"--allow-high-ceiling"] == nil) {
-            *problem = [NSString stringWithFormat:@"a ceiling above %.0f dB takes --allow-high-ceiling", QLMCeilingLimit];
-            return nil;
-        }
-        options.ceilingDecibels = number;
+    double ceilingDecibels = 0;
+    if (!QLMReadCeiling(given, &ceilingDecibels, problem)) {
+        return nil;
     }
+    options.ceilingDecibels = ceilingDecibels;
+    NSString *ceiling = given[@"--ceiling"];
 
     // apply-group's dry run reads only the setup file.
     BOOL reachesUSB = options.overUSB && !(command == QLMControlCommandApplyGroup && options.dryRun);

@@ -5,6 +5,7 @@
 #import <CoreServices/CoreServices.h>
 
 #import "QLMPreferences.h"
+#include "QLMReplies.h"
 #import "QLMSetup.h"
 
 NSString *const QLMEmDash = @"—";
@@ -105,7 +106,16 @@ NSInteger QLMMeterCounts(NSInteger raw) {
     if (raw == QLMMonitorValueAbsent) {
         return -1;
     }
-    return MAX(0, raw - 0x80);
+    return MAX(0, raw - QLMTelemetryOutputSilent);
+}
+
+const NSInteger QLMOutputMeterSpan = 0xFF - QLMTelemetryOutputSilent;
+
+QLMInputSignal QLMInputSignalOf(NSInteger raw) {
+    if (raw == QLMMonitorValueAbsent) {
+        return QLMInputSignalAbsent;
+    }
+    return raw >= QLMTelemetryInputSignal ? QLMInputSignalPresent : QLMInputSignalNone;
 }
 
 NSString *QLMReplyAgeText(NSDate *date) {

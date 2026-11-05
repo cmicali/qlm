@@ -1,6 +1,7 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMFormat.h"
+#include "QLMReplies.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMTestSupport.h"
 
@@ -314,6 +315,32 @@ static QLMSnapshot *QLMSnapshotWithProblem(QLMAdapterProblem problem, QLMHandBac
         XCTAssertTrue([formatter getObjectValue:&value forString:text errorDescription:NULL], @"%@", text);
         XCTAssertEqualObjects(value, taken[text], @"%@", text);
     }
+}
+
+#pragma mark - The meters
+
+// An output bar spans its floor to the byte's top, FF: 127 counts. With
+// music, the outputs rose to 246 (QLMTelemetryTests' testTheMetersWithMusic),
+// so the old bar of 48 counts pinned.
+- (void)testAnOutputSpansItsFloorToTheTop {
+    XCTAssertEqual(QLMOutputMeterSpan, 0xFF - QLMTelemetryOutputSilent);
+    XCTAssertEqual(QLMMeterCounts(QLMTelemetryOutputSilent), 0);
+    XCTAssertEqual(QLMMeterCounts(QLMTelemetryOutputSilent - 1), 0);
+    XCTAssertEqual(QLMMeterCounts(QLMTelemetryOutputSilent + 112), 112);
+    XCTAssertEqual(QLMMeterCounts(0xFF), QLMOutputMeterSpan);
+    XCTAssertEqual(QLMMeterCounts(QLMMonitorValueAbsent), -1);
+}
+
+// The input is a signal from QLMTelemetryInputSignal, whose source is in
+// QLMTelemetryTests.
+- (void)testTheInputSaysSignalOrNone {
+    for (NSNumber *raw in @[@0, @(QLMTelemetryInputSignal - 1)]) {
+        XCTAssertEqual(QLMInputSignalOf(raw.integerValue), QLMInputSignalNone, @"%@", raw);
+    }
+    for (NSNumber *raw in @[@(QLMTelemetryInputSignal), @255]) {
+        XCTAssertEqual(QLMInputSignalOf(raw.integerValue), QLMInputSignalPresent, @"%@", raw);
+    }
+    XCTAssertEqual(QLMInputSignalOf(QLMMonitorValueAbsent), QLMInputSignalAbsent);
 }
 
 @end

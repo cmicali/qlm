@@ -112,6 +112,10 @@ BOOL QLMIsMonitorPoll(QLMMessage message);
 // A volume frame's 24-bit word.
 uint32_t QLMVolumeWordOf(QLMMessage message);
 
+// The records in `sent`, from index `start` on, whose payload starts with
+// `opcode`, as a fake bus records them: the address, then the payload.
+NSArray<NSData *> *QLMSentWithOpcode(NSArray<NSData *> *sent, uint8_t opcode, NSUInteger start);
+
 // Each output report in captures/<scenario> whose payload starts with `opcode`.
 NSSet<NSData *> *QLMOutputReports(NSString *scenario, uint8_t opcode);
 

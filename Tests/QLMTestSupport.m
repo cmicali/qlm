@@ -676,3 +676,13 @@ QLMSetup *QLMReadFixtureSetup(void) {
 }
 
 @end
+
+NSArray<NSData *> *QLMSentWithOpcode(NSArray<NSData *> *sent, uint8_t opcode, NSUInteger start) {
+    NSMutableArray<NSData *> *found = [NSMutableArray array];
+    for (NSUInteger i = start; i < sent.count; i++) {
+        if (sent[i].length >= 2 && ((const uint8_t *)sent[i].bytes)[1] == opcode) {
+            [found addObject:sent[i]];
+        }
+    }
+    return found;
+}

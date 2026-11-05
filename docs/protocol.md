@@ -737,7 +737,7 @@ sequenceDiagram
 
 The sync's replies answer no request.[^open-sync] System's opening is from `qlm-first-discover`, at 24.940 to 24.947 s, before #33 added the sync. #32 adds the `19 01` to each monitor's old session, before the first probe.
 
-qlm leaves out `01 22`, `01 51 82`, the wake, the pair, and `01 2B 00` at connect. It sends no volume until one is set. The adapter bridged qlm without them.[^qlm-leaves-out] The app sets its level before the start, so its first level goes out after the adapter's first read, no louder than the knob when the knob moved since the last run ([The hand-back](#the-hand-back)).
+qlm leaves out `01 22`, `01 51 82`, the wake, the pair, and `01 2B 00` at connect. It sends no volume until one is set, but for `qlmctl poll`, which sets the knob's at its first read ([A host that sends no level](#a-host-that-sends-no-level)). The adapter bridged qlm without them.[^qlm-leaves-out] The app sets its level before the start, so its first level goes out after the adapter's first read, no louder than the knob when the knob moved since the last run ([The hand-back](#the-hand-back)).
 
 ### Discovery
 
@@ -1109,6 +1109,29 @@ qlm forgets the probe at each start and after each gap, when another host may ha
 
 A mute outlasts the host, and no reply reports it. The Right 8351B stayed muted after qlm's exit, until `mute off`.[^mute-outlasts] [Telemetry](#telemetry) has why no reply shows it.
 
+### A host that sends no level
+
+A host that leases the monitors and sends them neither a level nor a `2B` silences them. `qlmctl poll` did, before it sent the knob's level. With music on the monitors' digital input, every output read its floor from about 2 s in, while every input still read the music, and the owner heard it go quiet:[^poll-silent]
+
+| Monitors | Outputs with music | Outputs at their floor from | Input |
+| --- | --- | --- | --- |
+| The 8351Bs and the 7370A | 221 to 230 | The frame at 1.77 s | 252 throughout |
+| The 8330As and the 7350A | 228 to 240 | The frame at 2.38 s | 252 throughout |
+
+The times are seconds after `poll` started, at the frame `qlmctl` printed. A frame changes once a second, and an output takes up to 1.7 s to reach its floor after a mute ([telemetry.md](telemetry.md#a-count-is-about-a-db)), so the silence began a little before each.
+
+Either one alone kept a leased monitor playing, in `qlm-control-first`:[^level-or-2b]
+
+| Run | What it sent | What played |
+| --- | --- | --- |
+| `volume -60`, 274.7 to 289.7 s | The level every cycle, and no `2B` | The Right 8351B, all 15 s |
+| `mute on --serial`, 638.6 to 648.7 s | Two rounds of `2B`, and no level | The 7370A, all 10 s |
+| `poll`, in `qlm-poll-meters` | Neither | Nothing, from about 2 s in |
+
+So these are facts: a host that leases and polls, and sends neither, silences every monitor within about 2.4 s, and a level, or a round of `2B`, keeps them playing. `poll` now sends the knob's level, under the ceiling, and follows the knob. The take-over ran the monitors at the knob, so that level is what the listener heard. With no knob in, that level is unknown, so `poll` sends none until a knob is plugged in, and says the outputs may fall silent until then. A knob plugged in later sets its level, under the ceiling. That send hasn't run on the monitors yet.[^poll-level]
+
+**Guess:** once a host polls, the adapter stops running the monitors at the knob, and a monitor with no level or mute state from the host goes silent. That fits a woken monitor, which waits for the level or the pair ([Monitors keep their level and their mute](#monitors-keep-their-level-and-their-mute)). It also fits the adapter's `F0 1F 00 00 00`, which hlm saw it broadcast about every 610 ms while a host is connected, and calls a level the monitors ignore ([With no host, the adapter applies the knob](#with-no-host-the-adapter-applies-the-knob)). No USB capture of `poll` was made, so neither the start of the silence nor what ends it is timed.
+
 ### Monitors in standby still answer
 
 They answer discovery and polls without a wake, and stay in standby.[^standby-answers] They miss a request at times ([`01 7E`](#01-7e)).
@@ -1130,6 +1153,9 @@ On or in standby, monitors drop a quiet host's leases, within 2.84 s of the last
 [^power-on-count]: `qlm-control-all`, the Rear Right's lease at 214.774 s after the probe at 214.206 s, and every wake in the captures. The 67 s is the Rear Right again, leased by GLM at 379.660 s, against the probe of `qlmctl`'s run before; `testThePowerOnMarginSplitsEveryLease`. [telemetry.md](telemetry.md#49-seconds-since-the-wake) has the rule, and why it skips a lease's first frame.
 [^over-ceiling]: `qlm-control-all`, 8425.4 to 8471.0 s, and 8494.1 s, and its notes.
 [^mute-outlasts]: `qlm-control-first`, 648.7 to 660.5 s.
+[^poll-silent]: `qlm-poll-meters`, `poll-music.txt`, and its notes; `testWithMusicTheOutputsFallSilentWhileTheInputStaysAt252`.
+[^level-or-2b]: `qlm-control-first`, and its notes; `testALevelOrA2BKeepsALeasedMonitorPlaying`.
+[^poll-level]: `QLMSystemSettings`' `startsAtKnob`; `testAStartAtTheKnobSendsTheKnobsLevelUnderTheCeiling`; `testAStartAtTheKnobWaitsForAKnobPluggedInLater`; `testAStartAtTheKnobFollowsTheKnob`; `testPollSendsTheKnobsLevelUnderTheCeiling`; `testPollWithNoKnobSendsNoLevel`.
 [^standby-answers]: `qlm-standby-discover`.
 [^clock-49]: [telemetry.md](telemetry.md#49-seconds-since-the-wake).
 
@@ -1157,12 +1183,13 @@ On or in standby, monitors drop a quiet host's leases, within 2.84 s of the last
 | 18 | What does the bare `04` after `8A` mark? | It came once each from the two 8330As whose counts had restarted minutes before, in their first frame after GLM's apply. The notes confirm a power-on for one ([Telemetry](#telemetry)). One case can't say more. |
 | 19 | What made GLM send a broadcast `03`? | It drops every lease ([When a monitor loses its lease](#when-a-monitor-loses-its-lease)). The capture doesn't show what set it off ([refused-frames.md](refused-frames.md#broadcast-03)). |
 | 20 | Does GLM compute a shelf's w0 in double and round it to float, or in float arithmetic? | Both match every captured shelf. High shelves at 5000, 10000, 11000, 13000, and 15000 Hz, −5 dB, at 96 kHz tell them apart ([setup-captures.md](setup-captures.md#part-b-peq-on-the-8351b)). |
+| 21 | What silences monitors a host leases and sends no level or `2B`: the lease, or the adapter, once a host polls? How long after the lease? | `qlmctl poll` silenced them within about 2.4 s, with no USB capture ([A host that sends no level](#a-host-that-sends-no-level)). `info` polls only the adapter, and never ran long enough with music to tell. |
 
 ## Sources
 
 The footnotes name each fact's source. Together, they draw on:
 
-- The 25 captures in `captures/`, each with its `notes.md`. GLM 5 ran the Phase 0 scenarios on 2026-10-29. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30, and qlm's app ran `qlm-app-first` the same day. GLM ran the three setup captures on 2026-10-31: `setup-a-baseline`, `setup-b-peq-8351b`, and `setup-j-restore`.
+- The 25 captures in `captures/`, each with its `notes.md`, and `qlm-poll-meters`, which holds only what `qlmctl poll` printed, on 2026-11-05. GLM 5 ran the Phase 0 scenarios on 2026-10-29. qlm ran `qlm-first-discover`, `qlm-standby-discover`, `qlm-control-first`, and `qlm-control-all` on 2026-10-30, and qlm's app ran `qlm-app-first` the same day. GLM ran the three setup captures on 2026-10-31: `setup-a-baseline`, `setup-b-peq-8351b`, and `setup-j-restore`.
 - The tests in `Tests/`, which check these facts against the captures, and the headers in `qlm/GLMProtocol/`.
 - hlm's spec, revision 13, at robcazzaro/hlm commit `c08ced9`: §1 to §9, and Appendix B. Facts only. No text was copied.
 - genlc's `transport.py`, for the report-ID byte. Facts only. No code was ported.

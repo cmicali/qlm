@@ -13,14 +13,27 @@ extern const double QLMCeilingLimit;
 // The most --adapter-poll takes, in seconds.
 extern const NSTimeInterval QLMAdapterPollLimit;
 
-// info, discover, and poll send no control, but each refuses an argument
-// it doesn't know, as a control does. So a misplaced option, such as
-// volume's --adapter-poll, can't run with the defaults. Each flag maps to
-// itself, and each option to its value. Nil, with the reason in `problem`,
-// for an unknown or repeated argument, an option with no value, --seconds
-// that is not a number of seconds, or --fake with --replay.
+// info and discover send no control, and poll sends only the knob's level.
+// Each refuses an argument it doesn't know, as a control does. So a
+// misplaced option, such as volume's --adapter-poll, can't run with the
+// defaults. Each flag maps to itself, and each option to its value. Nil,
+// with the reason in `problem`, for an unknown or repeated argument, an
+// option with no value, --seconds that is not a number of seconds, --fake
+// with --replay.
 NSDictionary<NSString *, NSString *> *_Nullable QLMQueryArguments(NSString *command, NSArray<NSString *> *arguments,
                                                                   NSString *_Nullable *_Nonnull problem);
+
+// poll's System settings, from QLMQueryArguments' poll: the ceiling, as a
+// control takes it, and startsAtKnob. So poll sends the knob's level, under
+// the ceiling, and follows the knob, or with no knob in, sends no level
+// until one is. Nil, with the reason in `problem`, for a ceiling a control
+// refuses.
+QLMSystemSettings *_Nullable QLMPollSettings(NSDictionary<NSString *, NSString *> *given, NSString *_Nullable *_Nonnull problem);
+// What poll prints before it starts.
+NSString *QLMPollStartText(QLMSystemSettings *settings);
+// What poll prints once it has read the knob: the level it sends, or that
+// it sends none. Nil before the adapter's status is read.
+NSString *_Nullable QLMPollLevelText(QLMSnapshot *snapshot);
 
 // compare-apply's: a setup file and a capture's reports.txt, then --group,
 // which it needs, and --from, --to, and --check-outside, each at most once.
