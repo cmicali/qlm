@@ -632,6 +632,36 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertEqual(flushes.count, 1u);
 }
 
+// A snapshot that repeats the last one's values compares nothing with the
+// defaults, yet a change made meanwhile by another path is kept right: the
+// same snapshot again writes its values back.
+- (void)testARepeatedSnapshotStillUndoesAnotherPathsChange {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    (void)[self holdFlushesOf:kept];
+    QLMSnapshot *snapshot = QLMKnobSnapshot(-40, @(-400));
+    snapshot.mutedHardwareIDs = [NSSet setWithObject:QLMID(0xEA)];
+    [kept keepFromSnapshot:snapshot];
+    XCTAssertTrue([kept saveVolumeDecibels:-35]);
+    kept.mutedHardwareIDs = [NSSet set];
+    [kept keepFromSnapshot:snapshot];
+    XCTAssertEqual(self.written.volumeDecibels, -40, @"a lower level, so at once");
+    XCTAssertEqualObjects(self.written.mutedHardwareIDs, [NSSet setWithObject:QLMID(0xEA)]);
+}
+
+// The writes go out off the main queue, in order, and a read anywhere waits
+// for those queued before it: a turn down writes each lower level, and a
+// relaunch reads the last.
+- (void)testAReadSeesEveryWriteQueuedBeforeIt {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
+    for (int tenths = -400; tenths >= -600; tenths -= 5) {
+        [kept keepFromSnapshot:QLMKnobSnapshot(tenths / 10.0, @(tenths))];
+    }
+    XCTAssertEqual(flushes.count, 0u, @"a lowering never waits");
+    XCTAssertEqual(self.written.volumeDecibels, -60);
+    XCTAssertEqualObjects(self.written.knobTenths, @(-600));
+}
+
 // Every stop writes what waits: a stopped System's snapshot, and the app's
 // flush at quit, sleep, and a change of the adapter setting.
 - (void)testEveryStopWritesWhatWaits {

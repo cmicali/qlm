@@ -3,6 +3,7 @@
 #import "NSImage+Util.h"
 #import "PlatformColor.h"
 #import "QLMSkinDrawing.h"
+#import "QLMSkinGlyphs.h"
 #import "QLMSkinImages.h"
 #import "QLMSkinLayout.h"
 
@@ -471,6 +472,9 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
 
 @implementation QLMSkinDisplayView {
     QLMSkin *_skin;
+    // The numbers that change with each step, as glyph layers.
+    QLMSkinGlyphLine *_levelLine;
+    QLMSkinGlyphLine *_outputLine;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -478,8 +482,19 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     if (self) {
         _skin = skin;
         self.clipsToBounds = YES;  // nothing draws over the knob column
+        _levelLine = [[QLMSkinGlyphLine alloc] initWithLayers:self.layers];
+        _outputLine = [[QLMSkinGlyphLine alloc] initWithLayers:self.layers];
+        self.layers.movingLayers = @[_levelLine.layer, _outputLine.layer];
     }
     return self;
+}
+
+- (void)showLine:(QLMSkinGlyphLine *)line slot:(NSString *)name text:(nullable NSString *)text {
+    QLMSkinElement *element = [_skin element:@"display"];
+    QLMSkinTextSlot *slot = element.text[name];
+    CGSize size = self.bounds.size;
+    [line showText:text slot:slot frame:QLMSkinSlotFrame(element, slot, size) fontScale:QLMSkinSlotScale(element, slot, size)
+        monoDigits:YES overlay:self.disabled ? element.disabledOverlay : QLMSkinColorClear skin:_skin inView:self];
 }
 
 // Where a slot inks, in the view.
@@ -508,8 +523,7 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         return;
     }
     _level = [level copy];
-    [self redrawSlot:@"level"];
-    [self redrawSlot:@"unit"];
+    [self showLine:_levelLine slot:@"level" text:_level];
 }
 
 - (void)setOutput:(NSString *)output {
@@ -517,7 +531,7 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         return;
     }
     _output = [output copy];
-    [self redrawSlot:@"output"];
+    [self showLine:_outputLine slot:@"output" text:_output];
 }
 
 - (void)setMax:(NSString *)max {
@@ -547,14 +561,15 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     return glass ? @[glass] : @[];
 }
 
-- (void)drawSkinContent:(NSRect)dirtyRect {
+- (void)layoutSkinMovingLayers:(QLMSkinLayers *)layers {
+    [self showLine:_levelLine slot:@"level" text:self.level];
+    [self showLine:_outputLine slot:@"output" text:self.output];
+}
+
+- (void)drawTexts:(NSDictionary<NSString *, NSString *> *)texts dirtyRect:(NSRect)dirtyRect {
     QLMSkinElement *element = [_skin element:@"display"];
     CGSize size = self.bounds.size;
     QLMSkinDrawDimmed(self.disabled, element.disabledOverlay, self.bounds, ^{
-        NSDictionary<NSString *, NSString *> *texts = @{
-            @"caption": self.caption ?: @"", @"level": self.level ?: @"", @"unit": QLMSkinUnit,
-            @"output": self.output ?: @"", @"max": self.max ?: @"",
-        };
         for (NSString *name in texts) {
             if (!NSIntersectsRect([self inkOfSlot:name], dirtyRect)) {
                 continue;
@@ -564,6 +579,14 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
                                  QLMSkinSlotScale(element, slot, size), YES, 1);
         }
     });
+}
+
+- (void)drawSkinMovingReference {
+    [self drawTexts:@{@"level": self.level ?: @"", @"output": self.output ?: @""} dirtyRect:self.bounds];
+}
+
+- (void)drawSkinContent:(NSRect)dirtyRect {
+    [self drawTexts:@{@"caption": self.caption ?: @"", @"unit": QLMSkinUnit, @"max": self.max ?: @""} dirtyRect:dirtyRect];
 }
 
 // The slots, as they read, then the tooltip's reason, if any.
@@ -586,6 +609,7 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     QLMSkin *_skin;
     CALayer *_fillClip;
     CALayer *_fill;
+    QLMSkinGlyphLine *_levelLine;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -599,7 +623,8 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         _fill = [self.layers makeLayerOfClass:[CALayer class]];
         _fill.contentsGravity = kCAGravityResize;
         [_fillClip addSublayer:_fill];
-        self.layers.movingLayers = @[_fillClip];
+        _levelLine = [[QLMSkinGlyphLine alloc] initWithLayers:self.layers];
+        self.layers.movingLayers = @[_fillClip, _levelLine.layer];
     }
     return self;
 }
@@ -619,8 +644,13 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         return;
     }
     _level = [level copy];
-    [self redrawSlot:@"level"];
-    [self redrawSlot:@"unit"];
+    [self showLevelLine];
+}
+
+- (void)showLevelLine {
+    QLMSkinTextSlot *slot = _skin.osd.text[@"level"];
+    [_levelLine showText:self.level slot:slot frame:slot.frame fontScale:1 monoDigits:YES overlay:QLMSkinColorClear skin:_skin
+                  inView:self];
 }
 
 - (void)setTitle:(NSString *)title {
@@ -695,6 +725,7 @@ static void QLMSkinOSDFillBar(QLMSkinBar *bar, QLMSkinColor color, NSRect rect) 
     frame.origin.x = [self convertRectToLayer:_skin.osd.bar.frame].origin.x;
     _fillClip.position = frame.origin;
     _fillClip.bounds = (CGRect){frame.origin, CGSizeMake([self fillWidth], frame.size.height)};
+    [self showLevelLine];
 }
 
 // Only the width, so a layout that moves the clip mid-ease keeps it.
@@ -712,12 +743,14 @@ static void QLMSkinOSDFillBar(QLMSkinBar *bar, QLMSkinColor color, NSRect rect) 
         QLMSkinOSDFillBar(bar, bar.fill, bar.frame);
         [NSGraphicsContext restoreGraphicsState];
     }
+    QLMSkinTextSlot *slot = _skin.osd.text[@"level"];
+    QLMSkinDrawSlotInInk(self.level, slot, slot.frame, 1, YES, 1);
 }
 
 - (void)drawSkinContent:(NSRect)dirtyRect {
     QLMSkinElement *osd = _skin.osd;
     NSDictionary<NSString *, NSString *> *texts = @{
-        @"level": self.level ?: @"", @"unit": QLMSkinUnit, @"title": self.title ?: @"",
+        @"unit": QLMSkinUnit, @"title": self.title ?: @"",
         @"subtitle": self.subtitle ?: QLMSkinOSDIdleSubtitle,
     };
     for (NSString *name in texts) {

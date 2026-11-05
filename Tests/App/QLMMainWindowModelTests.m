@@ -261,6 +261,32 @@ static NSError *QLMApplyError(QLMSystemError code, BOOL refused) {
     XCTAssertNil(_model.knobDecibels);
 }
 
+// A number waits its turn on the display, but a change of what the line
+// says apart from its number shows at once: mute, dim, an error, or no
+// level.
+- (void)testEachReadoutSaysItsKind {
+    XCTAssertEqualObjects(_model.levelKind, @"level");
+    XCTAssertEqualObjects(_model.outputKind, @"level");
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.dimmed = YES;
+        snapshot.handBack = QLMMakeHandBack(QLMHandBackKnobLevel, @(-70), @(-60));
+    }];
+    XCTAssertEqualObjects(_model.outputKind, @"dimmed");
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.allMuted = YES;
+    }];
+    XCTAssertEqualObjects(_model.outputKind, @"muted");
+    _model.clickedGroupName = @"Main";
+    _model.applyError = QLMApplyError(QLMSystemErrorUnverifiedRate, YES);
+    XCTAssertEqualObjects(_model.outputKind, @"error");
+    _model.applyError = nil;
+    [self showRunningWith:^(QLMSnapshot *snapshot) {
+        snapshot.levelAwaitsKnob = YES;
+    }];
+    XCTAssertEqualObjects(_model.levelKind, @"none");
+    XCTAssertEqualObjects(_model.outputKind, @"none");
+}
+
 // Before a level is set, the preferences say the ceiling, as in the popover.
 - (void)testMaxIsTheCeiling {
     [self showRunningWith:^(QLMSnapshot *snapshot) {

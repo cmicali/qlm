@@ -86,6 +86,19 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 - (double)boundedVolume:(double)decibels;
 @end
 
+// Every bus's writes, in order, off the main queue: a write sends its
+// value to cfprefsd, which costs far more than the decision to make it.
+// Every read waits for the writes queued before it, so it sees them.
+static dispatch_queue_t QLMKeptWrites(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        queue = dispatch_queue_create("com.commonwealthrecordings.qlm.kept-writes",
+                                      dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0));
+    });
+    return queue;
+}
+
 @interface QLMBusPreferences ()
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults prefix:(NSString *)prefix preferences:(QLMPreferences *)preferences;
 @end
@@ -100,6 +113,18 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     BOOL _knobWaits;
     NSNumber *_waitingKnob;
     BOOL _flushScheduled;
+    // What this bus last wrote, so a decision reads no defaults. Nil until
+    // read or written.
+    NSNumber *_writtenVolume;
+    NSNumber *_writtenKnob;  // NSNull for no knob
+    // The last snapshot's values, so an unchanged one compares nothing
+    // with the defaults. A write by any other path clears them.
+    NSNumber *_seenVolume;
+    NSSet<NSData *> *_seenMuted;
+    NSNumber *_seenMutingAll;
+    NSSet<NSData *> *_seenLifted;
+    NSArray<QLMKnownLease *> *_seenLeases;
+    id _seenKnob;  // NSNull for no knob
 }
 
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults prefix:(NSString *)prefix preferences:(QLMPreferences *)preferences {
@@ -119,8 +144,22 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     return [_prefix stringByAppendingString:name];
 }
 
+// The defaults, once every write queued before has landed.
+- (NSUserDefaults *)read {
+    dispatch_sync(QLMKeptWrites(), ^{
+    });
+    return _defaults;
+}
+
+- (void)write:(void (^)(NSUserDefaults *defaults))write {
+    NSUserDefaults *defaults = _defaults;
+    dispatch_async(QLMKeptWrites(), ^{
+        write(defaults);
+    });
+}
+
 - (double)writtenVolume {
-    return [_preferences boundedVolume:QLMKeptLevel(_defaults, [self key:QLMVolumeName], QLMDefaultVolumeDecibels)];
+    return [_preferences boundedVolume:QLMKeptLevel(self.read, [self key:QLMVolumeName], QLMDefaultVolumeDecibels)];
 }
 
 - (double)volumeDecibels {
@@ -131,6 +170,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     if (!QLMIsSavableLevel(volumeDecibels)) {
         return NO;
     }
+    _seenVolume = nil;
     _volumeWaits = YES;
     _waitingVolume = volumeDecibels;
     [self flush];
@@ -140,7 +180,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 // Kept as a list of data, which a property list can hold.
 - (NSSet<NSData *> *)hardwareIDsNamed:(NSString *)name {
     NSMutableSet<NSData *> *hardwareIDs = [NSMutableSet set];
-    for (id item in [_defaults arrayForKey:[self key:name]]) {
+    for (id item in [self.read arrayForKey:[self key:name]]) {
         if ([item isKindOfClass:[NSData class]]) {
             [hardwareIDs addObject:item];
         }
@@ -153,15 +193,24 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 }
 
 - (void)setMutedHardwareIDs:(NSSet<NSData *> *)mutedHardwareIDs {
-    [_defaults setObject:mutedHardwareIDs.allObjects forKey:[self key:QLMMutedName]];
+    _seenMuted = nil;
+    NSArray<NSData *> *list = mutedHardwareIDs.allObjects;
+    NSString *key = [self key:QLMMutedName];
+    [self write:^(NSUserDefaults *defaults) {
+        [defaults setObject:list forKey:key];
+    }];
 }
 
 - (BOOL)mutingAll {
-    return [_defaults boolForKey:[self key:QLMMutingAllName]];
+    return [self.read boolForKey:[self key:QLMMutingAllName]];
 }
 
 - (void)setMutingAll:(BOOL)mutingAll {
-    [_defaults setBool:mutingAll forKey:[self key:QLMMutingAllName]];
+    _seenMutingAll = nil;
+    NSString *key = [self key:QLMMutingAllName];
+    [self write:^(NSUserDefaults *defaults) {
+        [defaults setBool:mutingAll forKey:key];
+    }];
 }
 
 - (NSSet<NSData *> *)liftedHardwareIDs {
@@ -169,13 +218,18 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 }
 
 - (void)setLiftedHardwareIDs:(NSSet<NSData *> *)liftedHardwareIDs {
-    [_defaults setObject:liftedHardwareIDs.allObjects forKey:[self key:QLMLiftedName]];
+    _seenLifted = nil;
+    NSArray<NSData *> *list = liftedHardwareIDs.allObjects;
+    NSString *key = [self key:QLMLiftedName];
+    [self write:^(NSUserDefaults *defaults) {
+        [defaults setObject:list forKey:key];
+    }];
 }
 
 // System checks each lease again before it takes one.
 - (NSArray<QLMKnownLease *> *)knownLeases {
     NSMutableArray<QLMKnownLease *> *leases = [NSMutableArray array];
-    for (id item in [_defaults arrayForKey:[self key:QLMLeasesName]]) {
+    for (id item in [self.read arrayForKey:[self key:QLMLeasesName]]) {
         if (![item isKindOfClass:[NSDictionary class]]) {
             continue;
         }
@@ -192,11 +246,16 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 }
 
 - (void)setKnownLeases:(NSArray<QLMKnownLease *> *)knownLeases {
-    [_defaults setObject:QLMLeasesPlist(knownLeases) forKey:[self key:QLMLeasesName]];
+    _seenLeases = nil;
+    NSArray<NSDictionary *> *plist = QLMLeasesPlist(knownLeases);
+    NSString *key = [self key:QLMLeasesName];
+    [self write:^(NSUserDefaults *defaults) {
+        [defaults setObject:plist forKey:key];
+    }];
 }
 
 - (BOOL)writtenKnobRead {
-    id kept = [_defaults objectForKey:[self key:QLMKnobReadName]];
+    id kept = [self.read objectForKey:[self key:QLMKnobReadName]];
     return [kept isKindOfClass:[NSNumber class]] && [kept boolValue];
 }
 
@@ -204,7 +263,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     if (!self.writtenKnobRead) {
         return nil;
     }
-    double tenths = QLMKeptNumber(_defaults, [self key:QLMKnobName]);
+    double tenths = QLMKeptNumber(self.read, [self key:QLMKnobName]);
     return tenths == floor(tenths) && tenths <= 0 && tenths > INT32_MIN ? @((NSInteger)tenths) : nil;
 }
 
@@ -218,36 +277,69 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 
 // Writes a reading at once. Only the tests call it.
 - (void)keepKnobTenths:(nullable NSNumber *)knobTenths {
+    _seenKnob = nil;
     _knobWaits = YES;
     _waitingKnob = knobTenths;
     [self flush];
 }
 
+- (double)lastWrittenVolume {
+    if (_writtenVolume == nil) {
+        _writtenVolume = @([self writtenVolume]);
+    }
+    return _writtenVolume.doubleValue;
+}
+
+- (nullable NSNumber *)lastWrittenKnob {
+    if (_writtenKnob == nil) {
+        _writtenKnob = self.writtenKnobTenths ?: (id)NSNull.null;
+    }
+    return _writtenKnob == (id)NSNull.null ? nil : _writtenKnob;
+}
+
 // Whether what waits is lower than what is written. A knob put in or taken
 // out counts.
 - (BOOL)waitingLowers {
-    if (_volumeWaits && [_preferences boundedVolume:_waitingVolume] < [self writtenVolume]) {
+    if (_volumeWaits && [_preferences boundedVolume:_waitingVolume] < [self lastWrittenVolume]) {
         return YES;
     }
     if (!_knobWaits) {
         return NO;
     }
-    NSNumber *written = self.writtenKnobTenths;
+    NSNumber *written = [self lastWrittenKnob];
     return written == nil || _waitingKnob == nil || _waitingKnob.integerValue < written.integerValue;
 }
 
-- (void)flush {
+// Queues what waits, without waiting for it to land.
+- (void)writeWaiting {
     if (_volumeWaits) {
         _volumeWaits = NO;
-        [_defaults setDouble:[_preferences boundedVolume:_waitingVolume] forKey:[self key:QLMVolumeName]];
+        double volume = [_preferences boundedVolume:_waitingVolume];
+        _writtenVolume = @(volume);
+        NSString *key = [self key:QLMVolumeName];
+        [self write:^(NSUserDefaults *defaults) {
+            [defaults setDouble:volume forKey:key];
+        }];
     }
     if (_knobWaits) {
         _knobWaits = NO;
-        [_defaults setObject:_waitingKnob forKey:[self key:QLMKnobName]];
-        if (!self.writtenKnobRead) {
-            [_defaults setBool:YES forKey:[self key:QLMKnobReadName]];
-        }
+        NSNumber *knob = _waitingKnob;
+        _writtenKnob = knob ?: (id)NSNull.null;
+        NSString *key = [self key:QLMKnobName];
+        NSString *readKey = [self key:QLMKnobReadName];
+        [self write:^(NSUserDefaults *defaults) {
+            [defaults setObject:knob forKey:key];
+            if (![[defaults objectForKey:readKey] isEqual:@YES]) {
+                [defaults setBool:YES forKey:readKey];
+            }
+        }];
     }
+}
+
+- (void)flush {
+    [self writeWaiting];
+    dispatch_sync(QLMKeptWrites(), ^{
+    });
 }
 
 - (void)scheduleFlush {
@@ -260,7 +352,7 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
         QLMBusPreferences *strongSelf = weakSelf;
         if (strongSelf != nil) {
             strongSelf->_flushScheduled = NO;
-            [strongSelf flush];
+            [strongSelf writeWaiting];
         }
     });
 }
@@ -277,42 +369,67 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 
 // TRAP: a snapshot from before System starts carries an empty record, not
 // the one System starts from. Each is compared with the one kept, so an
-// unchanged one writes nothing.
+// unchanged one writes nothing. A value the last snapshot had too is not
+// compared again.
 - (void)keepFromSnapshot:(QLMSnapshot *)snapshot {
     // The knob moves the volume too. Keep whichever set it last. System
     // never reports one above 0 dB.
     NSNumber *volume = snapshot.volumeDecibels;
-    if (volume != nil && QLMIsSavableLevel(volume.doubleValue) && [_preferences boundedVolume:volume.doubleValue] != self.volumeDecibels) {
-        _volumeWaits = YES;
-        _waitingVolume = volume.doubleValue;
+    if (volume != nil && ![volume isEqual:_seenVolume]) {
+        _seenVolume = volume;
+        if (QLMIsSavableLevel(volume.doubleValue) && [_preferences boundedVolume:volume.doubleValue] != self.volumeDecibels) {
+            _volumeWaits = YES;
+            _waitingVolume = volume.doubleValue;
+        }
     }
     if (snapshot.running) {
         [self keepRecordFromSnapshot:snapshot];
     }
     if (!snapshot.running || [self waitingLowers]) {
-        [self flush];
+        [self writeWaiting];
     } else if (_volumeWaits || _knobWaits) {
         [self scheduleFlush];
     }
 }
 
 - (void)keepRecordFromSnapshot:(QLMSnapshot *)snapshot {
-    if (![snapshot.mutedHardwareIDs isEqualToSet:self.mutedHardwareIDs]) {
-        self.mutedHardwareIDs = snapshot.mutedHardwareIDs;
+    NSSet<NSData *> *muted = snapshot.mutedHardwareIDs;
+    if (![muted isEqual:_seenMuted]) {
+        if (![muted isEqualToSet:self.mutedHardwareIDs]) {
+            self.mutedHardwareIDs = muted;
+        }
+        _seenMuted = muted;
     }
-    if (snapshot.mutingAll != self.mutingAll) {
-        self.mutingAll = snapshot.mutingAll;
+    if (_seenMutingAll == nil || snapshot.mutingAll != _seenMutingAll.boolValue) {
+        if (snapshot.mutingAll != self.mutingAll) {
+            self.mutingAll = snapshot.mutingAll;
+        }
+        _seenMutingAll = @(snapshot.mutingAll);
     }
-    if (![snapshot.liftedHardwareIDs isEqualToSet:self.liftedHardwareIDs]) {
-        self.liftedHardwareIDs = snapshot.liftedHardwareIDs;
+    NSSet<NSData *> *lifted = snapshot.liftedHardwareIDs;
+    if (![lifted isEqual:_seenLifted]) {
+        if (![lifted isEqualToSet:self.liftedHardwareIDs]) {
+            self.liftedHardwareIDs = lifted;
+        }
+        _seenLifted = lifted;
     }
-    if (![QLMLeasesPlist(snapshot.knownLeases) isEqualToArray:[_defaults arrayForKey:[self key:QLMLeasesName]] ?: @[]]) {
-        self.knownLeases = snapshot.knownLeases;
+    NSArray<QLMKnownLease *> *leases = snapshot.knownLeases;
+    if (![leases isEqual:_seenLeases]) {
+        if (![QLMLeasesPlist(leases) isEqualToArray:[self.read arrayForKey:[self key:QLMLeasesName]] ?: @[]]) {
+            self.knownLeases = leases;
+        }
+        _seenLeases = leases;
     }
-    NSNumber *knob = snapshot.adapter.knobTenths;
-    if (snapshot.adapter.hasStatus && (!self.knobRead || ![(knob ?: NSNull.null) isEqual:(self.knobTenths ?: NSNull.null)])) {
-        _knobWaits = YES;
-        _waitingKnob = knob;
+    if (!snapshot.adapter.hasStatus) {
+        return;
+    }
+    id knob = snapshot.adapter.knobTenths ?: NSNull.null;
+    if (![knob isEqual:_seenKnob]) {
+        if (!self.knobRead || ![knob isEqual:(self.knobTenths ?: NSNull.null)]) {
+            _knobWaits = YES;
+            _waitingKnob = knob == NSNull.null ? nil : knob;
+        }
+        _seenKnob = knob;
     }
 }
 

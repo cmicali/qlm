@@ -5,7 +5,11 @@
 #import "QLMSkinLayersTesting.h"
 #import "QLMViews.h"
 
-const CFTimeInterval QLMSkinEaseSeconds = 0.14;
+// The knob reads every 107 ms. An ease past that lags a turn: 140 ms
+// ending slow kept the pointer about 56 ms behind. This one moves half
+// way within a frame and is 90% there by 38 ms, so a turn shows about
+// 17 ms behind the level, yet a step still glides.
+const CFTimeInterval QLMSkinEaseSeconds = 0.08;
 
 static NSInteger QLMSkinEaseHolds;
 
@@ -42,7 +46,7 @@ void QLMSkinSetLayerValue(CALayer *layer, NSString *keyPath, id value, BOOL ease
         ease.fromValue = from;
         ease.toValue = value;
         ease.duration = QLMSkinEaseSeconds;
-        ease.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+        ease.timingFunction = [CAMediaTimingFunction functionWithControlPoints:0.25 :0.8 :0.35 :1];
         [layer addAnimation:ease forKey:keyPath];
     } else {
         [layer removeAnimationForKey:keyPath];

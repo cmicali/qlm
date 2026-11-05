@@ -5,17 +5,37 @@
 #include "QLMCommands.h"
 #import "QLMFormat.h"
 #import "QLMMainWindowModel.h"
+#import "QLMSettingsTesting.h"
 #import "QLMSkinLayout.h"
 #import "QLMSkinLibrary.h"
 #import "QLMViews.h"
 
 static const CGFloat QLMSettingsTextWidth = 360;
 
+BOOL (*QLMSettingsWindowIsSeen)(NSWindow *_Nullable window) = QLMWindowIsSeen;
+
+// A label with no size of its own, so a new text lays nothing out. Its box
+// sizes it.
+@interface QLMSettingsLineLabel : NSTextField
+@end
+
+@implementation QLMSettingsLineLabel
+
+- (NSSize)intrinsicContentSize {
+    return NSMakeSize(NSViewNoIntrinsicMetric, NSViewNoIntrinsicMetric);
+}
+
+@end
+
 @interface QLMSettingsWindowController () <NSWindowDelegate, NSTextFieldDelegate>
 @property (nonatomic) QLMPreferences *preferences;
 @property (nonatomic) QLMMonitorList *monitorList;
 @property (nonatomic) NSButton *adapterCheckbox;
 @property (nonatomic) NSTextField *handBackLevel;
+// The live line's box, of a fixed size, so a new line lays nothing else
+// out until its height changes.
+@property (nonatomic) NSView *handBackBox;
+@property (nonatomic) NSLayoutConstraint *handBackHeight;
 @property (nonatomic) NSGridRow *handBackRow;
 @property (nonatomic) NSPopUpButton *setupPicker;
 @property (nonatomic) NSTextField *setupNote;
@@ -79,7 +99,19 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @"The ceiling does not apply to the knob. With the knob at or below qlm's level, qlm sends the knob's level first, "
         @"so nothing changes. With it above, or unknown, the level may rise, and qlm asks first. If USB drops, qlm can send nothing first.",
         QLMSettingsTextWidth);
-    self.handBackLevel = QLMNoteLabel(@"", QLMSettingsTextWidth);
+    self.handBackLevel = [QLMSettingsLineLabel wrappingLabelWithString:@""];
+    self.handBackLevel.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
+    self.handBackLevel.textColor = NSColor.secondaryLabelColor;
+    self.handBackBox = [[NSView alloc] init];
+    self.handBackBox.translatesAutoresizingMaskIntoConstraints = NO;
+    self.handBackLevel.frame = self.handBackBox.bounds;
+    self.handBackLevel.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [self.handBackBox addSubview:self.handBackLevel];
+    self.handBackHeight = [self.handBackBox.heightAnchor constraintEqualToConstant:0];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.handBackBox.widthAnchor constraintEqualToConstant:QLMSettingsTextWidth],
+        self.handBackHeight,
+    ]];
 
     self.setupPicker = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     self.setupPicker.target = self;
@@ -122,7 +154,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
         @[[NSTextField labelWithString:@"Monitors:"], self.adapterCheckbox],
         @[[NSGridCell emptyContentView], adapterNote],
         @[[NSGridCell emptyContentView], handBackNote],
-        @[[NSGridCell emptyContentView], self.handBackLevel],
+        @[[NSGridCell emptyContentView], self.handBackBox],
         @[setupTitle, setupRow],
         @[[NSGridCell emptyContentView], self.setupNote],
         @[rangeTitle, lowestRow],
@@ -145,7 +177,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     grid.rowAlignment = NSGridRowAlignmentFirstBaseline;
     [grid columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
     // A note sits close under its control, and a new section stands apart.
-    for (NSView *note in @[adapterNote, handBackNote, self.handBackLevel, self.setupNote, self.rangeNote, ceilingNote, self.loginNote, self.skinNote]) {
+    for (NSView *note in @[adapterNote, handBackNote, self.handBackBox, self.setupNote, self.rangeNote, ceilingNote, self.loginNote, self.skinNote]) {
         [grid cellForView:note].row.topPadding = -4;
     }
     for (NSView *title in @[setupTitle, rangeTitle, launchTitle, skinTitle, osdTitle]) {
@@ -153,7 +185,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
     }
     grid.translatesAutoresizingMaskIntoConstraints = NO;
     self.grid = grid;
-    self.handBackRow = [grid cellForView:self.handBackLevel].row;
+    self.handBackRow = [grid cellForView:self.handBackBox].row;
     [grid cellForView:self.rangeNote].row.hidden = YES;
     [content addSubview:grid];
     [NSLayoutConstraint activateConstraints:@[
@@ -217,7 +249,7 @@ static const CGFloat QLMSettingsTextWidth = 360;
 // The live line changes with every turn of the knob, so the window refits
 // only when the line's height does.
 - (void)refresh {
-    if (QLMWindowIsSeen(self.window) && [self renderHandBack]) {
+    if (QLMSettingsWindowIsSeen(self.window) && [self renderHandBack]) {
         [self fitWindow];
     }
 }
@@ -505,17 +537,23 @@ static NSArray<NSString *> *QLMOSDPlacementTitles(void) {
 
 #pragma mark - Drawing
 
-// Returns whether the line's height changed.
+// Returns whether the line's height changed. The cell measures the line,
+// since a layout pass for it would cost far more.
 - (BOOL)renderHandBack {
     QLMSnapshot *snapshot = self.monitorList.snapshot;
     NSString *text = QLMHandBackLine(snapshot);
     if ([self.handBackLevel.stringValue isEqualToString:text ?: @""] && self.handBackRow.hidden == (text == nil)) {
         return NO;
     }
-    CGFloat height = self.handBackRow.hidden ? 0 : self.handBackLevel.fittingSize.height;
     self.handBackLevel.stringValue = text ?: @"";
     self.handBackRow.hidden = text == nil;
-    return height != (self.handBackRow.hidden ? 0 : self.handBackLevel.fittingSize.height);
+    CGFloat height = text == nil ? 0
+        : ceil([self.handBackLevel.cell cellSizeForBounds:NSMakeRect(0, 0, QLMSettingsTextWidth, CGFLOAT_MAX)].height);
+    if (height == self.handBackHeight.constant) {
+        return NO;
+    }
+    self.handBackHeight.constant = height;
+    return YES;
 }
 
 - (void)renderSetup {

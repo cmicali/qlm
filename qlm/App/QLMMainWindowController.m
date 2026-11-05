@@ -3,6 +3,7 @@
 #include "QLMCommands.h"
 #import "QLMFormat.h"
 #import "QLMMainWindowModel.h"
+#import "QLMReadoutThrottle.h"
 #import "QLMSkinView.h"
 #import "QLMViews.h"
 
@@ -18,6 +19,9 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 @property (nonatomic, nullable) QLMSkinView *skinView;
 @property (nonatomic, nullable) NSTimer *blinkTimer;
 @property (nonatomic) NSTimeInterval knobTurnedAt;
+// The display's level and OUTPUT line change four times a second at most.
+@property (nonatomic) QLMReadoutThrottle *levelReadout;
+@property (nonatomic) QLMReadoutThrottle *outputReadout;
 @end
 
 @implementation QLMMainWindowController {
@@ -31,6 +35,13 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
         _preferences = preferences;
         _monitorList = monitorList;
         _model = [[QLMMainWindowModel alloc] init];
+        __weak QLMMainWindowController *weakSelf = self;
+        _levelReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
+            weakSelf.skinView.display.level = text;
+        }];
+        _outputReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
+            weakSelf.skinView.display.output = text;
+        }];
         [self showSkin:skin];
         [self reloadVolumeRange];
     }
@@ -123,6 +134,8 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     view.powerButton.target = self;
     view.powerButton.action = @selector(powerClicked:);
     self.knobTurnedAt = 0;
+    [self.levelReadout reset];
+    [self.outputReadout reset];
     [self renderGroups];
     [self renderRange];
     [self render];
@@ -145,6 +158,8 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 - (void)renderAtOnce {
     QLMSkinWithoutEase(^{
         [self render];
+        [self.levelReadout flush];
+        [self.outputReadout flush];
     });
 }
 
@@ -186,6 +201,8 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 - (void)drawWhileOpen {
     if (self.showing) {
         [self render];
+        [self.levelReadout flush];
+        [self.outputReadout flush];
     }
 }
 #endif
@@ -282,7 +299,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 - (void)knobTurned:(QLMKnobControl *)knob {
     double decibels = knob.doubleValue;
     self.knobTurnedAt = NSProcessInfo.processInfo.systemUptime;
-    self.skinView.display.level = QLMDecibelsNumberText(decibels, 1);
+    [self.levelReadout showText:QLMDecibelsNumberText(decibels, 1) kind:@"level"];
     // Once the hold lapses, the display catches up with no new snapshot.
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(refresh) object:nil];
     [self performSelector:@selector(refresh) withObject:nil afterDelay:QLMLevelHoldInterval inModes:@[NSRunLoopCommonModes]];
@@ -478,9 +495,9 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     QLMSkinDisplayView *display = view.display;
     display.caption = model.caption;
     if (!held) {
-        display.level = model.levelText;
+        [self.levelReadout showText:model.levelText kind:model.levelKind];
     }
-    display.output = model.outputText;
+    [self.outputReadout showText:model.outputText kind:model.outputKind];
     display.max = model.maxText;
     display.disabled = model.displayDisabled;
     display.toolTip = model.applyError.localizedDescription;

@@ -175,6 +175,23 @@ NSUInteger QLMShownGroupButtons(NSUInteger cells) {
     return [@"OUTPUT " stringByAppendingString:output == nil ? QLMEmDash : QLMDecibelsNumberText(output.doubleValue, 1)];
 }
 
+- (NSString *)levelKind {
+    return [self shownLevel] == nil ? @"none" : @"level";
+}
+
+- (NSString *)outputKind {
+    if (self.applyError != nil) {
+        return @"error";
+    }
+    if (self.snapshot.allMuted && QLMOutputStateText(self.snapshot) != nil) {
+        return @"muted";
+    }
+    if ([self shownLevel] == nil || self.snapshot.handBack.volumeDecibels == nil) {
+        return @"none";
+    }
+    return self.snapshot.dimmed ? @"dimmed" : @"level";
+}
+
 - (NSString *)maxText {
     return [@"MAX " stringByAppendingString:QLMRangeEndText(QLMShownCeiling(self.snapshot, self.ceilingDecibels))];
 }

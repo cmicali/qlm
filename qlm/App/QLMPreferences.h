@@ -40,9 +40,12 @@ typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
 // QLMKeptRaiseDelay. TRAP: a level or a reading lower than the one written
 // writes both at once, so what a crash leaves can only be quieter than what
 // was heard. A stopped System's snapshot writes them at once too. Reads see
-// what waits. dispatch_after on the main queue until set.
+// what waits. dispatch_after on the main queue until set. Every write goes
+// out in order on a queue of its own, and every read waits for those
+// queued before it.
 @property (nonatomic, copy) QLMKeptScheduler scheduler;
-// Writes what waits now. Call at every stop.
+// Writes what waits now, and waits for every write to land. Call at every
+// stop.
 - (void)flush;
 
 // The app's own level. At connect System keeps it until the knob turns.
