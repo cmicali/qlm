@@ -19,6 +19,9 @@ GLM drives the bus the whole time, and qlm sends nothing, so AGENTS.md's bus rul
 | S5 | What do a subwoofer's `3C`, `3E`, and `42` carry, once its LFE fields aren't zero? | H |
 | S6 | What do the group's own settings change: its shelves, its room profile, and symmetrical EQ? | I |
 | S7 | Does the generator stop, `05 04 …`, ever change? | All |
+| S8 | What do the bass management and calibration bypasses send, live and in an apply? | K |
+| S9 | What do the group definition's system delay, bass management, input, and Extended Phase Linearity change? | L |
+| S10 | What does GLM send for the system settings: the LEDs, ISS, the power options, the startup level, the level limit, and the controllers? | M |
 
 S7 decides what qlm does with opcode `05`. GLM sends the same 14 bytes at the top of every monitor's block, in every capture so far.[^stop] If no setting moves them, the frame is a fixed reset, and allowing exactly those bytes in an apply is the owner's call. If a setting does move them, the frame carries something, and we decode that first.
 
@@ -109,10 +112,13 @@ This takes about 15 minutes.
 | F | `setup-f-crossover` | The crossover frequency | S3 | 10 min |
 | G | `setup-g-8351b-fields` | The 8351B's own fields | S4 | 15 min |
 | H | `setup-h-lfe` | Each LFE field of a subwoofer | S5 | 15 min |
-| I | `setup-i-group-eq` | The group's shelves, room profile, and symmetrical EQ | S6 | 15 min |
+| I | `setup-i-group-eq` | The Sound Character Profiler, the group's shelves, room profile, and symmetrical EQ | S6 | 20 min |
+| K | `setup-k-bypass` | The bass management and calibration bypasses | S8 | 10 min |
+| L | `setup-l-group-definition` | System delay, bass management, input, and Extended Phase Linearity | S9, S4 | 20 min |
+| M | `setup-m-system-settings` | The LEDs, ISS, power options, startup level, level limit, and controllers | S10 | 25 min |
 | J | `setup-j-restore` | Main.sam again | Back to normal | 5 min |
 
-That's about two hours. If time is short, run A, B, G, and J. The 8351B's refusal hangs on those.
+That's about three hours, so it splits well over two sittings. Run L right after G, since both may need the same recalibration. Part J always goes last, and a sitting that ends early runs J before it stops. If time is short, run A, G, L, and J. The 8351B's refusal hangs on G and L.
 
 ## Part A: the baseline
 
@@ -213,14 +219,77 @@ Then repeat whichever step moved a frame on the 7350A, to check it lands the sam
 
 ## Part I: the group's own EQ
 
-The group has settings of its own, beside each monitor's: low and high shelves (`Group_LP_Shelve` at 100 Hz and `Group_HP_Shelve` at 1 kHz, both at 0 dB), a room profile (`Group_RoomProfile`, with `_MidRange` and `_Strength`, all 0), and `Group_SymmetricalEQ`, on. One step each:
+The group has settings of its own, beside each monitor's: low and high shelves (`Group_LP_Shelve` at 100 Hz and `Group_HP_Shelve` at 1 kHz, both at 0 dB), a room profile (`Group_RoomProfile`, with `_MidRange` and `_Strength`, all 0), and `Group_SymmetricalEQ`, on.
 
-1. I1: the group's low shelf, to a new gain.
-2. I2: its high shelf, to a new gain.
-3. I3: the room profile on, with its strength above 0.
-4. I4: symmetrical EQ off.
+The Sound Character Profiler likely owns the two group shelves. Its window offers a low shelf at 100 Hz and a high shelf, and the group's shelves sit at 100 Hz too. But GLM says the profiler "shares Low Shelf 1 and High Shelf 1", and that they will be overwritten. So it may write each monitor's first shelves instead, and skip the subwoofers, as its note says. I1 and I2 tell the two apart, from the diff.
 
-These may change every monitor's bands or shelves at once. The capture shows how GLM folds them into each block.
+One step each:
+
+1. I1: in the profiler, the preset "HF Tilt: 6kHz, −4dB". Confirm it. The diff shows which fields it writes: the group's shelves, each monitor's `Low Shelf 1` and `High Shelf 1`, or both.
+2. I2: in the profiler, the low shelf to 80 Hz at +2 dB and the high shelf to 8000 Hz at −2 dB, by hand. Confirm it.
+3. I3: the profiler back to flat, both shelves at 0 dB. Check that the diff undoes I1 and I2's.
+4. I4: the room profile on, with its strength above 0.
+5. I5: symmetrical EQ off.
+
+These may change every monitor's bands or shelves at once. The capture shows how GLM folds them into each block. Note whether GLM sends anything live when you confirm the profiler, before the switch, as it does for a band.
+
+## Part K: the bypasses
+
+GLM has two bypasses. Bass management's sits in the file's header, as `SubwooferBypass`, and each monitor's node has one too. Both are 0 in every setup. The calibration bypass has no field we know of, so the diff will show where GLM keeps it, if anywhere. The plan lists a calibration bypass as a later feature, so this part also says what it would take.
+
+A bypass is likely a live change, like a band edit. So each step is a toggle on, a wait, and a toggle off, with no save between. Then a switch, to see whether an apply carries it.
+
+1. K1: bass management bypass on. Wait 10 s. Note the time. Save, and take the snapshot. Switch to Main 2x1 and back, and wait 15 s. Then bass management bypass off, and the same again.
+2. K2: the calibration bypass, the same way.
+
+With the bypass on, the subwoofers may stop and the main monitors play full range. Keep the knob at −60 dB.
+
+## Part L: the group definition
+
+The group definition holds four settings no part above touches: the system delay, bass management, the input, and Extended Phase Linearity. In the file, these likely are `Video_Delay`, `Group_Crossover_GlobalMode`, the header's `InputMode` with each node's `Input` and `ConnectorIn`, and `GroupDelayCompensation`. The diffs will say.
+
+Extended Phase Linearity is the one that matters most. It likely owns `GroupDelayCompensation`, which Part G needs. GLM may ask for a recalibration when it changes. If it does, cancel, and use [the file-edit route](#when-glm-doesnt-show-a-setting) for that step, giving `GroupDelayCompensation` the other values GLM's own setups write. If GLM rewrites the value when it opens the copy, note that, and skip the step. Never recalibrate in this session.
+
+Edit the group definition of Main 4x2 only. One step each, with a switch after each:
+
+1. L1: the system delay, to a value GLM offers above 0.
+2. L2: bass management, to each other mode GLM offers.
+3. L3: the input mode, to each other input GLM offers. The monitors may go quiet, which is fine with no music.
+4. L4: Extended Phase Linearity, to each other value GLM offers. Read the capture for `43` and `4B`.
+
+If GLM shows a setting only when creating a group, note that, and skip it. A new group would shift the group numbers in every later step.
+
+## Part M: the system settings
+
+The settings in GLM's system menu aren't part of a group. They sit in the file's header, and some may be stored in the monitors or the adapter, so they act while GLM is closed. That makes them the likeliest home of the standalone settings, `3A 01`, `3A 02`, and `3A 06`, which no capture has shown yet.[^standalone]
+
+**Restore each setting at the end of its own step.** A setting stored in a monitor stays there after GLM quits. Note each one's value before you change it.
+
+**This part only records.** AGENTS.md bars qlm from sending `3A 01`, `3A 02`, and `3A 06`. If these captures decode them, qlm can show what they hold. Sending them is a change to the safety rules, and the owner's call, made later.
+
+These are live, so no step needs a switch. Each is a change, a wait of 10 s, the change back, and another 10 s. Note the time of each change, save after each step, and take a snapshot.
+
+| Step | Setting | Its field, likely | Change |
+| --- | --- | --- | --- |
+| M1 | LED State, each option | `LEDDisable`, `LEDOFF` | Each option in turn, then back |
+| M2 | ISS Delay | `ISSDelay`, now 30 | 2 min, then 4 hour, then 30 min |
+| M3 | ISS Sensitivity | `ISSSensitivity`, now 0 | Each value in turn, then back |
+| M4 | Enable ISS with GLM Online | `SignalDetectionEnabled`, now 0 | On, then off |
+| M5 | Automatic Wake Up System with GLM | `AutomaticPowerUp`, now 1 | Off, then on |
+| M6 | Automatic Shut Down System with GLM | `AutomaticShutDown`, now 0 | On, then off |
+| M7 | Shut Down Group Off Devices | `ShutDownGroupOffDevices`, now 1 | Off, then on |
+| M8 | System Startup Level | `StartupLevel`, now −56.5 dB | −70 dB, then back |
+| M9 | Max Level Restriction | `Volume_Max_Limit`, now 0 dB | −20 dB, then back |
+| M10 | Enable USB Controller | `PowerMateKnopEnabled`, now 0 | On, then off |
+| M11 | Enable RF Remote | `RFRemoteEnabled`, now 1 | Off, then on |
+
+Keep both levels at or below their current values. A startup level above −56.5 dB would play louder at the next power-up, and a stored max level is the monitors' own ceiling.
+
+Don't let ISS put the system in standby during M2 to M4. If it does, note the time and wake it from GLM. Then check that every monitor came back before the next step.
+
+Steps M5 and M6 may need GLM quit and opened again to act. Don't do that inside this capture. Only record what GLM sends when the option changes.
+
+At the end, check the header of the last snapshot against snapshot `0`. Every field should be back.
 
 ## Part J: back to normal
 
@@ -289,4 +358,5 @@ Then one PR adds the captures, and it's mostly data. `QLMDSPBlockGoldenTests` ch
 [^own-fields]: `setup-b-peq-8351b`, `setups/0.sam` against `setups/1.sam`.
 [^limits]: `setup-b-peq-8351b`'s notes.
 [^cut]: `setup-b-peq-8351b`, the 7350A at 183.450 and 300.973 s.
+[^standalone]: [protocol.md](protocol.md), the opcode table; hlm §7.
 [^compare]: The README's [compare-apply](../README.md#compare-apply) section, and `qlmctl help`, say how it matches a pass to a node, and what each exit code means.

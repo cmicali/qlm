@@ -105,6 +105,9 @@ Record each one on its own. Start every capture with the monitors on and GLM clo
 | `setup-<part>-<topic>` | GLM applying a copy of the setup with known changes. [docs/setup-captures.md](../docs/setup-captures.md) is the script. |
 | `setup-a-baseline` | Part A. On a fresh copy of Main.sam, switch to Main 2x1 and back. |
 | `setup-b-peq-8351b` | Part B. Change the Left 8351B's bands, then its shelves, and switch to Main 2x1 and back after each. |
+| `setup-k-bypass` | Part K. Toggle the bass management bypass, then the calibration bypass, with a switch to Main 2x1 and back after each. |
+| `setup-l-group-definition` | Part L. Change Main 4x2's system delay, bass management, input, and Extended Phase Linearity, one at a time. |
+| `setup-m-system-settings` | Part M. Change each system setting, wait, and change it back. |
 | `setup-j-restore` | Part J. Open Main.sam again, and switch to the group you use. |
 
 ## What Phase 0 must answer
