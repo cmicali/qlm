@@ -9,6 +9,21 @@
 #import "QLMSetup.h"
 
 NSString *const QLMEmDash = @"—";
+
+NSString *QLMHexText(NSData *data) {
+    static const char digits[] = "0123456789ABCDEF";
+    const uint8_t *bytes = data.bytes;
+    NSUInteger length = data.length == 0 ? 0 : data.length * 3 - 1;
+    char *text = malloc(length + 1);
+    for (NSUInteger i = 0; i < data.length; i++) {
+        text[i * 3] = digits[bytes[i] >> 4];
+        text[i * 3 + 1] = digits[bytes[i] & 0xF];
+        if (i * 3 + 2 < length) {
+            text[i * 3 + 2] = ' ';
+        }
+    }
+    return [[NSString alloc] initWithBytesNoCopy:text length:length encoding:NSASCIIStringEncoding freeWhenDone:YES];
+}
 static NSString *const QLMNoLevelRefusal = @"Type a level in dB.";
 
 // rint rounds half to even, as printf does, so it zeroes what would print −0.

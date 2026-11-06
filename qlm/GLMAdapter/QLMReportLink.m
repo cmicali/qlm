@@ -147,8 +147,9 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
 // only now, and the allowlist checks the result again.
 - (void)write:(QLMReportLinkRequest *)request {
     NSData *report = request.report;
+    QLMMessage message = request.message;
     if (request.rewrite != nil) {
-        QLMMessage message = request.rewrite(request.message);
+        message = request.rewrite(message);
         NSError *refusal = nil;
         report = QLMReportData(&message, &refusal);
         if (report == nil) {
@@ -157,6 +158,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         }
     }
     NSError *error = _writer(report.bytes);
+    [self tap:error == nil ? QLMTrafficRequest : QLMTrafficNotTaken message:&message];
     if (error != nil) {
         [self finish:request.handler reply:NULL error:error];
         return;
@@ -169,6 +171,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     _waiting = request;
     [self after:_replyTimeout run:^(QLMReportLink *link) {
         link->_timeouts += 1;
+        [link tap:QLMTrafficTimeout message:NULL];
         [link loseReply:QLMAdapterErrorMake(QLMAdapterErrorTimeout, @"The adapter did not answer.")];
     }];
 }
@@ -202,6 +205,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
 
 - (void)syncOverdue {
     _timeouts += 1;
+    [self tap:QLMTrafficTimeout message:NULL];
     if (!_stalled) {
         _stalled = YES;
         [self failHeld:[self stalledError]];
@@ -237,6 +241,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     _syncAttempts += 1;
     NSTimeInterval wait = _replyTimeout * QLMSyncTimeouts * (double)(1u << (_syncAttempts - 1));
     NSError *error = _writer(sync.report.bytes);
+    [self tap:error == nil ? QLMTrafficSync : QLMTrafficNotTaken message:&query];
     if (error != nil) {
         _runNotTaken = _runNotTaken || error.code == QLMAdapterErrorNotTaken;
         [self failHeld:error];
@@ -294,8 +299,10 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     if (status == QLMReportPending) {
         return;
     }
+    BOOL reads = status == QLMReportOK || status == QLMReportNoAnswer;
     QLMReportLinkRequest *request = _waiting;
     if (request == nil) {
+        [self tap:reads ? QLMTrafficStray : QLMTrafficUnreadable message:&reply];
         _strayReplies += 1;
         return;
     }
@@ -303,9 +310,11 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         BOOL answers = status == QLMReportOK && (request.shape == QLMReplyShapeAdapterStatus ? QLMReplyIsAdapterStatus(&reply)
                                                                                              : QLMReplyIsSystemInfo(&reply));
         if (!answers) {
+            [self tap:reads ? QLMTrafficStray : QLMTrafficUnreadable message:&reply];
             _strayReplies += 1;
             return;
         }
+        [self tap:QLMTrafficReply message:&reply];
         BOOL another = _syncsOut > 1 || (_late & QLMReplyShapeAny) != 0;
         _waiting = nil;
         _generation += 1;
@@ -331,13 +340,22 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         }
         return;
     }
-    if (status != QLMReportOK && status != QLMReportNoAnswer) {
+    [self tap:status == QLMReportOK ? QLMTrafficReply : status == QLMReportNoAnswer ? QLMTrafficNoAnswer : QLMTrafficUnreadable
+        message:&reply];
+    if (!reads) {
         [self loseReply:QLMAdapterErrorMake(QLMAdapterErrorBadReply, @"The adapter's reply did not read.")];
         return;
     }
     _waiting = nil;
     _generation += 1;
     [self finish:request.handler reply:status == QLMReportOK ? &reply : NULL error:nil];
+}
+
+// An unreadable frame's message is not handed over.
+- (void)tap:(QLMTrafficKind)kind message:(const QLMMessage *_Nullable)message {
+    if (_trafficTap != nil) {
+        _trafficTap(kind, kind == QLMTrafficUnreadable || kind == QLMTrafficTimeout ? NULL : message);
+    }
 }
 
 - (void)closeWithError:(NSError *)error {

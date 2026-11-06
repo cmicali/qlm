@@ -18,8 +18,11 @@
 #import "QLMSetupWatcher.h"
 #import "QLMSkinChoice.h"
 #import "QLMSystem.h"
+#import "QLMTrafficWindowController.h"
 #if DEBUG
+#import "QLMCapture.h"
 #import "QLMDebugChannel.h"
+#import "QLMReplayAdapter.h"
 #import "QLMSkinLayers.h"
 #import "QLMSkinPreview.h"
 #endif
@@ -43,8 +46,16 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic, nullable) QLMMonitorsWindowController *monitorsController;
 @property (nonatomic, nullable) QLMSettingsWindowController *settingsController;
 @property (nonatomic, nullable) QLMFakeBusWindowController *fakeBusController;
+@property (nonatomic, nullable) QLMTrafficWindowController *trafficController;
 @property (nonatomic, nullable) QLMFakeBus *bus;
 @property (nonatomic, nullable) QLMSystem *system;
+#if DEBUG
+// QLM_REPLAY's capture, chosen once at launch, which every System plays
+// back in place of any bus. Its record is its own, wiped at each launch, so
+// a replay reaches neither the real monitors' record nor the fake bus's.
+@property (nonatomic, nullable) QLMCapture *replayCapture;
+@property (nonatomic, nullable) QLMBusPreferences *replayKept;
+#endif
 // What System's bus keeps across launches. It follows the bus, so a
 // snapshot from the fake bus never reaches the real monitors' store.
 @property (nonatomic, readonly) QLMBusPreferences *kept;
@@ -100,6 +111,23 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     };
 }
 
+#if DEBUG
+// QLM_REPLAY names a capture's reports.txt, which a Debug build plays back
+// as the adapter, for the traffic window and the UI. Nil without it.
+static QLMCapture *_Nullable QLMDebugReplayCapture(void) {
+    const char *path = getenv("QLM_REPLAY");
+    if (path == NULL || path[0] == '\0') {
+        return nil;
+    }
+    NSError *error = nil;
+    QLMCapture *capture = [QLMCapture captureWithContentsOfFile:@(path) error:&error];
+    if (capture == nil) {
+        NSLog(@"qlm: QLM_REPLAY %s does not read: %@", path, error.localizedDescription);
+    }
+    return capture;
+}
+#endif
+
 @implementation QLMAppDelegate
 
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
@@ -132,6 +160,15 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
         [weakSelf drawSnapshot:snapshot];
     }];
 
+#if DEBUG
+    self.replayCapture = QLMDebugReplayCapture();
+    if (self.replayCapture != nil) {
+        NSString *suite = @"com.commonwealthrecordings.qlm.replay";
+        NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+        [defaults removePersistentDomainForName:suite];
+        self.replayKept = [[QLMPreferences alloc] initWithDefaults:defaults].fakeBus;
+    }
+#endif
     [self startSystemDimmed:NO];
     if (self.preferences.wakesAtLaunch) {
         [self.system wake];
@@ -167,7 +204,17 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 
 // Only on the real monitors: on the fake bus a take-over moves no level.
 - (BOOL)stopMayRaiseLevel:(QLMSnapshot *)snapshot {
-    return self.bus == nil && QLMStopMayRaiseLevel(snapshot);
+    return self.drivesAdapter && QLMStopMayRaiseLevel(snapshot);
+}
+
+// System drives the GLM adapter: neither the fake bus nor a replay.
+- (BOOL)drivesAdapter {
+#if DEBUG
+    if (self.replayCapture != nil) {
+        return NO;
+    }
+#endif
+    return self.bus == nil;
 }
 
 // System's snapshot now, since the latest may lag a level or a knob
@@ -211,13 +258,18 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 - (void)startSystemDimmed:(BOOL)dimmed {
     id<QLMAdapter> adapter = nil;
     QLMFakeBus *bus = nil;
-    if (self.preferences.usesAdapter) {
+#if DEBUG
+    if (self.replayCapture != nil) {
+        adapter = [[QLMReplayAdapter alloc] initWithCapture:self.replayCapture];
+    }
+#endif
+    if (adapter == nil && self.preferences.usesAdapter) {
         QLMHIDAdapter *hid = [[QLMHIDAdapter alloc] init];
         hid.launchWatch = ^dispatch_block_t(void (^changed)(NSString *executablePath)) {
             return QLMWatchLaunches(changed);
         };
         adapter = hid;
-    } else {
+    } else if (adapter == nil) {
         bus = [QLMFakeBus demoBusWithSubwoofer:YES];
         bus.recordsSentMessages = NO;
         // A fresh bus's knob rests at the bottom. Where the last one read
@@ -234,6 +286,7 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     self.system = system;
     self.popoverController.system = system;
     self.mainWindowController.system = system;
+    self.trafficController.system = system;
     self.popoverController.showsFakeBus = bus != nil;
     self.fakeBusController.bus = bus;
     if (bus == nil) {
@@ -260,7 +313,12 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 }
 
 - (QLMBusPreferences *)kept {
-    return self.bus == nil ? self.preferences.adapterBus : self.preferences.fakeBus;
+#if DEBUG
+    if (self.replayKept != nil) {
+        return self.replayKept;
+    }
+#endif
+    return self.drivesAdapter ? self.preferences.adapterBus : self.preferences.fakeBus;
 }
 
 // System lets go of the adapter before the Mac sleeps. As at quit, the
@@ -416,6 +474,7 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
             strongSelf.alerts.setup = setup;
             strongSelf.setupError = setup == nil ? error : nil;
             strongSelf.popoverController.setup = setup;
+            strongSelf.trafficController.setup = setup;
             [strongSelf.mainWindowController showSetup:setup fileName:name error:strongSelf.setupError];
             [strongSelf.settingsController showSetup:setup error:strongSelf.setupError];
         });
@@ -533,6 +592,15 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
         self.monitorsController = [[QLMMonitorsWindowController alloc] initWithMonitorList:self.monitorList];
     }
     [self bringForward:self.monitorsController];
+}
+
+- (void)showTraffic:(id)sender {
+    if (self.trafficController == nil) {
+        self.trafficController = [[QLMTrafficWindowController alloc] initWithMonitorList:self.monitorList];
+        self.trafficController.setup = self.setup;
+        self.trafficController.system = self.system;
+    }
+    [self bringForward:self.trafficController];
 }
 
 - (void)popoverControllerShowSettings:(QLMPopoverController *)controller {
@@ -696,9 +764,18 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     [self.monitorsController drawWhileOpen];
     [self.settingsController drawWhileOpen];
     [self.fakeBusController drawWhileOpen];
+    [self.trafficController drawWhileOpen];
     // TRAP: a screenshot renders the presentation tree, so within an ease
     // it would catch the pointer or the OSD's bar on the way.
     QLMSkinFinishEases();
+}
+
+- (nullable QLMTrafficWindowController *)debugTraffic {
+    return self.trafficController;
+}
+
+- (void)debugShowTraffic {
+    [self showTraffic:nil];
 }
 
 - (QLMSkinChoice *)debugSkinChoice {

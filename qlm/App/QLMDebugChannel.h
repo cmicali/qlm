@@ -5,6 +5,7 @@
 @class QLMSkinChoice;
 @class QLMSnapshot;
 @class QLMSystem;
+@class QLMTrafficWindowController;
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -90,6 +91,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, readonly) QLMSkinChoice *debugSkinChoice;
 // What Settings' skin picker does. Returns the library's refusal.
 - (nullable NSString *)debugChooseSkin:(NSString *)name;
+// The traffic window, once Window > Traffic or its verb has opened it.
+@property (nonatomic, readonly, nullable) QLMTrafficWindowController *debugTraffic;
+// What Window > Traffic does.
+- (void)debugShowTraffic;
 @end
 
 // Installs the channel under the bundle identifier. Call it once, at launch.

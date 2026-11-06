@@ -10,6 +10,9 @@
 #import "QLMSnapshotInternal.h"
 #import "QLMSystemInternal.h"
 
+// The traffic System keeps: about 25 s of the bus.
+static const NSUInteger QLMTrafficKept = 1024;
+
 NSErrorDomain const QLMSystemErrorDomain = @"com.commonwealthrecordings.qlm.system";
 
 // In every capture, a monitor woken or switched on put its wake 0.18 to
@@ -351,6 +354,11 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
     NSString *_applyingGroupName;  // the group it sends
     QLMSnapshotHandler _snapshotHandler;
     dispatch_queue_t _snapshotQueue;
+    QLMTrafficRecorder *_traffic;
+    QLMTrafficHandler _trafficHandler;
+    dispatch_queue_t _trafficQueue;
+    uint64_t _trafficHanded;  // the last entry handed over
+    BOOL _trafficFlushDue;
     os_unfair_lock _callLock;
     QLMCallNumber _callsTaken;  // under _callLock
     QLMCallNumber _lastCall;    // the last call run on the queue
@@ -394,6 +402,12 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
         _knobRead = settings.knobRead;
         _lastKnobTenths = settings.knobTenths;
         _snapshot = [[QLMSnapshot alloc] init];
+        _traffic = [[QLMTrafficRecorder alloc] initWithCapacity:QLMTrafficKept];
+        if ([adapter respondsToSelector:@selector(setTrafficTap:)]) {
+            [adapter setTrafficTap:^(QLMTrafficKind kind, const QLMMessage *message) {
+                [weakSelf tapTraffic:kind message:message];
+            }];
+        }
     }
     return self;
 }
@@ -438,6 +452,53 @@ typedef void (^QLMSendCompletion)(const QLMMessage *_Nullable reply, NSError *_N
             }];
         }
     }];
+}
+
+#pragma mark - Traffic
+
+- (void)setTrafficHandler:(QLMTrafficHandler)handler queue:(dispatch_queue_t)queue {
+    QLMTrafficHandler copied = [handler copy];
+    [_clock async:_queue run:^{
+        self->_trafficHandler = copied;
+        self->_trafficQueue = queue;
+        self->_trafficHanded = 0;
+        [self handTraffic];
+    }];
+}
+
+// On the queue, from the adapter's tap. It only records.
+- (void)tapTraffic:(QLMTrafficKind)kind message:(const QLMMessage *)message {
+    uint8_t lease[3];
+    const uint8_t *hardwareID = NULL;
+    if (QLMTrafficKindIsOutgoing(kind) && message != NULL) {
+        hardwareID = QLMLeaseHardwareID(message, lease) ? lease : [self monitorAtSession:message->address].hardwareID.bytes;
+    }
+    [_traffic record:kind message:message hardwareID:hardwareID ceiling:self.settings.ceilingDecibels];
+    if (_trafficHandler != nil && !_trafficFlushDue) {
+        _trafficFlushDue = YES;
+        __weak QLMSystem *weakSelf = self;
+        [_clock after:0.1 queue:_queue run:^{
+            QLMSystem *system = weakSelf;
+            if (system != nil) {
+                system->_trafficFlushDue = NO;
+                [system handTraffic];
+            }
+        }];
+    }
+}
+
+- (void)handTraffic {
+    QLMTrafficHandler handler = _trafficHandler;
+    if (handler == nil) {
+        return;
+    }
+    NSArray<QLMTrafficEntry *> *entries = [_traffic entriesAfter:_trafficHanded];
+    _trafficHanded = _traffic.lastNumber;
+    if (entries.count > 0) {
+        [_clock async:_trafficQueue run:^{
+            handler(entries);
+        }];
+    }
 }
 
 #pragma mark - Lifecycle

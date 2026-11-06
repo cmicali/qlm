@@ -90,6 +90,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
     // a reopen knows which replies may still come. A replug is a new
     // registry entry, and gets a new link.
     QLMReportLink *_link;
+    QLMTrafficTap _trafficTap;  // every link's
     id<QLMClock> _clock;
     uint64_t _linkEntry;
     uint8_t _input[QLMReportLength];
@@ -346,6 +347,7 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
                                  : QLMAdapterErrorMake(QLMAdapterErrorDisconnected, @"The adapter is gone.");
     }];
     _link.replyTimeout = _replyTimeout;
+    _link.trafficTap = _trafficTap;
 }
 
 // Nil once the device is open, or why not.
@@ -541,6 +543,11 @@ static NSNumber *_Nullable QLMHIDNumberProperty(IOHIDDeviceRef device, CFStringR
         return;
     }
     [_link receiveReport:report length:(size_t)length];
+}
+
+- (void)setTrafficTap:(nullable QLMTrafficTap)tap {
+    _trafficTap = [tap copy];
+    _link.trafficTap = _trafficTap;
 }
 
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {

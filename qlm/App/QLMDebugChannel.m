@@ -10,6 +10,7 @@
 #import "DebugStandardVerbs.h"
 #import "DebugSyntheticInput.h"
 #import "DebugWireFormat.h"
+#import "IntegerTokenRules.h"
 #include "QLMCommands.h"
 #import "QLMFakeBus.h"
 #import "QLMFormat.h"
@@ -17,6 +18,7 @@
 #import "QLMSkinChoice.h"
 #import "QLMSnapshot.h"
 #import "QLMSystem.h"
+#import "QLMTrafficWindowController.h"
 
 // Nil for a bad argument: the reply is then the verb's usage.
 typedef NSDictionary *_Nullable (^QLMDebugHandler)(NSArray<NSString *> *tokens, id<QLMDebugApp> app);
@@ -217,6 +219,50 @@ static NSDictionary *QLMDebugWindows(id<QLMDebugApp> app) {
     return @{@"ok": @YES, @"popoverShown": @(app.debugPopover.isShown), @"windows": visible};
 }
 
+// The traffic window's state, and its last `count` rows shown, 0 for all.
+static NSDictionary *QLMDebugTraffic(QLMTrafficWindowController *_Nullable traffic, NSUInteger count) {
+    QLMTrafficLog *log = traffic.log;
+    NSArray<QLMTrafficRow *> *shown = log.shownRows ?: @[];
+    NSUInteger first = count == 0 || count >= shown.count ? 0 : shown.count - count;
+    NSArray<QLMTrafficRow *> *rows = [shown subarrayWithRange:NSMakeRange(first, shown.count - first)];
+    NSMutableArray *json = [NSMutableArray array];
+    for (QLMTrafficRow *row in rows) {
+        [json addObject:row.JSON];
+    }
+    return @{
+        @"ok": @YES,
+        @"open": @(traffic.window.visible),
+        @"paused": @(traffic.paused),
+        @"held": @(log.rowCount),
+        @"shown": @(shown.count),
+        @"direction": QLMTrafficDirectionNames()[(NSUInteger)log.direction],
+        @"opcode": log.opcode != nil ? [NSString stringWithFormat:@"%02lX", (long)log.opcode.integerValue] : NSNull.null,
+        @"target": log.targetKey ?: NSNull.null,
+        @"rows": json,
+    };
+}
+
+// The traffic window while it is open, or nil.
+static QLMTrafficWindowController *_Nullable QLMDebugOpenTraffic(id<QLMDebugApp> app) {
+    QLMTrafficWindowController *traffic = app.debugTraffic;
+    return traffic.window.visible ? traffic : nil;
+}
+
+static NSDictionary *QLMDebugTrafficClosed(void) {
+    return QLMDebugError(@"the traffic window is closed. Open it with traffic show");
+}
+
+// A target filter's key, with or without its spaces, as the window holds it.
+static NSString *_Nullable QLMDebugTargetKey(QLMTrafficLog *log, NSString *token) {
+    NSString *wanted = [token stringByReplacingOccurrencesOfString:@" " withString:@""].uppercaseString;
+    for (NSArray<NSString *> *target in log.targets) {
+        if ([[target[0] stringByReplacingOccurrencesOfString:@" " withString:@""].uppercaseString isEqualToString:wanted]) {
+            return target[0];
+        }
+    }
+    return nil;
+}
+
 static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
     return @[
         QLMDebugVerb(@"dump_state", QLM_HANDLER {
@@ -264,6 +310,89 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
         QLMDebugVerb(@"show_settings", QLM_HANDLER {
             [app debugShowSettings];
             return QLMDebugWindows(app);
+        }),
+        // Window > Traffic, which only reads: it sends nothing.
+        QLMDebugVerb(@"traffic <show|close>", QLM_HANDLER {
+            BOOL show = NO;
+            if (!QLMDebugParseWord(tokens[1], @"show", @"close", &show)) {
+                return nil;
+            }
+            if (show) {
+                [app debugShowTraffic];
+            } else {
+                [app.debugTraffic close];
+            }
+            return QLMDebugWindows(app);
+        }),
+        QLMDebugVerb(@"traffic_pause <on|off>", QLM_HANDLER {
+            BOOL on = NO;
+            if (!VibeParseOnOff(tokens, &on)) {
+                return nil;
+            }
+            QLMTrafficWindowController *traffic = QLMDebugOpenTraffic(app);
+            if (traffic == nil) {
+                return QLMDebugTrafficClosed();
+            }
+            traffic.paused = on;
+            return QLMDebugTraffic(traffic, 1);
+        }),
+        QLMDebugVerb(@"traffic_clear", QLM_HANDLER {
+            QLMTrafficWindowController *traffic = QLMDebugOpenTraffic(app);
+            if (traffic == nil) {
+                return QLMDebugTrafficClosed();
+            }
+            [traffic clear];
+            return QLMDebugTraffic(traffic, 1);
+        }),
+        // As the window's popups set them. "all" passes every one.
+        QLMDebugVerb(@"traffic_filter <direction|opcode|target> <value>", QLM_HANDLER {
+            QLMTrafficWindowController *traffic = QLMDebugOpenTraffic(app);
+            if (traffic == nil) {
+                return QLMDebugTrafficClosed();
+            }
+            NSString *filter = tokens[1].lowercaseString;
+            NSString *value = tokens[2];
+            BOOL all = [value.lowercaseString isEqualToString:@"all"];
+            NSString *refusal = nil;
+            if ([filter isEqualToString:@"direction"]) {
+                NSUInteger direction = [QLMTrafficDirectionNames() indexOfObject:value.lowercaseString];
+                if (all) {
+                    direction = QLMTrafficDirectionBoth;
+                }
+                if (direction == NSNotFound) {
+                    return QLMDebugError(@"a direction is both, sent, or received");
+                }
+                [traffic filterDirection:(QLMTrafficDirection)direction];
+            } else if ([filter isEqualToString:@"opcode"]) {
+                unsigned opcode = 0;
+                NSScanner *scanner = [NSScanner scannerWithString:value];
+                if (!all && !([scanner scanHexInt:&opcode] && scanner.atEnd && opcode <= 0xFF)) {
+                    return QLMDebugError(@"an opcode is one byte in hex, such as 1F");
+                }
+                refusal = [traffic filterOpcode:all ? nil : @(opcode)];
+            } else if ([filter isEqualToString:@"target"]) {
+                NSString *key = all ? nil : QLMDebugTargetKey(traffic.log, value);
+                if (!all && key == nil) {
+                    return QLMDebugError(@"no frame to %@ is held. A target is FF, 01, session 0B, or a hardware ID", value);
+                }
+                refusal = [traffic filterTarget:key];
+            } else {
+                return nil;
+            }
+            return QLMDebugResult(refusal, QLMDebugTraffic(traffic, 1));
+        }),
+        // The last <count> rows the traffic window shows, 0 for all of them.
+        QLMDebugVerb(@"dump_traffic <count>", QLM_HANDLER {
+            NSUInteger count = 0;
+            if (!VibeParseNonnegativeInteger(tokens[1], &count)) {
+                return nil;
+            }
+            QLMTrafficWindowController *traffic = QLMDebugOpenTraffic(app);
+            if (traffic == nil) {
+                return QLMDebugTrafficClosed();
+            }
+            [app debugDrawWindows];
+            return QLMDebugTraffic(traffic, count);
         }),
         // A look at a skin, with the mockups' sample text, for
         // dump_screenshot, without choosing it. It drives nothing.

@@ -7,6 +7,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)showMainWindow:(nullable id)sender;
 - (void)showMonitors:(nullable id)sender;
 - (void)showSettings:(nullable id)sender;
+- (void)showTraffic:(nullable id)sender;
 @end
 
 // The Controls menu's actions, which the main window's controller answers

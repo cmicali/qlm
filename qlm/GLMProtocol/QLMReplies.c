@@ -6,7 +6,7 @@ static bool QLMReplyIsReply(const QLMMessage *message) {
     return message != NULL && message->address == QLMAddressReply && message->length >= 1 && message->payload[0] == 0x09;
 }
 
-static bool QLMReplyIsBusyMarker(uint8_t byte) {
+bool QLMReplyIsBusyMarker(uint8_t byte) {
     return byte == 0x06 || byte == 0x07;
 }
 

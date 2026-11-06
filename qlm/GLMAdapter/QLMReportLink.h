@@ -98,6 +98,9 @@ typedef NSError *_Nullable (^QLMReportWriter)(const uint8_t *report);
 // new link.
 @property (nonatomic, readonly, nullable) NSError *failure;
 
+// Sees every report written and every frame read, syncs and strays too.
+@property (nonatomic, copy, nullable) QLMTrafficTap trafficTap;
+
 // Input that completed a frame no request was waiting for, or that a sync
 // dropped. A reply that comes after its timeout is one of these.
 @property (nonatomic, readonly) NSUInteger strayReplies;

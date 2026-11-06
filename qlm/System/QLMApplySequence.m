@@ -17,8 +17,7 @@
 @end
 
 QLMMessage QLMApplyMessage(NSData *record) {
-    const uint8_t *bytes = record.bytes;
-    return QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
+    return QLMAdapterRecordMessage(record);
 }
 
 static NSData *QLMRecord(QLMMessage message) {

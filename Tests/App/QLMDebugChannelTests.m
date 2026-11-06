@@ -14,6 +14,7 @@
 #import "QLMSkinChoice.h"
 #import "QLMSystem.h"
 #import "QLMTestSupport.h"
+#import "QLMTrafficWindowController.h"
 #include "QLMCommands.h"
 #include "QLMFrame.h"
 
@@ -125,6 +126,7 @@
 @property (nonatomic) QLMSkinChoice *debugSkinChoice;
 // The app's own actions the verbs called, in order.
 @property (nonatomic) NSMutableArray<NSString *> *actions;
+@property (nonatomic, nullable) QLMTrafficWindowController *debugTraffic;
 @end
 
 @implementation QLMTestDebugApp
@@ -222,6 +224,15 @@
 
 - (void)debugDrawWindows {
     [self.actions addObject:@"draw windows"];
+}
+
+- (void)debugShowTraffic {
+    if (self.debugTraffic == nil) {
+        self.debugTraffic = [[QLMTrafficWindowController alloc] initWithMonitorList:[[QLMMonitorList alloc] init]];
+        self.debugTraffic.system = self.debugSystem;
+    }
+    [self.debugTraffic showWindow:nil];
+    [self.actions addObject:@"show traffic"];
 }
 
 - (NSString *)debugChooseSkin:(NSString *)name {
@@ -585,6 +596,71 @@
     [self runOK:@[@"show_settings"]];
     [self runOK:@[@"read_setup"]];
     XCTAssertEqualObjects(_app.actions, (@[@"show popover", @"show monitors", @"show settings", @"read setup"]));
+}
+
+#pragma mark - The traffic window
+
+// The rows dump_traffic gives once the window holds `count` or more.
+- (NSArray<NSDictionary *> *)trafficRowsOnceAtLeast:(NSUInteger)count {
+    __block NSArray<NSDictionary *> *rows = @[];
+    [self turnRunLoopUntil:^BOOL {
+        [self->_time advanceBy:0.2];
+        rows = [self runOK:@[@"dump_traffic", @"0"]][@"rows"];
+        return rows.count >= count;
+    }];
+    return rows;
+}
+
+// The window takes System's traffic while it is open. Its verbs read and
+// filter, and send nothing.
+- (void)testTheTrafficVerbsShowFilterAndSendNothing {
+    XCTAssertNotNil(([self run:@[@"dump_traffic", @"0"]][@"error"]), @"closed, it holds nothing");
+    NSUInteger mark = _bus.sentMessages.count;
+    NSArray *windows = [self runOK:@[@"traffic", @"show"]][@"windows"];
+    XCTAssertTrue([windows containsObject:@"qlm Traffic"]);
+    NSArray<NSDictionary *> *rows = [self trafficRowsOnceAtLeast:4];
+    NSDictionary *poll = nil;
+    for (NSDictionary *row in rows) {
+        if ([row[@"description"] isEqualToString:@"poll"]) {
+            poll = row;
+        }
+    }
+    XCTAssertNotNil(poll);
+    NSDictionary *reply = nil;
+    for (NSDictionary *row in rows) {
+        if ([row[@"answers"] isEqual:poll[@"number"]]) {
+            reply = row;
+        }
+    }
+    XCTAssertEqualObjects(reply[@"kind"], @"reply");
+    XCTAssertTrue([reply[@"description"] hasPrefix:@"telemetry: on"], @"%@", reply);
+    XCTAssertEqualObjects(reply[@"target"], poll[@"target"]);
+
+    NSDictionary *sent = [self runOK:@[@"traffic_filter", @"direction", @"sent"]];
+    XCTAssertEqualObjects(sent[@"direction"], @"sent");
+    for (NSDictionary *row in [self runOK:@[@"dump_traffic", @"0"]][@"rows"]) {
+        XCTAssertEqualObjects(row[@"outgoing"], @YES);
+    }
+    NSDictionary *volume = [self runOK:@[@"traffic_filter", @"opcode", @"1F"]];
+    XCTAssertEqualObjects(volume[@"opcode"], @"1F");
+    XCTAssertEqualObjects([volume[@"rows"] firstObject][@"description"], @"volume −45.0 dB");
+    XCTAssertNotNil(([self run:@[@"traffic_filter", @"opcode", @"15"]][@"error"]), @"no flash commit is ever held");
+    XCTAssertNotNil(([self run:@[@"traffic_filter", @"target", @"AA BB CC"]][@"error"]));
+    NSDictionary *broadcast = [self runOK:@[@"traffic_filter", @"target", @"ff"]];
+    XCTAssertEqualObjects(broadcast[@"target"], @"FF");
+    [self runOK:@[@"traffic_filter", @"opcode", @"all"]];
+    [self runOK:@[@"traffic_filter", @"target", @"all"]];
+    [self runOK:@[@"traffic_filter", @"direction", @"all"]];
+
+    NSDictionary *paused = [self runOK:@[@"traffic_pause", @"on"]];
+    XCTAssertEqualObjects(paused[@"paused"], @YES);
+    [self runOK:@[@"traffic_pause", @"off"]];
+    NSDictionary *cleared = [self runOK:@[@"traffic_clear"]];
+    XCTAssertEqualObjects(cleared[@"held"], @0);
+    [self trafficRowsOnceAtLeast:1];
+    [self runOK:@[@"traffic", @"close"]];
+    XCTAssertNotNil(([self run:@[@"traffic_clear"]][@"error"]));
+    [self assertNothingSentSince:mark];
 }
 
 // A skin's look sends nothing to the monitors.

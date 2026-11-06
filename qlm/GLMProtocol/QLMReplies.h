@@ -21,6 +21,8 @@ bool QLMReplyIsNoAnswer(const QLMMessage *message);
 
 bool QLMReplyIsAck(const QLMMessage *message);
 bool QLMReplyIsBusy(const QLMMessage *message);
+// 06 or 07, as follows the 09 of a busy reply.
+bool QLMReplyIsBusyMarker(uint8_t byte);
 bool QLMReplySessionAck(const QLMMessage *message, uint8_t *session);
 bool QLMReplyHardwareID(const QLMMessage *message, uint8_t hardwareID[3]);
 

@@ -250,6 +250,8 @@ targets:
       - qlm/App/QLMSettingsWindowController.m
       - qlm/App/QLMSkin.m
       - qlm/App/QLMSkinChoice.m
+      - qlm/App/QLMTrafficLog.m
+      - qlm/App/QLMTrafficWindowController.m
       # It draws into a bitmap, which needs no NSApplication.
       - qlm/App/QLMSkinDrawing.m
       - qlm/App/QLMSkinImages.m

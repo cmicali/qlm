@@ -58,6 +58,8 @@ typedef enum {
 // Builders. Each returns a message the allowlist accepts.
 QLMMessage QLMCommandProbe(void);
 QLMMessage QLMCommandAssignSession(const uint8_t hardwareID[3], uint8_t session);
+// The monitor a lease names. False for any frame but a lease.
+bool QLMLeaseHardwareID(const QLMMessage *message, uint8_t hardwareID[3]);
 QLMMessage QLMCommandKeepAlive(void);
 QLMMessage QLMCommandPoll(uint8_t session);
 QLMMessage QLMCommandSerialNumber(uint8_t session);
