@@ -3,7 +3,6 @@
 #import "QLMFormat.h"
 #import "QLMKnobMath.h"
 #import "QLMOSDRule.h"
-#import "QLMReadoutThrottle.h"
 #import "QLMSkinControls.h"
 #import "QLMSkinView.h"
 
@@ -38,8 +37,6 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
 // The hold, then the fade.
 @property (nonatomic, nullable) NSTimer *timer;
 @property (nonatomic) BOOL fading;
-// The level changes four times a second at most. The bar follows each step.
-@property (nonatomic) QLMReadoutThrottle *levelReadout;
 @end
 
 @implementation QLMOSDController
@@ -51,10 +48,6 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
         _skin = skin;
         _rule = [[QLMOSDRule alloc] init];
         _rule.enabled = preferences.showsOSD;
-        __weak QLMOSDController *weakSelf = self;
-        _levelReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
-            weakSelf.osdView.level = text;
-        }];
     }
     return self;
 }
@@ -70,7 +63,7 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     QLMSnapshot *shown = self.shown;
     if (self.window.visible && shown != nil) {
         [self hostSkin];
-        [self render:shown];
+        [self render:shown atOnce:YES];
         [self place];
     }
 }
@@ -105,7 +98,6 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     [self.window setContentSize:view.frame.size];
     QLMSkinHost(self.window, view);
     self.osdView = view;
-    [self.levelReadout reset];
 }
 
 - (void)place {
@@ -130,10 +122,12 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     return refusal;
 }
 
-- (void)render:(QLMSnapshot *)snapshot {
+// The level waits its turn while the OSD shows. One that appears shows it
+// at once.
+- (void)render:(QLMSnapshot *)snapshot atOnce:(BOOL)atOnce {
     double decibels = snapshot.volumeDecibels.doubleValue;
     QLMSkinOSDView *view = self.osdView;
-    [self.levelReadout showText:QLMDecibelsNumberText(decibels, 1) kind:@"level"];
+    [view showLevel:QLMDecibelsNumberText(decibels, 1) atOnce:atOnce];
     view.title = QLMGroupNameText(snapshot);
     view.subtitle = QLMOutputStateText(snapshot);
     view.fraction = QLMKnobFraction(decibels, self.preferences.lowestDecibels, QLMShownCeiling(snapshot, self.preferences.ceilingDecibels));
@@ -151,14 +145,11 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     // TRAP: taken before the fade is undone below. A fade's timer is its
     // hide's, which a step must replace, not move.
     BOOL holding = self.timer != nil && !self.fading;
-    // A show from hidden shows its level at once.
-    if (!self.window.visible || self.fading) {
-        [self.levelReadout reset];
-    }
-    [self render:snapshot];
+    BOOL appearing = !self.window.visible || self.fading;
+    [self render:snapshot atOnce:appearing];
     // Only when it's hidden or fading: on each step of a turn, the order
     // front would wait on the window server for the last frame.
-    if (!self.window.visible || self.fading) {
+    if (appearing) {
         self.fading = NO;
         self.window.alphaValue = 1;
         if (!self.window.visible) {
@@ -175,10 +166,6 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     [self holdFor:self.preferences.osdSeconds then:^(QLMOSDController *controller) {
         [controller fade];
     }];
-}
-
-- (void)flushReadout {
-    [self.levelReadout flush];
 }
 
 // In the common modes, so it ends during a slider drag or a menu held open.

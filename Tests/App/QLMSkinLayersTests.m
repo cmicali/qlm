@@ -93,20 +93,10 @@ static double QLMTestMatch(NSBitmapImageRep *a, NSBitmapImageRep *b) {
     if (a.pixelsWide != b.pixelsWide || a.pixelsHigh != b.pixelsHigh) {
         return 0;
     }
-    const uint8_t *pa = a.bitmapData;
-    const uint8_t *pb = b.bitmapData;
-    NSInteger matched = 0;
-    for (NSInteger y = 0; y < a.pixelsHigh; y++) {
-        for (NSInteger x = 0; x < a.pixelsWide; x++) {
-            const uint8_t *u = pa + y * a.bytesPerRow + x * 4;
-            const uint8_t *v = pb + y * b.bytesPerRow + x * 4;
-            BOOL same = YES;
-            for (int k = 0; k < 4; k++) {
-                same = same && abs((int)u[k] - (int)v[k]) <= 2;
-            }
-            matched += same;
-        }
-    }
+    __block NSInteger matched = 0;
+    QLMTestEachPixelIn(a, b, NSMakeRect(0, 0, a.pixelsWide, a.pixelsHigh), ^(NSInteger x, NSInteger y, const uint8_t *u, const uint8_t *v) {
+        matched += QLMTestPixelDifference(u, v) <= 2;
+    });
     return (double)matched / (double)(a.pixelsWide * a.pixelsHigh);
 }
 
@@ -449,7 +439,8 @@ static uint8_t QLMTestMostAlpha(NSBitmapImageRep *bitmap) {
     return most;
 }
 
-// The bounds of what differs between two drawings by more than `levels`.
+// The bounds of what differs between two drawings by more than `levels`,
+// in color.
 static NSRect QLMTestDifference(NSBitmapImageRep *a, NSBitmapImageRep *b, int levels) {
     return QLMTestPixelBounds(a, b, ^BOOL(const uint8_t *u, const uint8_t *v) {
         int most = 0;
@@ -526,25 +517,18 @@ static NSRect QLMTestDifference(NSBitmapImageRep *a, NSBitmapImageRep *b, int le
 // The largest difference in any channel inside `rect`, in points, and the
 // share of its pixels that differ by more than 2 levels.
 static int QLMTestWorstIn(NSBitmapImageRep *a, NSBitmapImageRep *b, NSRect rect, double *share) {
-    NSRect pixels = NSIntersectionRect(NSIntegralRect(NSMakeRect(rect.origin.x * QLMTestScale, rect.origin.y * QLMTestScale,
-                                                                 rect.size.width * QLMTestScale, rect.size.height * QLMTestScale)),
-                                       NSMakeRect(0, 0, a.pixelsWide, a.pixelsHigh));
-    int worst = 0;
-    NSInteger differ = 0;
-    for (NSInteger y = (NSInteger)NSMinY(pixels); y < (NSInteger)NSMaxY(pixels); y++) {
-        for (NSInteger x = (NSInteger)NSMinX(pixels); x < (NSInteger)NSMaxX(pixels); x++) {
-            const uint8_t *u = a.bitmapData + y * a.bytesPerRow + x * 4;
-            const uint8_t *v = b.bitmapData + y * b.bytesPerRow + x * 4;
-            int most = 0;
-            for (int k = 0; k < 4; k++) {
-                most = MAX(most, abs((int)u[k] - (int)v[k]));
-            }
-            worst = MAX(worst, most);
-            differ += most > 2;
-        }
-    }
-    CGFloat area = pixels.size.width * pixels.size.height;
-    *share = area > 0 ? (double)differ / area : 0;
+    NSRect pixels = NSMakeRect(rect.origin.x * QLMTestScale, rect.origin.y * QLMTestScale, rect.size.width * QLMTestScale,
+                               rect.size.height * QLMTestScale);
+    __block int worst = 0;
+    __block NSInteger differ = 0;
+    __block NSInteger area = 0;
+    QLMTestEachPixelIn(a, b, pixels, ^(NSInteger x, NSInteger y, const uint8_t *u, const uint8_t *v) {
+        int most = QLMTestPixelDifference(u, v);
+        worst = MAX(worst, most);
+        differ += most > 2;
+        area++;
+    });
+    *share = area > 0 ? (double)differ / (double)area : 0;
     return worst;
 }
 

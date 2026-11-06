@@ -1,7 +1,15 @@
 #import "QLMViews.h"
 
+#import "QLMViewsTesting.h"
+
+BOOL (*QLMWindowIsSeenOverride)(NSWindow *window);
+
 NSTextField *QLMNoteLabel(NSString *text, CGFloat width) {
-    NSTextField *label = [NSTextField wrappingLabelWithString:text];
+    return QLMNoteLabelOfClass([NSTextField class], text, width);
+}
+
+NSTextField *QLMNoteLabelOfClass(Class labelClass, NSString *text, CGFloat width) {
+    NSTextField *label = [labelClass wrappingLabelWithString:text];
     label.font = [NSFont systemFontOfSize:NSFont.smallSystemFontSize];
     label.textColor = NSColor.secondaryLabelColor;
     label.preferredMaxLayoutWidth = width;
@@ -32,5 +40,8 @@ void QLMPinToEdges(NSView *view, NSView *container) {
 }
 
 BOOL QLMWindowIsSeen(NSWindow *window) {
+    if (QLMWindowIsSeenOverride != NULL) {
+        return QLMWindowIsSeenOverride(window);
+    }
     return window.visible && (window.occlusionState & NSWindowOcclusionStateVisible) != 0;
 }

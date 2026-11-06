@@ -1,20 +1,20 @@
-#import <Cocoa/Cocoa.h>
+#import <Foundation/Foundation.h>
 
 NS_ASSUME_NONNULL_BEGIN
 
-// Asks for one call of `fire` at the screen's next frame, on the main queue.
+// Asks for one call of `fire` later, on the main queue.
 typedef void (^QLMFrameRequest)(dispatch_block_t fire);
 
-// Hands on the newest value it was given, at most once a screen frame, on
-// the main queue. A value given while one waits replaces it, so a burst of
-// snapshots draws once. It asks for a frame only while a value waits, so
-// nothing runs while none does. On the main queue.
+// Hands on the newest value it was given, once, at the main queue's next
+// turn. A value given while one waits replaces it, so a burst of snapshots
+// draws once. It asks for a turn only while a value waits, so nothing runs
+// while none does. On the main queue.
 @interface QLMFrameCoalescer<ObjectType> : NSObject
 
 - (instancetype)initWithApply:(void (^)(ObjectType value))apply NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
-// The next main-queue turn until set. The app sets QLMDisplayFrameRequest().
+// dispatch_async on the main queue until set. The tests swap it.
 @property (nonatomic, copy) QLMFrameRequest requestFrame;
 
 - (void)submit:(ObjectType)value;
@@ -24,12 +24,5 @@ typedef void (^QLMFrameRequest)(dispatch_block_t fire);
 @property (nonatomic, readonly) BOOL pending;
 
 @end
-
-// The frames of the display `screen` names at each request, else the main
-// screen's, from its display link on macOS 14 and later while any of the
-// app's windows is on screen, else the next main-queue turn. A window moved
-// to another display takes a new link. TRAP: a display that sleeps or goes
-// away gives no frames, so a request waits at most 100 ms for one.
-QLMFrameRequest QLMDisplayFrameRequest(NSScreen *_Nullable (^screen)(void));
 
 NS_ASSUME_NONNULL_END

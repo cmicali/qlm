@@ -320,7 +320,7 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
     };
 }
 
-static NSRect QLMSkinLineBox(NSFont *font, NSRect frame) {
+NSRect QLMSkinLineBox(NSFont *font, NSRect frame) {
     CGFloat line = ceil(font.ascender - font.descender);
     return NSMakeRect(frame.origin.x, frame.origin.y + (frame.size.height - line) / 2, frame.size.width, line);
 }
@@ -400,10 +400,6 @@ NSAttributedString *QLMSkinSlotString(NSString *text, QLMSkinTextSlot *slot, CGF
         [string addAttribute:NSForegroundColorAttributeName value:accent range:NSMakeRange(text.length - 1, 1)];
     }
     return string;
-}
-
-NSRect QLMSkinSlotLineBox(NSAttributedString *text, NSRect frame) {
-    return QLMSkinLineBox([text attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL], frame);
 }
 
 void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits, CGFloat alpha) {

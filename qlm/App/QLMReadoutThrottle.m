@@ -2,10 +2,16 @@
 
 const NSTimeInterval QLMReadoutInterval = 0.25;
 
+static BOOL QLMReadoutSame(NSString *a, NSString *b) {
+    return a == b || [a isEqualToString:b];
+}
+
 @implementation QLMReadoutThrottle {
     void (^_show)(NSString *text);
-    NSString *_shownKind;
+    BOOL _shownAny;
+    NSString *_shown;
     NSTimeInterval _shownAt;
+    BOOL _waits;
     NSString *_waiting;
     BOOL _scheduled;
 }
@@ -17,45 +23,38 @@ const NSTimeInterval QLMReadoutInterval = 0.25;
         _now = ^NSTimeInterval {
             return NSProcessInfo.processInfo.systemUptime;
         };
-        _schedule = ^(NSTimeInterval delay, dispatch_block_t block) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
-        };
-        [self reset];
+        _schedule = QLMMainQueueScheduler();
     }
     return self;
 }
 
-- (void)reset {
-    _shownText = nil;
-    _shownKind = nil;
-    _shownAt = -INFINITY;
+- (void)showNow:(NSString *)text {
+    _waits = NO;
     _waiting = nil;
-}
-
-- (void)showNow:(NSString *)text kind:(NSString *)kind {
-    _waiting = nil;
-    _shownKind = [kind copy];
     _shownAt = self.now();
-    if (![text isEqualToString:_shownText]) {
-        _shownText = [text copy];
+    if (!_shownAny || !QLMReadoutSame(text, _shown)) {
+        _shownAny = YES;
+        _shown = [text copy];
         _show(text);
     }
 }
 
-- (void)showText:(NSString *)text kind:(NSString *)kind {
-    if (![kind isEqualToString:_shownKind] || _shownText == nil) {
-        [self showNow:text kind:kind];
+- (void)showText:(NSString *)text atOnce:(BOOL)atOnce {
+    if (atOnce || !_shownAny) {
+        [self showNow:text];
         return;
     }
-    if ([text isEqualToString:_shownText]) {
+    if (QLMReadoutSame(text, _shown)) {
+        _waits = NO;
         _waiting = nil;
         return;
     }
     NSTimeInterval since = self.now() - _shownAt;
     if (since >= QLMReadoutInterval && !_scheduled) {
-        [self showNow:text kind:kind];
+        [self showNow:text];
         return;
     }
+    _waits = YES;
     _waiting = [text copy];
     if (_scheduled) {
         return;
@@ -72,8 +71,8 @@ const NSTimeInterval QLMReadoutInterval = 0.25;
 }
 
 - (void)flush {
-    if (_waiting != nil) {
-        [self showNow:_waiting kind:_shownKind];
+    if (_waits) {
+        [self showNow:_waiting];
     }
 }
 

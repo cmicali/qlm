@@ -22,10 +22,20 @@ static const CGFloat QLMSkinGlyphPad = 2;
 @implementation QLMSkinGlyphImage
 @end
 
-static CGFloat QLMSkinGlyphPhase(CGFloat device, CGFloat *whole) {
+// A font's glyphs in one color, overlay, and scale, by glyph and phase.
+@interface QLMSkinGlyphFont : NSObject
+@property (nonatomic) CGFloat baseline;  // below the line's top
+@property (nonatomic) NSMutableDictionary<NSNumber *, id> *glyphs;
+@end
+
+@implementation QLMSkinGlyphFont
+@end
+
+// A sixteenth of a pixel, and the whole pixel left of it.
+static NSInteger QLMSkinGlyphPhase(CGFloat device, CGFloat *whole) {
     CGFloat base = floor(device);
-    CGFloat phase = round((device - base) * QLMSkinGlyphPhases) / QLMSkinGlyphPhases;
-    if (phase >= 1) {
+    NSInteger phase = (NSInteger)round((device - base) * QLMSkinGlyphPhases);
+    if (phase >= QLMSkinGlyphPhases) {
         base += 1;
         phase = 0;
     }
@@ -34,7 +44,7 @@ static CGFloat QLMSkinGlyphPhase(CGFloat device, CGFloat *whole) {
 }
 
 // The glyph at `phase` on the pixels, drawn as text draws it: filled in its
-// color, then the overlay over its ink alone.
+// color, then dimmed in its own shape.
 static QLMSkinGlyphImage *_Nullable QLMSkinMakeGlyphImage(CTFontRef font, CGGlyph glyph, NSColor *color, QLMSkinColor overlay,
                                                           CGFloat scale, CGPoint phase) {
     CGRect bounds = CTFontGetBoundingRectsForGlyphs(font, kCTFontOrientationHorizontal, &glyph, NULL, 1);
@@ -47,24 +57,17 @@ static QLMSkinGlyphImage *_Nullable QLMSkinMakeGlyphImage(CTFontRef font, CGGlyp
     CGFloat bottom = ceil(phase.y - CGRectGetMinY(bounds) * scale) + QLMSkinGlyphPad;
     CGPoint origin = CGPointMake(phase.x - left, phase.y - top);
     CGSize pixels = CGSizeMake(right - left, bottom - top);
-    BOOL dimmed = overlay.alpha > 0;
-    CGImageRef image = QLMSkinRenderImage(NSMakeSize(pixels.width / scale, pixels.height / scale), scale, ^{
-        CGContextRef cg = NSGraphicsContext.currentContext.CGContext;
-        if (dimmed) {
-            CGContextBeginTransparencyLayer(cg, NULL);
-        }
-        CGContextSetFillColorWithColor(cg, color.CGColor);
-        // The origin in the text matrix, so it holds whether the position
-        // is read in user space or text space.
-        CGContextSetTextMatrix(cg, CGAffineTransformMake(1, 0, 0, -1, origin.x / scale, origin.y / scale));
-        CGPoint position = CGPointZero;
-        CTFontDrawGlyphs(font, &glyph, &position, 1, cg);
-        if (dimmed) {
-            CGContextSetBlendMode(cg, kCGBlendModeSourceAtop);
-            CGContextSetFillColorWithColor(cg, QLMSkinNSColor(overlay).CGColor);
-            CGContextFillRect(cg, CGRectMake(0, 0, pixels.width / scale, pixels.height / scale));
-            CGContextEndTransparencyLayer(cg);
-        }
+    NSSize points = NSMakeSize(pixels.width / scale, pixels.height / scale);
+    CGImageRef image = QLMSkinRenderImage(points, scale, ^{
+        QLMSkinDrawDimmed(overlay.alpha > 0, overlay, (NSRect){NSZeroPoint, points}, ^{
+            CGContextRef cg = NSGraphicsContext.currentContext.CGContext;
+            CGContextSetFillColorWithColor(cg, color.CGColor);
+            // The origin in the text matrix, so it holds whether the
+            // position is read in user space or text space.
+            CGContextSetTextMatrix(cg, CGAffineTransformMake(1, 0, 0, -1, origin.x / scale, origin.y / scale));
+            CGPoint position = CGPointZero;
+            CTFontDrawGlyphs(font, &glyph, &position, 1, cg);
+        });
     });
     if (image == NULL) {
         return nil;
@@ -74,33 +77,6 @@ static QLMSkinGlyphImage *_Nullable QLMSkinMakeGlyphImage(CTFontRef font, CGGlyp
     made.origin = origin;
     made.pixels = pixels;
     return made;
-}
-
-// Where text drawing puts the baseline below a line's top. TRAP: not the
-// font's ascender, which sets glyphs up to half a point off.
-static CGFloat QLMSkinBaselineOffset(NSFont *font) {
-    static NSLayoutManager *layout;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        layout = [[NSLayoutManager alloc] init];
-    });
-    return [layout defaultBaselineOffsetForFont:font];
-}
-
-@implementation QLMSkinGlyphLine {
-    __weak QLMSkinLayers *_layers;
-    NSMutableArray<CALayer *> *_glyphs;
-}
-
-- (instancetype)initWithLayers:(QLMSkinLayers *)layers {
-    self = [super init];
-    if (self) {
-        _layers = layers;
-        _layer = [layers makeLayerOfClass:[CALayer class]];
-        _glyphs = [NSMutableArray array];
-        _text = @"";
-    }
-    return self;
 }
 
 // The line, cut with an ellipsis where it overflows the box, as text
@@ -122,6 +98,32 @@ static CTLineRef QLMSkinGlyphCTLine(NSAttributedString *string, CGFloat width) C
     return cut;
 }
 
+@implementation QLMSkinGlyphLine {
+    __weak QLMSkinLayers *_layers;
+    NSMutableArray<CALayer *> *_glyphs;
+    NSUInteger _shownCount;
+    // The last call's inputs, so a call that changes nothing does nothing.
+    NSString *_text;
+    NSRect _frame;
+    CGFloat _fontScale;
+    QLMSkinColor _overlay;
+    CGFloat _scale;
+    CGRect _bounds;
+    // The resolved fonts' glyphs, for this slot, scale, and overlay.
+    NSMutableDictionary<NSString *, QLMSkinGlyphFont *> *_fonts;
+    NSString *_fontsKey;
+}
+
+- (instancetype)initWithLayers:(QLMSkinLayers *)layers {
+    self = [super init];
+    if (self) {
+        _layers = layers;
+        _layer = [layers makeLayerOfClass:[CALayer class]];
+        _glyphs = [NSMutableArray array];
+    }
+    return self;
+}
+
 - (CALayer *)glyphLayerAt:(NSUInteger)index {
     while (_glyphs.count <= index) {
         CALayer *layer = [_layers makeLayerOfClass:[CALayer class]];
@@ -132,6 +134,38 @@ static CTLineRef QLMSkinGlyphCTLine(NSAttributedString *string, CGFloat width) C
     return _glyphs[index];
 }
 
+// Where text drawing puts the baseline below a line's top. TRAP: not the
+// font's ascender, which sets glyphs up to half a point off.
+static CGFloat QLMSkinBaselineOffset(NSFont *font) {
+    static NSLayoutManager *layout;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        layout = [[NSLayoutManager alloc] init];
+    });
+    return [layout defaultBaselineOffsetForFont:font];
+}
+
+- (QLMSkinGlyphFont *)glyphsOfFont:(CTFontRef)font color:(NSColor *)color family:(NSString *)family skin:(QLMSkin *)skin {
+    CGFloat red = 0, green = 0, blue = 0, alpha = 0;
+    [[color colorUsingColorSpace:NSColorSpace.sRGBColorSpace] getRed:&red green:&green blue:&blue alpha:&alpha];
+    QLMSkinColor rgba = {red, green, blue, alpha};
+    NSString *key = [NSString stringWithFormat:@"%@|%g|%@", CFBridgingRelease(CTFontCopyPostScriptName(font)), CTFontGetSize(font),
+                                               QLMSkinColorKey(rgba)];
+    QLMSkinGlyphFont *glyphs = _fonts[key];
+    if (glyphs == nil) {
+        // A size a live resize passes through keeps only the family's last
+        // few.
+        glyphs = [[QLMSkinImages imagesOfSkin:skin] objectForKey:key inFamily:family make:^id {
+            QLMSkinGlyphFont *made = [[QLMSkinGlyphFont alloc] init];
+            made.baseline = QLMSkinBaselineOffset((__bridge NSFont *)font);
+            made.glyphs = [NSMutableDictionary dictionary];
+            return made;
+        }];
+        _fonts[key] = glyphs;
+    }
+    return glyphs;
+}
+
 - (void)showText:(NSString *)text
             slot:(QLMSkinTextSlot *)slot
            frame:(NSRect)frame
@@ -140,14 +174,32 @@ static CTLineRef QLMSkinGlyphCTLine(NSAttributedString *string, CGFloat width) C
          overlay:(QLMSkinColor)overlay
             skin:(QLMSkin *)skin
           inView:(NSView *)view {
-    _text = [text copy] ?: @"";
-    _layer.frame = view.layer.bounds;
-    NSUInteger used = 0;
     QLMSkinLayers *layers = _layers;
+    CGFloat scale = layers.scale;
+    CGRect bounds = view.layer.bounds;
+    if (QLMSkinSameText(text, _text) && NSEqualRects(frame, _frame) && fontScale == _fontScale && scale == _scale
+        && CGRectEqualToRect(bounds, _bounds) && memcmp(&overlay, &_overlay, sizeof overlay) == 0) {
+        return;
+    }
+    _text = [text copy];
+    _frame = frame;
+    _fontScale = fontScale;
+    _scale = scale;
+    _bounds = bounds;
+    _overlay = overlay;
+    if (!CGRectEqualToRect(_layer.frame, bounds)) {
+        _layer.frame = bounds;
+    }
+    NSString *family = [NSString stringWithFormat:@"glyphs|%p|%g|%@", slot, scale, QLMSkinColorKey(overlay)];
+    if (![family isEqualToString:_fontsKey]) {
+        _fontsKey = family;
+        _fonts = [NSMutableDictionary dictionary];
+    }
+    NSUInteger used = 0;
     if (text.length > 0 && layers != nil) {
-        CGFloat scale = layers.scale;
         NSAttributedString *string = QLMSkinSlotString(text, slot, fontScale, monoDigits, 1);
-        NSRect box = QLMSkinSlotLineBox(string, frame);
+        NSFont *font = [string attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
+        NSRect box = QLMSkinLineBox(font, frame);
         CTLineRef line = QLMSkinGlyphCTLine(string, box.size.width);
         CGFloat width = MIN(box.size.width, CTLineGetTypographicBounds(line, NULL, NULL, NULL));
         CGFloat x = box.origin.x;
@@ -156,10 +208,6 @@ static CTLineRef QLMSkinGlyphCTLine(NSAttributedString *string, CGFloat width) C
         } else if (slot.alignment == QLMSkinAlignmentRight) {
             x += box.size.width - width;
         }
-        NSFont *font = [string attribute:NSFontAttributeName atIndex:0 effectiveRange:NULL];
-        CGFloat baseline = box.origin.y + QLMSkinBaselineOffset(font);
-        QLMSkinImages *images = [QLMSkinImages imagesOfSkin:skin];
-        NSString *family = [NSString stringWithFormat:@"glyphs|%p|%g|%@", slot, scale, QLMSkinColorKey(overlay)];
         for (id run in (__bridge NSArray *)CTLineGetGlyphRuns(line)) {
             CTRunRef ctRun = (__bridge CTRunRef)run;
             CFIndex count = CTRunGetGlyphCount(ctRun);
@@ -169,28 +217,23 @@ static CTLineRef QLMSkinGlyphCTLine(NSAttributedString *string, CGFloat width) C
             if (runFont == NULL || count == 0) {
                 continue;
             }
+            QLMSkinGlyphFont *glyphFont = [self glyphsOfFont:runFont color:color family:family skin:skin];
+            CGFloat baseline = box.origin.y + glyphFont.baseline;
             CGGlyph glyphs[count];
             CGPoint positions[count];
             CTRunGetGlyphs(ctRun, CFRangeMake(0, 0), glyphs);
             CTRunGetPositions(ctRun, CFRangeMake(0, 0), positions);
-            NSString *fontKey = [NSString stringWithFormat:@"%@|%g|%@", CFBridgingRelease(CTFontCopyPostScriptName(runFont)),
-                                                           CTFontGetSize(runFont), color];
-            // A size a live resize passes through keeps only the family's
-            // last few.
-            NSMutableDictionary<NSString *, id> *cache =
-                [images objectForKey:fontKey inFamily:family make:^id {
-                    return [NSMutableDictionary dictionary];
-                }];
             for (CFIndex i = 0; i < count; i++) {
                 CGFloat wholeX = 0;
                 CGFloat wholeY = 0;
-                CGPoint phase = CGPointMake(QLMSkinGlyphPhase((x + positions[i].x) * scale, &wholeX),
-                                            QLMSkinGlyphPhase((baseline - positions[i].y) * scale, &wholeY));
-                NSString *key = [NSString stringWithFormat:@"%u|%g|%g", glyphs[i], phase.x, phase.y];
-                id cached = cache[key];
+                NSInteger phaseX = QLMSkinGlyphPhase((x + positions[i].x) * scale, &wholeX);
+                NSInteger phaseY = QLMSkinGlyphPhase((baseline - positions[i].y) * scale, &wholeY);
+                NSNumber *key = @(((NSInteger)glyphs[i] * 16 + phaseX) * 16 + phaseY);
+                id cached = glyphFont.glyphs[key];
+                CGPoint phase = CGPointMake(phaseX / QLMSkinGlyphPhases, phaseY / QLMSkinGlyphPhases);
                 if (cached == nil) {
                     cached = QLMSkinMakeGlyphImage(runFont, glyphs[i], color, overlay, scale, phase) ?: NSNull.null;
-                    cache[key] = cached;
+                    glyphFont.glyphs[key] = cached;
                 }
                 if (cached == NSNull.null) {
                     continue;  // a space inks nothing
@@ -199,18 +242,28 @@ static CTLineRef QLMSkinGlyphCTLine(NSAttributedString *string, CGFloat width) C
                 CALayer *layer = [self glyphLayerAt:used++];
                 NSRect rect = NSMakeRect((wholeX - image.origin.x + phase.x) / scale, (wholeY - image.origin.y + phase.y) / scale,
                                          image.pixels.width / scale, image.pixels.height / scale);
-                layer.contents = image.image;
-                layer.contentsScale = scale;
-                layer.frame = [view convertRectToLayer:rect];
-                layer.hidden = NO;
+                CGRect inLayer = [view convertRectToLayer:rect];
+                if (layer.contents != image.image) {
+                    layer.contents = image.image;
+                }
+                if (layer.contentsScale != scale) {
+                    layer.contentsScale = scale;
+                }
+                if (!CGRectEqualToRect(layer.frame, inLayer)) {
+                    layer.frame = inLayer;
+                }
+                if (layer.hidden) {
+                    layer.hidden = NO;
+                }
             }
         }
         CFRelease(line);
     }
-    for (NSUInteger i = used; i < _glyphs.count; i++) {
+    for (NSUInteger i = used; i < _shownCount; i++) {
         _glyphs[i].hidden = YES;
         _glyphs[i].contents = nil;
     }
+    _shownCount = used;
 }
 
 @end

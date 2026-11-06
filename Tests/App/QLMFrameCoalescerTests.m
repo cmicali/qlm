@@ -2,8 +2,8 @@
 
 #import "QLMFrameCoalescer.h"
 
-// The windows draw a snapshot once a screen frame at most: only the newest,
-// and nothing while none waits. The test hands out the frames.
+// The windows draw a snapshot once a main-queue turn at most: only the
+// newest, and nothing while none waits. The test hands out the turns.
 @interface QLMFrameCoalescerTests : XCTestCase
 @end
 
@@ -75,15 +75,11 @@
     XCTAssertEqualObjects(_applied, @[@"a"]);
 }
 
-// The display's own frames, or the fallback when no frame comes, apply a
-// value on the main queue.
-- (void)testTheDisplaysFramesApply {
+// By default the next main-queue turn applies it.
+- (void)testTheMainQueuesNextTurnApplies {
     QLMFrameCoalescer<NSString *> *coalescer = [[QLMFrameCoalescer alloc] initWithApply:^(NSString *value) {
         [self->_applied addObject:value];
     }];
-    coalescer.requestFrame = QLMDisplayFrameRequest(^NSScreen *_Nullable {
-        return nil;
-    });
     [coalescer submit:@"a"];
     [coalescer submit:@"b"];
     NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];

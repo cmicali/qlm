@@ -4,7 +4,8 @@
 
 // The owner's rule: a number readout changes at most four times a second.
 // The first change shows at once, and the last always shows within 250 ms.
-// A change of kind, as to MUTED, shows at once. On a clock the test turns.
+// A change marked at once, as to MUTED, shows at once. On a clock the test
+// turns.
 @interface QLMReadoutThrottleTests : XCTestCase
 @end
 
@@ -58,10 +59,10 @@
 }
 
 - (void)testTheFirstChangeShowsAtOnce {
-    [_throttle showText:@"−40.0" kind:@"level"];
+    [_throttle showText:@"−40.0" atOnce:NO];
     XCTAssertEqualObjects(_shown, @[@"−40.0"]);
     [self advanceTo:101];
-    [_throttle showText:@"−41.0" kind:@"level"];
+    [_throttle showText:@"−41.0" atOnce:NO];
     XCTAssertEqualObjects(_shown, (@[@"−40.0", @"−41.0"]), @"after a quiet interval, at once");
     XCTAssertEqual(_timers.count, 0u, @"nothing scheduled while nothing waits");
 }
@@ -73,7 +74,7 @@
     for (int i = 0; i < 40; i++) {
         [self advanceTo:100 + i * 0.05];
         last = [NSString stringWithFormat:@"−%d.0", 40 + i];
-        [_throttle showText:last kind:@"level"];
+        [_throttle showText:last atOnce:NO];
     }
     NSTimeInterval lastStep = _now;
     [self advanceTo:lastStep + 1];
@@ -89,37 +90,36 @@
 
 // Muted, or dimmed, shows at once, and a level waiting from before never
 // shows over it.
-- (void)testAChangeOfKindShowsAtOnce {
-    [_throttle showText:@"OUTPUT −40.0" kind:@"level"];
+- (void)testAChangeMarkedAtOnceShowsAtOnce {
+    [_throttle showText:@"OUTPUT −40.0" atOnce:NO];
     [self advanceTo:100.05];
-    [_throttle showText:@"OUTPUT −41.0" kind:@"level"];
+    [_throttle showText:@"OUTPUT −41.0" atOnce:NO];
     XCTAssertEqual(_shown.count, 1u, @"the level waits its turn");
     [self advanceTo:100.1];
-    [_throttle showText:@"MUTED" kind:@"muted"];
+    [_throttle showText:@"MUTED" atOnce:YES];
     XCTAssertEqualObjects(_shown.lastObject, @"MUTED");
     [self advanceTo:101];
     XCTAssertEqualObjects(_shown, (@[@"OUTPUT −40.0", @"MUTED"]));
-    [_throttle showText:@"OUTPUT −61.0" kind:@"dimmed"];
+    [_throttle showText:@"OUTPUT −61.0" atOnce:YES];
     XCTAssertEqualObjects(_shown.lastObject, @"OUTPUT −61.0");
 }
 
 // A level that comes back to the one shown cancels what waits.
 - (void)testAReturnToTheShownTextShowsNothing {
-    [_throttle showText:@"−40.0" kind:@"level"];
-    [_throttle showText:@"−41.0" kind:@"level"];
-    [_throttle showText:@"−40.0" kind:@"level"];
+    [_throttle showText:@"−40.0" atOnce:NO];
+    [_throttle showText:@"−41.0" atOnce:NO];
+    [_throttle showText:@"−40.0" atOnce:NO];
     [self advanceTo:101];
     XCTAssertEqualObjects(_shown, @[@"−40.0"]);
 }
 
-- (void)testAFlushOrAResetShowsAtOnce {
-    [_throttle showText:@"−40.0" kind:@"level"];
-    [_throttle showText:@"−41.0" kind:@"level"];
+- (void)testAFlushShowsAtOnce {
+    [_throttle showText:@"−40.0" atOnce:NO];
+    [_throttle showText:@"−41.0" atOnce:NO];
     [_throttle flush];
     XCTAssertEqualObjects(_shown.lastObject, @"−41.0");
-    [_throttle reset];
-    [_throttle showText:@"−41.0" kind:@"level"];
-    XCTAssertEqual(_shown.count, 3u, @"a new view takes its text at once");
+    [self advanceTo:101];
+    XCTAssertEqual(_shown.count, 2u, @"nothing left to show");
 }
 
 @end

@@ -22,11 +22,10 @@ NS_ASSUME_NONNULL_BEGIN
 
 // One of its view's moving layers. It spans the view's layer.
 @property (nonatomic, readonly) CALayer *layer;
-// What it shows, as last laid out.
-@property (nonatomic, readonly, copy) NSString *text;
 
 // Lays `text` out in `view`, at the slot's frame and font scale, over
-// layers it reuses. A clear overlay lays none.
+// layers it reuses. A clear overlay lays none. A call that changes nothing
+// since the last does nothing.
 - (void)showText:(nullable NSString *)text
             slot:(QLMSkinTextSlot *)slot
            frame:(NSRect)frame

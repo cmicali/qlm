@@ -57,7 +57,7 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic, copy, nullable) NSString *statusTip;
 @property (nonatomic) QLMOSDController *osdController;
 @property (nonatomic) QLMSkinChoice *skinChoice;
-// The windows draw the newest snapshot once a screen frame at most.
+// The windows draw the newest snapshot once a main-queue turn at most.
 @property (nonatomic) QLMFrameCoalescer<QLMSnapshot *> *frames;
 #if DEBUG
 // A debug command's answer to the louder hand-back alert, while its quit runs.
@@ -131,12 +131,6 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     self.frames = [[QLMFrameCoalescer alloc] initWithApply:^(QLMSnapshot *snapshot) {
         [weakSelf drawSnapshot:snapshot];
     }];
-    // The main window's display, where the frames that matter show. The
-    // OSD shows on the main screen.
-    self.frames.requestFrame = QLMDisplayFrameRequest(^NSScreen *_Nullable {
-        QLMMainWindowController *window = weakSelf.mainWindowController;
-        return window.showing ? window.window.screen : nil;
-    });
 
     [self startSystemDimmed:NO];
     if (self.preferences.wakesAtLaunch) {
@@ -343,7 +337,7 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 }
 
 // What a snapshot keeps, and what it alerts, goes at once, every snapshot.
-// What it draws waits for the screen's next frame, and draws the newest.
+// What it draws waits for the main queue's next turn, and draws the newest.
 // Each window draws only while it is seen.
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
     [self.monitorList updateWithSnapshot:snapshot];
@@ -696,7 +690,6 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 
 - (void)debugDrawWindows {
     [self.frames flush];
-    [self.osdController flushReadout];
     [self.mainWindowController drawWhileOpen];
     [self.monitorsController drawWhileOpen];
     [self.settingsController drawWhileOpen];

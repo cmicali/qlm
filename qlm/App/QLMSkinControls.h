@@ -57,8 +57,14 @@ NS_ASSUME_NONNULL_BEGIN
 @interface QLMSkinDisplayView : QLMSkinLayerView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
 @property (nonatomic, copy, nullable) NSString *caption;
+// The level and OUTPUT change four times a second at most, by
+// QLMReadoutThrottle. A set of the property shows at once.
 @property (nonatomic, copy, nullable) NSString *level;
 @property (nonatomic, copy, nullable) NSString *output;
+- (void)showLevel:(nullable NSString *)level atOnce:(BOOL)atOnce;
+- (void)showOutput:(nullable NSString *)output atOnce:(BOOL)atOnce;
+// Shows what waits its turn now, as a screenshot must.
+- (void)flushReadouts;
 @property (nonatomic, copy, nullable) NSString *max;
 @property (nonatomic) BOOL disabled;
 @end
@@ -68,7 +74,11 @@ NS_ASSUME_NONNULL_BEGIN
 // 1.
 @interface QLMSkinOSDView : QLMSkinLayerView
 - (instancetype)initWithSkin:(QLMSkin *)skin;
+// Four times a second at most, as the display's. A set of the property
+// shows at once.
 @property (nonatomic, copy, nullable) NSString *level;
+- (void)showLevel:(nullable NSString *)level atOnce:(BOOL)atOnce;
+- (void)flushReadouts;
 @property (nonatomic, copy, nullable) NSString *title;
 // Nil shows the idle subtitle, "qlm · Output level".
 @property (nonatomic, copy, nullable) NSString *subtitle;

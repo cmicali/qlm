@@ -27,9 +27,6 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSString *)showSnapshot:(nullable QLMSnapshot *)snapshot;
 // At once, with no fade.
 - (void)hide;
-// Shows the level that waits its turn now, as a verb that reads the OSD
-// must.
-- (void)flushReadout;
 
 @property (nonatomic, readonly) BOOL showing;
 

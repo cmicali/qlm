@@ -3,7 +3,7 @@
 #include "QLMCommands.h"
 #import "QLMFormat.h"
 #import "QLMMainWindowModel.h"
-#import "QLMReadoutThrottle.h"
+#import "QLMSkinDrawing.h"
 #import "QLMSkinView.h"
 #import "QLMViews.h"
 
@@ -19,10 +19,26 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 @property (nonatomic, nullable) QLMSkinView *skinView;
 @property (nonatomic, nullable) NSTimer *blinkTimer;
 @property (nonatomic) NSTimeInterval knobTurnedAt;
-// The display's level and OUTPUT line change four times a second at most.
-@property (nonatomic) QLMReadoutThrottle *levelReadout;
-@property (nonatomic) QLMReadoutThrottle *outputReadout;
+// What the level and OUTPUT said, apart from their numbers, at the last
+// render. A change of it shows at once.
+@property (nonatomic, copy, nullable) NSString *levelKind;
+@property (nonatomic, copy, nullable) NSString *outputKind;
+// Set while the window catches up, so the readouts show at once.
+@property (nonatomic) BOOL catchingUp;
 @end
+
+// Each set posts to VoiceOver, so an unchanged value sets nothing.
+static void QLMSetAccessibilityValue(NSView *view, id value) {
+    if (![view.accessibilityValue isEqual:value]) {
+        view.accessibilityValue = value;
+    }
+}
+
+static void QLMSetAccessibilityLabel(NSView *view, NSString *label) {
+    if (!QLMSkinSameText(view.accessibilityLabel, label)) {
+        view.accessibilityLabel = label;
+    }
+}
 
 @implementation QLMMainWindowController {
     QLMPreferences *_preferences;
@@ -35,13 +51,6 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
         _preferences = preferences;
         _monitorList = monitorList;
         _model = [[QLMMainWindowModel alloc] init];
-        __weak QLMMainWindowController *weakSelf = self;
-        _levelReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
-            weakSelf.skinView.display.level = text;
-        }];
-        _outputReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
-            weakSelf.skinView.display.output = text;
-        }];
         [self showSkin:skin];
         [self reloadVolumeRange];
     }
@@ -134,8 +143,6 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     view.powerButton.target = self;
     view.powerButton.action = @selector(powerClicked:);
     self.knobTurnedAt = 0;
-    [self.levelReadout reset];
-    [self.outputReadout reset];
     [self renderGroups];
     [self renderRange];
     [self render];
@@ -157,9 +164,9 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 // What changed while the window was out of view shows at once.
 - (void)renderAtOnce {
     QLMSkinWithoutEase(^{
+        self.catchingUp = YES;
         [self render];
-        [self.levelReadout flush];
-        [self.outputReadout flush];
+        self.catchingUp = NO;
     });
 }
 
@@ -201,8 +208,6 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 - (void)drawWhileOpen {
     if (self.showing) {
         [self render];
-        [self.levelReadout flush];
-        [self.outputReadout flush];
     }
 }
 #endif
@@ -299,7 +304,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 - (void)knobTurned:(QLMKnobControl *)knob {
     double decibels = knob.doubleValue;
     self.knobTurnedAt = NSProcessInfo.processInfo.systemUptime;
-    [self.levelReadout showText:QLMDecibelsNumberText(decibels, 1) kind:@"level"];
+    [self.skinView.display showLevel:QLMDecibelsNumberText(decibels, 1) atOnce:NO];
     // Once the hold lapses, the display catches up with no new snapshot.
     [NSObject cancelPreviousPerformRequestsWithTarget:self selector:@selector(refresh) object:nil];
     [self performSelector:@selector(refresh) withObject:nil afterDelay:QLMLevelHoldInterval inModes:@[NSRunLoopCommonModes]];
@@ -473,7 +478,9 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
     view.status.text = model.statusText;
     view.status.lit = model.statusLit;
     view.status.enabled = model.statusEnabled;
-    view.status.toolTip = model.busProblem;
+    if (!QLMSkinSameText(view.status.toolTip, model.busProblem)) {
+        view.status.toolTip = model.busProblem;
+    }
 
     if (model.applying) {
         [self startBlink];
@@ -488,27 +495,32 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
         QLMSkinButtonView *button = view.groupButtons[i];
         button.selected = i == selected;
         button.enabled = enabled;
-        button.accessibilityValue = @(i == chosen);
+        QLMSetAccessibilityValue(button, @(i == chosen));
     }
     view.groupsMessage = model.groupsMessage;
 
     QLMSkinDisplayView *display = view.display;
     display.caption = model.caption;
     if (!held) {
-        [self.levelReadout showText:model.levelText kind:model.levelKind];
+        [display showLevel:model.levelText atOnce:self.catchingUp || ![model.levelKind isEqualToString:self.levelKind]];
+        self.levelKind = model.levelKind;
     }
-    [self.outputReadout showText:model.outputText kind:model.outputKind];
+    [display showOutput:model.outputText atOnce:self.catchingUp || ![model.outputKind isEqualToString:self.outputKind]];
+    self.outputKind = model.outputKind;
     display.max = model.maxText;
     display.disabled = model.displayDisabled;
-    display.toolTip = model.applyError.localizedDescription;
+    NSString *reason = model.applyError.localizedDescription;
+    if (!QLMSkinSameText(display.toolTip, reason)) {
+        display.toolTip = reason;
+    }
 
     view.muteButton.selected = model.muteOn;
     view.muteButton.ledLit = model.muteOn;
     view.muteButton.enabled = model.muteEnabled;
-    view.muteButton.accessibilityValue = @(model.muteOn);
+    QLMSetAccessibilityValue(view.muteButton, @(model.muteOn));
     view.dimButton.selected = model.dimOn;
     view.dimButton.enabled = model.dimEnabled;
-    view.dimButton.accessibilityValue = @(model.dimOn);
+    QLMSetAccessibilityValue(view.dimButton, @(model.dimOn));
 
     QLMKnobControl *knob = view.knob;
     knob.enabled = model.knobEnabled;
@@ -521,7 +533,7 @@ static const NSTimeInterval QLMBlinkInterval = 0.25;
 
     view.powerButton.title = model.powerTitle;
     view.powerButton.enabled = model.powerEnabled;
-    view.powerButton.accessibilityLabel = model.powerWakes ? @"Wake the monitors" : @"Put the monitors in standby";
+    QLMSetAccessibilityLabel(view.powerButton, model.powerWakes ? @"Wake the monitors" : @"Put the monitors in standby");
 }
 
 @end

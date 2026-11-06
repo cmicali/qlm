@@ -246,6 +246,7 @@ targets:
       - qlm/App/QLMOSDRule.m
       - qlm/App/QLMPreferences.m
       - qlm/App/QLMReadoutThrottle.m
+      - qlm/App/QLMScheduler.m
       - qlm/App/QLMSettingsWindowController.m
       - qlm/App/QLMSkin.m
       - qlm/App/QLMSkinChoice.m

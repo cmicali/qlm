@@ -6,6 +6,7 @@
 #import "QLMSkinGlyphs.h"
 #import "QLMSkinImages.h"
 #import "QLMSkinLayout.h"
+#import "QLMReadoutThrottle.h"
 
 // The symbol a footer button draws where this macOS lacks the skin's.
 static NSString *const QLMSkinFallbackSymbol = @"questionmark.circle";
@@ -475,6 +476,8 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     // The numbers that change with each step, as glyph layers.
     QLMSkinGlyphLine *_levelLine;
     QLMSkinGlyphLine *_outputLine;
+    QLMReadoutThrottle *_levelReadout;
+    QLMReadoutThrottle *_outputReadout;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -485,6 +488,13 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         _levelLine = [[QLMSkinGlyphLine alloc] initWithLayers:self.layers];
         _outputLine = [[QLMSkinGlyphLine alloc] initWithLayers:self.layers];
         self.layers.movingLayers = @[_levelLine.layer, _outputLine.layer];
+        __weak QLMSkinDisplayView *weakSelf = self;
+        _levelReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
+            [weakSelf takeLevel:text];
+        }];
+        _outputReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
+            [weakSelf takeOutput:text];
+        }];
     }
     return self;
 }
@@ -519,6 +529,27 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
 }
 
 - (void)setLevel:(NSString *)level {
+    [self showLevel:level atOnce:YES];
+}
+
+- (void)setOutput:(NSString *)output {
+    [self showOutput:output atOnce:YES];
+}
+
+- (void)showLevel:(NSString *)level atOnce:(BOOL)atOnce {
+    [_levelReadout showText:level atOnce:atOnce];
+}
+
+- (void)showOutput:(NSString *)output atOnce:(BOOL)atOnce {
+    [_outputReadout showText:output atOnce:atOnce];
+}
+
+- (void)flushReadouts {
+    [_levelReadout flush];
+    [_outputReadout flush];
+}
+
+- (void)takeLevel:(NSString *)level {
     if (QLMSkinSameText(level, _level)) {
         return;
     }
@@ -526,7 +557,7 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     [self showLine:_levelLine slot:@"level" text:_level];
 }
 
-- (void)setOutput:(NSString *)output {
+- (void)takeOutput:(NSString *)output {
     if (QLMSkinSameText(output, _output)) {
         return;
     }
@@ -610,6 +641,7 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
     CALayer *_fillClip;
     CALayer *_fill;
     QLMSkinGlyphLine *_levelLine;
+    QLMReadoutThrottle *_levelReadout;
 }
 
 - (instancetype)initWithSkin:(QLMSkin *)skin {
@@ -625,6 +657,10 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
         [_fillClip addSublayer:_fill];
         _levelLine = [[QLMSkinGlyphLine alloc] initWithLayers:self.layers];
         self.layers.movingLayers = @[_fillClip, _levelLine.layer];
+        __weak QLMSkinOSDView *weakSelf = self;
+        _levelReadout = [[QLMReadoutThrottle alloc] initWithShow:^(NSString *text) {
+            [weakSelf takeLevel:text];
+        }];
     }
     return self;
 }
@@ -640,6 +676,18 @@ static const CGFloat QLMSkinTextButtonFocusMargin = 4;
 }
 
 - (void)setLevel:(NSString *)level {
+    [self showLevel:level atOnce:YES];
+}
+
+- (void)showLevel:(NSString *)level atOnce:(BOOL)atOnce {
+    [_levelReadout showText:level atOnce:atOnce];
+}
+
+- (void)flushReadouts {
+    [_levelReadout flush];
+}
+
+- (void)takeLevel:(NSString *)level {
     if (QLMSkinSameText(level, _level)) {
         return;
     }

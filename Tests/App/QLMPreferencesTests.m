@@ -632,9 +632,8 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertEqual(flushes.count, 1u);
 }
 
-// A snapshot that repeats the last one's values compares nothing with the
-// defaults, yet a change made meanwhile by another path is kept right: the
-// same snapshot again writes its values back.
+// A change made by another path between two snapshots with the same values
+// is put right: the same snapshot again writes its values back.
 - (void)testARepeatedSnapshotStillUndoesAnotherPathsChange {
     QLMBusPreferences *kept = _preferences.adapterBus;
     (void)[self holdFlushesOf:kept];
@@ -642,7 +641,7 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     snapshot.mutedHardwareIDs = [NSSet setWithObject:QLMID(0xEA)];
     [kept keepFromSnapshot:snapshot];
     XCTAssertTrue([kept saveVolumeDecibels:-35]);
-    kept.mutedHardwareIDs = [NSSet set];
+    [_defaults setObject:@[] forKey:@"QLMMutedHardwareIDs"];
     [kept keepFromSnapshot:snapshot];
     XCTAssertEqual(self.written.volumeDecibels, -40, @"a lower level, so at once");
     XCTAssertEqualObjects(self.written.mutedHardwareIDs, [NSSet setWithObject:QLMID(0xEA)]);
@@ -730,6 +729,19 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertLessThanOrEqual(self.written.volumeDecibels, -60);
 }
 
+// A louder level written to the defaults from outside is put right at the
+// next snapshot, not only at a stop.
+- (void)testALouderLevelFromOutsideIsPutRightAtTheNextSnapshot {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-50, @(-500))];
+    XCTAssertEqual(self.written.volumeDecibels, -50);
+    [_defaults setDouble:-10 forKey:@"QLMVolumeDecibels"];
+    [kept keepFromSnapshot:QLMKnobSnapshot(-50, @(-500))];
+    XCTAssertEqual(self.written.volumeDecibels, -50);
+    XCTAssertEqual(flushes.count, 0u, @"a lowering never waits");
+}
+
 // The mute record's keys land together, before the snapshot's keep returns.
 - (void)testTheMuteRecordLandsAtOnce {
     QLMBusPreferences *kept = _preferences.adapterBus;
@@ -754,10 +766,9 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertEqual(self.written.volumeDecibels, -8);
 }
 
-// The writes go out off the main queue, in order, and a read anywhere waits
-// for those queued before it: a turn down writes each lower level, and a
-// relaunch reads the last.
-- (void)testAReadSeesEveryWriteQueuedBeforeIt {
+// A turn down writes each lower level as it comes, and a relaunch reads
+// the last.
+- (void)testATurnDownWritesEachLevel {
     QLMBusPreferences *kept = _preferences.adapterBus;
     NSMutableArray<dispatch_block_t> *flushes = [self holdFlushesOf:kept];
     for (int tenths = -400; tenths >= -600; tenths -= 5) {

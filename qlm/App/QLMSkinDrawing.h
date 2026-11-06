@@ -62,8 +62,9 @@ void QLMSkinDrawSlot(NSString *_Nullable text, QLMSkinTextSlot *slot, NSRect fra
                      CGFloat alpha);
 // The text QLMSkinDrawSlot draws, with its attributes. `text` is not empty.
 NSAttributedString *QLMSkinSlotString(NSString *text, QLMSkinTextSlot *slot, CGFloat scale, BOOL monoDigits, CGFloat alpha);
-// The line QLMSkinDrawSlot draws `text` in, centered on the frame's height.
-NSRect QLMSkinSlotLineBox(NSAttributedString *text, NSRect frame);
+// The line a slot's text in `font` draws in, centered on the frame's
+// height.
+NSRect QLMSkinLineBox(NSFont *font, NSRect frame);
 // Where a slot's text may ink, for one slot's redraw: its frame and its
 // line, with a margin for the glyphs' overhang.
 NSRect QLMSkinSlotInk(QLMSkinTextSlot *slot, NSRect frame, CGFloat scale);

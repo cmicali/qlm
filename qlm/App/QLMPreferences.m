@@ -4,6 +4,7 @@
 
 #include "QLMCommands.h"
 #import "QLMFakeBus.h"
+#import "QLMScheduler.h"
 #import "QLMSkinLibrary.h"
 #import "QLMSystem.h"
 
@@ -86,128 +87,170 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
 - (double)boundedVolume:(double)decibels;
 @end
 
-// Every bus's writes, in order, off the main queue: a write sends its
-// value to cfprefsd, which costs far more than the decision to make it.
-// Every read waits for the writes queued before it, so it sees them.
-static dispatch_queue_t QLMKeptWrites(void) {
-    static dispatch_queue_t queue;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{
-        queue = dispatch_queue_create("com.commonwealthrecordings.qlm.kept-writes",
-                                      dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INITIATED, 0));
-    });
-    return queue;
-}
-
 @interface QLMBusPreferences ()
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults prefix:(NSString *)prefix preferences:(QLMPreferences *)preferences;
 @end
 
 @implementation QLMBusPreferences {
     NSUserDefaults *_defaults;
-    NSString *_prefix;
     __weak QLMPreferences *_preferences;  // for the ceiling
-    // What waits to be written.
+    NSString *_volumeKey;
+    NSString *_mutedKey;
+    NSString *_mutingAllKey;
+    NSString *_liftedKey;
+    NSString *_leasesKey;
+    NSString *_knobReadKey;
+    NSString *_knobKey;
+    // The one thing kept outside the defaults: a raise, waiting its turn.
+    // The level is as it plays, under the ceiling at the time.
     BOOL _volumeWaits;
     double _waitingVolume;
     BOOL _knobWaits;
     NSNumber *_waitingKnob;
     BOOL _flushScheduled;
-    // What the defaults hold, as stored, read once and then kept with each
-    // write, so a decision reads no defaults. Only this bus writes its keys.
-    // TRAP: the level as stored, not as the ceiling bounds it. Bounded, a
-    // level above a lowered ceiling read as the level that plays, so it was
-    // never written, and showed again once the ceiling rose.
-    BOOL _writtenLoaded;
-    double _writtenVolume;
-    BOOL _writtenKnobRead;
-    NSNumber *_writtenKnob;
-    // The last snapshot's values, so an unchanged one compares nothing
-    // with the defaults. A write by any other path clears them.
-    NSNumber *_seenVolume;
-    NSSet<NSData *> *_seenMuted;
-    NSNumber *_seenMutingAll;
-    NSSet<NSData *> *_seenLifted;
-    NSArray<QLMKnownLease *> *_seenLeases;
-    id _seenKnob;  // NSNull for no knob
 }
 
 - (instancetype)initWithDefaults:(NSUserDefaults *)defaults prefix:(NSString *)prefix preferences:(QLMPreferences *)preferences {
     self = [super init];
     if (self) {
         _defaults = defaults;
-        _prefix = [prefix copy];
         _preferences = preferences;
-        _scheduler = ^(NSTimeInterval delay, dispatch_block_t block) {
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)), dispatch_get_main_queue(), block);
-        };
+        _volumeKey = [prefix stringByAppendingString:QLMVolumeName];
+        _mutedKey = [prefix stringByAppendingString:QLMMutedName];
+        _mutingAllKey = [prefix stringByAppendingString:QLMMutingAllName];
+        _liftedKey = [prefix stringByAppendingString:QLMLiftedName];
+        _leasesKey = [prefix stringByAppendingString:QLMLeasesName];
+        _knobReadKey = [prefix stringByAppendingString:QLMKnobReadName];
+        _knobKey = [prefix stringByAppendingString:QLMKnobName];
+        _scheduler = QLMMainQueueScheduler();
     }
     return self;
 }
 
-- (NSString *)key:(NSString *)name {
-    return [_prefix stringByAppendingString:name];
-}
+#pragma mark - The level and the knob
 
-// The defaults, once every write queued before has landed.
-- (NSUserDefaults *)read {
-    dispatch_sync(QLMKeptWrites(), ^{
-    });
-    return _defaults;
-}
-
-- (void)write:(void (^)(NSUserDefaults *defaults))write {
-    NSUserDefaults *defaults = _defaults;
-    dispatch_async(QLMKeptWrites(), ^{
-        write(defaults);
-    });
-}
-
-// The queue's blocks never wait on the main queue, so this can't deadlock.
-- (void)writeNow:(void (^)(NSUserDefaults *defaults))write {
-    NSUserDefaults *defaults = _defaults;
-    dispatch_sync(QLMKeptWrites(), ^{
-        write(defaults);
-    });
-}
-
+// As the defaults hold it, not bounded by the ceiling, which may have fallen
+// since it was written.
 - (double)storedVolume {
-    return QLMKeptLevel(self.read, [self key:QLMVolumeName], QLMDefaultVolumeDecibels);
-}
-
-- (double)writtenVolume {
-    return [_preferences boundedVolume:[self storedVolume]];
-}
-
-- (void)loadWritten {
-    if (_writtenLoaded) {
-        return;
-    }
-    _writtenLoaded = YES;
-    _writtenVolume = [self storedVolume];
-    _writtenKnobRead = self.writtenKnobRead;
-    _writtenKnob = self.writtenKnobTenths;
+    return QLMKeptLevel(_defaults, _volumeKey, QLMDefaultVolumeDecibels);
 }
 
 - (double)volumeDecibels {
-    return _volumeWaits ? [_preferences boundedVolume:_waitingVolume] : [self writtenVolume];
+    return [_preferences boundedVolume:_volumeWaits ? _waitingVolume : [self storedVolume]];
 }
 
 - (BOOL)saveVolumeDecibels:(double)volumeDecibels {
     if (!QLMIsSavableLevel(volumeDecibels)) {
         return NO;
     }
-    _seenVolume = nil;
     _volumeWaits = YES;
-    _waitingVolume = volumeDecibels;
-    [self flush];
+    _waitingVolume = [_preferences boundedVolume:volumeDecibels];
+    [self writeWaiting];
     return YES;
 }
 
+- (BOOL)storedKnobRead {
+    id kept = [_defaults objectForKey:_knobReadKey];
+    return [kept isKindOfClass:[NSNumber class]] && [kept boolValue];
+}
+
+- (nullable NSNumber *)storedKnobTenths {
+    if (!self.storedKnobRead) {
+        return nil;
+    }
+    double tenths = QLMKeptNumber(_defaults, _knobKey);
+    return tenths == floor(tenths) && tenths <= 0 && tenths > INT32_MIN ? @((NSInteger)tenths) : nil;
+}
+
+- (BOOL)knobRead {
+    return _knobWaits || self.storedKnobRead;
+}
+
+- (NSNumber *)knobTenths {
+    return _knobWaits ? _waitingKnob : self.storedKnobTenths;
+}
+
+// Writes a reading at once. Only the tests call it.
+- (void)keepKnobTenths:(nullable NSNumber *)knobTenths {
+    _knobWaits = YES;
+    _waitingKnob = knobTenths;
+    [self writeWaiting];
+}
+
+// Whether what waits is quieter than what the defaults hold. A knob put in
+// or taken out counts.
+- (BOOL)waitingLowers {
+    if (_volumeWaits && _waitingVolume < [self storedVolume]) {
+        return YES;
+    }
+    if (!_knobWaits) {
+        return NO;
+    }
+    NSNumber *stored = self.storedKnobTenths;
+    return stored == nil || _waitingKnob == nil || _waitingKnob.integerValue < stored.integerValue;
+}
+
+- (void)writeWaiting {
+    if (_volumeWaits) {
+        _volumeWaits = NO;
+        [_defaults setDouble:[_preferences boundedVolume:_waitingVolume] forKey:_volumeKey];
+    }
+    if (_knobWaits) {
+        _knobWaits = NO;
+        [_defaults setObject:_waitingKnob forKey:_knobKey];
+        if (!self.storedKnobRead) {
+            [_defaults setBool:YES forKey:_knobReadKey];
+        }
+    }
+}
+
+// What waits goes now. With none, a level stored above the ceiling goes
+// down to it, so a stop never leaves one louder than it can play. TRAP: it
+// only ever lowers what is stored, so a second copy of the app on the same
+// defaults can't raise what the other wrote.
+- (void)flush {
+    if (!_volumeWaits) {
+        double stored = [self storedVolume];
+        double plays = [_preferences boundedVolume:stored];
+        if (plays < stored) {
+            _volumeWaits = YES;
+            _waitingVolume = plays;
+        }
+    }
+    [self writeWaiting];
+}
+
+- (void)scheduleFlush {
+    if (_flushScheduled) {
+        return;
+    }
+    _flushScheduled = YES;
+    __weak QLMBusPreferences *weakSelf = self;
+    self.scheduler(QLMKeptRaiseDelay, ^{
+        QLMBusPreferences *strongSelf = weakSelf;
+        if (strongSelf != nil) {
+            strongSelf->_flushScheduled = NO;
+            [strongSelf writeWaiting];
+        }
+    });
+}
+
+- (void)restoreKnobOn:(QLMFakeBus *)bus {
+    if (!self.knobRead) {
+        return;
+    }
+    NSNumber *tenths = self.knobTenths;
+    [bus perform:^{
+        bus.knobTenths = tenths;
+    }];
+}
+
+#pragma mark - The record and the leases
+
 // Kept as a list of data, which a property list can hold.
-- (NSSet<NSData *> *)hardwareIDsNamed:(NSString *)name {
+- (NSSet<NSData *> *)hardwareIDsAt:(NSString *)key {
     NSMutableSet<NSData *> *hardwareIDs = [NSMutableSet set];
-    for (id item in [self.read arrayForKey:[self key:name]]) {
+    for (id item in [_defaults arrayForKey:key]) {
         if ([item isKindOfClass:[NSData class]]) {
             [hardwareIDs addObject:item];
         }
@@ -216,47 +259,21 @@ static dispatch_queue_t QLMKeptWrites(void) {
 }
 
 - (NSSet<NSData *> *)mutedHardwareIDs {
-    return [self hardwareIDsNamed:QLMMutedName];
-}
-
-- (void)setMutedHardwareIDs:(NSSet<NSData *> *)mutedHardwareIDs {
-    _seenMuted = nil;
-    NSArray<NSData *> *list = mutedHardwareIDs.allObjects;
-    NSString *key = [self key:QLMMutedName];
-    [self writeNow:^(NSUserDefaults *defaults) {
-        [defaults setObject:list forKey:key];
-    }];
+    return [self hardwareIDsAt:_mutedKey];
 }
 
 - (BOOL)mutingAll {
-    return [self.read boolForKey:[self key:QLMMutingAllName]];
-}
-
-- (void)setMutingAll:(BOOL)mutingAll {
-    _seenMutingAll = nil;
-    NSString *key = [self key:QLMMutingAllName];
-    [self writeNow:^(NSUserDefaults *defaults) {
-        [defaults setBool:mutingAll forKey:key];
-    }];
+    return [_defaults boolForKey:_mutingAllKey];
 }
 
 - (NSSet<NSData *> *)liftedHardwareIDs {
-    return [self hardwareIDsNamed:QLMLiftedName];
-}
-
-- (void)setLiftedHardwareIDs:(NSSet<NSData *> *)liftedHardwareIDs {
-    _seenLifted = nil;
-    NSArray<NSData *> *list = liftedHardwareIDs.allObjects;
-    NSString *key = [self key:QLMLiftedName];
-    [self writeNow:^(NSUserDefaults *defaults) {
-        [defaults setObject:list forKey:key];
-    }];
+    return [self hardwareIDsAt:_liftedKey];
 }
 
 // System checks each lease again before it takes one.
 - (NSArray<QLMKnownLease *> *)knownLeases {
     NSMutableArray<QLMKnownLease *> *leases = [NSMutableArray array];
-    for (id item in [self.read arrayForKey:[self key:QLMLeasesName]]) {
+    for (id item in [_defaults arrayForKey:_leasesKey]) {
         if (![item isKindOfClass:[NSDictionary class]]) {
             continue;
         }
@@ -272,227 +289,58 @@ static dispatch_queue_t QLMKeptWrites(void) {
     return leases;
 }
 
-- (void)setKnownLeases:(NSArray<QLMKnownLease *> *)knownLeases {
-    _seenLeases = nil;
-    NSArray<NSDictionary *> *plist = QLMLeasesPlist(knownLeases);
-    NSString *key = [self key:QLMLeasesName];
-    [self write:^(NSUserDefaults *defaults) {
-        [defaults setObject:plist forKey:key];
-    }];
-}
-
-- (BOOL)writtenKnobRead {
-    id kept = [self.read objectForKey:[self key:QLMKnobReadName]];
-    return [kept isKindOfClass:[NSNumber class]] && [kept boolValue];
-}
-
-- (nullable NSNumber *)writtenKnobTenths {
-    if (!self.writtenKnobRead) {
-        return nil;
-    }
-    double tenths = QLMKeptNumber(self.read, [self key:QLMKnobName]);
-    return tenths == floor(tenths) && tenths <= 0 && tenths > INT32_MIN ? @((NSInteger)tenths) : nil;
-}
-
-- (BOOL)knobRead {
-    return _knobWaits || self.writtenKnobRead;
-}
-
-- (NSNumber *)knobTenths {
-    return _knobWaits ? _waitingKnob : self.writtenKnobTenths;
-}
-
-// Writes a reading at once. Only the tests call it.
-- (void)keepKnobTenths:(nullable NSNumber *)knobTenths {
-    _seenKnob = nil;
-    _knobWaits = YES;
-    _waitingKnob = knobTenths;
-    [self flush];
-}
-
-// Whether what waits is lower than what is stored. A knob put in or taken
-// out counts.
-- (BOOL)waitingLowers {
-    [self loadWritten];
-    if (_volumeWaits && _waitingVolume < _writtenVolume) {
-        return YES;
-    }
-    if (!_knobWaits) {
-        return NO;
-    }
-    return !_writtenKnobRead || _writtenKnob == nil || _waitingKnob == nil || _waitingKnob.integerValue < _writtenKnob.integerValue;
-}
-
-// Writes what waits. A lowering and a stop wait until it has landed, so a
-// crash just after can't lose it. A raise is queued.
-- (void)writeWaitingAndWait:(BOOL)waits {
-    if (!_volumeWaits && !_knobWaits) {
-        if (waits) {
-            [self writeNow:^(NSUserDefaults *defaults) {
-            }];
-        }
-        return;
-    }
-    [self loadWritten];
-    BOOL volumeWaits = _volumeWaits;
-    BOOL knobWaits = _knobWaits;
-    double volume = [_preferences boundedVolume:_waitingVolume];
-    NSNumber *knob = _waitingKnob;
-    if (volumeWaits) {
-        _volumeWaits = NO;
-        _writtenVolume = volume;
-    }
-    if (knobWaits) {
-        _knobWaits = NO;
-        _writtenKnobRead = YES;
-        _writtenKnob = knob;
-    }
-    NSString *volumeKey = [self key:QLMVolumeName];
-    NSString *knobKey = [self key:QLMKnobName];
-    NSString *readKey = [self key:QLMKnobReadName];
-    void (^write)(NSUserDefaults *) = ^(NSUserDefaults *defaults) {
-        if (volumeWaits) {
-            [defaults setDouble:volume forKey:volumeKey];
-        }
-        if (knobWaits) {
-            [defaults setObject:knob forKey:knobKey];
-            if (![[defaults objectForKey:readKey] isEqual:@YES]) {
-                [defaults setBool:YES forKey:readKey];
-            }
-        }
-    };
-    if (waits) {
-        [self writeNow:write];
-    } else {
-        [self write:write];
-    }
-}
-
-// A stop writes the level and the reading kept, changed or not, so a
-// louder one put in the defaults from outside, by a hand edit or another
-// copy of the app, can't outlast it. TRAP: it only ever lowers. Another
-// copy on the same defaults may have written a lower level since this one
-// read, and a restate of its own older level would raise it.
-- (void)restateKept {
-    [self loadWritten];
-    if (!_volumeWaits) {
-        _volumeWaits = YES;
-        _waitingVolume = fmin(_writtenVolume, [self storedVolume]);
-    }
-    if (!_knobWaits && _writtenKnobRead) {
-        _knobWaits = YES;
-        _waitingKnob = _writtenKnob;
-    }
-}
-
-- (void)flush {
-    [self restateKept];
-    [self writeWaitingAndWait:YES];
-}
-
-- (void)scheduleFlush {
-    if (_flushScheduled) {
-        return;
-    }
-    _flushScheduled = YES;
-    __weak QLMBusPreferences *weakSelf = self;
-    self.scheduler(QLMKeptRaiseDelay, ^{
-        QLMBusPreferences *strongSelf = weakSelf;
-        if (strongSelf != nil) {
-            strongSelf->_flushScheduled = NO;
-            [strongSelf writeWaitingAndWait:NO];
-        }
-    });
-}
-
-- (void)restoreKnobOn:(QLMFakeBus *)bus {
-    if (!self.knobRead) {
-        return;
-    }
-    NSNumber *tenths = self.knobTenths;
-    [bus perform:^{
-        bus.knobTenths = tenths;
-    }];
-}
+#pragma mark - A snapshot
 
 // TRAP: a snapshot from before System starts carries an empty record, not
-// the one System starts from. Each is compared with the one kept, so an
-// unchanged one writes nothing. A value the last snapshot had too is not
-// compared again.
+// the one System starts from. Each value is compared with the defaults, so
+// an unchanged one writes nothing, and one changed from outside is put
+// right.
 - (void)keepFromSnapshot:(QLMSnapshot *)snapshot {
     // The knob moves the volume too. Keep whichever set it last. System
     // never reports one above 0 dB.
-    [self loadWritten];
     NSNumber *volume = snapshot.volumeDecibels;
-    if (volume != nil && ![volume isEqual:_seenVolume]) {
-        _seenVolume = volume;
-        // TRAP: kept as it plays. Kept raw, a raise waiting while the
-        // ceiling fell and rose was written above the level System had
-        // capped for good.
-        double kept = _volumeWaits ? _waitingVolume : _writtenVolume;
+    if (volume != nil && QLMIsSavableLevel(volume.doubleValue)) {
         double plays = [_preferences boundedVolume:volume.doubleValue];
-        if (QLMIsSavableLevel(volume.doubleValue) && plays != kept) {
+        if (plays != (_volumeWaits ? _waitingVolume : [self storedVolume])) {
             _volumeWaits = YES;
             _waitingVolume = plays;
         }
     }
     if (snapshot.running) {
         [self keepRecordFromSnapshot:snapshot];
-    } else {
-        [self restateKept];
+        [self keepKnobFromSnapshot:snapshot];
     }
-    if (!snapshot.running || [self waitingLowers]) {
-        [self writeWaitingAndWait:YES];
+    if (!snapshot.running) {
+        [self flush];
+    } else if ([self waitingLowers]) {
+        [self writeWaiting];
     } else if (_volumeWaits || _knobWaits) {
         [self scheduleFlush];
     }
 }
 
-// The mute record's three keys go in one write, which lands before this
-// returns, so a crash just after a mute can't lose it, or keep part of it.
+// The record's three keys go together, so a crash can't keep half of it.
 - (void)keepRecordFromSnapshot:(QLMSnapshot *)snapshot {
-    NSSet<NSData *> *muted = snapshot.mutedHardwareIDs;
-    NSSet<NSData *> *lifted = snapshot.liftedHardwareIDs;
-    BOOL mutingAll = snapshot.mutingAll;
-    BOOL seen = [muted isEqual:_seenMuted] && [lifted isEqual:_seenLifted] && _seenMutingAll != nil
-                && mutingAll == _seenMutingAll.boolValue;
-    if (!seen) {
-        if (![muted isEqualToSet:self.mutedHardwareIDs] || mutingAll != self.mutingAll
-            || ![lifted isEqualToSet:self.liftedHardwareIDs]) {
-            NSArray<NSData *> *mutedList = muted.allObjects;
-            NSArray<NSData *> *liftedList = lifted.allObjects;
-            NSString *mutedKey = [self key:QLMMutedName];
-            NSString *mutingAllKey = [self key:QLMMutingAllName];
-            NSString *liftedKey = [self key:QLMLiftedName];
-            [self writeNow:^(NSUserDefaults *defaults) {
-                [defaults setObject:mutedList forKey:mutedKey];
-                [defaults setBool:mutingAll forKey:mutingAllKey];
-                [defaults setObject:liftedList forKey:liftedKey];
-            }];
-        }
-        _seenMuted = muted;
-        _seenMutingAll = @(mutingAll);
-        _seenLifted = lifted;
+    if (![snapshot.mutedHardwareIDs isEqualToSet:self.mutedHardwareIDs] || snapshot.mutingAll != self.mutingAll
+        || ![snapshot.liftedHardwareIDs isEqualToSet:self.liftedHardwareIDs]) {
+        [_defaults setObject:snapshot.mutedHardwareIDs.allObjects forKey:_mutedKey];
+        [_defaults setBool:snapshot.mutingAll forKey:_mutingAllKey];
+        [_defaults setObject:snapshot.liftedHardwareIDs.allObjects forKey:_liftedKey];
     }
-    NSArray<QLMKnownLease *> *leases = snapshot.knownLeases;
-    if (![leases isEqual:_seenLeases]) {
-        if (![QLMLeasesPlist(leases) isEqualToArray:[self.read arrayForKey:[self key:QLMLeasesName]] ?: @[]]) {
-            self.knownLeases = leases;
-        }
-        _seenLeases = leases;
+    NSArray<NSDictionary *> *leases = QLMLeasesPlist(snapshot.knownLeases);
+    if (![leases isEqualToArray:[_defaults arrayForKey:_leasesKey] ?: @[]]) {
+        [_defaults setObject:leases forKey:_leasesKey];
     }
+}
+
+- (void)keepKnobFromSnapshot:(QLMSnapshot *)snapshot {
     if (!snapshot.adapter.hasStatus) {
         return;
     }
-    id knob = snapshot.adapter.knobTenths ?: NSNull.null;
-    if (![knob isEqual:_seenKnob]) {
-        BOOL read = _knobWaits || _writtenKnobRead;
-        NSNumber *kept = _knobWaits ? _waitingKnob : _writtenKnob;
-        if (!read || ![knob isEqual:(kept ?: NSNull.null)]) {
-            _knobWaits = YES;
-            _waitingKnob = knob == NSNull.null ? nil : knob;
-        }
-        _seenKnob = knob;
+    NSNumber *knob = snapshot.adapter.knobTenths;
+    if (!self.knobRead || ![(knob ?: NSNull.null) isEqual:(self.knobTenths ?: NSNull.null)]) {
+        _knobWaits = YES;
+        _waitingKnob = knob;
     }
 }
 

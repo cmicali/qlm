@@ -1,7 +1,7 @@
 #import <XCTest/XCTest.h>
 
 #import "QLMFormat.h"
-#import "QLMSettingsTesting.h"
+#import "QLMViewsTesting.h"
 #import "QLMSettingsWindowController.h"
 #import "QLMSnapshotInternal.h"
 #import "QLMTestSupport.h"
@@ -22,13 +22,11 @@ static BOOL QLMTestSettingsIsSeen(NSWindow *window) {
     NSUserDefaults *_defaults;
     QLMMonitorList *_list;
     QLMSettingsWindowController *_settings;
-    BOOL (*_wasSeen)(NSWindow *);
 }
 
 - (void)setUp {
     [super setUp];
-    _wasSeen = QLMSettingsWindowIsSeen;
-    QLMSettingsWindowIsSeen = QLMTestSettingsIsSeen;
+    QLMWindowIsSeenOverride = QLMTestSettingsIsSeen;
     QLMTestSettingsSeen = NO;
     _defaults = [[NSUserDefaults alloc] initWithSuiteName:NSStringFromClass([self class])];
     [_defaults removePersistentDomainForName:NSStringFromClass([self class])];
@@ -38,7 +36,7 @@ static BOOL QLMTestSettingsIsSeen(NSWindow *window) {
 }
 
 - (void)tearDown {
-    QLMSettingsWindowIsSeen = _wasSeen;
+    QLMWindowIsSeenOverride = NULL;
     [_settings close];
     [_defaults removePersistentDomainForName:NSStringFromClass([self class])];
     [super tearDown];
@@ -79,7 +77,7 @@ static BOOL QLMTestSettingsIsSeen(NSWindow *window) {
     QLMTestSettingsSeen = YES;
     [self showKnobAt:-30];
     [_settings refresh];
-    NSView *box = [_settings valueForKey:@"handBackBox"];
+    NSView *box = [_settings valueForKey:@"handBackLevel"];
     [_settings.window layoutIfNeeded];
     CGFloat height = box.frame.size.height;
     XCTAssertGreaterThan(height, 0);
