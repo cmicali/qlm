@@ -46,22 +46,40 @@ static inline NSBitmapImageRep *QLMTestDrawFlipped(NSSize points, void (^draw)(v
     return QLMTestDrawFlippedAtScale(points, QLMTestScale, draw);
 }
 
-// The bounds, in pixels, top first, where `pass` holds for a pixel of `a`
-// and the same pixel of `b`, each four bytes with alpha last. Zero where
-// it holds for none.
-static inline NSRect QLMTestPixelBounds(NSBitmapImageRep *a, NSBitmapImageRep *b,
-                                        BOOL (^pass)(const uint8_t *u, const uint8_t *v)) {
-    NSInteger minX = NSIntegerMax, minY = NSIntegerMax, maxX = -1, maxY = -1;
-    for (NSInteger y = 0; y < a.pixelsHigh; y++) {
-        for (NSInteger x = 0; x < a.pixelsWide; x++) {
-            if (pass(a.bitmapData + y * a.bytesPerRow + x * 4, b.bitmapData + y * b.bytesPerRow + x * 4)) {
-                minX = MIN(minX, x);
-                minY = MIN(minY, y);
-                maxX = MAX(maxX, x);
-                maxY = MAX(maxY, y);
-            }
+// Each pixel of `a` in `pixels`, top first, with the same pixel of `b`,
+// each four bytes with alpha last.
+static inline void QLMTestEachPixelIn(NSBitmapImageRep *a, NSBitmapImageRep *b, NSRect pixels,
+                                      void (^each)(NSInteger x, NSInteger y, const uint8_t *u, const uint8_t *v)) {
+    pixels = NSIntersectionRect(NSIntegralRect(pixels), NSMakeRect(0, 0, a.pixelsWide, a.pixelsHigh));
+    for (NSInteger y = (NSInteger)NSMinY(pixels); y < (NSInteger)NSMaxY(pixels); y++) {
+        for (NSInteger x = (NSInteger)NSMinX(pixels); x < (NSInteger)NSMaxX(pixels); x++) {
+            each(x, y, a.bitmapData + y * a.bytesPerRow + x * 4, b.bitmapData + y * b.bytesPerRow + x * 4);
         }
     }
+}
+
+// The largest difference in any channel of two pixels.
+static inline int QLMTestPixelDifference(const uint8_t *u, const uint8_t *v) {
+    int most = 0;
+    for (int k = 0; k < 4; k++) {
+        most = MAX(most, abs((int)u[k] - (int)v[k]));
+    }
+    return most;
+}
+
+// The bounds, in pixels, top first, where `pass` holds for a pixel of `a`
+// and the same pixel of `b`. Zero where it holds for none.
+static inline NSRect QLMTestPixelBounds(NSBitmapImageRep *a, NSBitmapImageRep *b,
+                                        BOOL (^pass)(const uint8_t *u, const uint8_t *v)) {
+    __block NSInteger minX = NSIntegerMax, minY = NSIntegerMax, maxX = -1, maxY = -1;
+    QLMTestEachPixelIn(a, b, NSMakeRect(0, 0, a.pixelsWide, a.pixelsHigh), ^(NSInteger x, NSInteger y, const uint8_t *u, const uint8_t *v) {
+        if (pass(u, v)) {
+            minX = MIN(minX, x);
+            minY = MIN(minY, y);
+            maxX = MAX(maxX, x);
+            maxY = MAX(maxY, y);
+        }
+    });
     return maxX < 0 ? NSZeroRect : NSMakeRect(minX, minY, maxX - minX + 1, maxY - minY + 1);
 }
 

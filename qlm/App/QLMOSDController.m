@@ -63,7 +63,7 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     QLMSnapshot *shown = self.shown;
     if (self.window.visible && shown != nil) {
         [self hostSkin];
-        [self render:shown];
+        [self render:shown atOnce:YES];
         [self place];
     }
 }
@@ -122,10 +122,12 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
     return refusal;
 }
 
-- (void)render:(QLMSnapshot *)snapshot {
+// The level waits its turn while the OSD shows. One that appears shows it
+// at once.
+- (void)render:(QLMSnapshot *)snapshot atOnce:(BOOL)atOnce {
     double decibels = snapshot.volumeDecibels.doubleValue;
     QLMSkinOSDView *view = self.osdView;
-    view.level = QLMDecibelsNumberText(decibels, 1);
+    [view showLevel:QLMDecibelsNumberText(decibels, 1) atOnce:atOnce];
     view.title = QLMGroupNameText(snapshot);
     view.subtitle = QLMOutputStateText(snapshot);
     view.fraction = QLMKnobFraction(decibels, self.preferences.lowestDecibels, QLMShownCeiling(snapshot, self.preferences.ceilingDecibels));
@@ -140,16 +142,26 @@ static const NSTimeInterval QLMOSDFadeSeconds = 0.25;
         [self hostSkin];
     }
     self.shown = snapshot;
-    [self render:snapshot];
+    // TRAP: taken before the fade is undone below. A fade's timer is its
+    // hide's, which a step must replace, not move.
+    BOOL holding = self.timer != nil && !self.fading;
+    BOOL appearing = !self.window.visible || self.fading;
+    [self render:snapshot atOnce:appearing];
     // Only when it's hidden or fading: on each step of a turn, the order
     // front would wait on the window server for the last frame.
-    if (!self.window.visible || self.fading) {
+    if (appearing) {
         self.fading = NO;
         self.window.alphaValue = 1;
         if (!self.window.visible) {
             [self place];
         }
         [self.window orderFrontRegardless];
+    }
+    // A turn that goes on moves the hold's end, rather than make a timer
+    // a step.
+    if (holding) {
+        self.timer.fireDate = [NSDate dateWithTimeIntervalSinceNow:self.preferences.osdSeconds];
+        return;
     }
     [self holdFor:self.preferences.osdSeconds then:^(QLMOSDController *controller) {
         [controller fade];

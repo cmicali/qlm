@@ -93,20 +93,10 @@ static double QLMTestMatch(NSBitmapImageRep *a, NSBitmapImageRep *b) {
     if (a.pixelsWide != b.pixelsWide || a.pixelsHigh != b.pixelsHigh) {
         return 0;
     }
-    const uint8_t *pa = a.bitmapData;
-    const uint8_t *pb = b.bitmapData;
-    NSInteger matched = 0;
-    for (NSInteger y = 0; y < a.pixelsHigh; y++) {
-        for (NSInteger x = 0; x < a.pixelsWide; x++) {
-            const uint8_t *u = pa + y * a.bytesPerRow + x * 4;
-            const uint8_t *v = pb + y * b.bytesPerRow + x * 4;
-            BOOL same = YES;
-            for (int k = 0; k < 4; k++) {
-                same = same && abs((int)u[k] - (int)v[k]) <= 2;
-            }
-            matched += same;
-        }
-    }
+    __block NSInteger matched = 0;
+    QLMTestEachPixelIn(a, b, NSMakeRect(0, 0, a.pixelsWide, a.pixelsHigh), ^(NSInteger x, NSInteger y, const uint8_t *u, const uint8_t *v) {
+        matched += QLMTestPixelDifference(u, v) <= 2;
+    });
     return (double)matched / (double)(a.pixelsWide * a.pixelsHigh);
 }
 
@@ -305,7 +295,7 @@ static BOOL QLMTestInksInside(NSSize size, CGFloat scale, NSRect rect, void (^dr
 
 // In a window, a change that redraws only a slot leaves none of the old
 // text: Core Animation clears the slot's rect before the content draws.
-// A narrow level drawn over a wide one comes out as a whole draw of it.
+// A short caption drawn over a long one comes out as a whole draw of it.
 - (void)testAPartialRedrawInAWindowLeavesNoOldText {
     QLMSkin *skin = QLMBuiltInSkin(@"retro");
     NSMutableArray<NSBitmapImageRep *> *renders = [NSMutableArray array];
@@ -314,10 +304,12 @@ static BOOL QLMTestInksInside(NSSize size, CGFloat scale, NSRect rect, void (^dr
         QLMTestSpyDisplay *display = [[QLMTestSpyDisplay alloc] initWithSkin:skin];
         display.frame = NSMakeRect(10, 10, 356, 132);
         [window.contentView addSubview:display];
-        // A window's first changes after it shows redraw whole.
-        NSArray<NSString *> *levels = partial.boolValue ? @[@"−88.8", @"1.0", @"−88.8", @"1.0"] : @[@"1.0"];
-        for (NSString *level in levels) {
-            display.level = level;
+        // A window's first changes after it shows redraw whole. The level
+        // is glyph layers, so the caption takes the redraw.
+        NSArray<NSString *> *captions = partial.boolValue ? @[@"MAIN 4X2 WITH A LONG NAME", @"A", @"MAIN 4X2 WITH A LONG NAME", @"A"]
+                                                          : @[@"A"];
+        for (NSString *caption in captions) {
+            display.caption = caption;
             QLMTestPumpWindow(window);
         }
         if (partial.boolValue) {
@@ -447,7 +439,8 @@ static uint8_t QLMTestMostAlpha(NSBitmapImageRep *bitmap) {
     return most;
 }
 
-// The bounds of what differs between two drawings by more than `levels`.
+// The bounds of what differs between two drawings by more than `levels`,
+// in color.
 static NSRect QLMTestDifference(NSBitmapImageRep *a, NSBitmapImageRep *b, int levels) {
     return QLMTestPixelBounds(a, b, ^BOOL(const uint8_t *u, const uint8_t *v) {
         int most = 0;
@@ -516,6 +509,136 @@ static NSRect QLMTestDifference(NSBitmapImageRep *a, NSBitmapImageRep *b, int le
             }
         }
     }
+}
+
+
+#pragma mark - The numbers
+
+// The largest difference in any channel inside `rect`, in points, and the
+// share of its pixels that differ by more than 2 levels.
+static int QLMTestWorstIn(NSBitmapImageRep *a, NSBitmapImageRep *b, NSRect rect, double *share) {
+    NSRect pixels = NSMakeRect(rect.origin.x * QLMTestScale, rect.origin.y * QLMTestScale, rect.size.width * QLMTestScale,
+                               rect.size.height * QLMTestScale);
+    __block int worst = 0;
+    __block NSInteger differ = 0;
+    __block NSInteger area = 0;
+    QLMTestEachPixelIn(a, b, pixels, ^(NSInteger x, NSInteger y, const uint8_t *u, const uint8_t *v) {
+        int most = QLMTestPixelDifference(u, v);
+        worst = MAX(worst, most);
+        differ += most > 2;
+        area++;
+    });
+    *share = area > 0 ? (double)differ / (double)area : 0;
+    return worst;
+}
+
+// With QLM_TEST_RENDERS set, each render goes there as a PNG, for a look by
+// eye.
+static void QLMTestKeepRender(NSBitmapImageRep *bitmap, NSString *name) {
+    NSString *directory = NSProcessInfo.processInfo.environment[@"QLM_TEST_RENDERS"];
+    if (directory.length > 0) {
+        NSString *file = [[[name componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet]
+            componentsJoinedByString:@"_"] stringByAppendingPathExtension:@"png"];
+        [[bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}]
+            writeToFile:[directory stringByAppendingPathComponent:file] atomically:YES];
+    }
+}
+
+// Within each slot's ink, the layers composite as the text draws, to the
+// level of rounding. A stretched glass differs in a pixel or two anyway.
+static void QLMTestAssertNumbersAsDrawn(XCTestCase *test, NSView *view, NSArray<NSValue *> *inks, NSString *at) {
+    NSBitmapImageRep *composite = QLMTestComposite(view);
+    NSBitmapImageRep *drawn = QLMTestDrawn(view);
+    QLMTestKeepRender(composite, [at stringByAppendingString:@" layers"]);
+    QLMTestKeepRender(drawn, [at stringByAppendingString:@" drawn"]);
+    for (NSValue *ink in inks) {
+        double share = 0;
+        int worst = QLMTestWorstIn(composite, drawn, ink.rectValue, &share);
+        if (share > 0.0001) {
+            NSString *issue = [NSString stringWithFormat:@"%@, in %@: %g of the pixels differ, by up to %d", at,
+                                                         NSStringFromRect(ink.rectValue), share, worst];
+            [test recordIssue:[[XCTIssue alloc] initWithType:XCTIssueTypeAssertionFailure compactDescription:issue]];
+        }
+    }
+}
+
+// The display's level and OUTPUT line, and the OSD's level, are glyph
+// layers. Each composites as the text draws, in every skin, at the
+// reference size and grown, dimmed and not, at a few levels and states.
+- (void)testEachSkinsNumbersCompositeAsTheyDraw {
+    NSArray<NSArray<NSString *> *> *texts = @[
+        @[@"−59.0", @"OUTPUT −79.0"], @[@"−0.5", @"OUTPUT −0.5"], @[@"−12.5", @"MUTED"], @[@"—", @"OUTPUT —"],
+        @[@"0.0", @"MAIN REFUSED"],
+    ];
+    for (NSString *name in QLMBuiltInSkinNames()) {
+        QLMSkin *skin = QLMBuiltInSkin(name);
+        QLMSkinElement *element = [skin element:@"display"];
+        for (NSNumber *grow in @[@1, @1.6]) {
+            NSSize size = NSMakeSize(round(element.frame.size.width * grow.doubleValue),
+                                     round(element.frame.size.height * grow.doubleValue));
+            NSMutableArray<NSValue *> *inks = [NSMutableArray array];
+            for (NSString *slotName in @[@"level", @"output"]) {
+                QLMSkinTextSlot *slot = element.text[slotName];
+                [inks addObject:[NSValue valueWithRect:QLMSkinSlotInk(slot, QLMSkinSlotFrame(element, slot, size),
+                                                                      QLMSkinSlotScale(element, slot, size))]];
+            }
+            for (NSNumber *disabled in @[@NO, @YES]) {
+                for (NSArray<NSString *> *pair in texts) {
+                    QLMSkinDisplayView *display = [[QLMSkinDisplayView alloc] initWithSkin:skin];
+                    display.frame = (NSRect){NSZeroPoint, size};
+                    display.caption = @"MAIN";
+                    display.max = @"MAX −30";
+                    display.level = pair[0];
+                    display.output = pair[1];
+                    display.disabled = disabled.boolValue;
+                    NSString *at = [NSString stringWithFormat:@"%@ display %@ %@ %@%@", name, grow, pair[0], pair[1],
+                                                              disabled.boolValue ? @" dimmed" : @""];
+                    QLMTestAssertNumbersAsDrawn(self, display, inks, at);
+                }
+            }
+        }
+        QLMSkinTextSlot *slot = skin.osd.text[@"level"];
+        NSArray<NSValue *> *inks = @[[NSValue valueWithRect:QLMSkinSlotInk(slot, slot.frame, 1)]];
+        for (NSArray<NSString *> *pair in texts) {
+            QLMSkinOSDView *osd = [[QLMSkinOSDView alloc] initWithSkin:skin];
+            osd.level = pair[0];
+            osd.title = @"Main monitors";
+            osd.fraction = 0.42;
+            QLMTestAssertNumbersAsDrawn(self, osd, inks, [NSString stringWithFormat:@"%@ OSD %@", name, pair[0]]);
+        }
+    }
+}
+
+// Each glyph of a level shows in a layer of its own, and a level shown
+// before shows the very images it showed then, so it draws nothing new.
+- (void)testALevelShowsAGlyphLayerEachAndDrawsEachGlyphOnce {
+    QLMSkin *skin = QLMBuiltInSkin(@"modern");
+    QLMSkinDisplayView *display = [[QLMSkinDisplayView alloc] initWithSkin:skin];
+    display.frame = (NSRect){NSZeroPoint, [skin element:@"display"].frame.size};
+    display.level = @"−40.0";
+    (void)QLMTestComposite(display);
+    NSUInteger materials = [display skinMaterials:display.layers].count;
+    CALayer *line = display.layer.sublayers[materials];
+    NSArray *(^shown)(void) = ^NSArray * {
+        NSMutableArray *contents = [NSMutableArray array];
+        for (CALayer *glyph in line.sublayers) {
+            if (!glyph.hidden && glyph.contents != nil) {
+                [contents addObject:glyph.contents];
+            }
+        }
+        return contents;
+    };
+    NSArray *first = shown();
+    XCTAssertEqual(first.count, 5u, @"−, 4, 0, the point, and 0");
+    display.level = @"−41.5";
+    XCTAssertEqual(shown().count, 5u);
+    XCTAssertNotEqualObjects(shown(), first);
+    display.level = @"−40.0";
+    XCTAssertEqualObjects(shown(), first);
+    display.level = @"—";
+    XCTAssertEqual(shown().count, 1u);
+    display.level = nil;
+    XCTAssertEqual(shown().count, 0u);
 }
 
 @end

@@ -111,7 +111,7 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
-// How long a level's change eases, ending slow.
+// How long a level's change eases, starting fast and ending slow.
 extern const CFTimeInterval QLMSkinEaseSeconds;
 
 // Whether a change in `view` eases: its window is seen, the user hasn't

@@ -4,6 +4,7 @@
 #import "QLMFakeBus.h"
 #import "QLMFakeBusWindowController.h"
 #import "QLMFormat.h"
+#import "QLMFrameCoalescer.h"
 #import "QLMHIDAdapter.h"
 #import "QLMMainMenu.h"
 #import "QLMMainWindowController.h"
@@ -56,6 +57,8 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 @property (nonatomic, copy, nullable) NSString *statusTip;
 @property (nonatomic) QLMOSDController *osdController;
 @property (nonatomic) QLMSkinChoice *skinChoice;
+// The windows draw the newest snapshot once a main-queue turn at most.
+@property (nonatomic) QLMFrameCoalescer<QLMSnapshot *> *frames;
 #if DEBUG
 // A debug command's answer to the louder hand-back alert, while its quit runs.
 @property (nonatomic, nullable) NSNumber *debugQuitAnswer;
@@ -124,6 +127,10 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     self.statusItem.button.action = @selector(togglePopover:);
     [self renderStatusItem];
     self.osdController = [[QLMOSDController alloc] initWithPreferences:self.preferences skin:self.skinChoice.skin];
+    __weak QLMAppDelegate *weakSelf = self;
+    self.frames = [[QLMFrameCoalescer alloc] initWithApply:^(QLMSnapshot *snapshot) {
+        [weakSelf drawSnapshot:snapshot];
+    }];
 
     [self startSystemDimmed:NO];
     if (self.preferences.wakesAtLaunch) {
@@ -319,6 +326,8 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 - (void)restartSystem {
     QLMSystem *old = self.system;
     [old setSnapshotHandler:nil queue:dispatch_get_main_queue()];
+    // The old bus's, as self.bus still names it. No snapshot reaches it now.
+    [self.kept flushKeeping:old.snapshot];
     [self.preferences flushKept];
     __weak QLMAppDelegate *weakSelf = self;
     [old stopWithCompletion:^{
@@ -329,15 +338,22 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
     }];
 }
 
+// What a snapshot keeps, and what it alerts, goes at once, every snapshot.
+// What it draws waits for the main queue's next turn, and draws the newest.
+// Each window draws only while it is seen.
 - (void)showSnapshot:(QLMSnapshot *)snapshot {
     [self.monitorList updateWithSnapshot:snapshot];
     [self.alerts updateWithMonitorList:self.monitorList];
+    [self.kept keepFromSnapshot:snapshot];
+    [self.frames submit:snapshot];
+}
+
+- (void)drawSnapshot:(QLMSnapshot *)snapshot {
     [self.popoverController refresh];
     [self.mainWindowController refresh];
     [self.monitorsController refresh];
     [self.settingsController refresh];
     [self.fakeBusController refresh];
-    [self.kept keepFromSnapshot:snapshot];
     [self renderStatusItem];
     [self.osdController takeSnapshot:snapshot];
 }
@@ -592,7 +608,10 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 
 @implementation QLMAppDelegate (Debug)
 
+// A verb reads the windows as they are, so what waits for a frame draws
+// first.
 - (QLMSnapshot *)debugSnapshot {
+    [self.frames flush];
     return self.monitorList.snapshot;
 }
 
@@ -637,6 +656,7 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 }
 
 - (NSString *)debugQuitGLMTitle {
+    [self.frames flush];
     return self.popoverController.quitGLMTitle;
 }
 
@@ -671,6 +691,7 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 }
 
 - (void)debugDrawWindows {
+    [self.frames flush];
     [self.mainWindowController drawWhileOpen];
     [self.monitorsController drawWhileOpen];
     [self.settingsController drawWhileOpen];

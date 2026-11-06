@@ -1,5 +1,7 @@
 #import <Foundation/Foundation.h>
 
+#import "QLMScheduler.h"
+
 @class QLMFakeBus;
 @class QLMKnownLease;
 @class QLMSnapshot;
@@ -28,22 +30,34 @@ extern const NSTimeInterval QLMOSDSecondsStep;
 // How long a raise of the kept level or knob reading may wait to be written.
 extern const NSTimeInterval QLMKeptRaiseDelay;
 
-// Runs the block once, after the delay, on the main queue.
-typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
-
 // What one bus keeps across launches: the app's level, System's mute record,
-// and the leases. The real monitors and the fake bus each keep their own, so
-// nothing set on the fake bus reaches the real monitors. On the main queue.
+// the leases, and the knob's last reading. The real monitors and the fake
+// bus each keep their own, so nothing set on the fake bus reaches the real
+// monitors. On the main queue. "Stored" means this process's NSUserDefaults,
+// as the main queue reads them.
+//
+// TRAP: the level stored is never louder than the last level System played,
+// after any snapshot and after any stop, so what a crash leaves can only be
+// quieter than what was heard. So:
+// - A snapshot's level is kept as it plays, under the ceiling at the time.
+// - A level or a reading lower than the one stored is written before
+//   keepFromSnapshot: returns, with whatever waits.
+// - A raise waits up to QLMKeptRaiseDelay, then goes.
+// - A stop writes what waits, and lowers a level stored above the ceiling.
+//   It never raises what is stored, so a second copy of the app on the same
+//   defaults can't raise what the other wrote.
+// - Each snapshot compares with what is stored, so a louder level written
+//   from outside is put right at the next one.
+// Reads see what waits. The mute record's three keys are written together.
 @interface QLMBusPreferences : NSObject
 
-// Each snapshot's level and knob reading are written at most once each
-// QLMKeptRaiseDelay. TRAP: a level or a reading lower than the one written
-// writes both at once, so what a crash leaves can only be quieter than what
-// was heard. A stopped System's snapshot writes them at once too. Reads see
-// what waits. dispatch_after on the main queue until set.
-@property (nonatomic, copy) QLMKeptScheduler scheduler;
+// When a waiting raise goes. QLMMainQueueScheduler() until set.
+@property (nonatomic, copy) QLMScheduler scheduler;
 // Writes what waits now. Call at every stop.
 - (void)flush;
+// A stop whose snapshots no longer arrive: keeps System's last, so a
+// louder level put in the defaults since is put right, then flushes.
+- (void)flushKeeping:(nullable QLMSnapshot *)last;
 
 // The app's own level. At connect System keeps it until the knob turns.
 // Never above the ceiling.
@@ -53,12 +67,12 @@ typedef void (^QLMKeptScheduler)(NSTimeInterval delay, dispatch_block_t block);
 // System's mute record: the muted hardware IDs, whether mute all is on, and
 // the monitors the user lifted it from. No reply reports a monitor's mute,
 // so the record is the truth.
-@property (nonatomic, copy) NSSet<NSData *> *mutedHardwareIDs;
-@property (nonatomic) BOOL mutingAll;
-@property (nonatomic, copy) NSSet<NSData *> *liftedHardwareIDs;
+@property (nonatomic, readonly) NSSet<NSData *> *mutedHardwareIDs;
+@property (nonatomic, readonly) BOOL mutingAll;
+@property (nonatomic, readonly) NSSet<NSData *> *liftedHardwareIDs;
 // The session each monitor last held, which the next System checks before
 // it leases anything.
-@property (nonatomic, copy) NSArray<QLMKnownLease *> *knownLeases;
+@property (nonatomic, readonly) NSArray<QLMKnownLease *> *knownLeases;
 // The knob's last reading: whether one was read, and then its tenths of a
 // dB, or nil with no knob in. The next start compares the knob with it. A
 // reading kept wrong reads as no knob, so the next start can only cap.

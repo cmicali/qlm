@@ -6,6 +6,7 @@
 #import "QLMSkinControls.h"
 #import "QLMSkinLayers.h"
 #import "QLMSkinLayersTesting.h"
+#import "QLMViewsTesting.h"
 #import "QLMSkinTestBitmaps.h"
 #import "QLMTestSupport.h"
 
@@ -19,7 +20,6 @@
 
 static BOOL QLMTestSeen = NO;
 static BOOL QLMTestReduced = NO;
-static BOOL (*QLMTestRealSeen)(NSWindow *);
 static BOOL (*QLMTestRealReduced)(void);
 
 static BOOL QLMTestWindowIsSeen(NSWindow *window) {
@@ -55,11 +55,10 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
 
 - (void)setUp {
     [super setUp];
-    QLMTestRealSeen = QLMSkinEaseWindowIsSeen;
     QLMTestRealReduced = QLMSkinEaseMotionIsReduced;
     QLMTestSeen = YES;
     QLMTestReduced = NO;
-    QLMSkinEaseWindowIsSeen = QLMTestWindowIsSeen;
+    QLMWindowIsSeenOverride = QLMTestWindowIsSeen;
     QLMSkinEaseMotionIsReduced = QLMTestMotionIsReduced;
     _window = QLMTestOffscreenWindow(NSMakeSize(400, 400));
     _knob = [[QLMTestCountingKnob alloc] initWithSkin:QLMBuiltInSkin(@"modern")];
@@ -73,7 +72,7 @@ static NSString *const QLMTestTurn = @"transform.rotation.z";
 
 - (void)tearDown {
     [_window close];
-    QLMSkinEaseWindowIsSeen = QLMTestRealSeen;
+    QLMWindowIsSeenOverride = NULL;
     QLMSkinEaseMotionIsReduced = QLMTestRealReduced;
     [super tearDown];
 }

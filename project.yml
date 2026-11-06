@@ -237,12 +237,17 @@ targets:
       - qlm/App/QLMAlerts.m
       - qlm/App/QLMDebugChannel.m
       - qlm/App/QLMFormat.m
+      - qlm/App/QLMFrameCoalescer.m
       - qlm/App/QLMMainMenu.m
       - qlm/App/QLMMainWindowController.m
       - qlm/App/QLMMainWindowModel.m
       - qlm/App/QLMMonitorList.m
+      - qlm/App/QLMOSDController.m
       - qlm/App/QLMOSDRule.m
       - qlm/App/QLMPreferences.m
+      - qlm/App/QLMReadoutThrottle.m
+      - qlm/App/QLMScheduler.m
+      - qlm/App/QLMSettingsWindowController.m
       - qlm/App/QLMSkin.m
       - qlm/App/QLMSkinChoice.m
       # It draws into a bitmap, which needs no NSApplication.
@@ -254,6 +259,7 @@ targets:
       # out of any window and in an offscreen one.
       - qlm/App/QLMKnobControl.m
       - qlm/App/QLMSkinControls.m
+      - qlm/App/QLMSkinGlyphs.m
       - qlm/App/QLMSkinLayers.m
       - qlm/App/QLMSkinView.m
       # The main window asks it whether it is seen.

@@ -320,7 +320,7 @@ NSDictionary<NSAttributedStringKey, id> *QLMSkinTextAttributes(NSFont *font, NSC
     };
 }
 
-static NSRect QLMSkinLineBox(NSFont *font, NSRect frame) {
+NSRect QLMSkinLineBox(NSFont *font, NSRect frame) {
     CGFloat line = ceil(font.ascender - font.descender);
     return NSMakeRect(frame.origin.x, frame.origin.y + (frame.size.height - line) / 2, frame.size.width, line);
 }
@@ -389,10 +389,7 @@ void QLMSkinDrawSlotInInk(NSString *text, QLMSkinTextSlot *slot, NSRect frame, C
     [NSGraphicsContext restoreGraphicsState];
 }
 
-void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits, CGFloat alpha) {
-    if (text.length == 0) {
-        return;
-    }
+NSAttributedString *QLMSkinSlotString(NSString *text, QLMSkinTextSlot *slot, CGFloat scale, BOOL monoDigits, CGFloat alpha) {
     NSColor *color = [QLMSkinNSColor(slot.color) colorWithAlphaComponent:slot.color.alpha * alpha];
     NSMutableAttributedString *string = [[NSMutableAttributedString alloc]
         initWithString:text
@@ -402,5 +399,12 @@ void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloa
         NSColor *accent = [QLMSkinNSColor(slot.accentColor) colorWithAlphaComponent:slot.accentColor.alpha * alpha];
         [string addAttribute:NSForegroundColorAttributeName value:accent range:NSMakeRange(text.length - 1, 1)];
     }
-    QLMSkinDrawAttributed(string, frame);
+    return string;
+}
+
+void QLMSkinDrawSlot(NSString *text, QLMSkinTextSlot *slot, NSRect frame, CGFloat scale, BOOL monoDigits, CGFloat alpha) {
+    if (text.length == 0) {
+        return;
+    }
+    QLMSkinDrawAttributed(QLMSkinSlotString(text, slot, scale, monoDigits, alpha), frame);
 }

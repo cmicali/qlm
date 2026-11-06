@@ -86,6 +86,11 @@ NS_ASSUME_NONNULL_BEGIN
 // the display's tooltip gives it.
 @property (nonatomic, readonly) NSString *outputText;
 @property (nonatomic, readonly) NSString *maxText;
+// What the level and the OUTPUT line say apart from their numbers: none
+// yet, the level, dimmed, muted, or the apply's error. A number readout
+// waits its turn, but a change of kind shows at once.
+@property (nonatomic, readonly) NSString *levelKind;
+@property (nonatomic, readonly) NSString *outputKind;
 // The display dims while System is stopped.
 @property (nonatomic, readonly) BOOL displayDisabled;
 

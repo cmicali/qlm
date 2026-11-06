@@ -1,11 +1,16 @@
 #import "QLMSkinLayers.h"
 
+#import "QLMSkinControls.h"
 #import "QLMSkinDrawing.h"
 #import "QLMSkinImages.h"
 #import "QLMSkinLayersTesting.h"
 #import "QLMViews.h"
 
-const CFTimeInterval QLMSkinEaseSeconds = 0.14;
+// The knob reads every 107 ms. An ease past that lags a turn: 140 ms
+// ending slow kept the pointer about 56 ms behind. This one moves half
+// way within a frame and is 90% there by 38 ms, so a turn shows about
+// 17 ms behind the level, yet a step still glides.
+const CFTimeInterval QLMSkinEaseSeconds = 0.08;
 
 static NSInteger QLMSkinEaseHolds;
 
@@ -14,17 +19,25 @@ static BOOL QLMSkinMotionIsReduced(void) {
     return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
 }
 
-BOOL (*QLMSkinEaseWindowIsSeen)(NSWindow *window) = QLMWindowIsSeen;
 BOOL (*QLMSkinEaseMotionIsReduced)(void) = QLMSkinMotionIsReduced;
 
 BOOL QLMSkinEases(NSView *view) {
-    return QLMSkinEaseHolds == 0 && QLMSkinEaseWindowIsSeen(view.window) && !QLMSkinEaseMotionIsReduced();
+    return QLMSkinEaseHolds == 0 && QLMWindowIsSeen(view.window) && !QLMSkinEaseMotionIsReduced();
 }
 
 void QLMSkinWithoutEase(void (^block)(void)) {
     QLMSkinEaseHolds++;
     block();
     QLMSkinEaseHolds--;
+}
+
+static CAMediaTimingFunction *QLMSkinEaseTiming(void) {
+    static CAMediaTimingFunction *timing;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        timing = [CAMediaTimingFunction functionWithControlPoints:0.25 :0.8 :0.35 :1];
+    });
+    return timing;
 }
 
 // The ease starts from the presentation only while an ease runs. A layer
@@ -42,7 +55,7 @@ void QLMSkinSetLayerValue(CALayer *layer, NSString *keyPath, id value, BOOL ease
         ease.fromValue = from;
         ease.toValue = value;
         ease.duration = QLMSkinEaseSeconds;
-        ease.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+        ease.timingFunction = QLMSkinEaseTiming();
         [layer addAnimation:ease forKey:keyPath];
     } else {
         [layer removeAnimationForKey:keyPath];
@@ -50,7 +63,11 @@ void QLMSkinSetLayerValue(CALayer *layer, NSString *keyPath, id value, BOOL ease
 }
 
 #if DEBUG
+// Shows what waits its turn too, so a screenshot shows the level.
 static void QLMSkinFinishEasesIn(NSView *view) {
+    if ([view respondsToSelector:@selector(flushReadouts)]) {
+        [(id)view flushReadouts];
+    }
     if ([view conformsToProtocol:@protocol(QLMSkinLayered)] && [view respondsToSelector:@selector(layers)]) {
         for (CALayer *layer in ((QLMSkinLayers *)[(id)view layers]).movingLayers) {
             [layer removeAllAnimations];

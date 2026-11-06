@@ -5,6 +5,8 @@ NS_ASSUME_NONNULL_BEGIN
 // A wrapping label in the small system font and the secondary color. A
 // width of 0 leaves the wrap to Auto Layout.
 NSTextField *QLMNoteLabel(NSString *text, CGFloat width);
+// The same, of a subclass of NSTextField.
+NSTextField *QLMNoteLabelOfClass(Class labelClass, NSString *text, CGFloat width);
 
 // A button in the small control size and font.
 NSButton *QLMSmallButton(NSString *title, id _Nullable target, SEL _Nullable action);
