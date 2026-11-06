@@ -50,8 +50,11 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)init NS_UNAVAILABLE;
 
 // `hardwareID`, 3 bytes, is the monitor an outgoing frame names. A reply
-// takes its request's. A request that expects a reply stays in flight until
-// a reply, a no-answer, a timeout, or an unreadable frame ends it.
+// takes its request's. A request or sync that expects a reply stays in
+// flight until a reply, a no-answer, or an unreadable reply ends it, or the
+// next one, or one not taken. A timeout names it and leaves it in flight:
+// a sync's wait goes on past it, and a request's late reply comes as a
+// stray.
 - (void)record:(QLMTrafficKind)kind
        message:(const QLMMessage *_Nullable)message
     hardwareID:(const uint8_t *_Nullable)hardwareID

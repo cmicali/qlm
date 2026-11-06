@@ -221,8 +221,9 @@ static NSDictionary *QLMDebugWindows(id<QLMDebugApp> app) {
 
 // The traffic window's state, and its last `count` rows shown, 0 for all.
 static NSDictionary *QLMDebugTraffic(QLMTrafficWindowController *_Nullable traffic, NSUInteger count) {
+    [traffic drawWhileOpen];
     QLMTrafficLog *log = traffic.log;
-    NSArray<QLMTrafficRow *> *shown = log.shownRows ?: @[];
+    NSArray<QLMTrafficRow *> *shown = traffic.shown ?: @[];
     NSUInteger first = count == 0 || count >= shown.count ? 0 : shown.count - count;
     NSArray<QLMTrafficRow *> *rows = [shown subarrayWithRange:NSMakeRange(first, shown.count - first)];
     NSMutableArray *json = [NSMutableArray array];
@@ -231,7 +232,7 @@ static NSDictionary *QLMDebugTraffic(QLMTrafficWindowController *_Nullable traff
     }
     return @{
         @"ok": @YES,
-        @"open": @(traffic.window.visible),
+        @"open": @(traffic.open),
         @"paused": @(traffic.paused),
         @"held": @(log.rowCount),
         @"shown": @(shown.count),
@@ -245,7 +246,7 @@ static NSDictionary *QLMDebugTraffic(QLMTrafficWindowController *_Nullable traff
 // The traffic window while it is open, or nil.
 static QLMTrafficWindowController *_Nullable QLMDebugOpenTraffic(id<QLMDebugApp> app) {
     QLMTrafficWindowController *traffic = app.debugTraffic;
-    return traffic.window.visible ? traffic : nil;
+    return traffic.open ? traffic : nil;
 }
 
 static NSDictionary *QLMDebugTrafficClosed(void) {
@@ -373,7 +374,7 @@ static NSArray<NSDictionary *> *QLMDebugOwnVerbs(void) {
             } else if ([filter isEqualToString:@"target"]) {
                 NSString *key = all ? nil : QLMDebugTargetKey(traffic.log, value);
                 if (!all && key == nil) {
-                    return QLMDebugError(@"no frame to %@ is held. A target is FF, 01, session 0B, or a hardware ID", value);
+                    return QLMDebugError(@"no frame to %@ is held. A target is FF, 01, session0B, or a hardware ID such as 112233", value);
                 }
                 refusal = [traffic filterTarget:key];
             } else {

@@ -63,6 +63,7 @@ typedef NS_ENUM(NSInteger, QLMTrafficChange) {
 // from that System are skipped, so a new handler's backlog adds only what's
 // new. A new System's entries number from 1 again.
 - (QLMTrafficChange)addEntries:(NSArray<QLMTrafficEntry *> *)entries fromSystem:(id)system;
+// Drops every row, and the opcode and target filters with them.
 - (void)clear;
 
 @property (nonatomic, readonly) NSArray<QLMTrafficRow *> *rows;

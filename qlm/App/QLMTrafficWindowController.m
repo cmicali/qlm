@@ -17,7 +17,8 @@ static NSUserInterfaceItemIdentifier const QLMTrafficColumnWhat = @"what";
 @property (nonatomic) NSPopUpButton *opcodePopup;
 @property (nonatomic) NSPopUpButton *targetPopup;
 @property (nonatomic) NSTextField *countLabel;
-@property (nonatomic) NSArray<QLMTrafficRow *> *shown;  // what the table draws
+@property (nonatomic, readwrite) NSArray<QLMTrafficRow *> *shown;
+@property (nonatomic, readwrite, getter=isOpen) BOOL open;
 @property (nonatomic) BOOL subscribed;
 // What the table hasn't drawn: rows appended, or a change that redraws all.
 @property (nonatomic) QLMTrafficChange pending;
@@ -138,7 +139,7 @@ static NSUserInterfaceItemIdentifier const QLMTrafficColumnWhat = @"what";
     }
     [self unsubscribe];
     _system = system;
-    if (self.window.visible) {
+    if (self.open) {
         [self subscribe];
     }
 }
@@ -189,11 +190,13 @@ static NSUserInterfaceItemIdentifier const QLMTrafficColumnWhat = @"what";
 
 - (void)showWindow:(id)sender {
     [super showWindow:sender];
+    self.open = YES;
     [self subscribe];
     [self render];
 }
 
 - (void)windowWillClose:(NSNotification *)notification {
+    self.open = NO;
     [self unsubscribe];
 }
 
@@ -206,7 +209,7 @@ static NSUserInterfaceItemIdentifier const QLMTrafficColumnWhat = @"what";
 
 #if DEBUG
 - (void)drawWhileOpen {
-    if (self.window.visible) {
+    if (self.open) {
         [self render];
     }
 }
@@ -217,7 +220,7 @@ static NSUserInterfaceItemIdentifier const QLMTrafficColumnWhat = @"what";
     if (self.log.choicesChanges != self.choicesShown) {
         [self rebuildFilterPopups];
     }
-    if (self.pending != QLMTrafficChangeNone) {
+    if (self.pending != QLMTrafficChangeNone && !self.paused) {
         NSClipView *clip = self.table.enclosingScrollView.contentView;
         BOOL atEnd = NSMaxY(clip.documentVisibleRect) >= NSMaxY(self.table.bounds) - self.table.rowHeight * 2;
         NSUInteger drawn = self.shown.count;
@@ -234,7 +237,7 @@ static NSUserInterfaceItemIdentifier const QLMTrafficColumnWhat = @"what";
         }
     }
     NSString *count = [NSString stringWithFormat:@"%lu frames held, %lu shown.", (unsigned long)self.log.rowCount,
-                                                 (unsigned long)self.log.shownCount];
+                                                 (unsigned long)self.shown.count];
     if (self.paused) {
         count = [count stringByAppendingString:@" Paused: the list holds still while frames arrive."];
     }
@@ -341,7 +344,7 @@ static NSUserInterfaceItemIdentifier const QLMTrafficColumnWhat = @"what";
 - (NSArray<QLMTrafficRow *> *)chosenRows {
     NSIndexSet *selected = self.table.selectedRowIndexes;
     if (selected.count == 0) {
-        return self.log.shownRows;
+        return self.shown;
     }
     NSMutableArray<QLMTrafficRow *> *rows = [NSMutableArray array];
     [selected enumerateIndexesUsingBlock:^(NSUInteger index, BOOL *stop) {

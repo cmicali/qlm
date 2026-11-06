@@ -101,7 +101,7 @@ static NSString *QLMReplyText(QLMMessage reply, const QLMMessage *request) {
 // The builder clamps to the ceiling (testEveryVolumeBuilderHonorsTheCeiling),
 // so a frame at it says so. One above it never goes out, and says so loudly.
 - (void)testAVolumeAtTheCeilingSaysSo {
-    XCTAssertEqualObjects(QLMRequestText(QLMCommandVolume(-10, -30), -30, 0), @"volume −30.0 dB, held at the ceiling");
+    XCTAssertEqualObjects(QLMRequestText(QLMCommandVolume(-10, -30), -30, 0), @"volume −30.0 dB, at the ceiling");
     XCTAssertEqualObjects(QLMRequestText(QLMCommandVolume(-42.5, -30), -30, 0), @"volume −42.5 dB");
     XCTAssertEqualObjects(QLMRequestText(QLMCommandVolume(-20, 0), -30, 0), @"volume −20.0 dB, ABOVE the ceiling −30.0 dB");
 }
@@ -140,6 +140,8 @@ static NSString *QLMReplyText(QLMMessage reply, const QLMMessage *request) {
     XCTAssertEqualObjects(QLMPlainRequestText(QLMCommandLevel(0x0B, QLMLevelWordForDecibels(-3.5))), @"level −3.50 dB");
     XCTAssertEqualObjects(QLMPlainRequestText(QLMCommandLevelUnknown(0x0B)), @"10 01 09 00 00 00, meaning unknown");
     XCTAssertEqualObjects(QLMPlainRequestText(QLMCommandCrossover(0x0B, 0x55)), @"crossover 85 Hz");
+    XCTAssertEqualObjects(QLMPlainRequestText(QLMCommandCrossover(0x0B, 0x01)), @"crossover 00 01, which hlm reads as full band",
+                          @"hlm §7");
     XCTAssertEqualObjects(QLMPlainRequestText(QLMCommandInputSync(0x0B)), @"3D 00 00, meaning unknown");
     XCTAssertEqualObjects(QLMPlainRequestText(QLMCommandRouting(0x0B, 0, 2, 0, 3)), @"routing: AES3, channel A and B");
     XCTAssertEqualObjects(QLMPlainRequestText(QLMCommandRouting(0x0B, 1, 2, 0, 0)),

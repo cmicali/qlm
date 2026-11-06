@@ -105,7 +105,7 @@ static void QLMPutVolume(QLMText *text, uint32_t word, const QLMDescribeContext 
         QLMMessage ceiling = QLMCommandVolume(QLMVolumeDecibelsMax, context->ceilingDecibels);
         uint32_t ceilingWord = QLMWord24(ceiling.payload + 1);
         if (word == ceilingWord) {
-            QLMPut(text, ", held at the ceiling");
+            QLMPut(text, ", at the ceiling");
         } else if (word > ceilingWord) {
             QLMPut(text, ", ABOVE the ceiling ");
             QLMPutDecibels(text, context->ceilingDecibels, 1);
@@ -316,7 +316,11 @@ static bool QLMPutRequest(QLMText *text, const QLMMessage *m, const QLMDescribeC
         if (n != 3) {
             return false;
         }
-        QLMPut(text, "crossover %u Hz", (unsigned)(p[1] << 8 | p[2]));
+        if (p[1] == 0x00 && p[2] == 0x01) {
+            QLMPut(text, "crossover 00 01, which hlm reads as full band");
+        } else {
+            QLMPut(text, "crossover %u Hz", (unsigned)(p[1] << 8 | p[2]));
+        }
         return true;
     case 0x3C:
     case 0x3E:

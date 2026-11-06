@@ -311,6 +311,8 @@ static NSString *QLMAddressText(uint8_t address) {
     [_shown removeAllObjects];
     [_opcodes removeAllObjects];
     [_targets removeAllObjects];
+    _opcode = nil;
+    _targetKey = nil;
     _choicesChanges += 1;
 }
 

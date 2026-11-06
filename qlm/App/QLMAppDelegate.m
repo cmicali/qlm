@@ -53,8 +53,10 @@ static const NSTimeInterval QLMSnapshotAllowance = 0.5;
 // QLM_REPLAY's capture, chosen once at launch, which every System plays
 // back in place of any bus. Its record is its own, wiped at each launch, so
 // a replay reaches neither the real monitors' record nor the fake bus's.
+// TRAP: QLM_REPLAY set but unreadable runs the fake bus, never the setting's
+// bus, which a Debug build shares with the installed app.
 @property (nonatomic, nullable) QLMCapture *replayCapture;
-@property (nonatomic, nullable) QLMBusPreferences *replayKept;
+@property (nonatomic, nullable) QLMBusPreferences *replayKept;  // set whenever QLM_REPLAY is
 #endif
 // What System's bus keeps across launches. It follows the bus, so a
 // snapshot from the fake bus never reaches the real monitors' store.
@@ -113,16 +115,17 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 
 #if DEBUG
 // QLM_REPLAY names a capture's reports.txt, which a Debug build plays back
-// as the adapter, for the traffic window and the UI. Nil without it.
-static QLMCapture *_Nullable QLMDebugReplayCapture(void) {
+// as the adapter, for the traffic window and the UI.
+static NSString *_Nullable QLMDebugReplayPath(void) {
     const char *path = getenv("QLM_REPLAY");
-    if (path == NULL || path[0] == '\0') {
-        return nil;
-    }
+    return path == NULL || path[0] == '\0' ? nil : @(path);
+}
+
+static QLMCapture *_Nullable QLMDebugReplayCapture(NSString *path) {
     NSError *error = nil;
-    QLMCapture *capture = [QLMCapture captureWithContentsOfFile:@(path) error:&error];
+    QLMCapture *capture = [QLMCapture captureWithContentsOfFile:path error:&error];
     if (capture == nil) {
-        NSLog(@"qlm: QLM_REPLAY %s does not read: %@", path, error.localizedDescription);
+        NSLog(@"qlm: QLM_REPLAY %@ does not read, so qlm runs the fake bus: %@", path, error.localizedDescription);
     }
     return capture;
 }
@@ -161,8 +164,9 @@ static QLMCapture *_Nullable QLMDebugReplayCapture(void) {
     }];
 
 #if DEBUG
-    self.replayCapture = QLMDebugReplayCapture();
-    if (self.replayCapture != nil) {
+    NSString *replay = QLMDebugReplayPath();
+    if (replay != nil) {
+        self.replayCapture = QLMDebugReplayCapture(replay);
         NSString *suite = @"com.commonwealthrecordings.qlm.replay";
         NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
         [defaults removePersistentDomainForName:suite];
@@ -210,7 +214,7 @@ static QLMCapture *_Nullable QLMDebugReplayCapture(void) {
 // System drives the GLM adapter: neither the fake bus nor a replay.
 - (BOOL)drivesAdapter {
 #if DEBUG
-    if (self.replayCapture != nil) {
+    if (self.replayKept != nil) {
         return NO;
     }
 #endif
@@ -263,7 +267,11 @@ static QLMCapture *_Nullable QLMDebugReplayCapture(void) {
         adapter = [[QLMReplayAdapter alloc] initWithCapture:self.replayCapture];
     }
 #endif
-    if (adapter == nil && self.preferences.usesAdapter) {
+    BOOL realAdapter = self.preferences.usesAdapter;
+#if DEBUG
+    realAdapter = realAdapter && self.replayKept == nil;
+#endif
+    if (adapter == nil && realAdapter) {
         QLMHIDAdapter *hid = [[QLMHIDAdapter alloc] init];
         hid.launchWatch = ^dispatch_block_t(void (^changed)(NSString *executablePath)) {
             return QLMWatchLaunches(changed);

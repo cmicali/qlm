@@ -47,9 +47,9 @@ static QLMTrafficEntry *QLMEntry(uint64_t number, QLMTrafficKind kind, QLMMessag
     XCTAssertEqualObjects(rows[1].targetText, rows[0].targetText, @"a reply shows its request's target");
     XCTAssertEqualObjects(rows[1].descriptionText, @"no new telemetry, to #1");
     XCTAssertEqual(rows[1].opcode, 0x08);
-    XCTAssertEqualObjects(rows[2].descriptionText, @"volume −30.0 dB, held at the ceiling");
+    XCTAssertEqualObjects(rows[2].descriptionText, @"volume −30.0 dB, at the ceiling");
     XCTAssertEqualObjects(rows[2].targetKey, @"FF");
-    XCTAssertTrue([rows[2].line hasSuffix:@"→  broadcast FF  FF 1F 04 0C 37  volume −30.0 dB, held at the ceiling"], @"%@", rows[2].line);
+    XCTAssertTrue([rows[2].line hasSuffix:@"→  broadcast FF  FF 1F 04 0C 37  volume −30.0 dB, at the ceiling"], @"%@", rows[2].line);
 }
 
 // A new handler's backlog repeats what the log holds, and a new System
@@ -85,6 +85,10 @@ static QLMTrafficEntry *QLMEntry(uint64_t number, QLMTrafficKind kind, QLMMessag
     XCTAssertEqual(log.shownRows.count, 2u);
     [log addEntries:[self entriesFrom:4] fromSystem:self];
     XCTAssertEqual(log.shownRows.count, 4u, @"new rows pass the filters as they come");
+    log.opcode = @0x08;
+    [log clear];
+    XCTAssertNil(log.opcode, @"a clear drops the choices, and the filters on them");
+    XCTAssertNil(log.targetKey);
 }
 
 - (void)testTheLogKeepsItsLimit {

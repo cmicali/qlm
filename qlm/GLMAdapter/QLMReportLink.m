@@ -302,7 +302,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
     BOOL reads = status == QLMReportOK || status == QLMReportNoAnswer;
     QLMReportLinkRequest *request = _waiting;
     if (request == nil) {
-        [self tap:reads ? QLMTrafficStray : QLMTrafficUnreadable message:&reply];
+        [self tap:QLMTrafficStray message:reads ? &reply : NULL];
         _strayReplies += 1;
         return;
     }
@@ -310,7 +310,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
         BOOL answers = status == QLMReportOK && (request.shape == QLMReplyShapeAdapterStatus ? QLMReplyIsAdapterStatus(&reply)
                                                                                              : QLMReplyIsSystemInfo(&reply));
         if (!answers) {
-            [self tap:reads ? QLMTrafficStray : QLMTrafficUnreadable message:&reply];
+            [self tap:QLMTrafficStray message:reads ? &reply : NULL];
             _strayReplies += 1;
             return;
         }
@@ -354,7 +354,7 @@ static NSData *_Nullable QLMReportData(const QLMMessage *message, NSError **erro
 // An unreadable frame's message is not handed over.
 - (void)tap:(QLMTrafficKind)kind message:(const QLMMessage *_Nullable)message {
     if (_trafficTap != nil) {
-        _trafficTap(kind, kind == QLMTrafficUnreadable || kind == QLMTrafficTimeout ? NULL : message);
+        _trafficTap(kind, kind == QLMTrafficUnreadable ? NULL : message);
     }
 }
 

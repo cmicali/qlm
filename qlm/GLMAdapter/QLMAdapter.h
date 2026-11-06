@@ -46,9 +46,9 @@ typedef NS_ENUM(NSInteger, QLMTrafficKind) {
     QLMTrafficNotTaken,     // a request or sync whose write failed, so it may not have gone out
     QLMTrafficReply,        // the reply to the request or sync in flight
     QLMTrafficNoAnswer,     // the adapter's 01 7E for it
-    QLMTrafficStray,        // a reply no request waited for, or one a sync dropped
-    QLMTrafficUnreadable,   // input that did not read as a frame; no message
-    QLMTrafficTimeout,      // the reply did not come in time; no message
+    QLMTrafficStray,        // a reply no request waited for, or one a sync dropped; no message if it did not read
+    QLMTrafficUnreadable,   // the reply waited for did not read; no message
+    QLMTrafficTimeout,      // the reply did not come in time; no message. A sync's wait may go on.
 };
 
 // Host to adapter: a request, a sync, or one not taken.
@@ -87,8 +87,8 @@ typedef void (^QLMTrafficTap)(QLMTrafficKind kind, const QLMMessage *_Nullable m
 // with why, as with no adapter.
 - (QLMReconnectResult)reconnect;
 
-// Taps every frame it sends and receives, for display only. Set on the
-// queue. Nil, the default, costs nothing.
+// Taps every frame it sends and receives, for display only. Set before
+// start, or on the queue. Nil, the default, costs nothing.
 - (void)setTrafficTap:(nullable QLMTrafficTap)tap;
 
 @end

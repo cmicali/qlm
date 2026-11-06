@@ -40,6 +40,25 @@
     XCTAssertEqual([recorder entriesAfter:4].count, 2u);
 }
 
+// A sync's wait goes on past its timeout, so its late reply still answers
+// it (QLMReportLink.h). One the adapter did not take answers nothing.
+- (void)testATimeoutLeavesItsRequestInFlight {
+    QLMTrafficRecorder *recorder = [[QLMTrafficRecorder alloc] initWithCapacity:8];
+    QLMMessage sync = QLMCommandPoll(QLMAddressAdapter);
+    QLMMessage status = QLMMakeMessage(0x01, 0x09, 0x33, 0x31);
+    [recorder record:QLMTrafficSync message:&sync hardwareID:NULL ceiling:-30];
+    [recorder record:QLMTrafficTimeout message:NULL hardwareID:NULL ceiling:-30];
+    [recorder record:QLMTrafficStray message:NULL hardwareID:NULL ceiling:-30];
+    [recorder record:QLMTrafficReply message:&status hardwareID:NULL ceiling:-30];
+    [recorder record:QLMTrafficNotTaken message:&sync hardwareID:NULL ceiling:-30];
+    [recorder record:QLMTrafficStray message:&status hardwareID:NULL ceiling:-30];
+    NSArray<QLMTrafficEntry *> *entries = [recorder entriesAfter:0];
+    XCTAssertEqual(entries[1].answers, 1u);
+    XCTAssertEqual(entries[2].answers, 0u, @"an unreadable stray ends no wait");
+    XCTAssertEqual(entries[3].answers, 1u);
+    XCTAssertEqual(entries[5].answers, 0u);
+}
+
 - (void)testTheRingKeepsTheLast {
     QLMTrafficRecorder *recorder = [[QLMTrafficRecorder alloc] initWithCapacity:4];
     QLMMessage poll = QLMCommandPoll(0x0B);

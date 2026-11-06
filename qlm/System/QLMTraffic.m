@@ -105,9 +105,9 @@ typedef struct {
     case QLMTrafficSync:
         _inFlight = message != NULL && QLMReportExpectsReply(message) ? _lastNumber : 0;
         break;
+    case QLMTrafficTimeout:
     case QLMTrafficReply:
     case QLMTrafficNoAnswer:
-    case QLMTrafficTimeout:
     case QLMTrafficUnreadable: {
         slot->answers = _inFlight;
         const QLMTrafficSlot *request = [self slotNumbered:_inFlight];
@@ -116,10 +116,14 @@ typedef struct {
             slot->hasHardwareID = request->hasHardwareID;
             memcpy(slot->hardwareID, request->hardwareID, sizeof slot->hardwareID);
         }
-        _inFlight = 0;
+        if (kind != QLMTrafficTimeout) {
+            _inFlight = 0;
+        }
         break;
     }
     case QLMTrafficNotTaken:
+        _inFlight = 0;
+        break;
     case QLMTrafficStray:
         break;
     }

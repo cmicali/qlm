@@ -18,9 +18,13 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, nullable) QLMSystem *system;
 @property (nonatomic, nullable) QLMSetup *setup;
 @property (nonatomic, readonly) QLMTrafficLog *log;
+// Shown and not closed, minimized or not. It takes System's traffic then.
+@property (nonatomic, readonly, getter=isOpen) BOOL open;
+// The rows the table draws. While paused, they hold still.
+@property (nonatomic, readonly) NSArray<QLMTrafficRow *> *shown;
 
-// Paused, the list holds still. The frames still arrive, and show at once
-// on resume.
+// Paused, the list holds still, filters and all. The frames still
+// arrive, and show at once on resume.
 @property (nonatomic) BOOL paused;
 - (void)clear;
 
