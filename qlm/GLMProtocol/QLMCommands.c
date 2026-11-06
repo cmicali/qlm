@@ -83,6 +83,14 @@ QLMMessage QLMCommandAssignSession(const uint8_t hardwareID[3], uint8_t session)
     return QLMMessageMake(QLMAddressMulticast, payload, sizeof payload);
 }
 
+bool QLMLeaseHardwareID(const QLMMessage *message, uint8_t hardwareID[3]) {
+    if (message->address != QLMAddressMulticast || message->length != 5 || message->payload[0] != 0x02) {
+        return false;
+    }
+    memcpy(hardwareID, message->payload + 1, 3);
+    return true;
+}
+
 QLMMessage QLMCommandKeepAlive(void) {
     const uint8_t payload[] = {0x04};
     return QLMMessageMake(QLMAddressBroadcast, payload, sizeof payload);

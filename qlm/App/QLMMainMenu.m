@@ -64,6 +64,7 @@ NSMenu *QLMMainMenu(id<QLMMainMenuActions> app, id<QLMMainMenuControls> controls
     [window addItem:NSMenuItem.separatorItem];
     QLMItem(window, @"qlm", @selector(showMainWindow:), @"0", command, app);
     QLMItem(window, @"Monitors", @selector(showMonitors:), @"", 0, app);
+    QLMItem(window, @"Traffic", @selector(showTraffic:), @"", 0, app);
     [window addItem:NSMenuItem.separatorItem];
     QLMItem(window, @"Bring All to Front", @selector(arrangeInFront:), @"", 0, nil);
 

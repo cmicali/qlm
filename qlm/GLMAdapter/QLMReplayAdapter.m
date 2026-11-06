@@ -2,6 +2,7 @@
 
 @implementation QLMReplayAdapter {
     dispatch_queue_t _queue;
+    QLMTrafficTap _trafficTap;  // set and read on the queue
     id<QLMClock> _clock;
     // For each distinct output report, its unplayed exchanges, in order.
     NSMutableDictionary<NSData *, NSMutableArray<QLMCaptureExchange *> *> *_unplayed;
@@ -51,6 +52,10 @@
     _queue = NULL;
 }
 
+- (void)setTrafficTap:(nullable QLMTrafficTap)tap {
+    _trafficTap = [tap copy];
+}
+
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
@@ -78,6 +83,10 @@
     BOOL answered = exchange.answered;
     QLMMessage reply = answered ? exchange.reply : QLMMessageMake(0, NULL, 0);
     [_clock async:queue run:^{
+        QLMTrafficTap tap = self->_trafficTap;
+        if (tap != nil) {
+            QLMTapExchange(tap, &message, answered ? &reply : NULL);
+        }
         handler(answered ? &reply : NULL, nil);
     }];
 }

@@ -54,6 +54,7 @@ const NSInteger QLMFakeKnobBottomTenths = -1004;
 
 @implementation QLMFakeBus {
     dispatch_queue_t _queue;
+    QLMTrafficTap _trafficTap;  // set and read on the queue
     id<QLMClock> _clock;
     NSMutableArray<NSData *> *_sent;
 }
@@ -138,6 +139,10 @@ const NSInteger QLMFakeKnobBottomTenths = -1004;
     _queue = NULL;
 }
 
+- (void)setTrafficTap:(nullable QLMTrafficTap)tap {
+    _trafficTap = [tap copy];
+}
+
 - (void)sendMessage:(QLMMessage)message replyHandler:(QLMAdapterReplyHandler)handler {
     dispatch_queue_t queue = _queue;
     NSAssert(queue != NULL, @"send before start");
@@ -166,6 +171,10 @@ const NSInteger QLMFakeKnobBottomTenths = -1004;
         }
         QLMMessage reply;
         BOOL answered = [self replyTo:&message into:&reply];
+        QLMTrafficTap tap = self->_trafficTap;
+        if (tap != nil) {
+            QLMTapExchange(tap, &message, answered ? &reply : NULL);
+        }
         handler(answered ? &reply : NULL, nil);
     }];
 }

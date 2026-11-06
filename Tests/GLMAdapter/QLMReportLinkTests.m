@@ -670,4 +670,38 @@ static NSData *QLMGLMReply(NSUInteger exchange) {
     XCTAssertEqual(QLMReportReadInput(&assembly, reports[1].bytes, QLMReportLength, &reply), QLMReportOK);
 }
 
+#pragma mark - The traffic tap
+
+// The tap sees what the link writes and reads, its own syncs and the late
+// reply they drop too, each with the request it follows. The late reply of
+// testALateReplyNeverAnswersTheNextRequest, seen through it.
+- (void)testTheTapSeesSyncsTimeoutsAndStrays {
+    NSMutableArray<NSString *> *seen = [NSMutableArray array];
+    QLMReportLink *link = _device.link;
+    dispatch_sync(_queue, ^{
+        link.trafficTap = ^(QLMTrafficKind kind, const QLMMessage *message) {
+            NSString *bytes = message == NULL ? @"-" : [NSString stringWithFormat:@"%02X %02X", message->address, message->payload[0]];
+            [seen addObject:[NSString stringWithFormat:@"%ld %@", (long)kind, bytes]];
+        };
+    });
+    _device.nextReplyDelay = 0.12;
+    QLMMessage reply;
+    XCTAssertFalse([self send:QLMCommandSystemInfo(QLMAddressAdapter) reply:&reply error:NULL]);
+    XCTAssertTrue([self send:QLMCommandSerialNumber(QLMAddressAdapter) reply:&reply error:NULL]);
+    NSArray<NSString *> *expected = @[
+        [NSString stringWithFormat:@"%ld 01 39", (long)QLMTrafficRequest],
+        [NSString stringWithFormat:@"%ld -", (long)QLMTrafficTimeout],
+        [NSString stringWithFormat:@"%ld 01 08", (long)QLMTrafficSync],
+        [NSString stringWithFormat:@"%ld 01 09", (long)QLMTrafficStray],
+        [NSString stringWithFormat:@"%ld 01 09", (long)QLMTrafficReply],
+        [NSString stringWithFormat:@"%ld 01 19", (long)QLMTrafficRequest],
+        [NSString stringWithFormat:@"%ld 01 09", (long)QLMTrafficReply],
+    ];
+    __block NSArray<NSString *> *got = nil;
+    dispatch_sync(_queue, ^{
+        got = [seen copy];
+    });
+    XCTAssertEqualObjects(got, expected);
+}
+
 @end

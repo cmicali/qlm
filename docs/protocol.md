@@ -335,6 +335,7 @@ Every frame qlm sent in its three runs on the adapter is one GLM sends.[^qlm-run
 | `04` | The keep-alive | `FF` | None | None | GLM, only in a DSP pass | Sends, in an apply | `startup-idle`, 8.534 s; #12 |
 | `05 04` | The generator stop | A session | `00 00 00 FF FF EA 00 01 90 00 02 DA` | `09` | GLM, in every block at launch, and in a switch's routing pass | Refuses. Never send. | hlm §7; [refused-frames.md](refused-frames.md#05-04--the-generator-stop) |
 | `08` | The poll | A session | None | Telemetry, a bare `09`, a busy marker, or `01 7E` | GLM, each cycle | Sends | hlm §7; [telemetry.md](telemetry.md) |
+| `08 7D`, `08 7D 5D`, `08 7D 5D 5D` | Unknown | A session | `7D`, then none, one, or two `5D` | `01 7E`: no monitor held the session | GLM, once each, inside one subwoofer block to a session no monitor held | Never sends. The allowlist checks only the opcode of `08`. | `setup-b-peq-8351b`, 183.635, 183.825, and 183.835 s; `testEveryCapturedFrameReads` |
 | `08` | The status poll | `01` | None | The adapter's status | GLM, in pairs, about every 107 ms | Sends | [adapter-status.md](adapter-status.md) |
 | `10 01 00` | The level | A session | A word | `09` | GLM, in each block | Sends | hlm §6; #15 |
 | `10 01 05` | Part of hlm's store sequence | | A word | | Never in the captures. hlm's store sequence sends it. | Refuses | hlm §9; `testTheAllowlistRefusesWhatQLMNeverSends` |
@@ -431,6 +432,8 @@ GLM designs in double precision, rounds the six raw coefficients to float, and n
 
 The design rate is 48 kHz for the 8330A, and 12 kHz for the subwoofers.[^peq-rate] The 8351B's bands match a 96 kHz design to the bit, and no 48 kHz design. They match across frequency, from 25 Hz to 18 kHz, gain, from −20 dB to +6 dB, and Q, from 0.1 to 20, and so do its four shelves.[^peq-range-8351b] No measurement confirms that rate yet.[^peq-rate-8351b]
 
+Read back, the floats pin a band to about four digits, but a band near DC far less. A float's rounding moves cos w0 by about 10⁻⁷, so a 25 Hz band at 96 kHz reads back only to a few percent in frequency and Q. Every design qlm makes inverts within that, and so does every band of the fixture setup.[^peq-read] qlm's traffic window says "about" for such a band.
+
 GLM sends all twenty slots in every block, not only the changed ones. A subwoofer's block sends 23 PEQ frames, with slot 0 four times.[^peq-twenty]
 
 GLM also sends a band on its own, as it's edited in GLM's Acoustic editor. Each change goes out at once, as one `10 0E` to the monitor's session, outside any block. A slot may get several as you edit it, and its last is the slot as the saved setup's block sends it. Confirming the editor sends the monitor `10 01 00`, `10 02`, and `10 01 09`, and no block. The block follows at the next group switch.[^peq-live]
@@ -460,6 +463,7 @@ The input index, the source, a pair selector, and the AES3 channel.[^routing] In
 [^peq-design]: #10.
 [^peq-rate]: hlm §4.
 [^peq-rate-8351b]: #10; `QLMDSPBlockGoldenTests`.
+[^peq-read]: `QLMReadPEQBand`; `testEveryDesignReadsBack`, `testEveryBandOfTheFixtureReadsAsTheFileStatesIt`.
 [^peq-twenty]: #9; `QLMDSPBlockGoldenTests`.
 [^shelf-w0]: `setup-b-peq-8351b`, slot `03` at 265.754 s, live from the editor, and at 300.029 s, in the pass; `testShelvesTakeAFloatW0`.
 [^peq-range-8351b]: `setup-b-peq-8351b`, the Main 4x2 applies at 182.460 and 300.007 s, and its notes; `QLMDSPBlockGoldenTests`.
@@ -1184,6 +1188,7 @@ On or in standby, monitors drop a quiet host's leases, within 2.84 s of the last
 | 19 | What made GLM send a broadcast `03`? | It drops every lease ([When a monitor loses its lease](#when-a-monitor-loses-its-lease)). The capture doesn't show what set it off ([refused-frames.md](refused-frames.md#broadcast-03)). |
 | 20 | Does GLM compute a shelf's w0 in double and round it to float, or in float arithmetic? | Both match every captured shelf. High shelves at 5000, 10000, 11000, 13000, and 15000 Hz, −5 dB, at 96 kHz tell them apart ([setup-captures.md](setup-captures.md#part-b-peq-on-the-8351b)). |
 | 21 | What silences monitors a host leases and sends no level or `2B`: the lease, or the adapter, once a host polls? How long after the lease? | `qlmctl poll` silenced them within about 2.4 s, with no USB capture ([A host that sends no level](#a-host-that-sends-no-level)). `info` polls only the adapter, and never ran long enough with music to tell. |
+| 22 | What are GLM's three `08`s with trailing bytes, `08 7D`, `08 7D 5D`, and `08 7D 5D 5D`? | They came inside one block, to a session no monitor held, and got `01 7E` ([Opcodes](#opcodes)). On the wire each `7D` but the first is followed by a `5D`, as if an escape had been escaped again. No other capture has an `08` with a payload. |
 
 ## Sources
 

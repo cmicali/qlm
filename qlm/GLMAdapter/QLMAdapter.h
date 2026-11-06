@@ -39,6 +39,27 @@ typedef void (^QLMAdapterReplyHandler)(const QLMMessage *_Nullable reply, NSErro
 // the queue just before its report is written.
 typedef QLMMessage (^QLMAdapterRewrite)(QLMMessage message);
 
+// What the traffic tap sees on the adapter's send and receive path.
+typedef NS_ENUM(NSInteger, QLMTrafficKind) {
+    QLMTrafficRequest = 0,  // a request written, as it went out
+    QLMTrafficSync,         // a sync the report link wrote itself
+    QLMTrafficNotTaken,     // a request or sync whose write failed, so it may not have gone out
+    QLMTrafficReply,        // the reply to the request or sync in flight
+    QLMTrafficNoAnswer,     // the adapter's 01 7E for it
+    QLMTrafficStray,        // a reply no request waited for, or one a sync dropped; no message if it did not read
+    QLMTrafficUnreadable,   // the reply waited for did not read; no message
+    QLMTrafficTimeout,      // the reply did not come in time; no message. A sync's wait may go on.
+};
+
+// Host to adapter: a request, a sync, or one not taken.
+static inline BOOL QLMTrafficKindIsOutgoing(QLMTrafficKind kind) {
+    return kind == QLMTrafficRequest || kind == QLMTrafficSync || kind == QLMTrafficNotTaken;
+}
+
+// One call per frame, on the adapter's queue, as it goes out or comes in.
+// The message is valid only during the call.
+typedef void (^QLMTrafficTap)(QLMTrafficKind kind, const QLMMessage *_Nullable message);
+
 // What System drives: the GLM network adapter over HID, a replay of a capture,
 // or a fake bus. The bus is half-duplex, so a caller sends one message and
 // waits for its handler before sending the next.
@@ -66,6 +87,10 @@ typedef QLMMessage (^QLMAdapterRewrite)(QLMMessage message);
 // with why, as with no adapter.
 - (QLMReconnectResult)reconnect;
 
+// Taps every frame it sends and receives, for display only. Set before
+// start, or on the queue. Nil, the default, costs nothing.
+- (void)setTrafficTap:(nullable QLMTrafficTap)tap;
+
 @end
 
 // Packs the message as an output report, through the allowlist. Every adapter
@@ -74,6 +99,12 @@ BOOL QLMAdapterPackReport(const QLMMessage *message, uint8_t report[_Nonnull QLM
 
 // A message as the adapters record it: the address byte, then the payload.
 NSData *QLMAdapterRecord(const QLMMessage *message);
+// The message a record holds. Empty for an empty record.
+QLMMessage QLMAdapterRecordMessage(NSData *_Nullable record);
+
+// Taps a request and its reply, for an adapter with no report link. A
+// request that expects a reply and got none got the adapter's 01 7E.
+void QLMTapExchange(QLMTrafficTap tap, const QLMMessage *request, const QLMMessage *_Nullable reply);
 
 NSError *QLMAdapterErrorMake(QLMAdapterError code, NSString *description);
 

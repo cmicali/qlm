@@ -2,6 +2,7 @@
 
 #import "QLMBannerView.h"
 #import "QLMFormat.h"
+#import "QLMMainMenu.h"
 #import "QLMViews.h"
 
 static NSUserInterfaceItemIdentifier const QLMColumnStatus = @"status";
@@ -214,8 +215,13 @@ static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
     self.knobLabel = [NSTextField labelWithString:@""];
     self.busLabel = [NSTextField labelWithString:@""];
     self.busLabel.selectable = YES;
+    // The app delegate answers, through the responder chain.
+    NSButton *traffic = QLMSmallButton(@"Traffic…", nil, @selector(showTraffic:));
+    traffic.toolTip = @"Every frame between qlm and the adapter, both ways, with what each does.";
+    NSStackView *adapterRow = [self headerRowTitled:@"Adapter" value:self.adapterLabel];
+    [adapterRow addArrangedSubview:traffic];
     NSStackView *adapter = [NSStackView stackViewWithViews:@[
-        [self headerRowTitled:@"Adapter" value:self.adapterLabel],
+        adapterRow,
         [self headerRowTitled:@"Knob" value:self.knobLabel],
         [self headerRowTitled:@"Bus" value:self.busLabel],
     ]];
@@ -366,7 +372,7 @@ static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
             status = [status stringByAppendingString:@", muted"];
         }
         cell.label.stringValue = status;
-        cell.toolTip = [NSString stringWithFormat:@"Hardware ID %@, session %02X", [self hexOf:monitor.hardwareID], monitor.session];
+        cell.toolTip = [NSString stringWithFormat:@"Hardware ID %@, session %02X", QLMHexText(monitor.hardwareID), monitor.session];
         return cell;
     }
     if ([identifier isEqualToString:QLMColumnInput]) {
@@ -416,15 +422,6 @@ static NSUserInterfaceItemIdentifier const QLMColumnLastReply = @"lastReply";
 
 - (BOOL)tableView:(NSTableView *)tableView shouldSelectRow:(NSInteger)row {
     return NO;
-}
-
-- (NSString *)hexOf:(NSData *)data {
-    const uint8_t *bytes = data.bytes;
-    NSMutableString *hex = [NSMutableString stringWithCapacity:data.length * 3];
-    for (NSUInteger i = 0; i < data.length; i++) {
-        [hex appendFormat:i == 0 ? @"%02X" : @" %02X", bytes[i]];
-    }
-    return hex;
 }
 
 @end

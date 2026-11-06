@@ -26,3 +26,22 @@ NSData *QLMAdapterRecord(const QLMMessage *message) {
     [record appendBytes:message->payload length:message->length];
     return record;
 }
+
+QLMMessage QLMAdapterRecordMessage(NSData *_Nullable record) {
+    if (record.length == 0) {
+        return QLMMessageMake(0, NULL, 0);
+    }
+    const uint8_t *bytes = record.bytes;
+    return QLMMessageMake(bytes[0], bytes + 1, record.length - 1);
+}
+
+void QLMTapExchange(QLMTrafficTap tap, const QLMMessage *request, const QLMMessage *_Nullable reply) {
+    tap(QLMTrafficRequest, request);
+    if (reply != NULL) {
+        tap(QLMTrafficReply, reply);
+    } else if (QLMReportExpectsReply(request)) {
+        const uint8_t flag = QLMFrameFlag;
+        QLMMessage noAnswer = QLMMessageMake(QLMAddressReply, &flag, 1);
+        tap(QLMTrafficNoAnswer, &noAnswer);
+    }
+}

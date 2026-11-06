@@ -4,6 +4,7 @@
 #import "QLMClock.h"
 #import "QLMSetup.h"
 #import "QLMSnapshot.h"
+#import "QLMTraffic.h"
 
 NS_ASSUME_NONNULL_BEGIN
 
@@ -84,6 +85,8 @@ BOOL QLMSystemErrorRefused(NSError *_Nullable error);
 @end
 
 typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
+typedef void (^QLMTrafficHandler)(NSArray<QLMTrafficEntry *> *entries);
+
 
 // Owns the bus on one serial queue. It reads the adapter's identity and polls
 // its status. It runs discovery, the session leases, the poll cycle, and
@@ -110,6 +113,13 @@ typedef void (^QLMSnapshotHandler)(QLMSnapshot *snapshot);
 
 // The handler gets the latest snapshot at once, then every one published.
 - (void)setSnapshotHandler:(nullable QLMSnapshotHandler)handler queue:(dispatch_queue_t)queue;
+
+// Every frame between qlm and the adapter, both ways, as the adapter's tap
+// saw it, for display only. System keeps the last 1,024 in a ring
+// of values, which costs a copy a frame and nothing else. The handler gets
+// those at once, then each new batch, at most ten a second, in order. Nil
+// stops the batches. Nothing here sends or changes a frame.
+- (void)setTrafficHandler:(nullable QLMTrafficHandler)handler queue:(dispatch_queue_t)queue;
 
 // The snapshot System would publish now. The latest one may lag, since
 // System publishes only once it is idle.

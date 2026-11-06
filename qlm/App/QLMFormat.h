@@ -9,6 +9,9 @@ NS_ASSUME_NONNULL_BEGIN
 // What a value with no reading shows.
 extern NSString *const QLMEmDash;
 
+// "0B 1F 0C CC CC": bytes in hex, a space apart.
+NSString *QLMHexText(NSData *data);
+
 // "−30.0", with a true minus sign and `decimals` places. A level that
 // rounds to zero reads 0, never −0.
 NSString *QLMDecibelsNumberText(double decibels, int decimals);

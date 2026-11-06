@@ -19,7 +19,7 @@ release=${2:?$usage}
 # the standard verbs, and the windows' draw for them.
 names='_QLMDebug _VibeDebug _VibeInstallDebug _VibeWriteDebug
        --debug-cmd .debug.command QLM_DEBUG_TIMEOUT quit_answering QLMDebugWindow QLMDebugOSD skin_preview
-       QLMSkinPreview dump_view_tree drawWhileOpen'
+       QLMSkinPreview dump_view_tree drawWhileOpen QLM_REPLAY dump_traffic'
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT

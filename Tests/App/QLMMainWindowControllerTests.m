@@ -37,6 +37,9 @@
 - (void)showSettings:(id)sender {
 }
 
+- (void)showTraffic:(id)sender {
+}
+
 - (void)setUp {
     [super setUp];
     _defaults = [[NSUserDefaults alloc] initWithSuiteName:NSStringFromClass([self class])];
