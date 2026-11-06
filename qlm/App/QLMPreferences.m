@@ -220,6 +220,13 @@ static NSArray<NSDictionary *> *QLMLeasesPlist(NSArray<QLMKnownLease *> *leases)
     [self writeWaiting];
 }
 
+- (void)flushKeeping:(QLMSnapshot *)last {
+    if (last != nil) {
+        [self keepFromSnapshot:last];
+    }
+    [self flush];
+}
+
 - (void)scheduleFlush {
     if (_flushScheduled) {
         return;

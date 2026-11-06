@@ -55,6 +55,9 @@ extern const NSTimeInterval QLMKeptRaiseDelay;
 @property (nonatomic, copy) QLMScheduler scheduler;
 // Writes what waits now. Call at every stop.
 - (void)flush;
+// A stop whose snapshots no longer arrive: keeps System's last, so a
+// louder level put in the defaults since is put right, then flushes.
+- (void)flushKeeping:(nullable QLMSnapshot *)last;
 
 // The app's own level. At connect System keeps it until the knob turns.
 // Never above the ceiling.

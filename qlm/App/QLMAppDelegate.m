@@ -326,6 +326,8 @@ static dispatch_block_t QLMWatchLaunches(void (^changed)(NSString *executablePat
 - (void)restartSystem {
     QLMSystem *old = self.system;
     [old setSnapshotHandler:nil queue:dispatch_get_main_queue()];
+    // The old bus's, as self.bus still names it. No snapshot reaches it now.
+    [self.kept flushKeeping:old.snapshot];
     [self.preferences flushKept];
     __weak QLMAppDelegate *weakSelf = self;
     [old stopWithCompletion:^{

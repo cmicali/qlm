@@ -742,6 +742,21 @@ static QLMSnapshot *QLMKnobSnapshot(double volume, NSNumber *knob) {
     XCTAssertEqual(flushes.count, 0u, @"a lowering never waits");
 }
 
+// A change of the adapter setting stops System with no snapshot to follow,
+// so the stop keeps its last one: a louder level put in the defaults since
+// is put right, not kept for the next launch.
+- (void)testARestartKeepsSystemsLastSnapshot {
+    QLMBusPreferences *kept = _preferences.adapterBus;
+    (void)[self holdFlushesOf:kept];
+    QLMSnapshot *last = QLMKnobSnapshot(-60, @(-600));
+    [kept keepFromSnapshot:last];
+    XCTAssertEqual(self.written.volumeDecibels, -60);
+    [_defaults removeObjectForKey:@"QLMVolumeDecibels"];
+    [kept flushKeeping:last];
+    [_preferences flushKept];
+    XCTAssertEqual(self.written.volumeDecibels, -60);
+}
+
 // The mute record's keys land together, before the snapshot's keep returns.
 - (void)testTheMuteRecordLandsAtOnce {
     QLMBusPreferences *kept = _preferences.adapterBus;
